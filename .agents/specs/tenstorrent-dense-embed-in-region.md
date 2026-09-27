@@ -1,6 +1,6 @@
 # Spec: the dense driver's embedding goes inside the captured region — the replay arm serves
 
-Row: `BACKEND-TENSTORRENT`. State: DRAFT (2026-09-26).
+Row: `BACKEND-TENSTORRENT`. State: STOPPED (2026-09-27) — see `## Now`.
 Issue: `ISSUE-LOCAL-01M3FF1DJA10C7DBY17QGZACSV` (this row closes it).
 Follow-up to: `ISSUE-LOCAL-01M3FF1`'s STOP-FINDING record (#3323) and the
 decompose (#3322).
@@ -83,3 +83,65 @@ Port that shape to `Qwen3_5DenseDecodeGraph`:
   increments stay out; the perf plan adjusts).
 - Served-replay tokens diverge from eager (both coherent) → stop,
   adjudication row.
+
+## Now
+
+2026-09-27: **STOPPED at the second defect beneath the un-gating — the port
+landed, the increments did not.** The embedding DID enter the region (no
+tt-metal impossibility): the capture scope covers `DenseEmbedInto`'s device
+work, the replayed embedding is byte-correct, and the still-masked arm's
+anchor leg is byte-identical to main's `13c3f70b…`. The increments are proven
+mechanically correct (red-first: replays==captures on the base tree;
+replays>captures with them) but the FIRST served replay of the anchor model
+writes 248,320/248,320 exact-zero logits and the process never recovers —
+neither written stop condition fires exactly (this is the zeros class, not the
+coherent divergence), so the stop-condition remedy is applied by analogy and
+named here: **the arm stays eager-served, the increments stay out** (landing
+them would unmask the anchor arm into the zero-desync). The defect is isolated
+past this row's scope: the dense region's replay is broken on BOTH of its
+models — the anchor (quantized) replays exact zeros, and the bf16
+Qwen3.5-9B's first served replay diverges COHERENTLY from eager
+([220,16,220,220] vs [220,16,220,16], the stop-condition-2 adjudication
+class) — while the qwen3-0.6B classic-dense captured gate is green on the
+same pin (176 byte-correct served replays), so the pin's trace-replay
+machinery works and the culprit is in the machinery the two dense models
+share and the classic-dense lane lacks (the GDN layer path, the fused
+preamble, and/or the unified-KV PA decode, with the quant arms amplifying
+to zeros on the anchor) — owned by
+ISSUE-LOCAL-01M3G75X89F89R331165AE6TMS with the full evidence in
+docs/bench-evidence/tt-dense-embed-in-region-20260927.md. The increments and
+the served-replay test land with that fix.
+
+## Outcome
+
+- **What shipped**: the in-region embedding port only — the replay arm
+  refreshes `WarmDecodeIds` instead of embedding eagerly while the trace is
+  live; the capture arm stages the ids, runs the R4 dummy pass, and captures
+  `EmbedDeviceIdsInto` + `DenseForwardLayers` + `CaptureDecodePosAdvance` as
+  one kFull segment (qwen3_5.cpp:12505-12521, :12647-12670, :12706-12721).
+  The eager/cold path is untouched. The still-masked arm's capture steps now
+  embed in-trace — reached on every capture, byte-preserving.
+- **What was measured**: the replayed embedding byte-identical to the eager
+  embedding of the same token (the `[DENSE-DUMP]` probe); the capture-launch
+  tokens correct in every leg; the still-masked anchor leg byte-identical to
+  main's anchor (`13c3f70b…`); the bf16 9B's served replay diverging
+  COHERENTLY from eager ([220,16,220,220] vs [220,16,220,16] — the
+  adjudication class, corrected from this session's earlier coherence-only
+  misread); the qwen3-0.6B captured gate green on the same pin (176
+  byte-correct served replays). The served-arm TPOT is VOID (neither dense
+  model can serve a correct replay); the masked arm's TPOT is unchanged
+  from the decompose's class (see the bench-evidence doc's gates table).
+- **What was rejected and why**: landing the increments — they unmask the
+  anchor arm into the zero-desync (user-visible brokenness; "never trade
+  correctness for throughput"); landing the served-replay test — it is red on
+  the masked tree by design (`CHECK(replays > captures)` fails at
+  replays==captures), and a permanently-red gate is not a gate; the
+  layer-count bisection of the region — the conv-shadow serveability gate
+  refuses to capture any truncated model (captures=0 for every K<64), so the
+  axis cannot localize the zero (recorded so the follow-up does not retry it).
+- **Why each default has its value**: the ids stage through `WarmDecodeIds`
+  (not a fresh per-step buffer) because the replay step must be
+  allocation-free around a live trace; the R4 dummy pass stays because
+  tt-metal refuses new binaries mid-trace; the embedding runs inside the
+  scope (not before it) because a replay must re-embed the refreshed ids —
+  the whole point of the row.
