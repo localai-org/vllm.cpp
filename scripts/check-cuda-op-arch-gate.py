@@ -217,7 +217,15 @@ def cuda_registrations(op: str, root: Path = REPO) -> dict[str, list[tuple[int, 
                     elif kw == "endif":
                         depth = max(0, depth - 1)
                 depths.append((text.count("\n", 0, h.start()) + 1, depth))
-            found[str(path.relative_to(root))] = depths
+            # POSIX spelling, always. `REQUIRED` names the home the way the
+            # CMake source list spells it (forward slashes, because that list is
+            # read as text), so a native-separator key misses the file the walk
+            # just found: the home lookup reads 0 registrations and the
+            # exclusivity loop reads the home as a SECOND file, and the gate
+            # reports both halves of its own contradiction. `str()` is the
+            # separator here on POSIX and a backslash on Windows, so this is
+            # invisible on a POSIX host and in CI.
+            found[path.relative_to(root).as_posix()] = depths
     return found
 
 
