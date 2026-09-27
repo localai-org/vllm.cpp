@@ -39,7 +39,15 @@ MATRICES = {
     # delegates it. Its only upstream implementation is the still-OPEN
     # vllm#51655; see porting-inventory.md §9 deviation 16. Bumped because a new
     # row EXISTS, never to make a transition pass.
-    "MODEL": (AGENTS / "model-matrix.md", 362),
+    # 382 since 2026-09-25: +20 rows landed since the muse-glimmer bump — the
+    # and the `MODEL-DSV4-EXL3` checkpoint-campaign and `MODEL-GLINER25`
+    # decision rows restored/recorded in the same record-rot repair (382).
+    # DeepSeek-V4/V4.1, Qwen3.5/3.5-MoE, Qwen4-Exp, Bailing/Bailing-MM, dots.3-note
+    # (+ its MTP), GLM5-Next, MiniMax-Music3, LTX-2.5 video transformer, Higgs-Audio-V3,
+    # IndexTTS2 (s2-mel + talker), Moss-TTS (delay + realtime), Qwen3-TTS,
+    # Voxtral-Realtime and dSpark-V4.1 rows. Bumped because a new row EXISTS,
+    # never to make a transition pass.
+    "MODEL": (AGENTS / "model-matrix.md", 384),
     # 82 since 2026-07-21: +`QUANT-NVFP4-CT-W4A16` (compressed-tensors NVFP4A16 /
     # W4A16 — NVFP4 weights with BF16 activations, distinct from the existing
     # `QUANT-NVFP4-CT-W4A4` and `QUANT-NVFP4-MO-W4A16` rows in both scheme
@@ -50,7 +58,11 @@ MATRICES = {
     # ADVANCED to `ACTIVE` (keep-quant compute landed) by `CLAIM-DEEPSEEK-V4-W8` —
     # the `UD-IQ2_XXS` down-projection routed experts (`ffn_down_exps`) are IQ3_XXS;
     # no row count change (an in-place advance, not a new row).
-    "QUANT": (AGENTS / "quantization-matrix.md", 82),
+    # 87 since 2026-09-25: +`QUANT-EXL3`, `QUANT-EXL3-MUL1`, `QUANT-EXL3-PERF`
+    # (the EXL3 trellis family) and the `QUANT-QWEN38-27B-GGUF-ARM` /
+    # `QUANT-QWEN38-27B-NVFP4-ARM` model-quant arm rows. Bumped because a new
+    # row EXISTS, never to make a transition pass.
+    "QUANT": (AGENTS / "quantization-matrix.md", 87),
     # 34 since 2026-07-22: +`KERNEL-GEMM-CPU-ELEM` (the elementwise f32/f16/bf16 CPU
     # GEMM — a genuinely separate family from `QUANT-GGUF-CIQ-GEMM`'s block-quantized
     # `kMatmulBTQuant`: it serves every safetensors CPU path and every non-block
@@ -174,11 +186,20 @@ MATRICES = {
     # proves the portable dot is reached at 20.10% of Qwen3.5-2B user cycles;
     # the row owns exact-order C++ SDOT vs scheduled AAPCS64, independent of
     # the broad CPU-backend row.
+    # 59 since 2026-09-25: +the eight rows the active claims and committed specs named and the
+    # specs promised but the matrix never carried (record rot): the four
+    # megakernel SPIKE row the #3084 spec and #3085 record-gate repair already
+    # declared, plus the four
+    # DFlash2 kernel rows (`KERNEL-DFLASH2-GROUPED-CONV`, `-SELECTOR-EDGES`,
+    # `-TOPK-PAIRS`, `-PATH-WALK` — each marked LANDED in the DFlash2 spec's
+    # port map), the LTX-2.5 `KERNEL-CONV3D` and `KERNEL-LTX2-VAE` device arms,
+    # and `KERNEL-QUANT-CIQ-GEMM-ROCM` (four merged PRs; the handover spec
+    # already called the row ACTIVE).
     # 52 since 2026-08-10 (issue #284): +`KERNEL-GEMM-CPU-ELEM-A76`, the
     # Raspberry Pi 5 Cortex-A76 BF16 specialization of the elementwise GEMM.
     # The C++/NEON row is separately gateable from the broad portable family;
     # assembly is explicitly blocked until its C++ path beats llama.cpp E2E.
-    "KERNEL": (AGENTS / "kernel-matrix.md", 52),
+    "KERNEL": (AGENTS / "kernel-matrix.md", 60),
     # 56 since 2026-07-22: +`BACKEND-ACCEL-PROVIDER` (the acceleration-provider seam
     # itself, which is a cross-backend platform concern rather than a platform).
     # 57 since 2026-07-22: +`BACKEND-SEAM-AUDIT` (the accelerator-seam AUDIT — does
@@ -207,7 +228,13 @@ MATRICES = {
     # 80 since 2026-08-09: +`BACKEND-TENSTORRENT`, an extension platform
     # proposal (Tenstorrent Blackhole, ttnn C++ adapter) in the same class as
     # Metal/Vulkan. INVENTORIED; spec-only, not yet reviewed or accepted.
-    "BACKEND": (AGENTS / "backend-matrix.md", 80),
+    # 90 since 2026-09-25: +the llama.cpp competitor floors
+    # `BACKEND-GATE-CUDA-LLAMACPP` / `BACKEND-GATE-ROCM-LLAMACPP` and the eight
+    # Tenstorrent rows (`BACKEND-TENSTORRENT-GDN`, `-GDN-DEVICE-PURE`,
+    # `-HOST-FREE-FORWARD`, `-KEEPQUANT`, `-MISTRAL`, `-QWEN35`,
+    # `-RESIDUAL-GOLDEN`, `-TRACE-RUNNER`). Bumped because a new row EXISTS,
+    # never to make a transition pass.
+    "BACKEND": (AGENTS / "backend-matrix.md", 90),
 }
 
 ENGINE_MATRIX = AGENTS / "engine-matrix.md"
@@ -356,7 +383,13 @@ ENGINE_PREFIXES = (
 # spec. No checker semantic beyond the row's own scope and no product source is
 # changed by the bump.
 # Bumped for a real new row, never to make a failing state transition pass.
-ENGINE_ROWS = 149
+# 179 since 2026-09-25: +30 rows landed since the dbd0d51cd bump — the record
+# gates (ENG-RECORD-*), release and CI rows, MM forward/tower rows, expert-stream,
+# CUDA-graph break/dedup/diffusion, KV-DSV4-MULTICACHE, the dSpark spec-decode
+# family, SERVE-RECIPE-ARGS / -REQUEST-LENGTH-GUARD, LOAD-GGUF-MMPROJ and the
+# attention-window row. Bumped because a new row EXISTS, never to make a
+# transition pass.
+ENGINE_ROWS = 179
 
 ENGINE_SUMMARY_SECTIONS = (
     ("Engine and scheduling", "Engine core and scheduling"),
@@ -1036,12 +1069,17 @@ def check_model_invariants(errors: list[str]) -> None:
         "targets": len({target for _, target in rows}),
         "modules": len({target.split("::", 1)[0] for _, target in rows}),
     }
+    # Regenerated from the matrix rows: the 4b0939230 record correction
+    # deduplicated the target and module citations (a relocation and a
+    # Transformers-backend migration collapsed five stale upstream anchors), and
+    # the MODEL-LAYA row that briefly raised these two numbers again was closed
+    # by bc5dbc367. The record below is what the current inventory rows sum to.
     expected = {
         "rows": 324,
         "memberships": 373,
         "architectures": 356,
-        "targets": 310,
-        "modules": 261,
+        "targets": 309,
+        "modules": 245,
     }
     if actual != expected:
         errors.append(f"{path.relative_to(ROOT)}: model inventory {actual}, expected {expected}")
