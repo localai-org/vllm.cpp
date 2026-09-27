@@ -117,6 +117,56 @@ Three consequences for anyone sizing work here:
    at 73.9 GiB `VmHWM`; the host side is now 31 GiB total. Run a CPU comparison
    on `thor` or `dgx`, or on-box against an oracle instead.
 
+### `garlic-clove` — Intel Arc Pro B60
+
+**It is NOT in the fleet table above, and it is not a fleet device.** Do not
+read its absence as unavailability: it is reachable, and it is the only Intel
+GPU on this estate. It is deliberately absent from the `rc` table because it is
+not enrolled in resource-controller — `rc devices` could not be consulted from
+the shell this was written in (no `rc` client), and nothing here may claim
+membership it has not verified. **Therefore the lease rule does not apply, and
+the file mutex does: take `${GPU_LOCK:-$HOME/gpu.lock}` ON THE BOX, as the
+non-fleet-device clause of §"Reaching a GPU" requires.** Do not `ssh` in and
+start GPU work unguarded, and do not add it to the fleet table until `rc
+devices` actually reports it.
+
+| | |
+|---|---|
+| Host | `garlic-clove`, Tailscale name, `100.67.232.8`, Linux, account `yoav` (lowercase) |
+| GPU | **Intel Arc Pro B60 Graphics (BMG G21)**, `8086:e211`, ASUS subsys `1849:6023`, `xe` kernel driver |
+| Vulkan | device API **1.4.354**, conformance 1.4.0.0, Mesa **26.2.3** (kisak PPA), LLVM 21.1.8; `VK_KHR_cooperative_matrix` = true, `VK_KHR_shader_bfloat16`, `VK_KHR_shader_integer_dot_product` |
+| Device type | **`PHYSICAL_DEVICE_TYPE_DISCRETE_GPU`** |
+| Memory | 20.91 GiB `DEVICE_LOCAL` heap + 23.44 GiB host heap; `memoryTypes[3]`/`[6]` = `DEVICE_LOCAL \| HOST_VISIBLE \| HOST_COHERENT` (0x0007) via ReBAR |
+| Host | Ubuntu 24.04.4 LTS, kernel 7.0.0-34, i7-10700 8c/16t, 31 GiB RAM, 465 GiB NVMe (159 GiB free) |
+| Toolchain | cmake 3.28.3, gcc 13.3.0, ninja 1.11.1, git, py3.12. **No `icpx`, no `sycl-ls`, no `/dev/accel/*`.** |
+| Assets | **no model weights** — `~/.cache/huggingface` is 3.5 MB; only vocab-only GGUFs under `~/llama-maple/models` |
+| Checkout | `~/vllm.cpp`, was on `row/BACKEND-VULKAN-TQ1_0-finish` with `VLLM_CPP_VULKAN=ON`, `BUILD EXIT 0`; that work appears to have landed on `main` as #2248, so the branch needs a fetch/prune, not a merge |
+
+**Its load-bearing property is ReBAR, and that is not a property of Arc — but it
+is a performance property, not a correctness one.** ReBAR is what makes the
+allocation *device-local AND* host-addressable on a *discrete* card, which is
+what the GGUF keep-quant CPU fall-through and the portable reference tier both
+want. `VulkanContext` (`vulkan_context.cpp:872-875`) does not require
+`DEVICE_LOCAL`: it prefers the device-local host-visible type and falls back to
+plain `HOST_VISIBLE | HOST_COHERENT`, and `AllocBuffer` maps whichever it picks,
+so `DeviceMemoryIsHostAddressable()` stays true without ReBAR. A discrete board
+without ReBAR therefore runs those paths **slower**, with the GPU reaching the
+allocation across the bus, not incorrectly. Host visibility is the correctness
+requirement; device locality is the performance preference. See
+[`specs/vulkan-full-support.md`](specs/vulkan-full-support.md) §4 and the
+comment at `src/vt/vulkan/vulkan_ops.cpp` in the `BACKEND-VULKAN-KEEPQUANT`
+block.
+
+**Two cosmetic warts, recorded because a clean enumeration is a gate here.** A
+stale `dzn_icd.json` (declaring `api_version 1.1.354`) makes the loader print
+`Received return code -9 from call to vkCreateInstance in ICD libvulkan_dzn.so.
+Skipping this driver` on every enumeration. It is HARMLESS — the working
+`intel_icd.json` provides the device, and `vulkaninfo --summary` lists the B60
+as GPU0 — but it will pollute any recorded enumeration. The loader's *instance*
+version is also 1.3.275 while the *device* is 1.4.354; the backend `dlopen`s the
+loader and only the device capability matters, but the two numbers should not
+be quoted interchangeably.
+
 ### `orin:gpu0` needs L4T CUDA 12.6, and the DGX recipe breaks it
 
 **Do not install `cuda-toolkit-13-*` from the generic `sbsa` repo on `orin`.** That
@@ -2340,6 +2390,16 @@ inner 4096, state 128; context 262144.
   Enumeration and the clean-tree rule:
   [`specs/oracle-llamacpp-repin-stock.md`](specs/oracle-llamacpp-repin-stock.md).
 
-- **No Intel GPU exists on any box here**, so `BACKEND-XPU` end-to-end work is
-  HW-BLOCKED; only policy-port, compile coverage and oneAPI CPU-device unit
-  numerics are available.
+- **An Intel GPU now exists on this estate: `garlic-clove`, an Intel Arc Pro B60.**
+  This line used to read "**No Intel GPU exists on any box here**, so
+  `BACKEND-XPU` end-to-end work is HW-BLOCKED", and that was true when written
+  but is FALSE as of 2026-09-27. The board is the hardware `VK-I` was scoped
+  against; see [garlic-clove](#garlic-clove--intel-arc-pro-b60) below. **`BACKEND-XPU`
+  nonetheless stays `SPIKE`/HW-blocked for a DIFFERENT and still-true reason: the
+  SYCL toolchain is absent, not the GPU.** Measured on the box 2026-09-27 — no
+  `icpx`, no `sycl-ls`, and no `/dev/accel/*` nodes, so there is no Level Zero
+  driver userspace to dispatch through. The Level Zero *runtime* libraries are
+  installed (`libze_loader.so.1`, `libze_intel_gpu.so.1`) and are not
+  sufficient. So the available work remains policy-port, compile coverage and
+  oneAPI CPU-device unit numerics, and closing `BACKEND-XPU` now needs an
+  oneAPI install rather than hardware acquisition.

@@ -2108,12 +2108,12 @@ void AttnQkNormRopeGateKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& gate
 // ---------------------------------------------------------------------------
 // BACKEND-VULKAN-KEEPQUANT — the GGUF keep-quant tier, by CPU FALL-THROUGH.
 //
-// WHY A HOST KERNEL IS THE CORRECT VULKAN REGISTRATION (for now). The B60 is
-// integrated: VulkanContext allocates every tensor from HOST_VISIBLE |
-// HOST_COHERENT memory and VulkanBackend::DeviceMemoryIsHostAddressable()
-// answers true unconditionally, so the host vec_dot kernels dereference the
-// SAME bytes the rest of the graph dispatches shaders over. That is precisely
-// the property the portable reference tier already relies on to run the CPU
+// WHY A HOST KERNEL IS THE CORRECT VULKAN REGISTRATION (for now). VulkanContext
+// allocates every tensor from HOST_VISIBLE | HOST_COHERENT memory and
+// VulkanBackend::DeviceMemoryIsHostAddressable() answers true unconditionally,
+// so the host vec_dot kernels dereference the SAME bytes the rest of the graph
+// dispatches shaders over. That is precisely the property the portable
+// reference tier already relies on to run the CPU
 // kMatmulBTQuant lazily at GetOp time (op_provider.cpp
 // MaybeInstallReferenceTier) — this registration makes that arrangement
 // EAGER, so it also flips vt::OpRegistered(kMatmulBTQuant, kVULKAN), which
@@ -2130,6 +2130,35 @@ void AttnQkNormRopeGateKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& gate
 // backend must not hand a host kernel activations the GPU has not written),
 // discharged here on the NATIVE path too because the native kernel here IS a
 // host kernel.
+//
+// WHY `DeviceMemoryIsHostAddressable()` IS TRUE HERE, AND WHY IT IS NOT FREE.
+// It is NOT because the board is integrated. MEASURED on `garlic-clove`
+// (Intel Arc Pro B60, `8086:e211`, `xe` driver) 2026-09-27 with `vulkaninfo`:
+// the device reports `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU` with two heaps —
+// 20.91 GiB `DEVICE_LOCAL` and 23.44 GiB host — so "integrated" was the wrong
+// reason and this comment used to say so. The property holds anyway, and by a
+// different mechanism: Resizable BAR maps VRAM into the host address space, so
+// `memoryTypes[3]` and `memoryTypes[6]` expose `DEVICE_LOCAL | HOST_VISIBLE |
+// HOST_COHERENT` (propertyFlags 0x0007), which is the type `vulkan_context.cpp:873`
+// prefers. So the allocation IS ordinary host memory the GPU also reads.
+//
+// THIS IS A PROPERTY OF ReBAR, NOT OF ARCS, AND IT IS A PERFORMANCE
+// PROPERTY, NOT A CORRECTNESS ONE. `VulkanContext` (vulkan_context.cpp:872-875)
+// PREFERS `DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT` and, when that lookup
+// fails, FALLS BACK to `HOST_VISIBLE | HOST_COHERENT` without `DEVICE_LOCAL`,
+// refusing to initialize only if that fails too. `AllocBuffer` then allocates
+// and `vkMapMemory`-maps whichever type was selected, and
+// `DeviceMemoryIsHostAddressable()` reports true unconditionally
+// (vulkan_backend.cpp:130-135). So a discrete card WITHOUT ReBAR does NOT
+// make this registration memory corruption: the fallback allocation is still
+// host-visible, and the host vec_dot kernel still reads memory it can
+// address. What it costs is that the GPU reaches that memory across the bus
+// instead of hitting VRAM locally, which is exactly the staging path `VK-I`
+// was scoped to build (vulkan-full-support.md §4/§6). The requirement is
+// therefore the one already in the code: keep PREFERRING a device-local
+// host-visible type, and let the ordered fallback carry correctness on a
+// board that has none. `unified_memory_` is the flag that records which of
+// the two happened, and it is the performance branch, not a safety one.
 //
 // Mirrors cuda_quant_dot.cu:1835 (CUDA falls through to GetOp(...,kCPU) for
 // dtypes its GPU kernel lacks; on unified memory that fall-through is free).

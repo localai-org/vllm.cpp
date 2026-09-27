@@ -43,7 +43,11 @@ a win over *the Vulkan maturity floor on the box we own*, and the record must sa
 exactly that rather than "we beat llama.cpp". The claim that would matter to a
 user — Vulkan winning where CUDA/ROCm/Metal do not exist — is `VK-I`, and it is
 hardware-blocked until an RDNA or Arc board is acquired (user decision 2026-08-06:
-GB10 first, acquire later).
+GB10 first, acquire later). **The Arc half of that acquisition HAPPENED: see
+§4 and §6.2 for the board (`garlic-clove`, Intel Arc Pro B60) and for the
+measurement that answers `VK-I`'s staging-path half without code. The RDNA arm
+is still unacquired, and the gate re-run — the half that actually matters —
+is still owed.**
 
 ---
 
@@ -248,7 +252,8 @@ our own CUDA paged kernel**, recorded as a partial-from-scratch entry in
 |---|---|---|
 | **GB10 on `dgx.casa`** | YES — `NVIDIA GB10`, `INTEGRATED_GPU`, Vulkan API 1.4.312, vendor `0x10de`, 249 device extensions incl. **`VK_KHR_cooperative_matrix` v2** and **`VK_NV_cooperative_matrix2`**, `VK_KHR_shader_float16_int8`, `VK_KHR_{8,16}bit_storage`, `VK_KHR_shader_integer_dot_product`, `VK_KHR_timeline_semaphore`, `VK_EXT_memory_budget`, `VK_KHR_buffer_device_address`. One 89.72 GiB `DEVICE_LOCAL` heap with a `DEVICE_LOCAL|HOST_VISIBLE` type — unified | **PRIMARY. Correctness oracle box AND the optimization target** (user decision 2026-08-06). Both llama.cpp coopmat tiers are reachable |
 | **`llvmpipe` (dev box)** | YES — Vulkan 1.4.318, CPU, `mesa-vulkan-drivers` | GPU-free CI correctness. **Never a speed venue** |
-| **AMD RDNA / Intel Arc** | **NO — none on any box** | `VK-I`. Deferred by user decision; the only venue where a Vulkan win means something to a user, and the only thing that exercises the missing staging path |
+| **Intel Arc Pro B60 on `garlic-clove`** | **YES — acquired, measured 2026-09-27.** `Intel(R) Arc(tm) Pro B60 Graphics (BMG G21)`, `8086:e211`, ASUS subsys `1849:6023`, `xe` driver, `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU`, device API **1.4.354** (conformance 1.4.0.0), Mesa 26.2.3 / LLVM 21.1.8, `VK_KHR_cooperative_matrix` = true. Heaps 20.91 GiB `DEVICE_LOCAL` + 23.44 GiB host. **NOT an `rc` fleet device** — file mutex, not a lease | `VK-I`, PARTIALLY ANSWERED — see §6.2. The "acquire later" half of the 2026-08-06 decision is DONE |
+| ~~**AMD RDNA**~~ | **NO — still none on any box** | `VK-I`'s RDNA arm. A discrete AMD board would need ReBAR for the same reason, and is still unacquired |
 
 **Premise update — the 2026-07-22 toolchain constraint is STALE.** That spec
 determined the committed-SPIR-V route partly because *"neither box grants sudo"*
@@ -326,6 +331,71 @@ the umbrella, not a substitute for them.
 | **VK-G** | **Linear attention, MLA, conv** (19 ops) | F | GDN/KDA + MLA models running; ported from `gated_delta_net.comp` et al |
 | **VK-H** | **Attention variants + samplers** (16 ops) | B (samplers), G (attn variants) | **83/83 — closes the op surface** |
 | **VK-I** | **AMD/RDNA (or Arc) bring-up** | hardware acquisition | The staging path for non-host-visible memory, and the gate re-run where Vulkan actually matters |
+
+### 6.2 `VK-I` PARTIALLY ANSWERED — ReBAR retires the staging path — 2026-09-27
+
+`VK-I` was the one sub-project blocked purely on acquisition, and §4 recorded
+the decision as **"GB10 first, acquire later"** (2026-08-06). The board is now
+on the estate: **`garlic-clove`, an Intel Arc Pro B60.** Its deliverable splits,
+and the split is not the one the row was written against.
+
+**THE STAGING-PATH HALF IS ANSWERED BY HARDWARE, NOT BY CODE, AND NO CODE
+SHOULD BE WRITTEN FOR IT.** The deliverable was "the staging path for
+**non-host-visible** memory". MEASURED on `garlic-clove` 2026-09-27 with
+`vulkaninfo`: the device is `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU` with two heaps
+(20.91 GiB `DEVICE_LOCAL`, 23.44 GiB host), **but** `memoryTypes[3]` and
+`memoryTypes[6]` expose `DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT`
+(propertyFlags `0x0007`) on the device-local heap. Resizable BAR maps the VRAM
+into the host address space, so the condition `VK-I` was built to survive —
+device-local memory the host may not dereference — **does not arise on this
+card**. `VulkanContext`'s existing preference for a device-local host-visible
+type (`vulkan_context.cpp:873`) already selects it, so
+`VulkanBackend::DeviceMemoryIsHostAddressable()` is sound here without a
+staging copy.
+
+**THIS RETIRES A RISK; IT DOES NOT DELETE A REQUIREMENT.** The property is a
+property of **ReBAR**, not of Arc and not of this backend — and it is a
+**performance** property, not a correctness one. `VulkanContext`
+(`vulkan_context.cpp:872-875`) does not require `DEVICE_LOCAL` at all: it
+PREFERS `DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT`, and when that lookup
+fails it FALLS BACK to `HOST_VISIBLE | HOST_COHERENT` without `DEVICE_LOCAL`,
+initializing only if that fails too. `AllocBuffer` allocates and
+`vkMapMemory`-maps whichever type was selected, and
+`DeviceMemoryIsHostAddressable()` returns true unconditionally
+(`vulkan_backend.cpp:130-135`) because every allocation is mapped.
+
+So a discrete card without ReBAR does **not** turn the GGUF keep-quant CPU
+fall-through or the portable reference tier into corruption. Host visibility
+is what correctness needs, the fallback supplies it, and the host vec_dot
+kernel keeps reading memory it can address. What the card without ReBAR costs
+is that the GPU reaches that memory across the bus rather than hitting VRAM
+locally — **slowness, not unsafety**, and the staging path `VK-I` exists to
+buy that back. So the standing requirement is the one already in the code:
+keep *preferring* a device-local host-visible type and let the ordered
+fallback carry correctness where none exists. `unified_memory_` records which
+of the two happened, and it is the performance branch, not a safety one. That
+is now written down at the `BACKEND-VULKAN-KEEPQUANT` block in
+`src/vt/vulkan/vulkan_ops.cpp`, which until 2026-09-27 carried the false claim
+**"The B60 is integrated"** — right conclusion, wrong mechanism, and dangerous
+as a generalisation. An earlier revision of this paragraph went further and
+called the no-ReBAR case *corruption*; that was wrong, and the correction is
+the host-visibility/device-locality distinction above.
+
+**THE SECOND HALF IS THE REAL ONE AND IT IS STILL OWED.** "The gate re-run
+where Vulkan actually matters" is now reachable and remains the entire value of
+`VK-I`. §0's framing is why: on GB10 *"llama.cpp's own CUDA backend will beat
+both of us there. Vulkan on an NVIDIA part is nobody's fastest path; it is the
+portability path."* Every Vulkan speed number in this spec is therefore either
+llvmpipe (a software rasteriser) or the wrong chip. `garlic-clove` is the first
+venue where **Vulkan is the only accelerator path on the box**, so a Vulkan win
+here is a win a user would actually feel. Concretely still owed, unchanged:
+the 27B prefill/decode re-run and its reference-tier count (named in §6.0b as
+"the only thing that can turn the structure above into a result"), `VK-C`'s
+coopmat tactic selection on a non-NVIDIA part, and re-taking the
+`BENCH-VK-LLAMA` verdict the records call the most fragile in the enumeration
+(0.23% margin inside a 0.69% spread, #1003). **20.91 GiB of device-local memory
+is the binding constraint** and 27B does not fit; the reachability question is
+which model arm does, and the box holds no weights at all.
 
 ### 6.0b The DECODE GEMV lever, measured to its floor — 2026-08-09
 
@@ -517,9 +587,16 @@ gated at — and IDENTICAL to what the 128-wide module scores on the same inputs
 The residual STREAM is held to the bit-exact tier by `memcmp`, which is what
 proves `vt_round_through` is the memory round trip rather than an approximation
 of it. `test_vulkan_backend` 30/30 (2371 assertions) on GB10 and 30/30 (1828) on
-llvmpipe; `test_opt_paged_engine` with `VLLM_CPP_DEVICE=vulkan` still 6/6
+llvmpipe; `test_opt_paged_engine` still 6/6
 token-exact (96/96) with 0 declines on BOTH arms; `test_backend_cross_device`
-11/11.
+11/11. **The device is asserted from the test's own printed `BACKEND PROOF` line
+(`the engine selected device type 3`), NOT from an env var — `VLLM_CPP_DEVICE`
+is read NOWHERE in the tree.** This line used to read
+``test_opt_paged_engine` with `VLLM_CPP_DEVICE=vulkan``, which is a placebo
+that happened to select Vulkan only because those builds had no CUDA compiler;
+see [benchmark-record.md](../benchmark-record.md) §0 of the
+`BACKEND-VULKAN-LOADMEM` entry. The corrected invocation is
+[`load-direct-upload.md`](load-direct-upload.md)'s.
 
 **AN HONEST LIMIT ON THAT e2e GATE.** `opt-125m` is a LayerNorm model — two
 `vt::LayerNorm` calls per layer and ZERO `vt::RmsNorm` — so the standing
@@ -714,8 +791,10 @@ and it stays sequential inside the workgroup.
 NMSE vs the CPU oracle in the same binary: prefill out `1.47e-14`, prefill
 carried state `6.43e-15`, bf16 arm `0`; decode (indexed cache) out `1.64e-14` and
 cache `3.31e-15`, decode (compact state) out `1.75e-14`. `test_vulkan_backend`
-25/25 cases, 1020/1020 assertions. `test_opt_paged_engine` with
-`VLLM_CPP_DEVICE=vulkan` still 6/6 token-exact (96/96), 0 declines.
+25/25 cases, 1020/1020 assertions. `test_opt_paged_engine` still 6/6
+token-exact (96/96), 0 declines, device asserted from the printed
+`BACKEND PROOF` line — `VLLM_CPP_DEVICE` is read nowhere and does not select
+it.
 
 **NOT measured: any speed number.** Local Vulkan is llvmpipe. The 27B
 prefill/decode re-run on GB10, and the reference-tier count that goes with it,
