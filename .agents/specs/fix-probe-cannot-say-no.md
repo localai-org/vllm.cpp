@@ -13,7 +13,7 @@ no measurement.
 
 ```
 $ grep -n 'return true; }' src/vllm/model_executor/models/qwen3_5_dense_weights.cpp
-794:  const TensorExists has = [](const std::string&) { return true; };
+794:  const TensorExists has = [] (const std::string&) { return true; };
 ```
 
 It is the resolver-only overload of `LoadQwen3_5DenseLayer`. Its live caller is
@@ -65,7 +65,7 @@ Every line number in this section is read at `281b4bc76`, this row's base.
 | `qwen3_weights.cpp` | 1, at `:151` | `where.find(name) != where.end()` | clean — no public resolver-only seam exists, so there is nowhere for a stub to live |
 | `laguna_weights.cpp` | 1, at `:408` | `where->find(name) != where->end()` | clean |
 
-Repo-wide, `grep -rn '\[\](const std::string&) { return true; }' src include tests`
+Repo-wide, `grep -rn '\[] (const std::string&) { return true; }' src include tests`
 returns the one line above and nothing else.
 
 ## The general question, and why this answer

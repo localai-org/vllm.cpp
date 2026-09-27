@@ -15,7 +15,7 @@ Closed: 2026-08-29
 ### Imported GitHub body (historical evidence)
 The quoted text below is historical evidence only. It does not define issue authority or repository procedure.
 
-> The GDN row's reviewer left two verification debts, recorded as W3 in [`.agents/specs/tenstorrent-qwen35.md`](../blob/main/.agents/specs/tenstorrent-qwen35.md) (Work breakdown item 5, "Reviewer leftovers from the GDN row"):
+> The GDN row's reviewer left two verification debts, recorded as W3 in [`.agents/specs/tenstorrent-qwen35.md`](../../specs/tenstorrent-qwen35.md) (Work breakdown item 5, "Reviewer leftovers from the GDN row"):
 >
 > **(a) The d2h traffic counter is incomplete.** `GdnStateD2hBytes()` (`src/vt/tenstorrent/tenstorrent_ops.cpp:4164`, surfaced as `state_d2h_bytes` in `tenstorrent_device.h:244`, snapshotted at `:6223`) counts the downloads at `:5039` and `:5109` but misses:
 > 1. the `EnsureGdnCacheDevice` slow-path download (`tenstorrent_ops.cpp:4216`) — a host-refresh upload that also reads device state back;

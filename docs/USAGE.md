@@ -3,7 +3,7 @@
 The complete surface: the CLI, the OpenAI-compatible server, and the library
 (C ABI and C++). The [README](../README.md) carries the quickstart; this page is
 the reference behind it. Per-capability lifecycle state is
-[docs/STATUS.md](STATUS.md); measured numbers are
+[README](../README.md); measured numbers are
 [docs/BENCHMARKS.md](BENCHMARKS.md).
 
 ## Building
@@ -217,7 +217,7 @@ on `CMAKE_PREFIX_PATH`. Blackhole currently runs OPT-125m through the shared
 engine and has the Qwen3-0.6B correctness gate wired with device-specific
 goldens. The full Qwen3 16x16 gate remains pending because paged attention is
 still host-bound. This is an active correctness backend, not a performance
-backend. See [STATUS.md](STATUS.md) and the
+backend. See [README](../README.md) and the
 [Tenstorrent backend spec](../.agents/specs/tenstorrent-backend.md).
 
 A Vulkan build (`-DVLLM_CPP_VULKAN=ON`) adds three kernel-measurement binaries.

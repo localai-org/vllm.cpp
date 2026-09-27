@@ -35,7 +35,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 >
 > ```cpp
 > const auto* src = reinterpret_cast<const uint16_t*>(w.bytes.data());
-> const auto bf16 = [src](int64_t idx) {
+> const auto bf16 = [src] (int64_t idx) {
 >   uint32_t bits = static_cast<uint32_t>(src[idx]) << 16;  // line 367
 > ```
 >

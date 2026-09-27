@@ -17,9 +17,9 @@ The quoted text below is historical evidence only. It does not define issue auth
 
 > `OpId::kMoeGroupedGemmBf16` and its fused `kMoeGroupedGemmBf16GateUpSilu`
 > sibling are registered CUDA-only
-> ([`cuda_matmul_nvfp4.cu:2722`](src/vt/cuda/cuda_matmul_nvfp4.cu#L2722)). ROCm's
+> ([`cuda_matmul_nvfp4.cu:2722`](../../../src/vt/cuda/cuda_matmul_nvfp4.cu#L2722)). ROCm's
 > grouped-GEMM kernel
-> ([`rocm_grouped_gemm.hip`](src/vt/rocm/rocm_grouped_gemm.hip)) covers only
+> ([`rocm_grouped_gemm.hip`](../../../src/vt/rocm/rocm_grouped_gemm.hip)) covers only
 > **quantized-weight** grouped GEMM (Q8_0/Q4_K/Q5_K/Q6_K activations against
 > keep-quant blocks); there is no bf16-weight grouped GEMM to extend on this
 > backend.
@@ -31,8 +31,8 @@ The quoted text below is historical evidence only. It does not define issue auth
 > every MoE GGUF load on ROCm with `VT_GGUF_KEEP_QUANT=0` and every MoE GGUF
 > whose quant encoding ROCm's keep-quant list does not cover — calls into
 > `vt::OpRegistered(OpId::kMoeGroupedGemmBf16, kROCM)` at
-> [`qwen3_5.cpp:7124`](src/vllm/model_executor/models/qwen3_5.cpp#L7124) and
-> [`deepseek_v2.cpp:325`](src/vllm/model_executor/models/deepseek_v2.cpp#L325).
+> [`qwen3_5.cpp:7124`](../../../src/vllm/model_executor/models/qwen3_5.cpp#L7124) and
+> [`deepseek_v2.cpp:325`](../../../src/vllm/model_executor/models/deepseek_v2.cpp#L325).
 > Whether the fallback those two call sites take today already produces a
 > message that names the missing op, or falls through to something less clear,
 > is exactly what this issue's fix needs to verify and, if it does not already
@@ -42,7 +42,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 >
 > Not proposed as a design, only to bound the size of the eventual work: the
 > CUDA implementation is a single TU spanning
-> [`cuda_matmul_nvfp4.cu:1478`](src/vt/cuda/cuda_matmul_nvfp4.cu#L1478)-`2732`,
+> [`cuda_matmul_nvfp4.cu:1478`](../../../src/vt/cuda/cuda_matmul_nvfp4.cu#L1478)-`2732`,
 > with a WMMA tensor-core prefill path, a split-K decode path, persistent
 > CUDA-graph-safe scratch buffers (the `g_moe_fused_partials` /
 > `g_moe_fused_gateup` retire-don't-free pattern), and a fused

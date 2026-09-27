@@ -12076,7 +12076,7 @@ its own row, with its own review.
 **Device residency changes, and that is the mechanism rather than a side
 effect.** The `d_dev` deleter that `ResidentWeight` installs
 (`include/vllm/model_executor/models/dense_attn_block.h:243`,
-`w.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); })`) hangs off
+`w.d_dev = std::shared_ptr<void>(p, [bk] (void* q) { bk->Free(q); })`) hangs off
 whichever handle was staged. Today that handle is the per-layer temporary, so
 the deleter runs at the end of each layer -- those are the 378 `cudaFree` calls
 per step the profile above measured. After the hoist the deleter hangs off a

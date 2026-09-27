@@ -17,7 +17,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 
 > Row: `BACKEND-ROCM`
 >
-> `RocmPlatform::needs_weight_staging()` ([`rocm.cpp:88`](src/vllm/platforms/rocm.cpp#L88))
+> `RocmPlatform::needs_weight_staging()` ([`rocm.cpp:88`](../../../src/vllm/platforms/rocm.cpp#L88))
 > hardcodes `false`, with a comment dated to the W0 skeleton: "in W0 there is one
 > registered op, so the only path that can run at all is the host-resident one
 > ... a discrete AMD card will eventually answer true ... Revisit at M2."
@@ -32,7 +32,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 > ## Why this is more than a stale comment
 >
 > `needs_weight_staging()` gates the ONE production call site of
-> `CheckDeviceWeightFit` ([`model_loader.cpp:2273`](src/vllm/entrypoints/model_loader.cpp#L2273)),
+> `CheckDeviceWeightFit` ([`model_loader.cpp:2273`](../../../src/vllm/entrypoints/model_loader.cpp#L2273)),
 > the load-time refusal ENG-EXPERT-STREAM (#1123) added specifically so a
 > checkpoint that cannot fit device memory is refused BY NAME before any
 > allocation, instead of dying mid-load with a raw `cudaMalloc`/`hipMalloc: out
@@ -71,8 +71,8 @@ The quoted text below is historical evidence only. It does not define issue auth
 > decisions, all of which currently take the "not staging" branch on ROCm and
 > would move:
 >
-> - `DirectDeviceLoadEligible` ([`qwen3_5_dense_weights.cpp:125`](src/vllm/model_executor/models/qwen3_5_dense_weights.cpp#L125)) — load-path optimization (straight-to-device vs. via host)
-> - `IndexedGdnStateIoEnabled` ([`qwen3_5.cpp:3354`](src/vllm/model_executor/models/qwen3_5.cpp#L3354)) — GDN state-cache kernel dispatch; ROCm currently gets the CPU-style row-copy reference path by default *because* this flag is false
+> - `DirectDeviceLoadEligible` ([`qwen3_5_dense_weights.cpp:125`](../../../src/vllm/model_executor/models/qwen3_5_dense_weights.cpp#L125)) — load-path optimization (straight-to-device vs. via host)
+> - `IndexedGdnStateIoEnabled` ([`qwen3_5.cpp:3354`](../../../src/vllm/model_executor/models/qwen3_5.cpp#L3354)) — GDN state-cache kernel dispatch; ROCm currently gets the CPU-style row-copy reference path by default *because* this flag is false
 > - `MergedGdnBaEnabled` / `MergedGdnQkvzEnabled`'s eligibility checks (`qwen3_5.cpp:3573`, `3881`) — merged-projection GDN kernel eligibility
 > - `PackedGdnDecodeEligibility` (`qwen3_5.cpp:3910`) and `PrepareGdnFp8Resident`/`PrepareBf16Resident` (`qwen3_5.cpp:8478`, `8498`) — decode-path prep gating
 >

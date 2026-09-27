@@ -17,7 +17,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 
 > Row: `QUANT-CUDA-KEEPQUANT-32B`
 >
-> Spec: [`.agents/specs/cuda-keepquant-32block.md`](../blob/main/.agents/specs/cuda-keepquant-32block.md).
+> Spec: [`.agents/specs/cuda-keepquant-32block.md`](../../specs/cuda-keepquant-32block.md).
 >
 > Discharges the keep-quant half of the debt #2380 records under `## Owed` for
 > `MODEL-MM-QWEN4-EXP`.

@@ -19837,7 +19837,7 @@ kMatmul 16 % + kMatmulBT 14 % = 80 %). G6 ports llama.cpp's Arm i8mm `nrc==2`
 `vmmlaq_s32` `vec_dot` for the FOUR encodings upstream gives one — q8_0/q4_0/q4_K/q6_K
 (q3_K/q5_K have none → stay portable) — and 2x2-tiles it into `kMatmulBTQuant`.
 
-- **Code:** [cpu_quant_dot_arm.cpp](specs/../../src/vt/cpu/cpu_quant_dot_arm.cpp) (the 4 mmla kernels + `getauxval(AT_HWCAP2)&HWCAP2_I8MM` probe + `VT_CPU_QUANT_MMLA` defeat), [cpu_quant_gemm.cpp](../src/vt/cpu/cpu_quant_gemm.cpp) `QuantChunkMmla` (parallel over weight PAIRS → thread-count-deterministic; engages only at even M,N, else the portable nrc==1 path, exactly ggml's `num_rows_per_vec_dot=1` guard), [quant.h](../include/vt/quant.h) surface, `CMakeLists.txt` per-file `-march=armv8.2-a+i8mm+dotprod`.
+- **Code:** [cpu_quant_dot_arm.cpp](../src/vt/cpu/cpu_quant_dot_arm.cpp) (the 4 mmla kernels + `getauxval(AT_HWCAP2)&HWCAP2_I8MM` probe + `VT_CPU_QUANT_MMLA` defeat), [cpu_quant_gemm.cpp](../src/vt/cpu/cpu_quant_gemm.cpp) `QuantChunkMmla` (parallel over weight PAIRS → thread-count-deterministic; engages only at even M,N, else the portable nrc==1 path, exactly ggml's `num_rows_per_vec_dot=1` guard), [quant.h](../include/vt/quant.h) surface, `CMakeLists.txt` per-file `-march=armv8.2-a+i8mm+dotprod`.
 - **Bit-exact vs NMSE — DETERMINED:** the int8 products accumulate into i32 exactly, and q8_0/q4_0's only float step is the block-by-block `vmlaq_f32` MAC in the scalar order, non-fused under `-ffp-contract=off` → **q8_0/q4_0 mmla is BIT-IDENTICAL to the portable/scalar tier** (`CHECK(exact==total)` passes). q4_K/q6_K add a `vpaddq`/`vmull` bias reduction that reassociates → gated at the ratified **NMSE ≤ 5e-4**. Both in the new [test_ops_quant_dot G6 cross-check](../tests/vt/test_ops_quant_dot.cpp); mmla GEMM bit-identical across threads 1/2/4/20.
 - **NO token movement:** `test_qwen36_gguf_engine` STANDALONE 2/2 · 16/16 on APEX-Compact and -Balanced vs the same-file llama.cpp oracle (q8_0/q4_K/q6_K exercised at prefill through mmla); bench-file token md5 `d235db12f2cd304007530286a1755c95` byte-identical across mmla-OFF/ON/`VT_CPU_REF=1`.
 - **Binding benchmark (idle-gated dgx aarch64, one flock):** op-level kMatmulBTQuant portable→i8mm — q8_0 ~1.2×, q6_K 3.8–4.5×, q4_K 7–8.4×; e2e prefill same-binary TTFT 1135.68→1047.70 ms (**1.084×**, 112.7→122.2 t/s), 1.56×→**1.44× behind** llama.cpp pp128 175.41. Decode unchanged (mmla off at M=1). The bench file is q8_0-dominant + 60 % f16 (pessimal for G6) so e2e is Amdahl-bounded — the 4–8× k-quant kernel win lands e2e on the APEX 35B files.
@@ -20267,15 +20267,15 @@ kMatmul 16 % + kMatmulBT 14 % = 80 %). G6 ports llama.cpp's Arm i8mm `nrc==2`
 Ported llama.cpp's repack-at-load for q8_0 (the fresh profile's #1 CPU prefill
 lever: `kMatmulBTQuant` = 55 % of prefill). The keep-quant loader repacks each
 eligible q8_0 weight once into the `block_q8_0x4` i8mm interleave
-([cpu_quant_repack.cpp](specs/../../src/vt/cpu/cpu_quant_repack.cpp)) and
+([cpu_quant_repack.cpp](../src/vt/cpu/cpu_quant_repack.cpp)) and
 `kMatmulBTQuant` dispatches a pre-shuffled i8mm gemm/gemv
-([cpu_quant_repack_arm.cpp](specs/../../src/vt/cpu/cpu_quant_repack_arm.cpp)).
+([cpu_quant_repack_arm.cpp](../src/vt/cpu/cpu_quant_repack_arm.cpp)).
 New TU + the `repacked` marker on `vt::Tensor`/`OwnedTensor` + policy field
 `GgufLoadPolicy::quant_repack`. `VT_CPU_QUANT_REPACK=0` A/B opt-out, `VT_CPU_REF=1`
 oracle.
 
 BIT-IDENTICAL by construction (byte-permute weight + non-fused `vmlaq_f32` in
-tier-0 block order, `-ffp-contract=off`); [test_ops_quant_repack](specs/../../tests/vt/test_ops_quant_repack.cpp)
+tier-0 block order, `-ffp-contract=off`); [test_ops_quant_repack](../tests/vt/test_ops_quant_repack.cpp)
 305 assertions on dgx (`memcmp` vs plain `kMatmulBTQuant` across
 decode/leftover/prefill, f32+bf16 out, strided activations, threads 1/2/4/20).
 

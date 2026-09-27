@@ -17,7 +17,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 
 > Row: `MODEL-MM-QWEN4-EXP`
 >
-> Spec: [`.agents/specs/qwen4-exp-flash-next.md`](../blob/main/.agents/specs/qwen4-exp-flash-next.md), section `### W6-CUDA-B`.
+> Spec: [`.agents/specs/qwen4-exp-flash-next.md`](../../specs/qwen4-exp-flash-next.md), section `### W6-CUDA-B`.
 >
 > ## What this tracks
 >

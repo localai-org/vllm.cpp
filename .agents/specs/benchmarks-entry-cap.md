@@ -313,7 +313,7 @@ next cadence of parallel work".
 - `test_live_link_is_still_extracted`, `test_a_backticked_label_is_still_a_link`,
   `test_link_after_a_closed_fence_is_still_extracted` and
   `test_link_beside_an_inline_span_is_still_extracted`: the narrowing does not
-  swallow real links, including the `` [`name`](path) `` form this tree uses
+  swallow real links, including the `` [`name`](derived-issue-index.md) `` form this tree uses
   everywhere.
 - `test_stripping_preserves_line_and_column_positions`: spans are blanked, not
   deleted, so every line and column offset survives. Review finding F6: this is
@@ -328,7 +328,7 @@ next cadence of parallel work".
   the real file that mis-paired. RED on the first revision of this row.
 - `test_a_link_straddled_by_two_INLINE_SPANS_is_not_extracted`: two stray
   backticks hide a target, matching the renderer, and the ordinary
-  `` [`name`](path) `` form is still a link (F5).
+  `` [`name`](derived-issue-index.md) `` form is still a link (F5).
 - `test_an_archived_row_with_a_docs_relative_link_is_accepted`: the #460
   reproduction, moved into the record as live markdown, resolves. RED on BASE
   with `dangling link bench-evidence/rpi5-a76-q8-dot-20260806.md`.
@@ -480,7 +480,7 @@ lost, and the fifth was the live link.
 form, which this spec itself carried until F5 found it:
 
 ```text
-`[`name`](path)`
+`[`name`](derived-issue-index.md)`
 ```
 
 is four backticks, so CommonMark reads it as a code span holding an open
@@ -490,7 +490,7 @@ renderer, which is the rule, but the consequence is that wrapping a dangling
 link in backticks hides it. Pinned by
 `test_a_link_straddled_by_two_INLINE_SPANS_is_not_extracted`, which asserts the
 same answer for the double-backtick form an author should use instead, and
-asserts that the ordinary `` [`name`](path) `` form is still a link.
+asserts that the ordinary `` [`name`](derived-issue-index.md) `` form is still a link.
 
 **Risk: an unbalanced fence blanks the rest of a file.** It does, and one file
 in the tree has one: `.agents/specs/laguna-s21-scope-2026-07-30.md` ends on a

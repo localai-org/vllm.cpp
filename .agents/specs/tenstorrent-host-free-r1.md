@@ -835,7 +835,7 @@ still allocate (layout conversion) — that's the remaining question.
 The `ttnn::copy` from a TILE `[1,1,nkv,d]` into a height-sharded
 `[1,1,nkv_pad,d]` slice silently fails or produces wrong data (the
 try/catch swallows the error, leaving zeros). The output is
-`[](zheimerzheimerzheimer` instead of ` Answer! I'm`.
+`] (zheimerzheimerzheimer` instead of ` Answer! I'm`.
 
 The capture mechanism is COMPLETE — EXIT=0, 83/76 tok/s replay. The
 issue is purely the k/v data copy into the sharded buffer: ttnn::copy

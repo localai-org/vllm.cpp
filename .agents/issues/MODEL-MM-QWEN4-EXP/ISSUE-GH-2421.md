@@ -17,7 +17,7 @@ The quoted text below is historical evidence only. It does not define issue auth
 
 > Row: `MODEL-MM-QWEN4-EXP`
 >
-> Spec: [`.agents/specs/qwen4-exp-qsa-device-residency.md`](../blob/main/.agents/specs/qwen4-exp-qsa-device-residency.md)
+> Spec: [`.agents/specs/qwen4-exp-qsa-device-residency.md`](../../specs/qwen4-exp-qsa-device-residency.md)
 >
 > ## What this tracks
 >

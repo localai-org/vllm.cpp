@@ -347,7 +347,7 @@ fenced block because its two links are relative to `docs/`, not to this file:
 is more accurate.** Those are different things and the CPU arm is not the
 authority: it runs an exact sequential recurrence and lands `1.15e-08` from the
 exact answer, where vLLM's own chunked kernel lands `2.29e-04`
-([decomposition](bench-evidence/gdn-chunked-decomposition-20260902.md),
+([decomposition](../../docs/bench-evidence/gdn-chunked-decomposition-20260902.md),
 [#2612](https://github.com/mudler/vllm.cpp/issues/2612)), so the CPU ids are the
 ids of an answer vLLM does not compute. Reach for `--device cpu` when you want
 the ids this table records, not when you want the ids vLLM would emit.
