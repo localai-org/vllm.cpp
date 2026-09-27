@@ -1,11 +1,16 @@
 # Speculative decoding
 
-**THE PIN MOVED UNDER TWO OF THESE ROWS.** The parity pin
-advanced to <!--pin:commit-->`e126687a9a`<!--/pin--> on 2026-09-03
+**THE PIN MOVED UNDER TWO OF THESE ROWS, TWICE.** The parity pin
+advanced to <!--pin:commit-->`a7c23ac96d`<!--/pin--> on 2026-09-22
+([#3320](https://github.com/mudler/vllm.cpp/pull/3320)), from `e126687a9a`, which it reached on 2026-09-03
 ([#2817](https://github.com/mudler/vllm.cpp/issues/2817)). The **MTP** row and
-the **DFlash** row carry a vLLM denominator measured against the PREVIOUS pin
-`555967922` with FlashInfer `0.6.15.post1`, which is the oracle's attention
-backend on that path and moves to `0.6.18` at the new pin. Both owe a
+the **DFlash** row carry a vLLM denominator measured against a pin TWO advances
+back, `555967922`, with FlashInfer `0.6.15.post1`, which is the oracle's attention
+backend on that path. **FlashInfer is `0.6.18` on the oracle this tree has
+actually built and on every pin since, and that step is STILL NOT discharged** --
+the `parity-pin` block reads `0.6.15.post1` and the `0.6.18` leg is REFUSED by
+the harness, so neither row's denominator has ever run against a `0.6.18`
+oracle. Both owe a
 re-measurement ([#2818](https://github.com/mudler/vllm.cpp/issues/2818)), and the
 DFlash re-take must record the oracle's SELECTED backend rather than assume it
 carries over. The advance preceded the re-measurement by a developer ruling that
