@@ -12502,7 +12502,22 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   if (do_replay) {
     const StepPhaseClk::time_point sph_te0 =
         sph.on ? StepPhaseClk::now() : sph.t0;
-    DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+    if (d.q.device.type == vt::DeviceType::kTENSTORRENT) {
+      // TT-DENSE-EMBED-IN-REGION (the qwen3.cpp:953-955 lane): the capture
+      // scope covers DenseEmbedInto's device work, so the trace EMBEDS — this
+      // step only REFRESHES the persistent ids tensor. Allocation-free
+      // (WarmDecodeIds stages into the same device buffer it allocated at the
+      // first capture); a miss fatals loudly inside EmbedDeviceIdsInto. NO
+      // eager embedding here: the fresh dids alloc + EmbeddingKernel's own
+      // device alloc + an eager ttnn::embedding program while the trace is
+      // live is the documented replay-corrupting class
+      // (tenstorrent_paged.cpp:2361-2364, #2469) — the defect #3323's
+      // un-gating exposed.
+      vt::tenstorrent::WarmDecodeIds(
+          s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+    } else {
+      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+    }
     if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te0, StepPhaseClk::now());
     if (dbuf) {
       StageStepInputs(d, s);
@@ -12632,7 +12647,28 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     }
     const StepPhaseClk::time_point sph_te1 =
         sph.on ? StepPhaseClk::now() : sph.t0;
-    DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+    if (d.q.device.type == vt::DeviceType::kTENSTORRENT) {
+      // TT-DENSE-EMBED-IN-REGION: stage ids for the captured embedding
+      // (outside capture) — the persistent WarmDecodeIds tensor the captured
+      // embedding reads (qwen3.cpp:998-1000).
+      vt::tenstorrent::WarmDecodeIds(
+          s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      // R4 dummy-run mirror (#1105, qwen3.cpp:1001-1016): the embedding and
+      // the hidden-shadow copy run INSIDE the capture below, and both programs
+      // are cold at first capture — tt-metal refuses to load new binaries
+      // mid-trace (TT_FATAL mesh_workload.cpp:153 !is_capturing_trace). Run
+      // the exact captured embed segment once OUTSIDE the scope; the captured
+      // pass then hits the program cache. Safe to run twice: the hold in
+      // EmbedDeviceIdsInto replaces the previous out tensor, and nothing
+      // references the dummy run's output.
+      Tensor dtab = Qwen3_5EmbeddingTable(
+          d.b, d.q, impl_->weights.embed_tokens, vocab, H);
+      vt::tenstorrent::EmbedDeviceIdsInto(
+          s.hidden->ptr(), S, H, dtab.data, vocab, H,
+          static_cast<int64_t>(s.token_ids.size()));
+    } else {
+      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+    }
     if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te1, StepPhaseClk::now());
     // ENG-CUDAGRAPH-BREAK W4 (#1307): the capture is the SHARED SEAM's, not this
     // driver's hand-rolled `BeginCapture`/`EndCaptureGraph` pair. The scope owns
@@ -12671,10 +12707,24 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       vt::GraphCaptureScope scope(b, impl_->queue, s.graph, vt::GraphCaptureMode::kFull);
       if (sph.on) sph.cap_begin_ms = StepPhaseMsOf(sph_tc0, StepPhaseClk::now());
       sph_tc1 = StepPhaseClk::now();
+      if (d.q.device.type == vt::DeviceType::kTENSTORRENT) {
+        // TT-DENSE-EMBED-IN-REGION: capture-safe embedding over the persistent
+        // ids tensor, writing the persistent hidden shadow the layer region
+        // reads — the capture scope now COVERS DenseEmbedInto's device work
+        // (the qwen3.cpp:1041-1051 lane; the #3321 W3 in-region discipline).
+        // Replay steps refresh the ids outside (WarmDecodeIds) and re-run
+        // this embedding inside the trace, so no replay step performs an
+        // eager device alloc while the trace is live.
+        Tensor dtab = Qwen3_5EmbeddingTable(
+            d.b, d.q, impl_->weights.embed_tokens, vocab, H);
+        vt::tenstorrent::EmbedDeviceIdsInto(
+            s.hidden->ptr(), S, H, dtab.data, vocab, H,
+            static_cast<int64_t>(s.token_ids.size()));
+      }
       lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                               s.gdn_meta, attn_kv, gdn_state, impl_->weights,
-                              impl_->config, {}, nullptr, nullptr, aux_ids_arg,
-                              aux_out_arg, /*return_hidden=*/false,
+                              impl_->config, {}, nullptr, nullptr,
+                              aux_ids_arg, aux_out_arg, /*return_hidden=*/false,
                               dbuf ? s.dev.get() : nullptr);
       // R2 (the qwen3.cpp:1054-1061 port): advance cur_pos on-device
       // (plus_one) INSIDE the captured trace, at the END of the body — after
