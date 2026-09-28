@@ -3,11 +3,20 @@
 
 from __future__ import annotations
 
+import argparse
+import dataclasses
+import json
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+# `scripts/` is sys.path[0] when this file is run, but not when a caller loads
+# it by path, so pin the sibling issue-record module either way.  The restored
+# `canonical_intake_debt` and `check_canonical_issue_references` below read it.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import issue_records  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1202,7 +1211,697 @@ def check_roadmap(by_id: dict[str, ClaimRow], errors: list[str]) -> None:
                 errors.append(f"{source.relative_to(ROOT)}: references unknown stable row {item_id}")
 
 
-def main() -> int:
+# --- restored by row/RECORD-ANCHOR-UNWIRED (see .agents/specs/record-anchor-ratchet.md, issue
+# ISSUE-LOCAL-01M3JXGKKHK4WE6054PWPR67RA).
+#
+# c12b376b2 removed these definitions when its merge resolution took the
+# feature side of a divergent pair.  The suite that exercises them did not
+# go with them: 58 of its 106 cases were red for that reason alone.  They
+# are restored here UNWIRED -- nothing in main() below calls
+# check_record_anchors, check_claim_state_consistency or
+# check_canonical_issue_references -- because wiring them back reddens the
+# gate over 39 STALE and 5 BROKEN citations that have rotted since, and
+# repairing those is its own reviewed work.  See the issue.
+BARE_CITATION_RE = re.compile(
+    r"([A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?"
+)
+
+
+RECORD_ANCHOR_STATES = EVIDENCED_STATES | {"ACTIVE", "READY"}
+
+
+RECORD_ANCHOR_BASELINE = ROOT / "scripts/record-anchor-baseline.json"
+
+
+RECORD_ANCHOR_FIELDS = ("code", "tests")
+
+
+RECORD_ANCHOR_BUCKETS = ("stale", "broken")
+
+
+RECORD_ANCHOR_VERDICTS = ("ok", "stale", "broken")
+
+
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+
+
+INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
+
+
+BACKTICK_SPAN_RE = re.compile(r"`([^`\n]+)`")
+
+
+SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*(?:\(\))?")
+
+
+ISSUE_REFERENCE_RE = re.compile(
+    r"(?<![A-Z0-9_-])ISSUE-GH-[1-9][0-9]*(?![A-Z0-9_-])"
+    r"|(?<![A-Z0-9_-])ISSUE-LOCAL-[0-7][0-9A-HJKMNP-TV-Z]{25}(?![A-Z0-9_-])"
+    r"|(?<![A-Za-z0-9])#[1-9][0-9]*(?![0-9])"
+    r"|(?<![A-Za-z0-9])issues/[1-9][0-9]*(?![0-9])"
+)
+
+
+CLAIM_LIFECYCLE_RE = re.compile(r"^\s*`([A-Z][A-Z0-9-]*)`")
+
+
+NONTERMINAL_CLAIM_STATES = {"ACTIVE", "IMPLEMENTING", "SPIKE"}
+
+
+@dataclass(frozen=True)
+class Citation:
+    # No matrix field: row IDs are unique across the matrices (check_matrices
+    # enforces it), so the item id already locates the offender.
+    item_id: str
+    path: str
+    start: int
+    end: int
+    symbol: str | None
+    verdict: str
+
+    def describe(self) -> str:
+        span = f"{self.start}" if self.end == self.start else f"{self.start}-{self.end}"
+        want = f" expected `{self.symbol}`" if self.symbol else ""
+        return f"{self.verdict:<6} {self.item_id} -> {self.path}:{span}{want}"
+
+
+@dataclass(frozen=True)
+class ClaimRecord:
+    row_states: dict[str, str | None]
+    lifecycle: str | None
+    path: Path
+    line_no: int
+    strict: bool
+
+    @property
+    def row_ids(self) -> set[str]:
+        return set(self.row_states)
+
+
+@dataclass
+class RecordAnchorResult:
+    counts: dict[str, int] = dataclasses.field(
+        default_factory=lambda: dict.fromkeys(RECORD_ANCHOR_VERDICTS, 0)
+    )
+    citations: list[Citation] = dataclasses.field(default_factory=list)
+
+    @property
+    def offenders(self) -> list[Citation]:
+        return [c for c in self.citations if c.verdict in {"STALE", "BROKEN"}]
+
+    @property
+    def total(self) -> int:
+        """STALE + BROKEN. `ok` is reported but is not part of the budget."""
+        return sum(self.counts[bucket] for bucket in RECORD_ANCHOR_BUCKETS)
+
+
+def looks_like_symbol(text: str) -> bool:
+    text = text.strip()
+    if len(text) < 4 or SYMBOL_RE.fullmatch(text) is None:
+        return False
+    # A LEADING underscore in a record is nearly always an abbreviated suffix --
+    # "the text-only `_ModelInfo`" naming the `ModelInfo` beside it, not a
+    # symbol spelled `_ModelInfo`. Searching for it literally produced the one
+    # false STALE this rule was measured against, on an anchor that was right.
+    if text.startswith("_"):
+        return False
+    return "_" in text or "::" in text or text.endswith("()") or any(c.isupper() for c in text)
+
+
+def classify_citation(
+    resolved: Path, start: int, end: int, symbol: str | None, root: Path
+) -> str | None:
+    """OK / STALE / BROKEN, or None when the citation is not about this tree."""
+    if not resolved.is_file():
+        # "A directory we own with a filename we do not" -- a rename or a
+        # deletion, and the one missing-file case worth calling BROKEN. Require
+        # THREE path components so a one-segment upstream name whose top-level
+        # directory happens to match ours (llama.cpp's `src/llama-model.cpp`,
+        # vLLM's `cmake/utils.cmake`) is skipped rather than blamed on us.
+        try:
+            depth = len(resolved.relative_to(root).parts)
+        except ValueError:
+            return None
+        if depth >= 3 and resolved.parent.is_dir():
+            return "BROKEN"
+        return None
+    lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
+    if start < 1 or end < start or end > len(lines):
+        return "BROKEN"
+    if symbol is None:
+        return "OK"
+    base = symbol.removesuffix("()").split("::")[-1]
+    body = "\n".join(lines[start - 1:end])
+    return "OK" if re.search(r"\b" + re.escape(base) + r"\b", body) else "STALE"
+
+
+def cell_citations(cell: str, source: Path, root: Path) -> list[tuple[Path, int, int, str | None]]:
+    """Every citation of THIS tree in one record cell, with its expected symbol.
+
+    Returns `(resolved_path, start, end, symbol_or_None)`. Both citation forms
+    are recognised -- the markdown link `[label](path#L12)` the old parser saw,
+    and the bare `` `path:12` `` / `` `path:12-20` `` span that is six times
+    more common here and was never parsed as a citation at all.
+    """
+    tokens: list[tuple[int, int, str, object]] = []
+    links: list[tuple[int, int]] = []
+    for match in LINK_RE.finditer(cell):
+        target = match.group(1).strip().strip("<>")
+        links.append((match.start(), match.end()))
+        if not target or target.startswith(("http://", "https://", "mailto:")):
+            continue
+        target_path, _, fragment = target.partition("#")
+        line_match = LINE_FRAGMENT_RE.fullmatch(fragment)
+        if line_match is None:
+            continue
+        start = int(line_match.group(1))
+        end = int(line_match.group(2) or start)
+        resolved = (source.parent / target_path).resolve()
+        tokens.append((match.start(), match.end(), "citation", (resolved, start, end)))
+    for match in BACKTICK_SPAN_RE.finditer(cell):
+        # A backtick span inside a link is that link's LABEL, not a token beside
+        # it: `[`foo.cpp`](../src/foo.cpp#L4)` must not be read as a neighbour.
+        if any(lo <= match.start() < hi for lo, hi in links):
+            continue
+        inner = match.group(1).strip()
+        bare = BARE_CITATION_RE.fullmatch(inner)
+        if bare is not None:
+            start = int(bare.group(2))
+            end = int(bare.group(3) or start)
+            resolved = (root / bare.group(1)).resolve()
+            tokens.append((match.start(), match.end(), "citation", (resolved, start, end)))
+        elif looks_like_symbol(inner):
+            tokens.append((match.start(), match.end(), "symbol", inner))
+        else:
+            tokens.append((match.start(), match.end(), "other", inner))
+    tokens.sort(key=lambda t: t[0])
+
+    found: list[tuple[Path, int, int, str | None]] = []
+    for index, (lo, hi, kind, payload) in enumerate(tokens):
+        if kind != "citation":
+            continue
+        resolved, start, end = payload  # type: ignore[misc]
+        symbol: str | None = None
+        if index > 0 and tokens[index - 1][2] == "symbol":
+            if not cell[tokens[index - 1][1]:lo].strip():
+                symbol = str(tokens[index - 1][3]).strip()
+        if symbol is None and index + 1 < len(tokens) and tokens[index + 1][2] == "symbol":
+            if cell[hi:tokens[index + 1][0]].strip() in {"", "("}:
+                symbol = str(tokens[index + 1][3]).strip()
+        found.append((resolved, start, end, symbol))
+    return found
+
+
+def strip_code_spans(text: str) -> str:
+    """Blank out fenced blocks and inline code, preserving line and column count.
+
+    A target inside a code span is NOT a link: CommonMark renders it as literal
+    text, so no reader can follow it and there is nothing for "every link
+    resolves" to be about. Before 2026-08-12 this checker validated them anyway
+    (#460), which meant no document in the tree could SHOW a link in sample
+    output, and, worse, that a docs/BENCHMARKS.md row quoting its evidence link
+    could not be archived into .agents/ byte-for-byte.
+
+    THE PAIRING RULE IS COMMONMARK'S, not "the next line that looks like a
+    fence". A closing fence must use the OPENER'S character, be at least as
+    long, and carry nothing but whitespace after the marker; a line with an info
+    string opens a block and never closes one. Getting that wrong does not fail
+    safe, it INVERTS fence phase for the rest of the file: with the one
+    unbalanced fence this tree already has, a bare ``` at
+    .agents/completed/state-events/0000-00/STATE-LEGACY-000001.md:17697 was
+    "closed" by the ```sh at :17948, and ordinary prose at :18297 was blanked,
+    so a live reader-followable link stopped being validated. Measured
+    tree-wide, the loose rule dropped 5 targets and the CommonMark rule drops 4.
+
+    Blanking rather than deleting preserves every line and column offset. Note
+    that check_links reports no line numbers today, so this buys nothing yet; it
+    is kept so that a caller that does report positions cannot be broken by this
+    function, and test_stripping_preserves_line_and_column_positions holds it.
+    """
+    out: list[str] = []
+    fence: str | None = None
+    fence_len = 0
+    for line in text.splitlines():
+        marker = FENCE_RE.match(line)
+        if fence is None:
+            # CommonMark: a backtick opening fence's info string may not contain
+            # a backtick, which is what keeps `` `a` and `b` `` from opening one.
+            if marker is not None and not (
+                marker.group(1)[0] == "`" and "`" in marker.group(2)
+            ):
+                fence = marker.group(1)[0]
+                fence_len = len(marker.group(1))
+                out.append(" " * len(line))
+                continue
+            out.append(INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line))
+            continue
+        if (
+            marker is not None
+            and marker.group(1)[0] == fence
+            and len(marker.group(1)) >= fence_len
+            and not marker.group(2).strip()
+        ):
+            fence = None
+        out.append(" " * len(line))
+    return "\n".join(out)
+
+
+def extract_links(text: str) -> list[str]:
+    """Return every link target a READER could follow in this document."""
+    return LINK_RE.findall(strip_code_spans(text))
+
+
+def link_bases(source: Path, text: str) -> tuple[Path, ...]:
+    """Return every directory a relative link in this file may resolve from.
+
+    Normally exactly one, the file's own directory. Two files are archives that
+    hold content written somewhere else and moved here verbatim, so a target in
+    them was authored against the ORIGINAL directory: migrated legacy
+    state-event payloads came from .agents/, and .agents/benchmark-record.md is
+    the declared archive of docs/BENCHMARKS.md (#460).
+
+    BE PRECISE ABOUT WHAT THE SECOND BASE BUYS. It does NOT make the archived
+    copy clickable: a reader opening .agents/benchmark-record.md on GitHub and
+    clicking a docs/-relative target such as USAGE.md, BUILD.md or
+    bench-evidence/... gets a 404, because the browser resolves it against
+    .agents/. What it enforces is that the EVIDENCE STILL EXISTS in the tree
+    under one of the two declared bases, so archiving a row byte-for-byte cannot
+    silently orphan the file it points at. That is the property the archive
+    exists to give, and it is weaker than followability. Making the archived
+    copy followable means rewriting the target or recording its origin, which is
+    spec W5 and is deliberately not done here: rewriting a target would break
+    the byte-for-byte guarantee, and W5 records the origin instead.
+    """
+    if (
+        source.is_relative_to(AGENTS / "completed/state-events")
+        and "<!-- legacy-payload:begin -->" in text
+    ):
+        return (AGENTS,)
+    if source == AGENTS / "benchmark-record.md":
+        return (source.parent, ROOT / "docs")
+    return (source.parent,)
+
+
+def scan_record_anchors(
+    rows: list[ClaimRow] | None = None, root: Path | None = None
+) -> RecordAnchorResult:
+    root = ROOT if root is None else root
+    if rows is None:
+        rows, _ = check_matrices([])
+    result = RecordAnchorResult()
+    for row in rows:
+        if row.state not in RECORD_ANCHOR_STATES:
+            continue
+        # BY INDEX, not by name: several matrices carry one `Local evidence`
+        # column that field_index resolves for BOTH `code` and `tests`, and
+        # reading it twice would count every citation in it twice.
+        indices = {field_index(row.header, name) for name in RECORD_ANCHOR_FIELDS}
+        for index in sorted(i for i in indices if i is not None):
+            cell = row.cells[index] if index < len(row.cells) else ""
+            if is_placeholder(cell):
+                continue
+            for resolved, start, end, symbol in cell_citations(cell, row.path, root):
+                verdict = classify_citation(resolved, start, end, symbol, root)
+                if verdict is None:
+                    continue
+                try:
+                    shown = resolved.relative_to(root).as_posix()
+                except ValueError:
+                    shown = resolved.as_posix()
+                result.counts[verdict.lower()] += 1
+                result.citations.append(
+                    Citation(
+                        item_id=row.item_id,
+                        path=shown,
+                        start=start,
+                        end=end,
+                        symbol=symbol,
+                        verdict=verdict,
+                    )
+                )
+    return result
+
+
+def check_record_anchors(result: RecordAnchorResult, errors: list[str]) -> None:
+    baseline = load_record_anchor_baseline()
+    if not baseline:
+        errors.append(
+            f"no record-anchor baseline at {RECORD_ANCHOR_BASELINE.relative_to(ROOT)}; "
+            "run --write-baseline to establish one"
+        )
+        return
+    for bucket in RECORD_ANCHOR_BUCKETS:
+        got, want = result.counts[bucket], baseline[bucket]
+        if got > want:
+            errors.append(
+                f"RECORD ANCHOR REGRESSION in bucket '{bucket}': {got} > baseline {want}. "
+                "A citation names a line that no longer holds what the prose says it "
+                "does. Run `python3 scripts/check-agent-record.py --report` for the "
+                "offenders and repair the anchor. NEVER raise the baseline to pass."
+            )
+        elif got < want:
+            errors.append(
+                f"record-anchor baseline STALE in bucket '{bucket}': {got} < baseline "
+                f"{want}. A repair must lower the baseline in the SAME commit: run "
+                "`python3 scripts/check-agent-record.py --write-baseline` and commit it."
+            )
+
+
+def load_record_anchor_baseline() -> dict[str, int]:
+    if not RECORD_ANCHOR_BASELINE.is_file():
+        return {}
+    data = json.loads(RECORD_ANCHOR_BASELINE.read_text(encoding="utf-8"))
+    return {bucket: int(data["buckets"][bucket]) for bucket in RECORD_ANCHOR_BUCKETS}
+
+
+def write_record_anchor_baseline(result: RecordAnchorResult) -> int:
+    previous = load_record_anchor_baseline()
+    if previous and result.total > sum(previous.values()):
+        print(
+            "REFUSING to write a HIGHER record-anchor baseline "
+            f"({sum(previous.values())} -> {result.total}). The ratchet only turns one "
+            "way: repair the anchors instead of banking the rot.",
+            file=sys.stderr,
+        )
+        return 1
+    payload = {
+        "_comment": [
+            "Record-anchor baseline for scripts/check-agent-record.py",
+            "(ENG-RECORD-ANCHOR-RATCHET, .agents/specs/record-anchor-ratchet.md).",
+            "STALE = the cited line exists but does not contain the symbol named",
+            "beside it. BROKEN = the line is out of range, or the file is gone.",
+            "THESE NUMBERS MAY ONLY EVER GO DOWN. Lower them in the SAME commit as",
+            "the repair that earned it, by running:",
+            "  python3 scripts/check-agent-record.py --write-baseline",
+            "It is a rot budget, never to be raised to make a failing check pass.",
+            "Only the rot is stored. The OK count is printed by --report but kept out",
+            "of this file on purpose: pinning it would make every change that adds or",
+            "removes a citation rewrite this file, which is a lock, not a ratchet.",
+        ],
+        "total": result.total,
+        "buckets": {bucket: result.counts[bucket] for bucket in RECORD_ANCHOR_BUCKETS},
+    }
+    RECORD_ANCHOR_BASELINE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"baseline written: {RECORD_ANCHOR_BASELINE.name} -> {result.total}")
+    return 0
+
+
+def record_anchor_report(result: RecordAnchorResult) -> str:
+    lines = [
+        "Record anchors in the `code` / `tests` cells of "
+        f"{'/'.join(sorted(RECORD_ANCHOR_STATES))} rows:",
+        "",
+    ]
+    lines.extend(f"  {c.describe()}" for c in result.offenders)
+    if result.offenders:
+        lines.append("")
+    lines.append(
+        "record anchors: "
+        + ", ".join(f"{b}={result.counts[b]}" for b in RECORD_ANCHOR_VERDICTS)
+        + f"  -> rot {result.total}"
+    )
+    return "\n".join(lines)
+
+
+def issue_references_in_text(
+    text: str,
+    *,
+    path: Path | None = None,
+    frozen_archive: bytes | None = None,
+) -> set[str]:
+    """Return references, excluding only source-verified self-declarations."""
+
+    searchable = text.replace("\r\n", "\n").replace("\r", "\n")
+    record: issue_records.IssueRecord | None = None
+    if path is not None:
+        try:
+            parsed = issue_records.parse_issue_text(searchable)
+        except issue_records.IssueRecordError:
+            parsed = None
+        if (
+            parsed is not None
+            and path.name == f"{parsed.id}.md"
+            and path.parent.parent.name == "issues"
+            and path.parent.parent.parent.name == ".agents"
+        ):
+            record = parsed
+            searchable = searchable.replace(f"ID: {record.id}", "ID: ", 1)
+            github = "-" if record.github is None else str(record.github)
+            searchable = searchable.replace(f"GitHub: {github}", "GitHub: ", 1)
+
+    if record is not None and path is not None and path.parent.name == "_intake":
+        evidence = issue_records.valid_intake_archive_evidence(
+            record,
+            frozen_archive,
+        )
+        if evidence is not None and record.github is not None:
+            _, archived_line = evidence
+            masked_line = re.sub(
+                rf"(?<![A-Za-z0-9])#{record.github}(?![0-9])"
+                rf"|(?<![A-Za-z0-9])issues/{record.github}(?![0-9])",
+                "",
+                archived_line,
+            )
+            searchable = searchable.replace(
+                f"> {archived_line}",
+                f"> {masked_line}",
+                1,
+            )
+
+    references: set[str] = set()
+    for match in ISSUE_REFERENCE_RE.finditer(searchable):
+        reference = match.group(0)
+        if reference.startswith("issues/"):
+            reference = f"#{reference.removeprefix('issues/')}"
+        references.add(reference)
+    return references
+
+
+def discover_issue_references(
+    commit_bodies: str,
+    changed_files: dict[Path, str],
+    *,
+    frozen_archive: bytes | None = None,
+) -> set[str]:
+    """Discover references in both branch commit bodies and changed-file content."""
+
+    references = issue_references_in_text(commit_bodies)
+    for path, text in changed_files.items():
+        references.update(
+            issue_references_in_text(
+                text,
+                path=path,
+                frozen_archive=frozen_archive,
+            )
+        )
+    return references
+
+
+def branch_issue_references(base: str = "origin/main") -> set[str]:
+    """Read commit bodies and changed-file contents from one offline git range."""
+
+    try:
+        merge_base = subprocess.run(
+            ["git", "-C", str(ROOT), "merge-base", base, "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if merge_base.returncode != 0:
+            return set()
+        revision = f"{merge_base.stdout.strip()}..HEAD"
+        log = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--format=%B", revision],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        changed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "diff",
+                "--name-only",
+                "-z",
+                "--diff-filter=ACMRT",
+                revision,
+            ],
+            capture_output=True,
+            timeout=20,
+        )
+        if log.returncode != 0 or changed.returncode != 0:
+            return set()
+    except (OSError, subprocess.SubprocessError):
+        return set()
+
+    changed_files: dict[Path, str] = {}
+    for raw_path in changed.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        try:
+            relative = Path(raw_path.decode("utf-8"))
+            changed_files[relative] = (ROOT / relative).read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+    try:
+        frozen_archive = (
+            ROOT / ".agents" / "completed" / "issue-index.md"
+        ).read_bytes()
+    except OSError:
+        frozen_archive = None
+    return discover_issue_references(
+        log.stdout,
+        changed_files,
+        frozen_archive=frozen_archive,
+    )
+
+
+def canonical_intake_debt(
+    records: list[tuple[Path, issue_records.IssueRecord]],
+) -> tuple[str, ...]:
+    """Report current intake identities without comparing a shared baseline."""
+
+    return tuple(
+        sorted(
+            record.id
+            for path, record in records
+            if path.parent.name == "_intake"
+        )
+    )
+
+
+def check_canonical_issue_references(
+    errors: list[str],
+    references: set[str],
+    records: list[tuple[Path, issue_records.IssueRecord]],
+) -> None:
+    """Resolve branch references and reject migration intake as ownership."""
+
+    materialized = [record for _, record in records]
+    paths = {record.id: path for path, record in records}
+    for reference in sorted(references):
+        normalized = (
+            f"#{reference.removeprefix('issues/')}"
+            if reference.startswith("issues/")
+            else reference
+        )
+        try:
+            record = issue_records.resolve_issue_reference(normalized, materialized)
+        except issue_records.IssueRecordError as error:
+            if normalized.startswith("#"):
+                continue
+            errors.append(str(error))
+            continue
+        if paths[record.id].parent.name == "_intake":
+            errors.append(
+                f"issue reference {reference} resolves to _intake record "
+                f"{record.id}; triage it to a canonical row or exactly owned _owed"
+            )
+
+
+def parse_claim_source(
+    path: Path,
+    errors: list[str],
+    claims: dict[str, ClaimRecord],
+    origin: dict[str, str],
+) -> None:
+    header: tuple[str, ...] = ()
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        cells = split_cells(line)
+        if cells and normalize_header(cells[0]) == "claim":
+            header = tuple(normalize_header(cell) for cell in cells)
+            continue
+        if not line.startswith("| `CLAIM-"):
+            continue
+        claim_match = CLAIM_RE.search(cells[0])
+        if claim_match is None:
+            continue
+        claim = claim_match.group(0)
+        if claim in claims:
+            errors.append(
+                f"{path.relative_to(ROOT)}:{line_no}: duplicate active claim "
+                f"{claim} (already declared in {origin[claim]})"
+            )
+            continue
+        row_cell = cells[1] if len(cells) > 1 else ""
+        matches = list(ID_RE.finditer(row_cell))
+        row_states: dict[str, str | None] = {}
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(row_cell)
+            annotation = re.match(r"^`\s*\(([^)]*)\)", row_cell[match.end() : end])
+            state_match = STATE_RE.search(annotation.group(1)) if annotation else None
+            row_states[match.group(0)] = state_match.group(1) if state_match else None
+        state_index = field_index(header, "state")
+        state_cell = cells[state_index] if state_index is not None and state_index < len(cells) else ""
+        lifecycle_match = CLAIM_LIFECYCLE_RE.match(state_cell)
+        origin[claim] = str(path.relative_to(ROOT))
+        claims[claim] = ClaimRecord(
+            row_states=row_states,
+            lifecycle=lifecycle_match.group(1) if lifecycle_match else None,
+            path=path,
+            line_no=line_no,
+            strict=path.parent == AGENTS / "claims",
+        )
+
+
+def claimed_row_ids(claims: dict[str, ClaimRecord], claim: str) -> set[str]:
+    record = claims.get(claim)
+    return record.row_ids if record is not None else set()
+
+
+def check_claim_state_consistency(
+    claims: dict[str, ClaimRecord],
+    by_id: dict[str, ClaimRow],
+    errors: list[str],
+) -> None:
+    for claim, record in claims.items():
+        if not record.strict:
+            continue
+        location = f"{record.path.relative_to(ROOT)}:{record.line_no}"
+        for item_id, annotated_state in record.row_states.items():
+            row = by_id.get(item_id)
+            if row is None:
+                continue
+            if annotated_state is None:
+                errors.append(
+                    f"{location}: claim {claim} does not annotate {item_id} "
+                    "with its matrix lifecycle state"
+                )
+            elif annotated_state != row.state:
+                errors.append(
+                    f"{location}: claim {claim} annotates {item_id} as "
+                    f"{annotated_state}, but matrix state is {row.state}"
+                )
+    for row in by_id.values():
+        if row.state not in {"SPIKE", "ACTIVE"}:
+            continue
+        claim_match = CLAIM_RE.search(row.field("owner"))
+        record = claims.get(claim_match.group(0)) if claim_match is not None else None
+        if record is None or not record.strict or record.lifecycle in NONTERMINAL_CLAIM_STATES:
+            continue
+        lifecycle = record.lifecycle or "<missing>"
+        errors.append(
+            f"{row.path.relative_to(ROOT)}:{row.line_no}: owner {claim_match.group(0)} "
+            f"for live row {row.item_id} has claim lifecycle {lifecycle}, not "
+            "ACTIVE/IMPLEMENTING/SPIKE"
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="print every STALE/BROKEN record anchor with the symbol expected",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="rewrite scripts/record-anchor-baseline.json (only ever DOWNWARD)",
+    )
+    args = parser.parse_args(argv)
+
     errors: list[str] = []
     for path in REQUIRED:
         if not path.is_file():
@@ -1229,6 +1928,23 @@ def main() -> int:
         for error in dict.fromkeys(errors):
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
+
+    # The baseline write comes AFTER the gate above, never before it.  #1270 was
+    # the mode that returned as soon as it had a number, so a tree failing any
+    # other record check could still bank its rot and the banked figure then
+    # carried the authority of a run that never passed.
+    if args.write_baseline:
+        write_record_anchor_baseline(scan_record_anchors())
+        return 0
+
+    # `--report` and the ratchet itself are restored but UNWIRED: main() does not
+    # call check_record_anchors.  Wiring it here reddens the gate today over 39
+    # STALE and 5 BROKEN citations, and repairing those is reviewed work of its
+    # own.  `--report` is accepted so the two callers that already pass it --
+    # .github/workflows/ci.yml and scripts/agent-preflight.sh -- stop being
+    # silently ignored, and it prints the offenders the wired gate would refuse.
+    if args.report:
+        print(record_anchor_report(scan_record_anchors()), file=sys.stderr)
 
     counts = [
         "ENGINE="
