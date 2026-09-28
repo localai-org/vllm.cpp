@@ -49,6 +49,17 @@ bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols);
 void CommitRank3DeviceLogicalForTest(Tensor& out, uint32_t b, uint32_t h, uint32_t d);
 void EnsureDevice2DForTest(Tensor& t);
 bool TraceCaptureActive();
+// Host-free decode warm hooks + shadow readback (tenstorrent_paged.cpp,
+// tenstorrent_device.h); declared here to keep the test TU internal-free.
+void WarmPagedKvShadow(void* k_cache_data, void* v_cache_data,
+                       int64_t num_blocks, int64_t block_size,
+                       int64_t num_kv_heads, int64_t head_size,
+                       int64_t used_blocks);
+void WarmRacIdx(const void* slot_mapping_owner, const int64_t* slots,
+                int64_t num_slots, int64_t block_size,
+                const int32_t* page_table, int64_t page_table_cols,
+                const int32_t* positions);
+bool ReadPagedKvShadowForTest(const void* k_cache_data, float* dst, int64_t n);
 }  // namespace vt::tenstorrent
 
 namespace {
@@ -2006,6 +2017,251 @@ TEST_CASE("kTENSTORRENT fresh-slot Memset installs the same shadow in both passe
   backend.Free(mem);
 }
 
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ, site 3 (blocker A): the batched
+// decode RAC. TryReshapeAndCacheDeviceDecode declined num_slots > 1 ("decode
+// T=1 only for now"), so a c2 serve leg fell back to the host path inside the
+// capture — EnsureHost(k) read the rope K/V shadows back mid-trace and
+// TT_FATAL'd "Reads are not supported during trace capture"
+// (fd_mesh_command_queue.cpp:873). The fix admits the batched decode: one
+// [nkv_pad, d] shard per user on the sharded input (shard i is user i, the
+// fused-update kernel maps core i to update_idxs[i] / page-table row i), and
+// the SAME slice->multiply->concat->copy->paged_fused_update_cache sequence
+// runs in the eager pass (which warms the programs) and in the capture. This
+// case reproduces the exact leg: batched rope shadows committed rank-3, RAC
+// inside a capture, then replay, and verifies BOTH users' KV landed in the
+// paged-KV device shadow. Red: with the decline restored, BeginCapture ->
+// rac() TT_FATALs at fd_mesh_command_queue.cpp:873.
+TEST_CASE("kTENSTORRENT batched decode RAC is capture-safe (num_slots=2)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+
+  // TILE-legal decode geometry: d and bs multiples of 32 (TryRAC's arms).
+  constexpr int64_t NBlocks = 2, Bsz = 32, Hkv = 2, Dh = 32, C = 2;
+  const size_t cache_elems = static_cast<size_t>(NBlocks * Bsz * Hkv * Dh);
+  const size_t kv_elems = static_cast<size_t>(C * Hkv * Dh);
+
+  // The device-RAC lane is the default for the host-free decode path; own the
+  // env explicitly and restore it (earlier cases legitimately opt out).
+  const bool had_hf = std::getenv("VT_TT_HOST_FREE_DECODE") != nullptr;
+  const std::string saved_hf =
+      had_hf ? std::string(std::getenv("VT_TT_HOST_FREE_DECODE")) : std::string();
+  struct RestoreHf {
+    bool had;
+    std::string saved;
+    ~RestoreHf() {
+      if (had) ::setenv("VT_TT_HOST_FREE_DECODE", saved.c_str(), 1);
+      else ::unsetenv("VT_TT_HOST_FREE_DECODE");
+    }
+  } restore_hf{had_hf, saved_hf};
+  ::setenv("VT_TT_HOST_FREE_DECODE", "1", 1);
+
+  Backend& be = backend;
+  void* mem_kc = be.Alloc(cache_elems * sizeof(uint16_t));
+  void* mem_vc = be.Alloc(cache_elems * sizeof(uint16_t));
+  void* mem_k = be.Alloc(kv_elems * sizeof(uint16_t));
+  void* mem_v = be.Alloc(kv_elems * sizeof(uint16_t));
+  void* mem_slots = be.Alloc(C * sizeof(int64_t));
+  Queue q = be.CreateQueue();
+
+  // Seed caches with a recognizable pattern; user u's page is block u.
+  std::vector<uint16_t> seed(cache_elems);
+  for (size_t i = 0; i < seed.size(); ++i)
+    seed[i] = static_cast<uint16_t>(0x3800 + (i % 1023));  // bf16 ~0.03.. pattern
+  std::vector<uint16_t> host_k(kv_elems), host_v(kv_elems);
+  for (size_t i = 0; i < host_k.size(); ++i) {
+    host_k[i] = static_cast<uint16_t>(0x3c00 + (i % 31));  // ~1.0x bf16 pattern
+    host_v[i] = static_cast<uint16_t>(0x3d00 + (i % 29));
+  }
+  std::vector<int64_t> slots{0, Bsz};  // user0 -> block0 off0, user1 -> block1 off0
+  auto bf16_val = [](uint16_t h) {
+    uint32_t bits = static_cast<uint32_t>(h) << 16;
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+  };
+  be.Copy(q, mem_kc, seed.data(), seed.size() * sizeof(uint16_t));
+  be.Copy(q, mem_vc, seed.data(), seed.size() * sizeof(uint16_t));
+  be.Copy(q, mem_k, host_k.data(), host_k.size() * sizeof(uint16_t));
+  be.Copy(q, mem_v, host_v.data(), host_v.size() * sizeof(uint16_t));
+  be.Copy(q, mem_slots, slots.data(), slots.size() * sizeof(int64_t));
+
+  // Warm hooks exactly as the driver runs them, BEFORE capture.
+  vt::tenstorrent::WarmPagedKvShadow(mem_kc, mem_vc, NBlocks, Bsz, Hkv, Dh,
+                                     /*used_blocks=*/NBlocks);
+  // update_idx = seq_lens-1 = 0 for both users; page-table row = {block u}.
+  std::vector<int32_t> block_table{0, 1};
+  std::vector<int32_t> seq_lens{1, 1};
+  vt::tenstorrent::WarmRacIdx(mem_slots, slots.data(), C, Bsz,
+                              block_table.data(), /*page_table_cols=*/1,
+                              seq_lens.data());
+
+  Tensor tkc = Tensor::Contiguous(mem_kc, vt::DType::kBF16,
+                                  Device{DeviceType::kTENSTORRENT, 0},
+                                  {NBlocks, Bsz, Hkv, Dh});
+  Tensor tvc = Tensor::Contiguous(mem_vc, vt::DType::kBF16,
+                                  Device{DeviceType::kTENSTORRENT, 0},
+                                  {NBlocks, Bsz, Hkv, Dh});
+  Tensor tsl = Tensor::Contiguous(mem_slots, vt::DType::kI64,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {C});
+
+  auto rac = reinterpret_cast<vt::ReshapeAndCacheFn>(
+      vt::GetOp(vt::OpId::kReshapeAndCache, DeviceType::kTENSTORRENT));
+
+  // Warm (eager) pass FIRST — the W4 doctrine: warm in eager what capture
+  // replays. This is the same call the cold step's ForwardLayers makes.
+  {
+    // Stage as flat rank-2 [C*Hkv, Dh] (EnsureDevice2D's contract) and commit
+    // the rank-3 [C, Hkv, Dh] logical the rope result carries; the RAC call
+    // itself sees the rank-3 view the decode graph hands the kernel.
+    Tensor tk2d = Tensor::Contiguous(mem_k, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0},
+                                     {C * Hkv, Dh});
+    Tensor tv2d = Tensor::Contiguous(mem_v, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0},
+                                     {C * Hkv, Dh});
+    vt::tenstorrent::CommitRank3DeviceLogicalForTest(tk2d, C, Hkv, Dh);
+    vt::tenstorrent::CommitRank3DeviceLogicalForTest(tv2d, C, Hkv, Dh);
+    Tensor tk = Tensor::Contiguous(mem_k, vt::DType::kBF16,
+                                   Device{DeviceType::kTENSTORRENT, 0},
+                                   {C, Hkv, Dh});
+    Tensor tv = Tensor::Contiguous(mem_v, vt::DType::kBF16,
+                                   Device{DeviceType::kTENSTORRENT, 0},
+                                   {C, Hkv, Dh});
+    rac(q, tk, tv, tkc, tvc, tsl);
+    // Per-pass probe 1: the EAGER pass alone must land both users' KV.
+    {
+      std::vector<float> kp(cache_elems, 0.0f);
+      REQUIRE(vt::tenstorrent::ReadPagedKvShadowForTest(mem_kc, kp.data(),
+                                                        (int64_t)kp.size()));
+      int bad = 0;
+      for (int64_t u = 0; u < C; ++u)
+        for (int64_t h = 0; h < Hkv; ++h)
+          for (int64_t e = 0; e < Dh; ++e) {
+            const size_t dst = (static_cast<size_t>(u * Bsz) * Hkv + h) * Dh +
+                               static_cast<size_t>(e);
+            const size_t src =
+                static_cast<size_t>(u * Hkv + h) * Dh + static_cast<size_t>(e);
+            if (std::fabs(kp[dst] - bf16_val(host_k[src])) >= 0.05f) {
+              if (bad < 4) MESSAGE("EAGER K bad u=", u, " h=", h, " e=", e,
+                                   " got=", kp[dst], " want=", bf16_val(host_k[src]));
+              ++bad;
+            }
+          }
+      MESSAGE("post-EAGER bad K elems: ", bad);
+    }
+  }
+
+  // Capture pass: fresh rank-3 committed shadows (as rope leaves them each
+  // step) and the identical RAC inside a trace.
+  {
+    Tensor tk2d = Tensor::Contiguous(mem_k, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0},
+                                     {C * Hkv, Dh});
+    Tensor tv2d = Tensor::Contiguous(mem_v, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0},
+                                     {C * Hkv, Dh});
+    vt::tenstorrent::CommitRank3DeviceLogicalForTest(tk2d, C, Hkv, Dh);
+    vt::tenstorrent::CommitRank3DeviceLogicalForTest(tv2d, C, Hkv, Dh);
+    Tensor tk2 = Tensor::Contiguous(mem_k, vt::DType::kBF16,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {C, Hkv, Dh});
+    Tensor tv2 = Tensor::Contiguous(mem_v, vt::DType::kBF16,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {C, Hkv, Dh});
+    be.BeginCapture(q);
+    // If anything inside the region throws, end the capture before
+    // propagating — a leaked active capture poisons every later case.
+    struct EndOnExit {
+      Backend& b;
+      Queue& q;
+      ~EndOnExit() {
+        if (vt::tenstorrent::TraceCaptureActive()) {
+          try { b.EndCapture(q); } catch (...) {}
+        }
+      }
+    } end_guard{be, q};
+    rac(q, tk2, tv2, tkc, tvc, tsl);
+    be.EndCapture(q);
+    // Per-pass probe 2: the CAPTURE pass itself writes through the recorded
+    // ops (capture executes the region once) — check before any replay.
+    {
+      std::vector<float> kp(cache_elems, 0.0f);
+      REQUIRE(vt::tenstorrent::ReadPagedKvShadowForTest(mem_kc, kp.data(),
+                                                        (int64_t)kp.size()));
+      int bad = 0;
+      for (int64_t u = 0; u < C; ++u)
+        for (int64_t h = 0; h < Hkv; ++h)
+          for (int64_t e = 0; e < Dh; ++e) {
+            const size_t dst = (static_cast<size_t>(u * Bsz) * Hkv + h) * Dh +
+                               static_cast<size_t>(e);
+            const size_t src =
+                static_cast<size_t>(u * Hkv + h) * Dh + static_cast<size_t>(e);
+            if (std::fabs(kp[dst] - bf16_val(host_k[src])) >= 0.05f) ++bad;
+          }
+      MESSAGE("post-CAPTURE (pre-replay) bad K elems: ", bad);
+    }
+    be.Replay(q);
+    // Per-pass probe 3: the REPLAY must reproduce the same bytes.
+    {
+      std::vector<float> kp(cache_elems, 0.0f);
+      REQUIRE(vt::tenstorrent::ReadPagedKvShadowForTest(mem_kc, kp.data(),
+                                                        (int64_t)kp.size()));
+      int bad = 0;
+      for (int64_t u = 0; u < C; ++u)
+        for (int64_t h = 0; h < Hkv; ++h)
+          for (int64_t e = 0; e < Dh; ++e) {
+            const size_t dst = (static_cast<size_t>(u * Bsz) * Hkv + h) * Dh +
+                               static_cast<size_t>(e);
+            const size_t src =
+                static_cast<size_t>(u * Hkv + h) * Dh + static_cast<size_t>(e);
+            if (std::fabs(kp[dst] - bf16_val(host_k[src])) >= 0.05f) ++bad;
+          }
+      MESSAGE("post-REPLAY bad K elems: ", bad);
+    }
+  }
+
+  // Both users' KV must sit at their pages in the paged-KV DEVICE shadow.
+  std::vector<float> kc(cache_elems, 0.0f), vc(cache_elems, 0.0f);
+  REQUIRE(vt::tenstorrent::ReadPagedKvShadowForTest(mem_kc, kc.data(),
+                                                    (int64_t)kc.size()));
+  REQUIRE(vt::tenstorrent::ReadPagedKvShadowForTest(mem_vc, vc.data(),
+                                                    (int64_t)vc.size()));
+  // Host bf16->float reference for user u's token (bf16_val above).
+  const size_t tok = static_cast<size_t>(Hkv * Dh);
+  int k_ok = 0, v_ok = 0, k_bad = 0, v_bad = 0;
+  const int total = static_cast<int>(C * tok);
+  for (int64_t u = 0; u < C; ++u) {
+    for (int64_t h = 0; h < Hkv; ++h) {
+      for (int64_t e = 0; e < Dh; ++e) {
+        const size_t dst =
+            (static_cast<size_t>(u * Bsz) * Hkv + h) * Dh + static_cast<size_t>(e);
+        const size_t src = static_cast<size_t>(u * Hkv + h) * Dh + static_cast<size_t>(e);
+        bool kb = std::fabs(kc[dst] - bf16_val(host_k[src])) >= 0.05f;
+        bool vb = std::fabs(vc[dst] - bf16_val(host_v[src])) >= 0.05f;
+        if (kb) { ++k_bad; if (k_bad <= 4) MESSAGE("K bad u=", u, " h=", h,
+                   " e=", e, " got=", kc[dst], " want=", bf16_val(host_k[src])); }
+        if (vb) { ++v_bad; if (v_bad <= 4) MESSAGE("V bad u=", u, " h=", h,
+                   " e=", e, " got=", vc[dst], " want=", bf16_val(host_v[src])); }
+        if (!kb) ++k_ok;
+        if (!vb) ++v_ok;
+      }
+    }
+  }
+  (void)tok;
+  MESSAGE("token-exact K elems: ", k_ok, "/", total, " V: ", v_ok, "/", total);
+  CHECK(k_ok == total);
+  CHECK(v_ok == total);
+
+  be.Free(mem_kc);
+  be.Free(mem_vc);
+  be.Free(mem_k);
+  be.Free(mem_v);
+  be.Free(mem_slots);
+}
 // BACKEND-TENSTORRENT-RESIDUAL-GOLDEN: op-level numerics probe at the
 // kDeviceResidualMinRows == 32 boundary. The device path (rows >= 32,
 // non-gemma) does ttnn::add + ttnn::rms_norm in bf16; the host/CPU path

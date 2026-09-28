@@ -608,6 +608,22 @@ struct RacIdxEntry {
   // read and may hold garbage — no zeros tail, no concat, no allocation.
   ttnn::Tensor sharded_in;   // K input (height-sharded)
   ttnn::Tensor sharded_in_v;  // V input (separate — K and V must NOT share the same buffer)
+  // Batched lane (num_slots > 1): the PROVEN single-user tensors, one set per
+  // user. sharded_*[u] sits on its own core (K on worker u, V on worker C+u);
+  // update_idxs[u] is [1], page_table[u] is [1, cols] — each fused-update
+  // call then runs the C=1 shapes, with the op's override_runtime_arguments
+  // re-patching the per-user addresses on the shared cached program. The
+  // per-user idx content is refreshed OUTSIDE capture every step (no on-device
+  // plus_one for this lane yet — recorded as owed: fold the [C] plus_one'd
+  // cur_pos into the per-user reads).
+  std::vector<ttnn::Tensor> batched_in;
+  std::vector<ttnn::Tensor> batched_in_v;
+  std::vector<ttnn::Tensor> batched_update_idxs;
+  std::vector<ttnn::Tensor> batched_page_table;
+  std::vector<int32_t> batched_idx_host;   // last content copied per user
+  std::vector<int32_t> batched_pt_host;    // last page-table row copied per user
+  bool batched_alloc = false;
+  bool batched_in_is_alloc = false;
   uint32_t nkv = 0;
   uint32_t d = 0;
   bool allocated = false;        // ttnn::Tensor::is_allocated() crashes on default-constructed tensors in this build
@@ -639,7 +655,9 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
   const int64_t num_slots = slot_mapping.shape[0];
   if (T < 1 || num_slots < 1) return false;
   if ((d % 32u) != 0u || (bs % 32u) != 0u) return false;
-  if (num_slots > 1) return false;  // decode T=1 only for now
+  // Decode: one token per user (token i is user i). Prefill (T > num_slots)
+  // keeps the host path.
+  if (T != num_slots) return false;
 
   // k/v must carry CURRENT device shadows ([T*nkv, d] TILE bf16 from rope).
   std::optional<ttnn::Tensor> k_dev, v_dev;
@@ -678,14 +696,23 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
     }
   }
 
-  // Paged-KV shadows must exist and cover the target block.
-  const int64_t slot = slot_mapping.Ptr<int64_t>()[0];
+  // Walk ALL users: batched decode carries one slot per user. The paged-KV
+  // shadow must cover the DEEPEST target block; per-user padding slots
+  // (slot < 0) are skipped by paged_update_cache itself (update_idx == -1).
+  const int64_t* slots_ptr = slot_mapping.Ptr<int64_t>();
+  int64_t max_block = -1;
+  bool any_valid = false;
+  for (int64_t u = 0; u < num_slots; ++u) {
+    const int64_t su = slots_ptr[u];
+    if (su < 0) continue;
+    max_block = std::max(max_block, su / bs);
+    any_valid = true;
+  }
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
-    std::fprintf(stderr, "[TT-TRACE] RAC slot=%lld cap=%d\n",
-                 (long long)slot, (int)tt_capture_active());
-  if (slot < 0) return true;  // nothing to write; treat as handled
-  const uint32_t block = static_cast<uint32_t>(slot / bs);
-  const uint32_t offset = static_cast<uint32_t>(slot % bs);
+    std::fprintf(stderr, "[TT-TRACE] RAC slot0=%lld nslots=%lld max_block=%lld cap=%d\n",
+                 (long long)slots_ptr[0], (long long)num_slots,
+                 (long long)max_block, (int)tt_capture_active());
+  if (!any_valid) return true;  // nothing to write; treat as handled
 
   std::optional<ttnn::Tensor> kc_dev, vc_dev;
   {
@@ -696,9 +723,9 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
       std::fprintf(stderr, "[TT-TRACE] RAC paged-kv shadow k=%d v=%d k_nb=%u\n",
                    skc->device.has_value(), svc->device.has_value(), skc->nb);
     if (!skc->device.has_value() || !svc->device.has_value()) return false;
-    if (skc->nb <= block || skc->nkv != static_cast<uint32_t>(nkv) ||
+    if (skc->nb <= max_block || skc->nkv != static_cast<uint32_t>(nkv) ||
         skc->bs != static_cast<uint32_t>(bs) || skc->d != static_cast<uint32_t>(d)) return false;
-    if (svc->nb <= block || svc->nkv != static_cast<uint32_t>(nkv) ||
+    if (svc->nb <= max_block || svc->nkv != static_cast<uint32_t>(nkv) ||
         svc->bs != static_cast<uint32_t>(bs) || svc->d != static_cast<uint32_t>(d)) return false;
     kc_dev = skc->device;
     vc_dev = svc->device;
@@ -717,14 +744,21 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
                    (long long)num_slots, (long long)bs);
     // WarmRacIdx (driver Refresh slot) refreshes update_idxs/page_table content
     // every step via copy_to_device; here we just verify the tensors exist.
-    if (it == RacIdxCache().end() || !it->second.allocated) {
+    // C=1 verifies the shared pair; the batched lane verifies its per-user set.
+    const bool warmed = num_slots == 1
+                            ? (it != RacIdxCache().end() && it->second.allocated)
+                            : (it != RacIdxCache().end() &&
+                               it->second.batched_alloc &&
+                               it->second.batched_in_is_alloc &&
+                               it->second.batched_in.size() ==
+                                   static_cast<size_t>(num_slots));
+    if (!warmed) {
       VT_CHECK(!tt_capture_active(),
                "tenstorrent: RAC idx tensors not warmed — call WarmRacIdx "
                "outside capture (driver Refresh slot) first");
       return false;
     }
-    // sharded_in must exist (WarmRacIdx needs the paged-KV shadow geometry).
-    if (!it->second.sharded_in_is_alloc) {
+    if (num_slots == 1 && !it->second.sharded_in_is_alloc) {
       VT_CHECK(!tt_capture_active(),
                "tenstorrent: RAC sharded input not warmed — call WarmRacIdx "
                "outside capture after WarmPagedKvShadow");
@@ -827,34 +861,101 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
     return sharded_dst;
   };
   // V first, then K
-  // Debug: dump v_dev properties before sharding
-  ttnn::Tensor v_in = build_input(*v_dev, rac_entry.sharded_in_v, rac_entry);
-  ttnn::Tensor k_in = build_input(*k_dev, rac_entry.sharded_in, rac_entry);
-  // Debug: check v_in for all heads
-  // num_kv_heads_override pins the kernel's head loop to nkv rows: the input
-  // shard is tile-padded (nkv_pad rows) but only the first nkv rows hold data
-  // (upstream decode pattern, test_paged_cache_flexible_geometry.py).
-  // Use paged_fused_update_cache (single call for K+V) instead of two separate
-  // paged_update_cache calls. The fused op has override_runtime_arguments
-  // (the non-fused doesn't), so it works correctly with program cache enabled.
-  // The second separate call would reuse the first's cached program with the
-  // first's buffer addresses (program cache collision).
-  auto [new_kc, new_vc] = ttnn::experimental::paged_fused_update_cache(
-      *kc_dev, k_in, *vc_dev, v_in,
-      /*update_idxs=*/{}, rac_entry.update_idxs,
-      /*share_cache=*/false, rac_entry.page_table,
-      /*batch_offset=*/0, /*compute_kernel_config=*/std::nullopt,
-      /*mesh_coords=*/std::nullopt);
+  // Batched users (num_slots > 1): run the PROVEN single-user sequence once
+  // per user — slice this user's [nkv, d] rows out of the rope shadow,
+  // materialize the fresh native [1,1,nkv,d] via the 1.0 multiply, ttnn::copy
+  // into that user's own single-shard persistent input, then one
+  // paged_fused_update_cache call against that user's own [1] update_idx and
+  // [1, cols] page-table row. Same shapes as the C=1 lane, so call u > 0
+  // hits the warmed program and the fused op's override_runtime_arguments
+  // re-patches the per-user buffer addresses — the exact mechanism the
+  // C=1 replay already relies on. slice/multiply/copy are the warmed,
+  // capture-safe in-region ops.
+  auto user_slice = [&](const ttnn::Tensor& src, uint32_t u,
+                        const RacIdxEntry& entry) -> ttnn::Tensor {
+      // Materialize a FRESH native copy of the whole shadow first (the 1.0
+      // multiply), THEN slice the user's rows out of it. Slicing the
+      // committed rope shadow directly mis-served the second user's last
+      // head in-suite (the unaligned TILE row slice reused a slice program
+      // first compiled against a different offset); from a fresh native
+      // tensor the slice is exact in both regimes.
+      const auto ls = src.logical_shape();
+      ttnn::Tensor fresh = ttnn::multiply(src, 1.0f);
+      // Rank-2 token-row layout [T, nkv*d] (rope's flat commit on the 27B):
+      // user u is ROW u; each head is a d-ALIGNED column range, so slice
+      // per (u, h) column range — the proven per-head recipe — and concat
+      // the heads back into [nkv, d] storage.
+      if (ls.rank() == 2 && ls[0] == num_slots && ls[1] == entry.nkv * entry.d) {
+        std::vector<ttnn::Tensor> heads;
+        heads.reserve(entry.nkv);
+        for (uint32_t h = 0; h < entry.nkv; ++h) {
+          heads.push_back(ttnn::slice(
+              fresh,
+              ttsl::SmallVector<uint32_t>{u, h * entry.d},
+              ttsl::SmallVector<uint32_t>{u + 1u, (h + 1u) * entry.d},
+              ttsl::SmallVector<uint32_t>{1u, 1u}));
+        }
+        return ttnn::concat(heads, /*dim=*/0);
+      }
+      return ls.rank() == 3
+                 ? ttnn::slice(fresh,
+                               ttsl::SmallVector<uint32_t>{u, 0u, 0u},
+                               ttsl::SmallVector<uint32_t>{u + 1u, entry.nkv,
+                                                           entry.d},
+                               ttsl::SmallVector<uint32_t>{1u, 1u, 1u})
+                 : ttnn::slice(fresh,
+                               ttsl::SmallVector<uint32_t>{u * entry.nkv, 0u},
+                               ttsl::SmallVector<uint32_t>{
+                                   (u + 1u) * entry.nkv, entry.d},
+                               ttsl::SmallVector<uint32_t>{1u, 1u});
+  };
+  const uint32_t C = static_cast<uint32_t>(num_slots);
+  // Per-user temporaries (the fresh shadow copy, the slice, the native4
+  // multiply output) are FRESH ALLOCATIONS freed at each iteration's end.
+  // Freeing one while its enqueued copy is still in flight lets the next
+  // iteration's allocation recycle the storage under the deferred reader —
+  // the exact class the retention root-cause names — so hold them until the
+  // end of the function.
+  std::vector<ttnn::Tensor> keepalive;
+  keepalive.reserve(static_cast<size_t>(C) * 3);
+  std::optional<ttnn::Tensor> new_kc, new_vc;
+  for (uint32_t u = 0; u < C; ++u) {
+    ttnn::Tensor v_src = user_slice(*v_dev, u, rac_entry);
+    ttnn::Tensor k_src = user_slice(*k_dev, u, rac_entry);
+    ttnn::Tensor v_in = build_input(v_src, rac_entry.batched_in_v[u], rac_entry);
+    ttnn::Tensor k_in = build_input(k_src, rac_entry.batched_in[u], rac_entry);
+    keepalive.push_back(v_src);
+    keepalive.push_back(k_src);
+    keepalive.push_back(v_in);
+    keepalive.push_back(k_in);
+    // num_kv_heads_override pins the kernel's head loop to nkv rows (the
+    // input shard is tile-padded); see the C=1 lane below for the fused-op /
+    // program-cache rationale.
+    auto [ukc, uvc] = ttnn::experimental::paged_fused_update_cache(
+        *kc_dev, k_in, *vc_dev, v_in,
+        /*update_idxs=*/{}, rac_entry.batched_update_idxs[u],
+        /*share_cache=*/false, rac_entry.batched_page_table[u],
+        /*batch_offset=*/0, /*compute_kernel_config=*/std::nullopt,
+        /*mesh_coords=*/std::nullopt);
+    new_kc = std::move(ukc);
+    new_vc = std::move(uvc);
+    // Eager pass only: sync between users, so user u+1's fresh allocations
+    // cannot recycle user u's in-flight temporaries (the deferred-reader
+    // recycle class the retention root-cause names) and each per-user program
+    // variant is patched against quiesced state. A finish inside a live trace
+    // is illegal; the capture pass records the identical op sequence against
+    // trace-tracked allocations instead.
+    if (!tt_capture_active()) SharedMeshDevice().mesh_command_queue().finish();
+  }
   {
     std::lock_guard<std::mutex> g(PagedKvMutex());
-    PagedKvShadows()[reinterpret_cast<uintptr_t>(k_cache.data)].device = std::move(new_kc);
+    PagedKvShadows()[reinterpret_cast<uintptr_t>(k_cache.data)].device = std::move(*new_kc);
     PagedKvShadows()[reinterpret_cast<uintptr_t>(k_cache.data)].device_current = true;
-    PagedKvShadows()[reinterpret_cast<uintptr_t>(v_cache.data)].device = std::move(new_vc);
+    PagedKvShadows()[reinterpret_cast<uintptr_t>(v_cache.data)].device = std::move(*new_vc);
     PagedKvShadows()[reinterpret_cast<uintptr_t>(v_cache.data)].device_current = true;
   }
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
-    std::fprintf(stderr, "[TT-TRACE] RAC device update (copy+paged_update_cache)\n");
-  (void)offset; (void)block;
+    std::fprintf(stderr, "[TT-TRACE] RAC device update batched C=%u (per-user copy+paged_update_cache)\n", C);
   return true;
 }
 
@@ -1987,6 +2088,16 @@ void WarmPagedKvShadow(void* k_cache_data, void* v_cache_data,
   warm_one(v_cache_data);
 }
 
+bool ReadPagedKvShadowForTest(const void* k_cache_data, float* dst, int64_t n) {
+  std::lock_guard<std::mutex> g(PagedKvMutex());
+  auto it = PagedKvShadows().find(reinterpret_cast<uintptr_t>(k_cache_data));
+  if (it == PagedKvShadows().end() || !it->second.device.has_value()) return false;
+  auto host = it->second.device->to_vector<float>();
+  const int64_t m = std::min<int64_t>(n, static_cast<int64_t>(host.size()));
+  for (int64_t i = 0; i < m; ++i) dst[i] = host[static_cast<size_t>(i)];
+  return true;
+}
+
 void WarmRacIdx(const void* /*slot_mapping_owner*/, const int64_t* slots,
                 int64_t num_slots, int64_t block_size,
                 const int32_t* block_table, int64_t block_table_cols,
@@ -2050,6 +2161,13 @@ void WarmRacIdx(const void* /*slot_mapping_owner*/, const int64_t* slots,
   const auto key = std::make_pair(num_slots, block_size);
   std::lock_guard<std::mutex> g(RacIdxMutex());
   RacIdxEntry& e = RacIdxCache()[key];
+  // The SHARED [C] update_idxs / page-table tensors serve the C=1 lane only
+  // (its captured paged_update_cache replays against these stable addresses,
+  // and its update_idxs is plus_one'd on-device). The batched lane keeps its
+  // own per-user tensors below and must NOT allocate the shared ones — a
+  // standalone update_idxs allocated after a capture would trip the #1105
+  // frozen-index refusal. The vectors ptv/idxv above still feed it.
+  if (num_slots == 1) {
   // idx/page-table tensors are allocated ONCE per key and their CONTENT is
   // refreshed in place each step (copy_to_device, outside capture). The
   // captured paged_update_cache replays against the stable address and reads
@@ -2113,6 +2231,105 @@ void WarmRacIdx(const void* /*slot_mapping_owner*/, const int64_t* slots,
     }
   }
   e.pt_host = ptv;
+  }  // num_slots == 1 (shared C=1 tensors)
+  // Batched lane (num_slots > 1): per-user persistent tensors, allocated
+  // once, CONTENT refreshed outside capture every step. The per-user
+  // update_idx changes every step (it is the decode position), so unlike the
+  // C=1 lane there is no on-device plus_one yet — the refresh is the same
+  // copy_to_device discipline the page-table refresh already pays (the
+  // on-device advance for this lane is recorded as owed in the entry).
+  if (num_slots > 1) {
+    const uint32_t C = static_cast<uint32_t>(num_slots);
+    if (!e.batched_alloc) {
+      MeshDevice& device2 = device;
+      e.batched_in.assign(C, ttnn::Tensor());
+      e.batched_in_v.assign(C, ttnn::Tensor());
+      e.batched_update_idxs.assign(C, ttnn::Tensor());
+      e.batched_page_table.assign(C, ttnn::Tensor());
+      for (uint32_t u = 0; u < C; ++u) {
+        e.batched_update_idxs[u] = ttnn::Tensor::from_vector<int32_t>(
+            {idxv[static_cast<size_t>(u)]},
+            SpecOf(tt::tt_metal::Shape({1u}), ttnn::DataType::INT32,
+                   ttnn::Layout::ROW_MAJOR),
+            &device2);
+        e.batched_page_table[u] = ttnn::Tensor::from_vector<int32_t>(
+            std::vector<int32_t>(
+                ptv.begin() + static_cast<long>(u) * block_table_cols,
+                ptv.begin() + static_cast<long>(u + 1) * block_table_cols),
+            SpecOf(tt::tt_metal::Shape({1u, static_cast<uint32_t>(block_table_cols)}),
+                   ttnn::DataType::INT32, ttnn::Layout::ROW_MAJOR),
+            &device2);
+      }
+      e.batched_idx_host.assign(idxv.begin(), idxv.end());
+      e.batched_pt_host = ptv;
+      e.batched_alloc = true;
+    } else {
+      for (uint32_t u = 0; u < C; ++u) {
+        const int32_t idx_u = idxv[static_cast<size_t>(u)];
+        if (e.batched_idx_host[static_cast<size_t>(u)] != idx_u) {
+          ttnn::Tensor ih = ttnn::Tensor::from_vector<int32_t>(
+              {idx_u}, SpecOf(tt::tt_metal::Shape({1u}), ttnn::DataType::INT32,
+                              ttnn::Layout::ROW_MAJOR));
+          ttnn::copy_to_device(ih, e.batched_update_idxs[u]);
+          e.batched_idx_host[static_cast<size_t>(u)] = idx_u;
+        }
+        bool row_changed = false;
+        for (int64_t c = 0; c < block_table_cols; ++c) {
+          if (e.batched_pt_host[static_cast<size_t>(u) * block_table_cols + c] !=
+              ptv[static_cast<size_t>(u) * block_table_cols + c]) {
+            row_changed = true;
+            break;
+          }
+        }
+        if (row_changed) {
+          ttnn::Tensor ph = ttnn::Tensor::from_vector<int32_t>(
+              std::vector<int32_t>(
+                  ptv.begin() + static_cast<long>(u) * block_table_cols,
+                  ptv.begin() + static_cast<long>(u + 1) * block_table_cols),
+              SpecOf(tt::tt_metal::Shape({1u, static_cast<uint32_t>(block_table_cols)}),
+                     ttnn::DataType::INT32, ttnn::Layout::ROW_MAJOR));
+          ttnn::copy_to_device(ph, e.batched_page_table[u]);
+          for (int64_t c = 0; c < block_table_cols; ++c)
+            e.batched_pt_host[static_cast<size_t>(u) * block_table_cols + c] =
+                ptv[static_cast<size_t>(u) * block_table_cols + c];
+        }
+      }
+    }
+    // Per-user single-shard inputs: K for user u on worker core (u, 0), V on
+    // (C+u, 0) — never the same core, or the second copy's program-cache hit
+    // would write V into K's buffer (the C=1 lane's rule, one pair per user).
+    if (!e.batched_in_is_alloc) {
+      std::lock_guard<std::mutex> pg(PagedKvMutex());
+      for (auto& [ptr, shadow] : PagedKvShadows()) {
+        if (!(shadow.nkv > 0 && shadow.d > 0 && (shadow.d % 32u) == 0u)) continue;
+        const uint32_t np = std::max(32u, ((shadow.nkv + 31u) / 32u) * 32u);
+        const auto grid = device.compute_with_storage_grid_size();
+        if (2u * C > grid.x) break;  // not enough worker cores: leave unallocated
+        for (uint32_t u = 0; u < C; ++u) {
+          auto make = [&](uint32_t cx) {
+            tt::tt_metal::CoreRangeSet cs({tt::tt_metal::CoreRange(
+                tt::tt_metal::CoreCoord(cx, 0), tt::tt_metal::CoreCoord(cx, 0))});
+            tt::tt_metal::ShardSpec ss(cs, {np, shadow.d},
+                                       tt::tt_metal::ShardOrientation::ROW_MAJOR);
+            tt::tt_metal::MemoryConfig sm(
+                tt::tt_metal::TensorMemoryLayout::HEIGHT_SHARDED,
+                tt::tt_metal::BufferType::L1, ss);
+            return ttnn::create_device_tensor(
+                tt::tt_metal::TensorSpec(
+                    tt::tt_metal::Shape({1u, 1u, shadow.nkv, shadow.d}),
+                    tt::tt_metal::TensorLayout(
+                        ttnn::DataType::BFLOAT16,
+                        tt::tt_metal::PageConfig(ttnn::Layout::TILE), sm)),
+                &device);
+          };
+          e.batched_in[u] = make(u);
+          e.batched_in_v[u] = make(C + u);
+        }
+        e.batched_in_is_alloc = true;
+        break;
+      }
+    }
+  }
   // Build the persistent sharded RAC input ONCE from the first available
   // paged-KV shadow's geometry (same nkv/d as the cache): logical
   // [1,1,nkv,d], padded [1,1,nkv_pad,d], HEIGHT_SHARDED L1, shard

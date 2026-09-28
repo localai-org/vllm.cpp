@@ -85,3 +85,110 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   (multi-slot RAC device path; 27B decode-trace DRAM fit), not regressions
   of this fix. Issue stays OPEN for them.
 -
+- 2026-09-28 (worktree row/tt-27b-capture-write) BLOCKER A FIXED — multi-slot
+  decode RAC is capture-safe. ROOT CAUSE: the decline `if (num_slots > 1)
+  return false` at tenstorrent_paged.cpp:642 is NOT new — it is byte-identical
+  since 79ff8f310 (2026-08-18, the #1105 whole-graph capture) and was already
+  present at the W3-era c2 bench commit ead93289b. What changed since W3 is
+  the STATE OF k/v AT THE FALLBACK: the capture-warmup redesign's device-
+  residency waves (28c154d78 "grouped-quant activations serve device-resident"
+  and successors; the suite-repair 12d5d75ee) left the rope K/V outputs as
+  device_current TILE shadows at RAC time under capture. In W3 the host
+  fallback's `EnsureHost(k)` (tenstorrent_paged.cpp:890) found host bytes and
+  did a pure host write; at HEAD the same fallback triggered the device
+  readback mid-capture — TT_FATAL "Reads are not supported during trace
+  capture" (fd_mesh_command_queue.cpp:873). The decline that was a benign
+  perf shortcut in August became a capture-fatal in September.
+  FIX (W4 doctrine, warm in eager what capture replays; no capture-active
+  branch): TryReshapeAndCacheDeviceDecode admits the batched decode
+  (num_slots == T, one token per user) and runs the PROVEN single-user
+  sequence once per user — slice this user's [nkv, d] rows from the rope
+  shadow, 1.0-multiply into a fresh native [1,1,nkv,d], ttnn::copy into that
+  user's own single-shard persistent input (K on worker core u, V on C+u),
+  then one paged_fused_update_cache per user against that user's own [1]
+  update_idx and [1, cols] page-table row; the fused op's
+  override_runtime_arguments re-patches the per-user addresses on the shared
+  cached program, the same mechanism the C=1 replay uses. WarmRacIdx
+  allocates and per-step-refreshes the per-user idx tensors outside capture
+  (the per-step update_idx copy is the C=1 lane's on-device plus_one not yet
+  extended here — recorded as owed perf debt). An earlier design that packed
+  all C users into ONE C-shard sharded input was tried and REJECTED on two
+  tt-metal facts measured in this change: ttnn::copy demands LOGICAL shape
+  equality while a C-shard dest needs padded height C*np (unrepresentable
+  from logical C*nkv, tt_metal::Shape carries no padding), and concat does
+  not preserve per-input padding into its output storage.
+  RED: new doctest `kTENSTORRENT batched decode RAC is capture-safe
+  (num_slots=2)` reproduces the exact leg fatal with the decline restored
+  (/tmp/red-multislot.log, TT_FATAL fd_mesh_command_queue.cpp:873); GREEN
+  with the fix: capture + replay complete and BOTH users' KV verified
+  token-exact (128/128 K, 128/128 V) in the paged-KV device shadow via the
+  new ReadPagedKvShadowForTest hook (/tmp/green-multislot.log). The leg also
+  needed no residency change — the fix is confined to tenstorrent_paged.cpp.
+- 2026-09-28 BLOCKER B ANALYSIS — 27B whole-graph decode trace does not fit;
+  recommendation is REGION-SCOPED capture. The numbers: (1) DEMAND: the
+  captured decode graph records 1,037 tt-metal op entries (the step-decompose
+  legE in-capture census, identical across all four captures —
+  docs/bench-evidence/tt-27b-step-decompose-20260926.md) and end_trace_capture
+  asks for one 3,153,969,152 B DRAM buffer (/tmp/leg-27b-c1.log) — 3.04 MB
+  PER RECORDED COMMAND. The MeshTrace buffer is the replay staging DRAM for
+  the whole recorded command stream; at 1,037 commands the per-command region
+  (launch descriptors, CB/semaphore state, runtime-arg and buffer-descriptor
+  records) dominates, NOT tensor staging (every in-region tensor is
+  persistent/preallocated by the warmup discipline; the 27B DRAM ledger shows
+  the slot census flat) and NOT program binaries (cached outside the trace).
+  (2) SUPPLY: 298,568,896 B free, largest block 280,928,384 B — and ~948
+  MiB of that pressure is the tt-metal#57970-class GDN scatter retention
+  (docs/bench-evidence/tt-ttm-retention-rootcause-20260925.md), i.e. at most
+  ~1.9 GiB recoverable for a 2-request run, taking free to ~2.2 GiB. Even a
+  FULL upstream retention fix leaves 3.15 GB > 2.2 GB: NO whole-graph scope
+  fits the 27B decode step at this command density, and the gap is
+  structural (3,037 more commands than a ~90-command budget of 280 MB).
+  (3) PRECEDENT: region-scoped capture FITS and SERVES — the GDN-region row
+  captured and replayed a multi-layer region inside this same step
+  (.agents/specs/tenstorrent-gdn-region-replay.md,
+  docs/bench-evidence/tt-gdn-region-replay-20260927.md), and the chunked E=1
+  arm already targets a 50 MiB trace region (tenstorrent_capture.cpp's
+  LastTraceBytes discipline). A region of ≤ ~90 commands fits today's free;
+  ≤ ~16 commands fits a 50 MiB region.
+  RECOMMENDATION: region-scoped capture for the 27B decode — capture the
+  recurring per-layer compute region(s) (the kernel-dense GDN/attention/GEMM
+  chain), replay per layer from a host loop, and keep the heterogeneous
+  preamble/RAC/sampling ops eager. Whole-graph stays the right shape for the
+  small models it already serves; forcing 27B into it is bounded by tt-metal's
+  per-command trace cost, which no vllm.cpp-side discipline can shrink. Do
+  not attempt this inside this issue — it is a fresh row (trace-budget,
+  region segmentation, per-region state binding) with its own spec.
+- 2026-09-28 DEVICE GATE (c2 leg, /tmp/leg-27b-c2b.log = monitor
+  bench-c2b): BENCH_EXIT=1 — BLOCKER A's fatal is GONE (the leg no longer
+  dies at RAC; it served thousands of decode steps across ~16 minutes) but
+  fails FURTHER DOWN at the NEXT site of the same class:
+  PagedAttentionKernel's host fallback read mid-capture (EnsureHost ->
+  DownloadToHost -> to_vector, TT_FATAL "Reads are not supported during
+  trace capture" at fd_mesh_command_queue.cpp:873) during a late re-capture
+  — TryPADecodeDevice's multi-slot condition declines in some late state
+  (width change / boundary re-capture) and the leg falls to the PA host
+  path. This is a NEW owed site (multi-slot PA device path under re-capture),
+  the third of the class after the two capture-write sites and the RAC one.
+  Also fixed en route: the batched user split handles the 27B's real rope
+  shadow geometry — rank-2 token-row [T, nkv*d] (per-head d-ALIGNED column
+  slices, the proven recipe) as well as rank-3 [C, nkv, d].
+  RESIDUAL (recorded, not hidden): the new doctest passes standalone and in
+  12-case subsets, but in the FULL 95-case suite it measures 96/128 K elems
+  exact — user 1's SECOND head (and only that head) reads uninitialized bytes
+  from the paged-KV shadow after the eager pass, deterministically, with the
+  same 32-elem count across eager/capture/replay; the per-user
+  mesh_command_queue().finish() sync did not clear it. The fused-update
+  input dumps verify the device inputs are correct (out_headmax exact for
+  all four per-user copies), so the divergence is inside tt-metal's
+  copy/program-cache interaction for the LAST per-user input in a deep
+  program-cache history. Owed: bisect which preceding case poisons the
+  variant, then either the tt-metal report or a per-user program isolation.
+  SUITE: 94/95 passed (the residual is the only failure; every pre-existing
+  case stays green).
+- 2026-09-28 Blocks A and B status: A = the decline is REMOVED and the
+  batched RAC device path serves (warm in eager, replay in capture —
+  /tmp/red-multislot.log reproduces the old fatal, /tmp/green-multislot.log
+  the green case); the serve leg now reaches the PA site above. B = the
+  trace-budget analysis above stands (region-scoped recommended). Issue
+  stays OPEN for the PA multi-slot site, the batched-lane residual, and the
+  27B decode-trace DRAM fit.
