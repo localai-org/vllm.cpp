@@ -67,3 +67,8 @@ earlier in the CI job. The rot repair (#3329) unmasked it.
 
 - A test's needs cannot be met by the current code's semantics → stop,
   record, the capability gap becomes its own unit.
+
+## Owed
+
+- `ISSUE-LOCAL-01M3JMSD9P7REKNQVEG9HCEWTD` owns this spec's remaining stop condition: the tree must satisfy the restored restructured checker (claim annotations, roadmap issue-row refusal, canonical issue paths, anchor ratchet) and the record suite must pass against it.
+

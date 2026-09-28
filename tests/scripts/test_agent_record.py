@@ -27,60 +27,8 @@ agent_record = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = agent_record
 SPEC.loader.exec_module(agent_record)
 
-# The restructured checker split the issue-record primitives into their own
-# module; the tests address them through the checker as before.
-_ISSUE_RECORDS_SPEC = importlib.util.spec_from_file_location(
-    "agent_record.issue_records", ROOT / "scripts/issue_records.py"
-)
-assert _ISSUE_RECORDS_SPEC is not None and _ISSUE_RECORDS_SPEC.loader is not None
-agent_record.issue_records = importlib.util.module_from_spec(_ISSUE_RECORDS_SPEC)
-sys.modules[_ISSUE_RECORDS_SPEC.name] = agent_record.issue_records
-_ISSUE_RECORDS_SPEC.loader.exec_module(agent_record.issue_records)
-
-
-def check_issue_records(
-    errors: list[str],
-    *,
-    issues_root: Path,
-    rows: set[str],
-    owed: dict,
-    references: set[str],
-    frozen_archive: bytes,
-) -> None:
-    """Compose the current validation path the restructured checker ships.
-
-    The old checker monolith owned this entry point; the restructure moved the
-    primitives into ``scripts/issue_records.py`` and the per-record walk into
-    ``scripts/agent-issue.py``. The tests exercise the primitives directly in
-    the same order the collection walk uses: parse, collection contracts,
-    per-record contracts, then reference resolution.
-    """
-
-    issue_records = agent_record.issue_records
-    records = [
-        issue_records.parse_issue_file(path)
-        for path in sorted(issues_root.rglob("*.md"))
-    ]
-    try:
-        issue_records.validate_issue_collection(records)
-    except issue_records.IssueRecordError as error:
-        errors.append(str(error))
-    for record in records:
-        path = issues_root / (record.row or "") / f"{record.id}.md"
-        try:
-            issue_records.validate_issue_record(
-                record, path, rows, owed, frozen_archive=frozen_archive
-            )
-        except issue_records.IssueRecordError as error:
-            errors.append(str(error))
-    for reference in sorted(references):
-        try:
-            issue_records.resolve_issue_reference(reference, records)
-        except issue_records.IssueRecordError as error:
-            errors.append(str(error))
-
-
-agent_record.check_issue_records = check_issue_records
+# The restructured checker owns `check_issue_records` itself (it composes the
+# issue_records primitives); the tests call it through the checker as before.
 
 
 def with_field(row, field: str, value: str):
@@ -626,73 +574,13 @@ class AgentRecordMutationTests(unittest.TestCase):
 
         require(errors, r"model inventory .*expected")
 
-    def test_kernel_row_ratchet_matches_the_current_inventory(self) -> None:
-        """The #284 A76 family is a real kernel row, never a relaxed pin.
-
-        The constant moved 52 -> 60 when the record-rot repair restored the
-        eight promised matrix rows and the LTX2-VAE and megakernel rows landed;
-        the ratchet semantics are unchanged: one row less or one row more must
-        fail the check for its own reason.
-        """
-        path, expected = agent_record.MATRICES["KERNEL"]
-        self.assertEqual(expected, 60)
-
-        errors: list[str] = []
-        rows = agent_record.parse_claim_rows(path, errors)
-        self.assertEqual(errors, [])
-        self.assertEqual(len(rows), expected)
-
-        for mutated_expected in (expected - 1, expected + 1):
-            with self.subTest(expected=mutated_expected):
-                mutated_errors: list[str] = []
-                with mock.patch.dict(
-                    agent_record.MATRICES,
-                    {"KERNEL": (path, mutated_expected)},
-                ):
-                    agent_record.check_matrices(mutated_errors)
-                require(mutated_errors, r"\d+ KERNEL rows; expected \d+")
-
-    def test_matrix_row_ratchets_match_the_current_inventory(self) -> None:
-        """MUTATION: every matrix constant is a ratchet, in all four sections.
-
-        The MODEL, QUANTIZATION, and BACKEND constants carry the same semantic
-        the KERNEL test has pinned since #284: the committed value is what the
-        matrix rows sum to, and one row either side fails the check. Red first:
-        each mutated constant names its own section in the error.
-        """
-        for prefix, expected in (
-            ("MODEL", 384),
-            ("QUANT", 87),
-            ("BACKEND", 90),
-        ):
-            with self.subTest(prefix=prefix):
-                path, value = agent_record.MATRICES[prefix]
-                self.assertEqual(value, expected)
-                errors: list[str] = []
-                rows = agent_record.parse_claim_rows(path, errors)
-                self.assertEqual(errors, [])
-                self.assertEqual(
-                    sum(
-                        row.item_id.startswith(prefix + "-") for row in rows
-                    ),
-                    expected,
-                )
-        for prefix, expected in (
-            ("MODEL", 384),
-            ("QUANT", 87),
-            ("KERNEL", 60),
-            ("BACKEND", 90),
-        ):
-            path, _ = agent_record.MATRICES[prefix]
-            for mutated_expected in (expected - 1, expected + 1):
-                with self.subTest(prefix=prefix, expected=mutated_expected):
-                    mutated_errors: list[str] = []
-                    with mock.patch.dict(
-                        agent_record.MATRICES,
-                        {prefix: (path, mutated_expected)},
-                    ):
-                        agent_record.check_matrices(mutated_errors)
-                    require(mutated_errors, rf"\d+ {prefix} rows; expected \d+")
+    # DELETED with the retired capability: `test_kernel_row_ratchet_matches_
+    # the_current_inventory` and `test_matrix_row_ratchets_match_the_current_
+    # inventory` pinned the per-matrix row-count constants (`MATRICES[name]
+    # = (path, count)`). The reviewed ENG-RECORD-CONFLICT-SURFACES restructure
+    # (a9f6186c2, lost in the 40990825d merge and restored here) DERIVES every
+    # matrix count from its rows, so there is no constant to ratchet and the
+    # mutation these tests performed no longer exists.
 
     def test_engine_summary_rejects_stale_area_rollup(self) -> None:
         source = agent_record.ENGINE_MATRIX.read_text(encoding="utf-8")
@@ -2065,30 +1953,33 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
         self.assertEqual(actual, digest.group(1))
 
     def _check_kernel_source(self, source: str) -> list[str]:
-        path, expected = agent_record.MATRICES["KERNEL"]
+        path = agent_record.MATRICES["KERNEL"]
         with tempfile.TemporaryDirectory(dir=agent_record.ROOT) as tmp:
             matrix = Path(tmp) / "kernel-matrix.md"
             matrix.write_text(source, encoding="utf-8")
             paths = [matrix if candidate == path else candidate
                      for candidate in agent_record.MATRIX_PATHS]
             matrices = dict(agent_record.MATRICES)
-            matrices["KERNEL"] = (matrix, expected)
+            matrices["KERNEL"] = matrix
             errors: list[str] = []
             with mock.patch.object(agent_record, "MATRIX_PATHS", paths), \
                  mock.patch.object(agent_record, "MATRICES", matrices):
                 agent_record.check_matrices(errors)
         return errors
 
-    def test_matrix_registry_pairs_each_path_with_its_ratchet_constant(self) -> None:
-        """Each matrix registry value is its owning path and its ratchet."""
+    def test_matrix_registry_maps_each_prefix_to_its_owning_path(self) -> None:
+        """Each matrix registry value is its owning path (counts are derived)."""
         self.assertTrue(agent_record.MATRICES)
-        for prefix, (path, expected) in agent_record.MATRICES.items():
+        for prefix, path in agent_record.MATRICES.items():
             with self.subTest(prefix=prefix):
                 self.assertIsInstance(path, Path)
-                self.assertIsInstance(expected, int)
 
     def test_a_valid_unique_matrix_row_needs_no_checker_constant(self) -> None:
-        """Adding a valid keyed row does not require editing the checker."""
+        """Adding a valid keyed row does not require editing the checker.
+
+        The restructured checker DERIVES every matrix count from its rows, so
+        a new valid row is accepted with no constant bump anywhere.
+        """
         source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
         template = next(
             line for line in source.splitlines()
@@ -2104,25 +1995,14 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
                 encoding="utf-8",
             )
             paths = [
-                matrix if path == agent_record.MATRICES["KERNEL"][0] else path
+                matrix if path == agent_record.MATRICES["KERNEL"] else path
                 for path in agent_record.MATRIX_PATHS
             ]
-            # The restructured checker ratchets every matrix section, so a new
-            # valid row is only accepted together with its constant bump. The
-            # un-bumped constant must fail for the ratchet's own reason first.
-            expected = agent_record.MATRICES["KERNEL"][1]
             errors: list[str] = []
             matrices = dict(agent_record.MATRICES)
             with mock.patch.object(agent_record, "MATRIX_PATHS", paths), \
                  mock.patch.object(agent_record, "MATRICES",
-                                   {**matrices, "KERNEL": (matrix, expected)}):
-                agent_record.check_matrices(errors)
-            require(errors, rf"\d+ KERNEL rows; expected {expected}")
-            rows, by_id = [], {}
-            errors = []
-            with mock.patch.object(agent_record, "MATRIX_PATHS", paths), \
-                 mock.patch.object(agent_record, "MATRICES",
-                                   {**matrices, "KERNEL": (matrix, expected + 1)}):
+                                   {**matrices, "KERNEL": matrix}):
                 rows, by_id = agent_record.check_matrices(errors)
         self.assertEqual(errors, [])
         self.assertIn("KERNEL-TEST-DERIVED-ROW", by_id)
@@ -2290,7 +2170,7 @@ class Ltx2VaeKernelRowIsCounted(unittest.TestCase):
     ROW = "KERNEL-LTX2-VAE"
 
     def _kernel_matrix_path(self) -> Path:
-        return agent_record.MATRICES["KERNEL"][0]
+        return agent_record.MATRICES["KERNEL"]
 
     def test_the_row_exists_in_the_kernel_matrix(self) -> None:
         text = self._kernel_matrix_path().read_text(encoding="utf-8")
