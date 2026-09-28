@@ -260,3 +260,27 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   trace_region_size policy, or a #57970 retention recovery that actually
   covers 3.15 GB) — escalated with these numbers beside tt-metal#57970. The
   in-flow RAC C=1 segfault the legs exposed is ISSUE-LOCAL-01M3M0K390EM40W5R9BR5A2KZ7.
+
+- 2026-09-28 UPLOAD-GUARD WAVE (worktree row/tt-27b-region-capture-spec,
+  commits 6473ae731/286947603/39e2ca8ef, evidence
+  docs/bench-evidence/tt-capture-upload-guard-20260928.md): the
+  trace-record-audit inline-upload lever landed and the c1 leg FALSIFIED the
+  attribution. The guard (UploadRows/UploadRowsBf16 refuse capture-scope
+  uploads by name; the AddKernel broadcast operand warms into a hash-keyed
+  cache) is red-first proven (pre-fix: raw TT_FATAL
+  fd_mesh_command_queue.cpp:826, no refusal; post-fix: named refusal, warmed
+  capture 1,024 B). SUITE: 98/526,778 assertions, only the pre-recorded RAC
+  residual flake fails. MONEY LEG: 27B whole-graph c1 BENCH_EXIT=1, no TPOT —
+  but zero capture-scope uploads fired (no [TT-UP] line in the leg) and the
+  end_trace_capture demand is byte-identical 3,153,969,152 B; the warmed
+  MatmulBT region still closes at 3,088,384 B. Model C (inline H2D payload) is
+  falsified: the ~3 MB/command is the quant-matmul program class's own
+  recorded launch stream on this tt-metal pin. This issue's fit site stays
+  OPEN with a sharper next step: dump the tt::LogDispatch command stream for
+  one captured MatmulBTQuantGrouped launch and attribute the ~3 MB of
+  bypass_data (candidates: per-launch relay of kernel-binary pages for
+  programs missing the 1,024 KB prefetch ringbuffer fit at
+  fd_mesh_command_queue.cpp:453, or per-launch config/RTA page writes scaling
+  with the quant program's footprint). The escalation beside tt-metal#57970
+  now carries a reproducing op-scale case: a single warmed MatmulBT region
+  closes at 3,088,384 B on this pin.

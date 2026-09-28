@@ -253,6 +253,28 @@ records land together (developer decision, 2026-09-28, recorded in
 
 ## Now
 
+2026-09-28 (wave 2, same worktree, commits `6473ae731`, `286947603`,
+`39e2ca8ef`): the trace-record audit's inline-upload lever was implemented and
+the leg FALSIFIED the attribution. Landed: the capture-scope upload guard
+(`UploadRows`/`UploadRowsBf16` refuse under capture by name after the
+`VT_TT_TRACE_DEBUG` route print; `AddKernel`'s broadcast operand warms into a
+hash-keyed cache with a named capture-scope miss refusal), and the red-first
+device test pinning the contract (unwarmed capture-scope upload refuses;
+warmed capture records 1,024 B). SUITE: 98 cases / 526,778 assertions,
+526,777 green, the only failure the pre-recorded RAC residual flake. MONEY
+LEG (27B whole-graph c1, evidence
+`docs/bench-evidence/tt-capture-upload-guard-20260928.md`): BENCH_EXIT=1, no
+TPOT — but ZERO `[TT-UP]` uploads under capture, and the demand is
+byte-identical 3,153,969,152 B. With the warmed warmed-MatmulBT region still
+closing at 3,088,384 B, the audit's inline-payload model C is FALSIFIED: the
+~3 MB/command is the quant-matmul program class's own recorded launch stream,
+not a capture-scope upload. The guard stays as hardening; the fit site is
+tt-metal-side and now has a precise next step (dump the `tt::LogDispatch`
+command stream for one captured quant-matmul launch and attribute the ~3 MB
+of `bypass_data`). Owed unchanged: the RAC doctest flake, the INT8DOT
+re-measure, the sampler-bracket re-baseline, the model-scale region
+served-replay doctest, the 6 `EnsureHostBytes DURING CAPTURE` readbacks.
+
 2026-09-28 (wave 1, worktree `row/tt-27b-region-capture-spec`, commits
 `dc99071ad`, `f376b512c`, and the RAC C=1 fix + census beneath): the region
 machinery LANDED and the fit wall was MEASURED. Landed: the per-region
