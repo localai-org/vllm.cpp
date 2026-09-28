@@ -707,10 +707,15 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
         const auto ls = s->device->logical_shape();
         if (ls.rank() == 2 && ls[0] == rows && ls[1] == cols)
           return *s->device;
-        if (tt_capture_active()) {
-          s->device = CaptureSafeReshape(*s->device, ttnn::Shape({rows, cols}));
-          return *s->device;
-        }
+        // ONE chain in BOTH passes (W4 doctrine; ISSUE-LOCAL-01M3JXEFQKSZP2
+        // 3PP2HWY9G0VQ). The tt_capture_active() arm this replaced ran a bare
+        // ttnn::reshape on the TILED shadow, a program the eager pass never
+        // warmed (its row-major reshape is a free view), so the first decode
+        // capture on a rank-3-committed slot (CommitDeviceLogical2D, e.g. the
+        // 27B attention output) created ReshapeViewTiledProgramFactory's
+        // program mid-capture and died on its to_device write. The chain
+        // below is warmed by the eager pass at this exact spec, so under
+        // capture it is a program-cache hit with no writes.
         ttnn::Tensor reshaped = ttnn::to_layout(
             ttnn::reshape(ttnn::to_layout(*s->device, ttnn::Layout::ROW_MAJOR),
                           ttnn::Shape({rows, cols})),
@@ -722,6 +727,11 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
           static_cast<uint64_t>(s->dev_rows) * static_cast<uint64_t>(s->dev_cols);
       const uint64_t want = static_cast<uint64_t>(rows) * static_cast<uint64_t>(cols);
       if (have == want) {
+        if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+          std::fprintf(stderr,
+                       "[TT-RESHAPE] arm726 rows=%u cols=%u dev=%ux%u cap=%d\n",
+                       rows, cols, s->dev_rows, s->dev_cols,
+                       (int)tt_capture_active());
         if (tt_capture_active()) {
           ttnn::Tensor reshaped =
               CaptureSafeReshape(*s->device, ttnn::Shape({rows, cols}));
@@ -855,6 +865,26 @@ bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols) {
   return s != nullptr && s->device_current && s->device.has_value() &&
          s->dev_rows == rows && s->dev_cols == cols;
 }
+
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ test surfaces (external linkage, the
+// DeviceShadowExact pattern — the test TU stays free of ttnn headers).
+// CommitRank3DeviceLogicalForTest reproduces the slot state a decode op
+// leaves after CommitDeviceLogical2D on a rank-3 device result: the shadow's
+// logical shape stays [b, h, d] while the slot records the flat 2D geometry
+// [b*h, d]. The next EnsureDevice2D at [b*h, d] takes the exact-rows/cols arm
+// whose logical shape mismatches — the arm that must run ONE chain in both
+// passes. EnsureDevice2DForTest is that call.
+void CommitRank3DeviceLogicalForTest(Tensor& out, uint32_t b, uint32_t h, uint32_t d) {
+  VT_CHECK(out.IsContiguous(), "CommitRank3DeviceLogicalForTest expects contiguous out");
+  VT_CHECK(out.Numel() == static_cast<int64_t>(b) * h * d, "numel mismatch");
+  MeshDevice& device = SharedMeshDevice();
+  ttnn::Tensor dev = EnsureDevice2D(out, device);
+  ttnn::Tensor r3 = ttnn::reshape(dev, ttnn::Shape({b, h, d}));
+  CommitDeviceLogical2D(out, std::move(r3), b * h, d);
+}
+
+void EnsureDevice2DForTest(Tensor& t) { (void)EnsureDevice2D(t, SharedMeshDevice()); }
+
 
 // to host (the residency win). Host is marked stale until EnsureHost.
 // Device tensor is stored as logical [rows, cols] TILE (may differ from out's

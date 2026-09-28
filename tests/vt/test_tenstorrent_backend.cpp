@@ -45,6 +45,9 @@ namespace vt::tenstorrent {
 // Tenstorrent residency probe (tenstorrent_internal.h); declared here to keep
 // the test TU free of internal includes.
 bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols);
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ surfaces (tenstorrent_residency.cpp).
+void CommitRank3DeviceLogicalForTest(Tensor& out, uint32_t b, uint32_t h, uint32_t d);
+void EnsureDevice2DForTest(Tensor& t);
 }  // namespace vt::tenstorrent
 
 namespace {
@@ -1839,6 +1842,68 @@ TEST_CASE("kTENSTORRENT SupportsGraphCapture and matmul capture/replay") {
   backend.Free(ma);
   backend.Free(mb);
   backend.Free(mc);
+}
+
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ: EnsureDevice2D's exact-rows/cols
+// arm on a rank-3-committed slot ran a bare ttnn::reshape on the TILED shadow
+// during capture — a program the eager pass never warmed (its row-major
+// reshape is a free view) — so the 27B decode capture created
+// ReshapeViewTiledProgramFactory's program mid-trace and died on its
+// to_device write ("Writes are not supported during trace capture"). The fix
+// runs one chain in both passes; this case fails red if the capture pass
+// diverges again: with the old branch restored, BeginCapture fatals.
+TEST_CASE("kTENSTORRENT EnsureDevice2D rank-3 reshape is capture-safe (one chain both passes)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+
+  // [2, 48, 32] device result, flat 2D geometry [96, 32]: reshaping the tiled
+  // rank-3 shadow to 2D is NOT a metadata view (the 48 second-last dim is not
+  // tile-aligned — reshape.cpp's this_is_view), so the divergent capture arm
+  // had to create ReshapeViewTiledProgramFactory's program mid-capture.
+  constexpr uint32_t B = 2, H = 48, D = 32;
+  constexpr uint32_t Rows = B * H, Cols = D;
+  std::vector<float> host(static_cast<size_t>(Rows * Cols), 0.25f);
+
+  void* mem = backend.Alloc(host.size() * sizeof(float));
+  Queue q = backend.CreateQueue();
+  backend.Copy(q, mem, host.data(), host.size() * sizeof(float));
+  Tensor t = Tensor::Contiguous(mem, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0},
+                                {Rows, Cols});
+
+  // Commit the rank-3 shadow under the 2D slot record, warm the eager chain,
+  // re-commit (the warm consumed the rank-3 logical shape), then capture.
+  vt::tenstorrent::CommitRank3DeviceLogicalForTest(t, B, H, D);
+  vt::tenstorrent::EnsureDevice2DForTest(t);
+  vt::tenstorrent::CommitRank3DeviceLogicalForTest(t, B, H, D);
+
+  backend.BeginCapture(q);
+  vt::tenstorrent::EnsureDevice2DForTest(t);
+  backend.EndCapture(q);
+  MESSAGE("shadow exact after capture: ", vt::tenstorrent::DeviceShadowExact(t, Rows, Cols));
+  backend.Replay(q);
+  backend.Replay(q);
+
+  std::vector<float> after(host.size(), 0.0f);
+  backend.Copy(q, after.data(), mem, after.size() * sizeof(float));
+  float max_abs = 0.0f;
+  for (size_t i = 0; i < after.size(); ++i)
+    max_abs = std::max(max_abs, std::fabs(after[i] - host[i]));
+  MESSAGE("replay max_abs vs staged: ", max_abs);
+  // Diagnostic: a fresh eager EnsureDevice2D must serve the replayed bytes.
+  vt::tenstorrent::EnsureDevice2DForTest(t);
+  std::vector<float> after2(host.size(), 0.0f);
+  backend.Copy(q, after2.data(), mem, after2.size() * sizeof(float));
+  float max_abs2 = 0.0f;
+  for (size_t i = 0; i < after2.size(); ++i)
+    max_abs2 = std::max(max_abs2, std::fabs(after2[i] - host[i]));
+  MESSAGE("post-eager max_abs vs staged: ", max_abs2);
+  CHECK(max_abs2 < 1e-3f);
+
+  backend.Free(mem);
 }
 
 // BACKEND-TENSTORRENT-RESIDUAL-GOLDEN: op-level numerics probe at the
