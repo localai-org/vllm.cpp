@@ -47,7 +47,16 @@ MATRICES = {
     # IndexTTS2 (s2-mel + talker), Moss-TTS (delay + realtime), Qwen3-TTS,
     # Voxtral-Realtime and dSpark-V4.1 rows. Bumped because a new row EXISTS,
     # never to make a transition pass.
-    "MODEL": (AGENTS / "model-matrix.md", 384),
+    # 387 since 2026-09-28: +3 rows that three specs and three open canonical
+    # records already named but no matrix declared, so `canonical_rows()` could
+    # not see them and each record failed `validate_issue_record` with "row is
+    # not canonical and claimable": `MODEL-GLINER25-DECIDE` (the classification
+    # head sibling of `MODEL-GLINER25`, named by the heading of
+    # specs/gliner2.5-decide.md), and `MODEL-DSV41-EXL3` +
+    # `MODEL-DSV41-GGUF-Q1_0` (the two V4.1 checkpoint-campaign rows named by
+    # the specs/deepseek-v4-1-flash.md header). Bumped because the rows EXIST,
+    # never to make a transition pass.
+    "MODEL": (AGENTS / "model-matrix.md", 387),
     # 82 since 2026-07-21: +`QUANT-NVFP4-CT-W4A16` (compressed-tensors NVFP4A16 /
     # W4A16 — NVFP4 weights with BF16 activations, distinct from the existing
     # `QUANT-NVFP4-CT-W4A4` and `QUANT-NVFP4-MO-W4A16` rows in both scheme
