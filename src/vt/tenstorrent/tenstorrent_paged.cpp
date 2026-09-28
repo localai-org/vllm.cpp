@@ -928,6 +928,33 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
   std::vector<ttnn::Tensor> keepalive;
   keepalive.reserve(static_cast<size_t>(C) * 3);
   std::optional<ttnn::Tensor> new_kc, new_vc;
+  if (num_slots == 1) {
+    // ISSUE-LOCAL-01M3M0K390EM40W5R9BR5A2KZ7: THE C=1 LANE, verbatim the
+    // pre-e39f2cf3f form (git `show e39f2cf3f~1` carries it). The batched
+    // rewrite routed ONE user through the batched arrays WarmRacIdx never
+    // allocates for C=1 — the loop indexed empty vectors and the first cold
+    // decode step segfaulted on ttnn::copy into an empty tensor. C=1 feeds
+    // the WHOLE rope shadow (no per-user slice: there is one user) into the
+    // SHARED sharded inputs, and one fused update against the SHARED
+    // (plus_one'd on-device, R2) update_idxs and page-table. V first, then K.
+    // num_kv_heads_override pins the kernel's head loop to nkv rows: the
+    // input shard is tile-padded (nkv_pad rows) but only the first nkv rows
+    // hold data (upstream decode pattern,
+    // test_paged_cache_flexible_geometry.py). The fused op has
+    // override_runtime_arguments (the non-fused doesn't), so it works with
+    // the program cache enabled; two separate calls would reuse the first's
+    // cached program with the first's buffer addresses.
+    ttnn::Tensor v_in = build_input(*v_dev, rac_entry.sharded_in_v, rac_entry);
+    ttnn::Tensor k_in = build_input(*k_dev, rac_entry.sharded_in, rac_entry);
+    auto [nkc, nvc] = ttnn::experimental::paged_fused_update_cache(
+        *kc_dev, k_in, *vc_dev, v_in,
+        /*update_idxs=*/{}, rac_entry.update_idxs,
+        /*share_cache=*/false, rac_entry.page_table,
+        /*batch_offset=*/0, /*compute_kernel_config=*/std::nullopt,
+        /*mesh_coords=*/std::nullopt);
+    new_kc = std::move(nkc);
+    new_vc = std::move(nvc);
+  } else {
   for (uint32_t u = 0; u < C; ++u) {
     ttnn::Tensor v_src = user_slice(*v_dev, u, rac_entry);
     ttnn::Tensor k_src = user_slice(*k_dev, u, rac_entry);
@@ -956,6 +983,7 @@ bool TryReshapeAndCacheDeviceDecode(const Tensor& k, const Tensor& v,
     // trace-tracked allocations instead.
     if (!tt_capture_active()) SharedMeshDevice().mesh_command_queue().finish();
   }
+  }  // num_slots == 1 (shared C=1 tensors) / the per-user batched lane
   {
     std::lock_guard<std::mutex> g(PagedKvMutex());
     PagedKvShadows()[reinterpret_cast<uintptr_t>(k_cache.data)].device = std::move(*new_kc);

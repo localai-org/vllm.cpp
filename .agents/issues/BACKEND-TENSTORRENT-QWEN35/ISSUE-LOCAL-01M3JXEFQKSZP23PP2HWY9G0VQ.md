@@ -242,3 +242,21 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   case). No TPOT table: the leg died at a re-capture before completing the
   32-token horizon. Blocker B stays with its fresh trace-budget row; this
   issue's PA site is closed by the red/green + full-suite evidence above.
+- 2026-09-28 (worktree row/tt-27b-region-capture-spec, dc99071ad + f376b512c):
+  the Blocker-B region-scoped recommendation was implemented as the row's wave
+  1 and the fit wall was MEASURED. The dense decode driver captures ONE REGION
+  PER LAYER under VLLM_CPP_REGION_CAPTURE=1 through the bare GraphBreak seam;
+  the red-first device gate proves a TWO-region capture replays byte-identical
+  to eager across the boundary (region 0 = 2,048 B, region 1 = 3,088,384 B).
+  The 27B c1 leg then died at the 8th segment close: tt-metal mesh_trace.cpp:125,
+  trace buffer 4,226,469,888 B vs allocation high-water 4,229,506,816 B — the
+  64 live regions SUM to the whole graph's ~3.15 GB staging (each region owns
+  its trace staging until release, and all 64 replay every step), so
+  segmentation does not shrink the fit demand. The whole-graph OOM and this
+  collision are one structural limit. Evidence:
+  docs/bench-evidence/tt-region-capture-20260928.md. The 27B decode-trace
+  DRAM-fit site stays OPEN, now with the segmentation result recorded: it
+  closes only on a tt-metal-side change (shared/reusable trace staging, a
+  trace_region_size policy, or a #57970 retention recovery that actually
+  covers 3.15 GB) — escalated with these numbers beside tt-metal#57970. The
+  in-flow RAC C=1 segfault the legs exposed is ISSUE-LOCAL-01M3M0K390EM40W5R9BR5A2KZ7.

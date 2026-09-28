@@ -253,8 +253,33 @@ records land together (developer decision, 2026-09-28, recorded in
 
 ## Now
 
-2026-09-28: DRAFT. The trace-budget analysis (issue Blocker B) named
-region-scoped capture as the recommendation; this spec commits the
-design before any implementation. Next: the red-first region handoff
-tests, then the region capture machinery on the existing
-`tenstorrent_capture.cpp` seams.
+2026-09-28 (wave 1, worktree `row/tt-27b-region-capture-spec`, commits
+`dc99071ad`, `f376b512c`, and the RAC C=1 fix + census beneath): the region
+machinery LANDED and the fit wall was MEASURED. Landed: the per-region
+trace-staging census (`BreakableGraph::region_bytes()`, probe-fed from the
+Tenstorrent registrar; `VT_REGION_CENSUS` prints per segment so a mid-scope
+death still leaves its record), the pure `WholeGraphTraceFits` predicate, the
+dense decode driver's region arm (`VLLM_CPP_REGION_CAPTURE=1`, one region per
+layer via the bare `GraphBreak()`, per-region 50 MiB assertion with a named
+sticky decline), and the red-first device handoff gate (TWO regions on the real
+trace backend, replay byte-identical to eager; region 0 = 2,048 B, region 1 =
+3,088,384 B). An in-flow bug blocked every leg: e39f2cf3f's batched RAC rewrite
+had routed C=1 through batched tensors WarmRacIdx never allocates - the first
+cold decode step segfaulted on any c1 leg
+(ISSUE-LOCAL-01M3M0K390EM40W5R9BR5A2KZ7, fixed same-flow, red
+`/tmp/leg-control-c1.log`, green `/tmp/leg-region-c1-fix.log`).
+MEASURED (evidence `docs/bench-evidence/tt-region-capture-20260928.md`): the
+region arm dies at the 8th segment close on tt-metal `mesh_trace.cpp:125` -
+trace buffer 4,226,469,888 B vs allocation high-water 4,229,506,816 B. All 64
+live regions sum to the whole graph's ~3.15 GB staging demand; segmentation
+does not shrink the fit. This is the spec's stop condition firing on the fit
+axis: the census is recorded, the arm stays masked (env-gated, default-off,
+named decline in the tree), and the numbers escalate beside tt-metal#57970. NO
+TPOT table - no leg completes a step horizon. NEXT: the stop-condition
+adjudication - either a tt-metal-side change (shared/reusable staging, a
+non-zero trace_region_size policy, or #57970 retention recovery large enough
+for 3.15 GB) reopens the row, or the 27B TT arm's next lever is the
+dispatch-cost row (per-command ~30 ms term) on the eager arm while this stays
+masked. Owed unchanged: the RAC doctest flake, the INT8DOT re-measure, the
+sampler-bracket re-baseline, plus the model-scale region served-replay
+doctest.

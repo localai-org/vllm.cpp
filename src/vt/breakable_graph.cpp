@@ -285,8 +285,16 @@ void GraphCaptureScope::EndSegment() {
   void* seg = b_->EndCaptureGraph(*q_);
   g_->segments_.push_back(seg);
   // tt-27b-region-capture: the per-region census entry (see region_bytes()).
-  if (GraphRegionBytesProbe probe = RegionBytesProbe())
-    g_->region_bytes_.push_back(probe() - region_bytes_base_);
+  // VT_REGION_CENSUS prints per segment, because a capture that DIES
+  // mid-scope (the 27B fit collision does) must still leave its per-region
+  // record: the post-scope summary only exists for a capture that finished.
+  if (GraphRegionBytesProbe probe = RegionBytesProbe()) {
+    const int64_t bytes = probe() - region_bytes_base_;
+    g_->region_bytes_.push_back(bytes);
+    if (std::getenv("VT_REGION_CENSUS") != nullptr)
+      std::fprintf(stderr, "[REGION-CAPTURE] segment %zu: %lld B staging\n",
+                   g_->region_bytes_.size() - 1, static_cast<long long>(bytes));
+  }
   g_segments.fetch_add(1, std::memory_order_relaxed);
 }
 
