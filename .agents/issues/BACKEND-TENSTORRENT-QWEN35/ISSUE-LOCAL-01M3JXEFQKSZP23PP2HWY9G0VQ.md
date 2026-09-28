@@ -45,4 +45,43 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   step where the warmup step committed a different shape. Issue stays OPEN for
   that second site; the arm-710 unification and its red/green doctest stand as
   committed.
+- 2026-09-28 (worktree row/tt-27b-capture-write, ab7cdb359 + follow-up): site 2
+  ROOT CAUSE: `MemsetDeviceIfCapture`'s fresh-slot lane in
+  `src/vt/tenstorrent/tenstorrent_residency.cpp` was CAPTURE-ONLY for the
+  shadow install. Under capture, a fresh-slot `DBuf::Zero` (the 20480-B
+  residual) installed a `{1,10240}` bf16 TILE shadow; the eager pass only
+  primed the zero and returned false (host memset + `MarkHostWritten`), so
+  eager ended with the consumer-shaped shadow (`{2,5120}` from kRmsNorm's
+  staging) and capture ended with the memset-shaped one. The capture consumer
+  then hit EnsureDevice2D's same-numel arm with the never-warmed
+  `{1,10240} -> {2,5120}` reshape (bench trace `arm726 rows=2 cols=5120
+  dev=1x10240 cap=1`) and the ReshapeViewTiled program's `to_device` wrote
+  mid-trace. FIX (W4 doctrine, one install in both passes): the fresh-slot
+  lane now installs the `{1, cols}` persistent shadow in BOTH passes, so the
+  eager consumer runs — and warms — the same-numel reshape and capture
+  replays it as a program-cache hit. Eager installs are bounded to
+  scratch-scale memsets (bytes <= 64 KiB): an unbounded eager install
+  retained the 3-8 MB weights-load slots and OOMed DRAM (a 268 MB
+  `ttnn::where` then missed by ~7 MB); larger slots keep the pre-fix
+  host-fallback priming. RED: doctest `fresh-slot Memset installs the same
+  shadow in both passes` reproduces the exact bench fatal on the old code
+  (`arm726 rows=2 cols=5120 dev=1x10240 cap=1` -> TT_FATAL at
+  fd_mesh_command_queue.cpp:826, /tmp/red-site2.log); GREEN with the fix
+  (arm726 cap=0 warms, cap=1 cache-hit, /tmp/green-site2.log). SUITE 94/94
+  (/tmp/suite-final2.log). The case also exposed a suite-hygiene bug, fixed
+  here: the `kRopeNeox (small)` case leaked `VT_TT_HOST_FREE_DECODE=0` into
+  every later case; it now restores the ambient value.
+- 2026-09-28 DEVICE GATE (27B leg, /tmp/leg-27b-final3.log, c1:
+  /tmp/leg-27b-c1.log): BENCH_EXIT=1 — the site-2 fatal is gone (capture
+  passes the `{1,10240}->{2,5120}` reshape), but two FURTHER blockers, both
+  previously masked because the leg died at site 2 first, now surface in
+  order: (1) at --concurrency 2, `TryReshapeAndCacheDeviceDecode`
+  (tenstorrent_paged.cpp:643) declines `num_slots > 1` ("decode T=1 only for
+  now"), RAC falls to the host path and `EnsureHost(k)` readbacks mid-capture
+  (fd_mesh_command_queue.cpp:873, "Reads are not supported"); (2) at
+  --concurrency 1 the whole decode capture replays cleanly but
+  `end_trace_capture` OOMs: the trace buffer needs 3,153,969,152 B against
+  ~298 MB free (MeshTrace::populate_mesh_buffer). These are new owed sites
+  (multi-slot RAC device path; 27B decode-trace DRAM fit), not regressions
+  of this fix. Issue stays OPEN for them.
 -

@@ -48,6 +48,7 @@ bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols);
 // ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ surfaces (tenstorrent_residency.cpp).
 void CommitRank3DeviceLogicalForTest(Tensor& out, uint32_t b, uint32_t h, uint32_t d);
 void EnsureDevice2DForTest(Tensor& t);
+bool TraceCaptureActive();
 }  // namespace vt::tenstorrent
 
 namespace {
@@ -864,7 +865,21 @@ TEST_CASE("kTENSTORRENT kRopeNeox is BIT-EXACT vs a host F32 reference (small)")
   // VT_TT_HOST_FREE_DECODE (e.g. a suite run under the host-free gate) flips
   // PreferDeviceRope to the device BF16 path even at small T*H and reds the
   // bit-exact checks — so the case owns its own default-path env, mirroring
-  // the inertness-guard case below.
+  // the inertness-guard case below. The opt-out is restored afterwards: a
+  // leaked "0" silently disabled the host-free lane for EVERY later case in
+  // the suite (found via ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ's fresh-slot
+  // memset case, which needs the default host-free warmup).
+  const bool had_hf = std::getenv("VT_TT_HOST_FREE_DECODE") != nullptr;
+  const std::string saved_hf =
+      had_hf ? std::string(std::getenv("VT_TT_HOST_FREE_DECODE")) : std::string();
+  struct RestoreHf {
+    bool had;
+    std::string saved;
+    ~RestoreHf() {
+      if (had) ::setenv("VT_TT_HOST_FREE_DECODE", saved.c_str(), 1);
+      else ::unsetenv("VT_TT_HOST_FREE_DECODE");
+    }
+  } restore_hf{had_hf, saved_hf};
   ::setenv("VT_TT_HOST_FREE_DECODE", "0", 1);  // opt-out path
   REQUIRE(vt::OpRegistered(vt::OpId::kRopeNeox, DeviceType::kTENSTORRENT));
 
@@ -1902,6 +1917,91 @@ TEST_CASE("kTENSTORRENT EnsureDevice2D rank-3 reshape is capture-safe (one chain
     max_abs2 = std::max(max_abs2, std::fabs(after2[i] - host[i]));
   MESSAGE("post-eager max_abs vs staged: ", max_abs2);
   CHECK(max_abs2 < 1e-3f);
+
+  backend.Free(mem);
+}
+
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ, site 2: MemsetDeviceIfCapture's
+// fresh-slot lane installed a [1, cols] bf16 shadow ONLY under capture; the
+// eager pass primed the zero and kept the host fallback, so the slot ended
+// each pass in a different state. The 27B bench: DBuf::Zero of the 20480-B
+// residual, then kRmsNorm's EnsureDevice2D at [2, 5120] — the capture step
+// hit the same-numel arm with a reshape spec the eager pass never ran, and
+// ReshapeViewTiledProgramFactory created its program mid-trace and died on
+// its to_device write. The fix installs the same [1, cols] shadow in BOTH
+// passes, so the eager consumer warms the reshape and the capture replays it
+// as a cache hit. This case fails red if the eager lane diverges again: with
+// the capture-only install restored, the EnsureDevice2D inside capture
+// creates the program and TT_FATALs ("Writes are not supported during trace
+// capture").
+TEST_CASE("kTENSTORRENT fresh-slot Memset installs the same shadow in both passes") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+
+  // The production geometry: 20480 B = 10240 bf16 elems, consumer [2, 5120]
+  // — the same-numel arm's [1, 10240] -> [2, 5120] reshape is not a metadata
+  // view (different tile counts), so it needs the warmed program exactly as
+  // the bench ran it (bf16 tensor: the shadow's element count is bytes/2,
+  // which must equal the consumer's numel for the same-numel arm to fire).
+  constexpr uint32_t Rows = 2, Cols = 5120;
+  void* mem = backend.Alloc(Rows * Cols * sizeof(uint16_t));
+  // The pool recycles blocks across test cases: acquire the block so both
+  // passes start from the same W7 fresh-slot state (no stale shadow from a
+  // previous tenant can route the eager memset down a different lane).
+  backend.OnScratchBlockAcquired(mem);
+  Queue q = backend.CreateQueue();
+
+  // The case needs the default host-free decode lane for BOTH passes; own the
+  // env explicitly (earlier cases legitimately run under the opt-out).
+  const bool had_hf = std::getenv("VT_TT_HOST_FREE_DECODE") != nullptr;
+  const std::string saved_hf =
+      had_hf ? std::string(std::getenv("VT_TT_HOST_FREE_DECODE")) : std::string();
+  struct RestoreHf {
+    bool had;
+    std::string saved;
+    ~RestoreHf() {
+      if (had) ::setenv("VT_TT_HOST_FREE_DECODE", saved.c_str(), 1);
+      else ::unsetenv("VT_TT_HOST_FREE_DECODE");
+    }
+  } restore_hf{had_hf, saved_hf};
+  ::unsetenv("VT_TT_HOST_FREE_DECODE");
+
+  MESSAGE("capture flag at entry: ", vt::tenstorrent::TraceCaptureActive());
+
+  // Warmup step: fresh slot, DBuf::Zero, then the consumer's stage. With the
+  // fix, the Memset installs the [1, 5120] shadow and this EnsureDevice2D
+  // runs (and warms) the same-numel reshape in the eager pass.
+  backend.Memset(q, mem, 0, Rows * Cols * sizeof(uint16_t));
+  Tensor t = Tensor::Contiguous(mem, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0},
+                                {Rows, Cols});
+  vt::tenstorrent::EnsureDevice2DForTest(t);
+
+  // The production capture step saw this buffer as a FRESH slot (the pool
+  // handed the block to a new tensor between steps, W7 semantics). Reproduce
+  // the acquisition so the capture memset takes the fresh-slot lane exactly
+  // like the bench's trace did.
+  backend.OnScratchBlockAcquired(mem);
+  // Capture step: the production zero-fill runs INSIDE the captured region
+  // (the bench trace's "device zero-fill (fresh slot ...)" fires after
+  // BeginCapture), so begin capture first, then repeat the memset on the
+  // recycled slot and the consumer's stage.
+  backend.BeginCapture(q);
+  backend.Memset(q, mem, 0, Rows * Cols * sizeof(uint16_t));
+  vt::tenstorrent::EnsureDevice2DForTest(t);
+  backend.EndCapture(q);
+  backend.Replay(q);
+
+  // The replayed region holds the zeros the memsets wrote.
+  std::vector<uint16_t> after(Rows * Cols, 0x3f80);  // f32 1.0 bits in the low half: garbage if read
+  backend.Copy(q, after.data(), mem, after.size() * sizeof(uint16_t));
+  float max_abs = 0.0f;
+  for (uint16_t v : after) max_abs = std::max(max_abs, std::fabs(static_cast<float>(v)));
+  MESSAGE("post-replay nonzero bf16 elems: ", max_abs);
+  CHECK(max_abs == 0.0f);
 
   backend.Free(mem);
 }
