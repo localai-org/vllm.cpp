@@ -544,6 +544,169 @@ class WiringMutationTests(unittest.TestCase):
         self.assert_wiring_error(mutated, self.ci, "execute CHECKERS")
 
 
+class HostPortabilityTests(unittest.TestCase):
+    """Cases a host, not the tree, used to decide.
+
+    Every one of these was a RED on a Windows host while the same tree was
+    green on a POSIX one, and every one of them was a message naming the tree
+    rather than the host that could not answer.  None of them is named `test_M*`:
+    that inventory is the MUTATION set, pinned by digest in the checker, and a
+    host-portability regression is not a mutation of the contract.
+    """
+
+    # --- _target_artifact: the MSVC debug-symbol side artifact -------------
+
+    @staticmethod
+    def detail(*artifacts: str, kind: str = "EXECUTABLE") -> dict:
+        return {"type": kind, "artifacts": [{"path": path} for path in artifacts]}
+
+    def test_debug_symbol_artifact_does_not_hide_the_executable(self) -> None:
+        """Multi-config generators list the .pdb BESIDE the .exe.
+
+        Measured on MSVC 19.44 / CMake 4.4.2 against this tree: the codemodel
+        describes `test_device_selection` as an EXECUTABLE with two artifacts,
+        `tests/Release/test_device_selection.exe` and
+        `.../test_device_selection.pdb`, and a rule that wanted the artifact
+        LIST to hold exactly one entry answered 'has no single configured
+        executable artifact' about a target that has one.
+        """
+
+        build_dir = Path("C:/build")
+        resolved = mod._target_artifact(
+            build_dir,
+            self.detail(
+                "tests/Release/test_device_selection.exe",
+                "tests/Release/test_device_selection.pdb",
+            ),
+        )
+        self.assertEqual(
+            resolved,
+            (build_dir / "tests/Release/test_device_selection.exe").resolve(),
+        )
+
+    def test_dsym_bundle_does_not_hide_the_executable(self) -> None:
+        """The same shape from Xcode, and the case the suffix list lowercases."""
+
+        build_dir = Path("/build")
+        self.assertEqual(
+            mod._target_artifact(
+                build_dir,
+                self.detail("Release/test", "Release/test.dSYM"),
+            ),
+            (build_dir / "Release/test").resolve(),
+        )
+
+    def test_two_executable_artifacts_are_still_refused(self) -> None:
+        """The control: filtering symbols must not admit a second binary.
+
+        If this ever passes with a non-None result, the filter above has become
+        a hole and the gate stopped being able to see an ambiguous target.
+        """
+
+        self.assertIsNone(
+            mod._target_artifact(
+                Path("C:/build"),
+                self.detail("tests/Debug/test.exe", "tests/Release/test.exe"),
+            )
+        )
+
+    def test_single_artifact_target_is_unchanged(self) -> None:
+        """The ordinary single-config shape still resolves, unchanged."""
+
+        self.assertEqual(
+            mod._target_artifact(Path("C:/build"), self.detail("tests/test")),
+            (Path("C:/build") / "tests/test").resolve(),
+        )
+
+    def test_non_executable_target_has_no_artifact(self) -> None:
+        """A STATIC_LIBRARY with a lone .a is still not an executable."""
+
+        self.assertIsNone(
+            mod._target_artifact(Path("C:/build"), self.detail("libcore.a", kind="STATIC_LIBRARY"))
+        )
+
+    # --- _include_spelling: the separator an #include never uses ------------
+
+    def test_include_spelling_normalizes_the_windows_separator(self) -> None:
+        """`str(Path)` renders a relative path with backslashes on Windows.
+
+        None of the prefixes below ever matched one, so on a Windows host
+        `_gated_declaring_headers` resolved 1 of the 6 gated translation units
+        in this tree and 0 in the suite's own fixtures -- a guard that cannot
+        name the header it forbids cannot fire.  The key also has to equal the
+        spelling inside an `#include "..."` directive, which is forward slashes
+        on every host.
+        """
+
+        for relative, expected in (
+            ("include\\vllm\\engine.h", "vllm/engine.h"),
+            ("src\\vllm\\entrypoints\\openai\\api_server.h", "vllm/entrypoints/openai/api_server.h"),
+            ("tests\\parity\\test_plain.cpp", "parity/test_plain.cpp"),
+            ("include/vllm/engine.h", "vllm/engine.h"),
+            ("vllm/engine.h", "vllm/engine.h"),
+        ):
+            with self.subTest(relative=relative):
+                self.assertEqual(mod._include_spelling(relative), expected)
+
+    def test_every_gated_translation_unit_resolves_its_declaring_header(self) -> None:
+        """Derived from the tree, so it extends itself.
+
+        The expected set is the guarded `target_sources` sources the top-level
+        CMakeLists actually declares -- read, never listed -- so a seventh gated
+        unit is covered the day it lands.  On Windows this read 1 of 6.
+        """
+
+        top = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="replace")
+        gated_sources = [
+            argument
+            for _, name, arguments, guarded in mod._guarded_commands(top)
+            if name == "target_sources" and guarded
+            for argument in arguments
+            if argument.endswith(mod._SOURCE_SUFFIXES)
+        ]
+        self.assertTrue(gated_sources, "the tree declares no guarded target_sources")
+        headers = mod._gated_declaring_headers(ROOT)
+        self.assertEqual(len(headers), len(gated_sources), sorted(headers))
+
+    # --- the CPU-only configure must not reach the network ----------------
+
+    def test_every_fetch_content_site_is_pinned_off(self) -> None:
+        """The count is read from the tree, so a fourth site cannot join quietly.
+
+        `NETWORK_FETCH_OPTIONS` is what the configure turns off; the tree is
+        what actually fetches.  While those two agree, the CPU-only configure
+        this gate performs is offline, and a failed git checkout can no longer
+        be reported as a missing test target.
+        """
+
+        sites = sum(
+            path.read_text(encoding="utf-8", errors="replace").count("FetchContent_Declare")
+            for pattern in ("CMakeLists.txt", "*.cmake")
+            for path in ROOT.rglob(pattern)
+            if ".git" not in path.parts
+        )
+        self.assertEqual(sites, len(mod.NETWORK_FETCH_OPTIONS))
+
+    def test_each_network_fetch_option_is_forced_off(self) -> None:
+        for option in mod.NETWORK_FETCH_OPTIONS:
+            with self.subTest(option=option):
+                self.assertIn(f"-D{option}=OFF", mod.CPU_ONLY_CONFIGURE_ARGS)
+
+    def test_the_parakeet_pin_is_load_bearing(self) -> None:
+        """The control: the option still defaults ON, so the pin is not a no-op.
+
+        If this stops matching, someone turned the option off at its
+        declaration and the argument above became decoration.  The gate would
+        still be correct -- which is exactly why it has to be checked rather
+        than assumed.
+        """
+
+        top = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="replace")
+        self.assertRegex(
+            top, r"option\(\s*VLLM_CPP_WITH_DIARIZATION\b[^\n]*\bON\s*\)"
+        )
+
+
 class ShippedTreeTests(unittest.TestCase):
     def test_shipped_tree_is_registered_and_wired(self) -> None:
         self.assertEqual(mod.check_tree(ROOT), [])

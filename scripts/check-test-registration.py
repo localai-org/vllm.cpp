@@ -232,13 +232,34 @@ def _cmake_truthy(value: object) -> bool:
     } and not normalized.endswith("-NOTFOUND")
 
 
+# Debug-symbol side artifacts, which a multi-config generator lists BESIDE the
+# binary it produced.  Measured on MSVC 19.44 / CMake 4.4.2: the codemodel
+# describes `test_device_selection` as type EXECUTABLE with TWO artifacts,
+# `tests/Release/test_device_selection.exe` and `.../test_device_selection.pdb`.
+# Only the first is the file CTest runs, and requiring the artifact LIST to hold
+# exactly one entry therefore reported a configured, correctly registered target
+# as having no executable at all.  `.dSYM` is the same shape from Xcode, and is
+# spelled lowercase here because the comparison lowercases the path.
+_DEBUG_SYMBOL_SUFFIXES = (".pdb", ".dsym", ".dwarf")
+
+
 def _target_artifact(build_dir: Path, detail: dict[str, object]) -> Path | None:
-    """Resolve the single configured executable artifact for a File-API target."""
+    """Resolve the single configured executable artifact for a File-API target.
+
+    "Exactly one" still means one *executable*: a target that genuinely
+    produces two binaries is refused, as before.  Only the artifacts that are
+    not the binary are set aside.
+    """
 
     artifacts = detail.get("artifacts", [])
     if detail.get("type") != "EXECUTABLE" or not isinstance(artifacts, list):
         return None
-    paths = [entry.get("path") for entry in artifacts if isinstance(entry, dict)]
+    paths = [
+        entry.get("path")
+        for entry in artifacts
+        if isinstance(entry, dict)
+        and not str(entry.get("path", "")).lower().endswith(_DEBUG_SYMBOL_SUFFIXES)
+    ]
     if len(paths) != 1 or not isinstance(paths[0], str):
         return None
     return (build_dir / paths[0]).resolve()
@@ -574,12 +595,23 @@ def _guarded_commands(text: str) -> list[tuple[int, str, list[str], bool]]:
 
 
 def _include_spelling(relative: str) -> str:
-    """The path a `#include "..."` would name for a repository-relative path."""
+    """The path a `#include "..."` would name for a repository-relative path.
 
+    An `#include "..."` directive is spelled with forward slashes whatever the
+    host is, so the key this returns has to be that spelling on every host.  The
+    separator is normalized first because `str(Path)` on Windows renders a
+    relative path with backslashes, and none of the prefixes below ever matched
+    one: each caller of this function built its key, or its `include/`
+    candidate, from a `str()`, so on Windows `_gated_declaring_headers` resolved
+    1 of the 6 gated translation units in this tree and 0 in the suite's own
+    fixtures.  A guard that cannot name the header it forbids cannot fire.
+    """
+
+    normalized = relative.replace("\\", "/")
     for base in ("include/", "src/", "tests/"):
-        if relative.startswith(base):
-            return relative[len(base) :]
-    return relative
+        if normalized.startswith(base):
+            return normalized[len(base) :]
+    return normalized
 
 
 def _without_c_comments(text: str) -> str:
@@ -1133,6 +1165,48 @@ def mutation_suite_integrity_errors(
     return errors
 
 
+# Every option in this tree that can put a `FetchContent_Declare` on the
+# CONFIGURE path, so that the CPU-only configure below reaches no network at
+# all.  Three sites, three guards:
+#   * `VLLM_CPP_CUTLASS_FETCH`  -> cutlass,     CMakeLists.txt:577  (default OFF)
+#   * `VLLM_CPP_WITH_DIARIZATION` -> parakeet.cpp, CMakeLists.txt:1595 (default ON)
+#   * `VLLM_CPP_BUILD_BORINGSSL` -> boringssl,  CMakeLists.txt:2740  (default OFF)
+#
+# The middle one is the defect this list answers.  It is the only one that
+# defaults ON, and a gate whose configure dies on a failed git checkout then
+# reports the CONSEQUENCE -- 'missing required test target
+# test_device_selection in configured codemodel' -- about a target that was
+# configured all along, naming the tree instead of the host.  The other two are
+# listed so that a fourth site cannot join them silently: the suite counts the
+# `FetchContent_Declare` calls in the tree and fails when that count and this
+# tuple's length disagree.
+#
+# Nothing this gate measures needs any of the three.  The required targets are
+# the device selector and two labelled music3 arms, none of which references
+# `VLLM_WITH_DIARIZATION`, CUTLASS headers, or the HF transport.
+NETWORK_FETCH_OPTIONS = (
+    "VLLM_CPP_CUTLASS_FETCH",
+    "VLLM_CPP_WITH_DIARIZATION",
+    "VLLM_CPP_BUILD_BORINGSSL",
+)
+
+# The CPU-only configure this gate measures the shipped tree with.  Pinned here
+# rather than spelled at the call site so a test can assert what it asks for.
+CPU_ONLY_CONFIGURE_ARGS = (
+    "-DVLLM_CPP_CUDA=OFF",
+    "-DVLLM_CPP_HIP=OFF",
+    "-DVLLM_CPP_VULKAN=OFF",
+    "-DVLLM_CPP_METAL=OFF",
+    "-DVLLM_CPP_MLX=OFF",
+    "-DVLLM_CPP_TRITON=OFF",
+    *(f"-D{option}=OFF" for option in NETWORK_FETCH_OPTIONS),
+    "-DVLLM_CPP_BUILD_TESTS=ON",
+    "-DVLLM_CPP_BUILD_EXAMPLES=OFF",
+    "-DVLLM_CPP_SERVER=OFF",
+    "-DCMAKE_BUILD_TYPE=Release",
+)
+
+
 def check_tree(root: Path = ROOT) -> list[str]:
     paths = {
         "tests/CMakeLists.txt": root / "tests/CMakeLists.txt",
@@ -1147,18 +1221,7 @@ def check_tree(root: Path = ROOT) -> list[str]:
     if missing:
         return [f"required registration-guard input is missing: {path}" for path in missing]
 
-    configure_args = [
-        "-DVLLM_CPP_CUDA=OFF",
-        "-DVLLM_CPP_HIP=OFF",
-        "-DVLLM_CPP_VULKAN=OFF",
-        "-DVLLM_CPP_METAL=OFF",
-        "-DVLLM_CPP_MLX=OFF",
-        "-DVLLM_CPP_TRITON=OFF",
-        "-DVLLM_CPP_BUILD_TESTS=ON",
-        "-DVLLM_CPP_BUILD_EXAMPLES=OFF",
-        "-DVLLM_CPP_SERVER=OFF",
-        "-DCMAKE_BUILD_TYPE=Release",
-    ]
+    configure_args = list(CPU_ONLY_CONFIGURE_ARGS)
     with tempfile.TemporaryDirectory(prefix="vllm-registration-tree-") as temporary:
         build_dir = Path(temporary) / "build"
         registration = _configured_contract_errors(
