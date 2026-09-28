@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3M0K390EM40W5R9BR5A2KZ7
 Title: 27B c1 decode: RAC C=1 lane routes through unallocated batched tensors — segfault at the first cold decode step
 Row: BACKEND-TENSTORRENT-QWEN35
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-28
 Updated: 2026-09-28
-Closed: -
+Closed: 2026-09-28
 
 ## Problem
 
@@ -16,20 +16,4 @@ At row/tt-27b-region-capture HEAD ec4e8a824, the Qwen3.8-27B-Q4_K_M c1 leg (--co
 
 ## Resolution
 
--
-
-## Resolution
-
-- 2026-09-28 (worktree row/tt-27b-region-capture-spec): FIXED same-flow. The
-  C=1 lane is restored verbatim from `git show e39f2cf3f~1`
-  (build_input over the whole rope shadow into the shared sharded_in /
-  sharded_in_v, one paged_fused_update_cache against the shared update_idxs /
-  page_table) beside the batched loop, which now serves num_slots > 1 only.
-  RED: /tmp/leg-control-c1.log and /tmp/leg-region-c1-diag.log (segfault at
-  RAC native4 -> ttnn::copy, capturing=0, identical with and without
-  VLLM_CPP_REGION_CAPTURE). GREEN: /tmp/leg-region-c1-fix.log — the cold step
-  and the capture pass run; the leg proceeds to 8 segment captures before
-  dying at the unrelated fit wall recorded in
-  ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ and
-  docs/bench-evidence/tt-region-capture-20260928.md. Focused device gate for
-  the RAC lane itself rides the standing TT suite (see the row spec's ## Now).
+2026-09-28: fixed in the same flow that found it (commit restoring the C=1 lane verbatim beside the batched loop). Red /tmp/leg-control-c1.log + /tmp/leg-region-c1-diag.log (cold-step segfault, capturing=0, with and without VLLM_CPP_REGION_CAPTURE); green /tmp/leg-region-c1-fix.log (cold step + capture pass run, leg proceeds to the unrelated fit wall) and the full TT suite green on the RAC lane apart from the recorded OWED batched flake. Full detail in the issue's Resolution section.
