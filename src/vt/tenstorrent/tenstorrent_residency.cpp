@@ -328,9 +328,22 @@ ttnn::Tensor UploadRows(const float* data, uint32_t rows, uint32_t cols, MeshDev
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
     std::fprintf(stderr, "[TT-UP] UploadRows ptr=%p rows=%u cols=%u\n",
                  static_cast<const void*>(data), rows, cols);
+  // tt-27b-region-capture: an H2D write issued while a trace capture is open
+  // is recorded INLINE into the trace buffer — the 27B whole-graph
+  // 3,153,969,152 B demand was ~1,037 such payloads, not tt-metal record
+  // overhead (docs/bench-evidence/tt-trace-record-audit-20260928.md). The
+  // eager pass warms every upload; an upload that still fires under capture is
+  // a warm hole and is refused by name.
+  if (tt_capture_active()) {
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+      std::fprintf(stderr, "[TT-UP] UploadRows from_vector WRITE during capture\n");
+    VT_CHECK(false,
+             "tenstorrent: UploadRows f32 H2D upload refused inside an open "
+             "trace capture — the payload would be recorded inline into the "
+             "trace; warm the tensor in the eager pass before "
+             "TraceBeginCapture (tt-27b-region-capture)");
+  }
   std::vector<float> host(data, data + static_cast<size_t>(rows) * cols);
-  if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
-    std::fprintf(stderr, "[TT-UP] UploadRows from_vector WRITE during capture\n");
   return ttnn::Tensor::from_vector<float>(host, TileSpecOf(rows, cols), &device);
 }
 
@@ -410,6 +423,15 @@ ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
     std::fprintf(stderr, "[TT-UP] UploadRowsBf16 from_span WRITE during capture ptr=%p rows=%u cols=%u\n",
                  (const void*)t.data, rows, cols);
+  // tt-27b-region-capture: same refusal as UploadRows — every arm below
+  // (from_span, persistent enqueue_write, allocating arm) is an H2D write that
+  // a capture would record inline.
+  if (tt_capture_active())
+    VT_CHECK(false,
+             "tenstorrent: UploadRowsBf16 bf16 H2D upload refused inside an "
+             "open trace capture — the payload would be recorded inline into "
+             "the trace; warm the tensor in the eager pass before "
+             "TraceBeginCapture (tt-27b-region-capture)");
   const size_t n = static_cast<size_t>(rows) * static_cast<size_t>(cols);
   // The bytes at t.Ptr are the window's own bf16 bits (bfloat16 is a 2-byte
   // class wrapping the same uint16 pattern).
