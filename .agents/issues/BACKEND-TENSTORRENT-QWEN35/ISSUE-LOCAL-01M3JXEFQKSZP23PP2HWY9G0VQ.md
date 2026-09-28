@@ -284,3 +284,27 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   with the quant program's footprint). The escalation beside tt-metal#57970
   now carries a reproducing op-scale case: a single warmed MatmulBT region
   closes at 3,088,384 B on this pin.
+- 2026-09-28 ATTRIBUTION (worktree row/tt-27b-region-capture-spec, evidence
+  docs/bench-evidence/tt-launch-record-attribution-20260928.md): the
+  binary-relay candidate is FALSIFIED and the ~3 MB/command is attributed to
+  tt-metal's per-core launch-record path. Source (pin d20b8e27f29): the
+  1,024 KB prefetch-ringbuffer fit (fd_mesh_command_queue.cpp:453,
+  dispatch_settings.cpp:72) only chooses relay_paged vs relay_ringbuffer —
+  BOTH record the kernel binary BY REFERENCE to the resident DRAM kernels
+  buffer (dispatch.cpp:1942-1971, 2079-2116); binary bytes never enter
+  bypass_data; and load_binaries refuses first-time loads mid-capture by name
+  (mesh_workload.cpp:201-205). Our keep-quant kernel measures .text 51,648 B +
+  .data 3,372 B — 18x under the threshold. Device (region-handoff doctest under
+  gdb breakpins, capture window gated on tt_capture_active()): the 3,088,384 B
+  region record is exactly 284 issue_queue_reserve chunks (~10.9 KB each) of
+  the recorded command stream for the ONE full-grid MatmulBTQuantGrouped
+  program, with ZERO in-capture buffer-data writes (write_to_device_buffer: 0
+  real hits) — so no inline H2D payload, ours or tt-metal's. The record scales
+  with the keepquant program's per-core config/RTA dispatch footprint
+  (RmsNorm-class program: 2,048 B total), i.e. tt-metal-side. Our-side grid
+  shrink only scales the record linearly (halving the grid halves 3.15 GB —
+  still OOM) and is recorded as a bound, not a fix. OPEN NEXT (one step): a
+  logging-enabled pin build (TT_METAL_ENABLE_LOGGING=ON + TT_METAL_LOGGER_
+  LEVEL=TRACE, names verified at tt-logger.hpp:98,182 — current release builds
+  compile LogDispatch out, which is why the cheap logger leg was silent) to
+  name the dominant per-chunk class; the attribution does not depend on it.
