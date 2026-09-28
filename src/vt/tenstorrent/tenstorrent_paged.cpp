@@ -622,6 +622,15 @@ struct RacIdxEntry {
   std::vector<ttnn::Tensor> batched_page_table;
   std::vector<int32_t> batched_idx_host;   // last content copied per user
   std::vector<int32_t> batched_pt_host;    // last page-table row copied per user
+  int64_t batched_pt_width = 0;  // columns the batched page tables were built with
+  // A page-table WIDTH change (block boundary growth, or the shrink when the
+  // longest request finishes) retires the per-user tables here and
+  // reallocates — the C=1 lane's pt_width discipline. A stale-width device
+  // tensor would TT_FATAL the refresh copy_to_device (shape mismatch), and an
+  // old-width batched_pt_host makes the change-detection loop read out of
+  // bounds. The retired tensors stay alive: never free a buffer a recorded
+  // trace addresses (#1105).
+  std::vector<ttnn::Tensor> batched_retired_pts;
   bool batched_alloc = false;
   bool batched_in_is_alloc = false;
   uint32_t nkv = 0;
@@ -1225,15 +1234,18 @@ bool TryPagedAttentionDeviceDecode(Tensor& out, const Tensor& query, const Tenso
           // path). No metadata view of the [rows, D] buffer represents
           // the per-batch head tiling at B > 1, so materialize the
           // correct [1, B, H, D] TILE tensor through the free reshape's
-          // device program. That program calls to_device — forbidden
-          // during trace capture — so a captured batched step takes the
-          // host Q path (the contract the old fatal enforced, loudly).
+          // device program. W4 doctrine: BOTH passes run that same
+          // multiply(reshape(...)) chain — the eager step warms the
+          // reshape program for this exact input/output spec, so the
+          // captured call is a program-cache HIT, not a mid-trace
+          // to_device. The former capture-active B>1 decline here sent
+          // every captured batched step to the host Q arm, whose refusal
+          // cascaded into PagedAttentionKernel's host oracle and its
+          // EnsureHost(k_cache) readback mid-trace — the 27B c2 leg fatal
+          // (ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ). A reshape spec the
+          // warmup did not warm still fatals loudly at the program-cache
+          // miss, which is the W4 divergence detector, not a defect.
           const auto ps2d = dev_q_2d.padded_shape();
-          (void)ps2d;
-          if (tt_capture_active() && Bu > 1)
-            throw std::runtime_error(
-                "tenstorrent PA: batched (B>1) Q 4D materialization is "
-                "not capture-safe; the host Q path must serve this step");
           if (Bu == 1) {
             dev_q = ttnn::multiply(
                 ttnn::experimental::view(
@@ -2240,6 +2252,20 @@ void WarmRacIdx(const void* /*slot_mapping_owner*/, const int64_t* slots,
   // on-device advance for this lane is recorded as owed in the entry).
   if (num_slots > 1) {
     const uint32_t C = static_cast<uint32_t>(num_slots);
+    // ANY width change retires + reallocates the per-user page tables (same
+    // discipline as the C=1 lane above): the refresh copy_to_device would
+    // TT_FATAL on a shape mismatch, and batched_pt_host sized at the old
+    // width makes the change-detection loop read out of bounds. The driver
+    // resets + re-captures on any column-count change, so the new address is
+    // what the next capture records.
+    bool realloc_pts = false;
+    if (e.batched_alloc && block_table_cols != e.batched_pt_width) {
+      for (auto& pt : e.batched_page_table)
+        e.batched_retired_pts.push_back(std::move(pt));
+      e.batched_page_table.assign(C, ttnn::Tensor());
+      e.batched_pt_host.clear();
+      realloc_pts = true;
+    }
     if (!e.batched_alloc) {
       MeshDevice& device2 = device;
       e.batched_in.assign(C, ttnn::Tensor());
@@ -2250,7 +2276,7 @@ void WarmRacIdx(const void* /*slot_mapping_owner*/, const int64_t* slots,
         e.batched_update_idxs[u] = ttnn::Tensor::from_vector<int32_t>(
             {idxv[static_cast<size_t>(u)]},
             SpecOf(tt::tt_metal::Shape({1u}), ttnn::DataType::INT32,
-                   ttnn::Layout::ROW_MAJOR),
+                              ttnn::Layout::ROW_MAJOR),
             &device2);
         e.batched_page_table[u] = ttnn::Tensor::from_vector<int32_t>(
             std::vector<int32_t>(
@@ -2262,7 +2288,23 @@ void WarmRacIdx(const void* /*slot_mapping_owner*/, const int64_t* slots,
       }
       e.batched_idx_host.assign(idxv.begin(), idxv.end());
       e.batched_pt_host = ptv;
+      e.batched_pt_width = block_table_cols;
       e.batched_alloc = true;
+    } else if (realloc_pts) {
+      // Width change on a live entry: rebuild ONLY the per-user page tables
+      // (update_idxs is [1] per user and width-independent; the sharded
+      // inputs must NOT be touched — batched_in_is_alloc still marks them).
+      for (uint32_t u = 0; u < C; ++u) {
+        e.batched_page_table[u] = ttnn::Tensor::from_vector<int32_t>(
+            std::vector<int32_t>(
+                ptv.begin() + static_cast<long>(u) * block_table_cols,
+                ptv.begin() + static_cast<long>(u + 1) * block_table_cols),
+            SpecOf(tt::tt_metal::Shape({1u, static_cast<uint32_t>(block_table_cols)}),
+                   ttnn::DataType::INT32, ttnn::Layout::ROW_MAJOR),
+            &device);
+      }
+      e.batched_pt_host = ptv;
+      e.batched_pt_width = block_table_cols;
     } else {
       for (uint32_t u = 0; u < C; ++u) {
         const int32_t idx_u = idxv[static_cast<size_t>(u)];

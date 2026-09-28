@@ -192,3 +192,53 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   trace-budget analysis above stands (region-scoped recommended). Issue
   stays OPEN for the PA multi-slot site, the batched-lane residual, and the
   27B decode-trace DRAM fit.
+- 2026-09-28 (worktree row/tt-27b-capture-write) PA MULTI-SLOT SITE FIXED —
+  the same doctrine as Blocker A, third site of the class. ROOT CAUSE
+  (diagnosed live, /tmp/leg-27b-diag.log = monitor bench-c2-diag, the leg
+  re-run with VT_TT_TRACE_DEBUG=1): the final traces before the fatal are
+  "PA q_from_device FAILED: tenstorrent PA: batched (B>1) Q 4D materializa-
+  tion is not capture-safe; the host Q path must serve this step" ->
+  "PA device decode FAILED: vt: tenstorrent: PA Q host path is not capture-
+  safe (from_vector readback)" (tenstorrent_paged.cpp:1280) -> the host PA
+  oracle's EnsureHost readback mid-trace (TT_FATAL fd_mesh_command_queue.cpp:873).
+  The decline was the explicit `if (tt_capture_active() && Bu > 1) throw` in
+  TryPagedAttentionDeviceDecode's identity-Q path — a stale W3-era guard.
+  Its premise ("that program calls to_device — forbidden during trace
+  capture") predates the W4 doctrine: the B>1 arm runs the IDENTICAL
+  multiply(reshape(...)) chain in both passes, so the eager step warms the
+  reshape program for the exact input/output spec and the captured call is a
+  program-cache HIT; a spec the warmup did not warm still fatals loudly at
+  the miss (the W4 divergence detector, not a defect to guard against).
+  FIX: the guard is deleted; both passes run the same chain (one hunk in
+  tenstorrent_paged.cpp, no capture-active branch).
+  RED: new doctest `kTENSTORRENT batched decode PagedAttention is capture-
+  safe (num_reqs=2)` (mirror of the RAC case) fails on HEAD for the right
+  reason (/tmp/red-pa.log): the capture pass takes the decline (trace in
+  /tmp/red-pa2.log shows the exact q_from_device FAILED chain) and the
+  captured+replayed output mismatches the device-path reference 2048/2048 —
+  the test stages generation-B K/V through RAC into the DEVICE paged-KV
+  shadow before the capture, so only a device-served PA can reproduce it.
+  GREEN: /tmp/green-pa.log — capture pass serves (q_from_device OK cap=1),
+  replay-vs-eagerB 0/2048 mismatched elems, both users nonzero.
+  EN ROUTE BUG (own issue ISSUE-LOCAL-01M3KM4R2KQN5WXTM57W8BD849): the new
+  case exposed that the batched RacIdxCache lane lacks the C=1 lane's
+  page-table width-change guard — fixed in the same change (evidence in that
+  issue). The RAC residual flake is NOT this: it still reproduces in the
+  full suite and stays owed.
+  SUITE: 95/96 (/tmp/suite-pa3.log) — every pre-existing case green, the PA
+  case green in-suite (0/2048), the only failure the recorded RAC residual
+  (126/128 K/V, user-1 second head).
+  DEVICE GATE: see the next dated entry (bench-c2c).
+- 2026-09-28 DEVICE GATE (c2 leg, /tmp/leg-27b-c2c.log = monitor bench-c2c,
+  post-fix HEAD): BENCH_EXIT=1, but the PA multi-slot site is GONE — the leg
+  served ~12+ minutes of batched decode through SIX successful boundary
+  re-captures (11:24:06, 11:26:40, 11:29:13, 11:31:46, 11:34:15, 11:36:40)
+  that previously died at the PA host readback. The fatal moved PAST the PA
+  site to the ALREADY-RECORDED Blocker B structural limit: the last
+  end_trace_capture asks for 3,128,655,872 B of DRAM trace staging (2.9 GiB,
+  ~3 MB/recorded command) against 278,858,624 B free / 266,655,872 B largest
+  block — bank_manager.cpp:495 OOM, same whole-graph-does-not-fit conclusion
+  as the Blocker B analysis above (3.15 GB demand, ~2.2 GiB recoverable best
+  case). No TPOT table: the leg died at a re-capture before completing the
+  32-token horizon. Blocker B stays with its fresh trace-budget row; this
+  issue's PA site is closed by the red/green + full-suite evidence above.
