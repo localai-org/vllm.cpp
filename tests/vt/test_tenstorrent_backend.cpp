@@ -11481,3 +11481,76 @@ TEST_CASE("kTENSTORRENT region replay: state handoff across a region boundary, r
   backend.Free(mem_gamma);
   backend.Free(mem_w2);
 }
+
+// ─── tt-27b-region-capture: the capture-scope upload guard ──────────────────
+// The audit (docs/bench-evidence/tt-trace-record-audit-20260928.md) attributed
+// the 27B whole-graph 3,153,969,152 B trace demand to inline H2D payloads
+// recorded DURING capture: region 1's close was byte-exact 2,048 B of command
+// headers + 2 × 1,544,192 B of inline bf16 upload. The doctrine fix: the eager
+// pass warms every upload, and an upload route that fires under capture is
+// REFUSED by name. This case is red twice on the pre-fix tree: the unwarmed
+// capture-scope upload does not refuse (it silently inlines ~3.09 MB), and the
+// warmed capture still shows the audit's region-1 close instead of the ~2 KB
+// header floor region 0 measured.
+TEST_CASE("kTENSTORRENT capture-scope upload refuses and the warmed capture records the 2 KB floor") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+  Queue q = backend.CreateQueue();
+
+  // 1,544,192 bf16 elements — the byte-exact inline payload the audit measured
+  // in a region-1 close (3,088,384 = 2,048 headers + 2 × 1,544,192).
+  constexpr uint32_t R = 1024, C = 1508;  // 1024 × 1508 = 1,544,192
+  std::vector<uint16_t> host(static_cast<size_t>(R) * C);
+  for (size_t i = 0; i < host.size(); ++i)
+    host[i] = vt::F32ToBF16(0.125f * static_cast<float>(i % 17));
+  void* mem = backend.Alloc(host.size() * sizeof(uint16_t));
+  backend.Copy(q, mem, host.data(), host.size() * sizeof(uint16_t));
+  Tensor t = Tensor::Contiguous(mem, vt::DType::kBF16,
+                                Device{vt::DeviceType::kTENSTORRENT, 0}, {R, C});
+
+  // 1. An unwarmed EnsureDevice2D inside a capture scope is REFUSED by name —
+  //    the upload would be recorded inline into the trace.
+  {
+    vt::BreakableGraph g;
+    vt::GraphCaptureScope scope(backend, q, g, vt::GraphCaptureMode::kPiecewise);
+    bool refused = false;
+    std::string what;
+    try {
+      vt::tenstorrent::EnsureDevice2DForTest(t);
+    } catch (const std::exception& e) {
+      refused = true;
+      what = e.what();
+    }
+    CHECK_MESSAGE(refused,
+                  "the unwarmed EnsureDevice2D upload fired inside the capture "
+                  "scope without refusing — its payload would be inlined into "
+                  "the trace record");
+    CHECK_MESSAGE(what.find("capture") != std::string::npos,
+                  "refusal did not name the capture-scope upload: " << what);
+    CHECK_MESSAGE(what.find("refus") != std::string::npos,
+                  "refusal did not say it refused: " << what);
+  }
+
+  // 2. The warmed capture finds the tensor resident and records the header
+  //    floor (region 0's measured 2,048 B), not the inline payload.
+  vt::tenstorrent::EnsureDevice2DForTest(t);  // the eager warm pass
+  vt::BreakableGraph g;
+  {
+    vt::GraphCaptureScope scope(backend, q, g, vt::GraphCaptureMode::kPiecewise);
+    vt::tenstorrent::EnsureDevice2DForTest(t);
+    vt::GraphBreak();
+  }
+  const std::vector<int64_t>& rb = g.region_bytes();
+  REQUIRE(rb.size() >= 1);
+  MESSAGE("warmed capture region bytes: ", rb.back(),
+          " B (header floor 2048 B, inline payload would be 3090432 B)");
+  CHECK_MESSAGE(rb.back() <= 65536,
+                "the warmed capture still staged " << rb.back()
+                << " B — an upload (or its payload) rode inside the capture scope");
+
+  backend.Free(mem);
+}
