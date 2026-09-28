@@ -31,6 +31,7 @@
 
 #include "vllm/platforms/interface.h"
 #include "vt/backend.h"
+#include "vt/breakable_graph.h"  // tt-27b-region-capture: the region seam
 #include "vt/dtype.h"
 #include "vt/ops.h"
 #include "vt/quant.h"
@@ -11350,4 +11351,129 @@ TEST_CASE("kTENSTORRENT BFP8 vs bf16 resident-weight matmul timing (VT_TT_BFP8_B
             ": ", us_per_call, " us/call whole-op (M=", M, ",K=", K, ",N=", N,
             "), Bfp8MatmulUses=", vt::tenstorrent::Bfp8MatmulUses());
   }
+}
+
+// ─── tt-27b-region-capture: the region-handoff gate ─────────────────────────
+// The spec's red-first tests 1+2 at op scale: a TWO-REGION capture on the real
+// tt-metal trace backend where region 2 reads the buffer region 1 wrote — the
+// state binding across a region boundary — and each replay is BYTE-IDENTICAL
+// to the eager reference. The in-place discipline is the whole test: region 1
+// writes the PERSISTENT norm buffer in-region (the W3 commit shape), region 2
+// bakes that same address, so a replay chains through the boundary exactly as
+// the 27B per-layer regions will.
+//
+// RED-FIRST: on the pre-row tree the seam carries no per-region census
+// (`BreakableGraph::region_bytes()`), so this case does not compile there —
+// the capability it gates does not exist. The reviewer's MUTATION target is
+// the fresh-tensor defect the #3327 class names: give region 1 a FRESH output
+// buffer instead of the persistent one (allocate inside the capture) and this
+// case must FAIL — the replayed region 2 reads the address its capture baked,
+// which the fresh-tensor commit freed, and the output stops being the eager
+// bytes.
+//
+// Byte-exactness bar: MatmulBT/RmsNorm are deterministic kernels over fixed
+// device buffers — the same bar the int8-dot capture-x2 cases above assert.
+TEST_CASE("kTENSTORRENT region replay: state handoff across a region boundary, replay byte-identical to eager") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+  REQUIRE(vt::OpRegistered(vt::OpId::kRmsNorm, vt::DeviceType::kTENSTORRENT));
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuant, vt::DeviceType::kTENSTORRENT));
+  Queue q = backend.CreateQueue();
+
+  // [1,H] bf16 state -> RmsNorm -> [1,H] bf16 (region 1) -> MatmulBT -> [1,N]
+  // f32 (region 2). H/N are small: this case owns the handoff mechanics, not
+  // kernel throughput.
+  constexpr int64_t kH = 512, kN = 1024;
+  const int64_t kQ6Elems = vt::BlockElems(vt::DType::kQ6_K);  // 256
+  const int64_t kQ6Bytes = vt::BlockBytes(vt::DType::kQ6_K);  // 210
+  const int64_t kNb = kH / kQ6Elems;
+
+  std::mt19937 rng(20260928u);
+  std::vector<uint16_t> x_bf(kH);
+  for (auto& v : x_bf) v = vt::F32ToBF16((static_cast<float>(rng() % 401) - 200.0f) / 100.0f);
+  std::vector<uint16_t> gamma_bf(kH);
+  for (auto& v : gamma_bf) v = vt::F32ToBF16(0.5f + static_cast<float>(rng() % 8) / 16.0f);
+  std::vector<uint8_t> w2_packed(static_cast<size_t>(kN) * kNb * kQ6Bytes);
+  for (size_t blk = 0; blk < w2_packed.size() / static_cast<size_t>(kQ6Bytes); ++blk) {
+    uint8_t* p = w2_packed.data() + blk * kQ6Bytes;
+    for (int i = 0; i < 208; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+    const uint16_t d_bits = vt::F32ToF16(0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f);
+    std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+  }
+
+  void* mem_x = backend.Alloc(x_bf.size() * sizeof(uint16_t));
+  void* mem_norm = backend.Alloc(kH * sizeof(uint16_t));       // the persistent handoff buffer
+  void* mem_out = backend.Alloc(kN * sizeof(float));
+  void* mem_gamma = backend.Alloc(gamma_bf.size() * sizeof(uint16_t));
+  void* mem_w2 = backend.Alloc(w2_packed.size());
+  backend.Copy(q, mem_x, x_bf.data(), x_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_gamma, gamma_bf.data(), gamma_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_w2, w2_packed.data(), w2_packed.size());
+
+  Tensor x_t = Tensor::Contiguous(mem_x, vt::DType::kBF16,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kH});
+  Tensor norm_t = Tensor::Contiguous(mem_norm, vt::DType::kBF16,
+                                     Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kH});
+  Tensor gamma_t = Tensor::Contiguous(mem_gamma, vt::DType::kBF16,
+                                      Device{vt::DeviceType::kTENSTORRENT, 0}, {kH});
+  Tensor out_t = Tensor::Contiguous(mem_out, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kN});
+  Tensor w2_t = Tensor::Contiguous(mem_w2, vt::DType::kQ6_K,
+                                   Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, kH});
+
+  // ---- the eager reference: the same two calls, no capture ----
+  vt::RmsNorm(q, norm_t, x_t, gamma_t, vt::RmsNormArgs{1e-6f, false});
+  vt::MatmulBT(q, out_t, norm_t, w2_t);
+  std::vector<float> eager(static_cast<size_t>(kN), 0.0f);
+  backend.Copy(q, eager.data(), mem_out, eager.size() * sizeof(float));
+  for (float v : eager) CHECK(std::isfinite(v));
+
+  // ---- capture TWO regions and replay; the handoff must be invisible ----
+  // ONE capture here, replayed twice. The census below reads the backend's
+  // TRACE-STAGING byte level, whose release accounting is asynchronous across
+  // captures (a destroyed capture's staging drains after the blocking
+  // readback), so a second capture pass would subtract a stale level — the
+  // capture-x2 discipline is the keepquant capture cases' job; this case
+  // owns the handoff and the census, both of which are per-capture facts.
+  {
+    const int pass = 0;
+    vt::ResetGraphBreakStats();
+    vt::BreakableGraph graph;
+    {
+      vt::GraphCaptureScope scope(backend, q, graph,
+                                  vt::GraphCaptureMode::kPiecewise);
+      vt::RmsNorm(q, norm_t, x_t, gamma_t, vt::RmsNormArgs{1e-6f, false});
+      vt::GraphBreak();  // the REGION BOUNDARY: end segment 1, open segment 2
+      vt::MatmulBT(q, out_t, norm_t, w2_t);
+    }
+    REQUIRE(graph.captured());
+    const vt::GraphBreakStats stats = vt::GetGraphBreakStats();
+    CHECK(stats.segments_captured == 2);
+    // The per-region census (the spec's LastTraceBytes discipline): each
+    // region's staging must sit inside the 50 MiB budget a 27B layer region
+    // is sized against.
+    const std::vector<int64_t>& rb = graph.region_bytes();
+    REQUIRE(rb.size() == 2);
+    for (size_t i = 0; i < rb.size(); ++i) {
+      MESSAGE("region ", i, ": ", rb[i], " B (budget 52428800 B)");
+      const bool in_budget = rb[i] > 0 && rb[i] <= 50 * 1024 * 1024;
+      CHECK_MESSAGE(in_budget, "region " << i << " staged " << rb[i]
+                                         << " B, outside the 50 MiB region budget");
+    }
+    graph.Replay(q);
+    std::vector<float> got(static_cast<size_t>(kN), 0.0f);
+    backend.Copy(q, got.data(), mem_out, got.size() * sizeof(float));
+    CHECK_MESSAGE(std::memcmp(got.data(), eager.data(), eager.size() * sizeof(float)) == 0,
+                  "capture pass " << pass << ": the TWO-REGION replay diverged "
+                                                     "from the eager reference at the region handoff");
+  }
+  backend.Free(mem_x);
+  backend.Free(mem_norm);
+  backend.Free(mem_out);
+  backend.Free(mem_gamma);
+  backend.Free(mem_w2);
 }

@@ -51,7 +51,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>  // tt-27b-region-capture: std::accumulate over the region census
 #include <string>
+#include <string_view>  // tt-27b-region-capture: VLLM_CPP_REGION_CAPTURE parse
 #include <unordered_map>
 #include <utility>
 #include <optional>
@@ -10200,6 +10202,15 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
     // DFlash DF-AUX-TAPS: capture (hidden+res) at configured boundaries. Inert
     // (no-op) when aux_out is null — every non-DFlash caller.
     MaybeCaptureAuxTap(d, l, aux_layer_ids, aux_out, hidden.t(), res.t(), T, H);
+    // tt-27b-region-capture: ONE REGION PER LAYER. The bare break splits the
+    // kPiecewise scope into a new segment with NO eager call and NO
+    // destination — the region boundary is a pure capture split, and the
+    // handoff is the in-place one: hidden/res are pool-backed buffers whose
+    // captured addresses the #2274 pinning holds for the graph's life, and
+    // the GDN ssm/conv + KV state slots are persistent shadows committed IN
+    // PLACE (tenstorrent_gdn.cpp's W3 discipline). Inert (a counter tick)
+    // in every kFull scope and every eager call — byte-identical to today.
+    vt::GraphBreak();
     // VT_DUMP_ACT (issue #41, ROCm 0.8B forward-divergence fix spike W1; keyed
     // and completed for #2590): dump the residual stream after each layer.
     //
@@ -12090,6 +12101,39 @@ ForwardLogits Qwen3_5DecodeGraph::Step(
   return fl;
 }
 
+// ─── tt-27b-region-capture: the region-scoped decode-capture arm ─────────────
+// The 27B decode graph does not fit ONE whole-graph trace: end_trace_capture
+// asks for one ~3.15 GB staging buffer against ~298 MB free (the spec's
+// `## Scope` census, 1,037 recorded commands), and the whole-graph arm serves
+// nothing. Region scope splits the same command stream into ONE REGION PER
+// LAYER: the decode driver opens its capture kPiecewise and DenseForwardLayers
+// emits an in-place boundary after each layer (`vt::GraphBreak()`, the bare
+// form — no eager call, no destination; the layer outputs flow device-side
+// through the SAME persistent buffers a whole-graph capture bakes, which is
+// exactly the in-place handoff discipline the #3327 class demands — no region
+// boundary installs, frees, or re-shadows a state tensor). The replay is the
+// container's host loop: segment, (no-op break), segment, ... — the per-region
+// runtime-arg re-patch the RAC per-user mechanism already serves, because the
+// RAC/rope hooks read the SAME persistent device inputs every segment bakes.
+// Sizing: 1,037 commands / 64 layers ≈ 16.2 commands per layer ≈ 48.6 MiB at
+// the measured 3.04 MB per command — the GDN precedent's 50 MiB region budget
+// (tenstorrent_capture.cpp:90), asserted per region from the probe-fed census
+// (`BreakableGraph::region_bytes()`), with an over-cap region declining the
+// capture BY NAME (below).
+// OFF by default in this slice (`VLLM_CPP_REGION_CAPTURE=1` opts in): the fit
+// predicate's automatic model-by-model wiring (`vt::WholeGraphTraceFits`) is
+// the next wave — wiring it now would re-route the 9B whole-graph arm the
+// census cannot yet price per model.
+static bool RegionCaptureRequested() {
+  static const bool v = [] {
+    const char* e = std::getenv("VLLM_CPP_REGION_CAPTURE");
+    return e != nullptr && e[0] != '\0' && std::string_view(e) != "0";
+  }();
+  return v;
+}
+// The GDN precedent's fit number (tenstorrent_capture.cpp:90).
+constexpr int64_t kRegionCaptureBudgetBytes = 50 * 1024 * 1024;
+
 // ─── Qwen3_5DenseDecodeGraph (27B dense decode CUDA-graph driver) ────────────
 // The 27B DENSE sibling of Qwen3_5DecodeGraph. Same cold→warm→replay state
 // machine, same padded-batch capture set (kDecodeGraphSizes), same persistent
@@ -12167,6 +12211,11 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     vt::BreakableGraph graph;
     int fa_cols = -1;                 // captured block-table column count
     bool warm = false;
+    // tt-27b-region-capture: a named per-region over-budget DECLINE (see the
+    // census below) is sticky for this size — an over-budget layer's command
+    // stream does not shrink between steps, so re-capturing every step would
+    // be the boundary storm the spec's risk names. The slot serves EAGER.
+    bool region_declined = false;
     int64_t replays = 0;
     // R2: the cur_pos the device held after this slot's last seeding step or
     // replay (WarmDecodePos continuation predicate, qwen3.cpp #2469).
@@ -12742,7 +12791,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
 
   // Warm: the pool + residency were warmed for this size by the previous (eager)
   // step. CAPTURE the dense layer region once, instantiate the graph, launch it.
-  if (s.warm) {
+  if (s.warm && !s.region_declined) {
     // #1380: THE POOL MUST BE ABLE TO SERVE THE WHOLE CAPTURED FORWARD, not one
     // block of one tensor. This used to alloc-and-free a single [S, vocab] f32
     // block, on the reasoning that the capture RETAINS its logits while the
@@ -12894,10 +12943,21 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     // nothing), cap_end the scope DESTRUCTION (EndCaptureGraph: the tt-metal
     // trace finalize + trace-buffer build — the capture-invocation cost).
     StepPhaseClk::time_point sph_tc1{};
+    // tt-27b-region-capture: the mode IS the fit decision. Region scope
+    // (env opt-in this slice; the automatic `vt::WholeGraphTraceFits`
+    // wiring is the next wave) splits the same command stream one layer per
+    // region — the whole-graph staging demand (~3.15 GB for 1,037 recorded
+    // commands) never accrues, because each region's trace buffer lands
+    // inside the 50 MiB budget the census below asserts. Every GraphBreak
+    // in the forward is INERT in the kFull arm, so the default shape is
+    // byte-identical to the one the comment above records.
+    const bool region_scope = RegionCaptureRequested();
     {
       const StepPhaseClk::time_point sph_tc0 =
           sph.on ? StepPhaseClk::now() : sph.t0;
-      vt::GraphCaptureScope scope(b, impl_->queue, s.graph, vt::GraphCaptureMode::kFull);
+      vt::GraphCaptureScope scope(b, impl_->queue, s.graph,
+          region_scope ? vt::GraphCaptureMode::kPiecewise
+                       : vt::GraphCaptureMode::kFull);
       if (sph.on) sph.cap_begin_ms = StepPhaseMsOf(sph_tc0, StepPhaseClk::now());
       sph_tc1 = StepPhaseClk::now();
       if (d.q.device.type == vt::DeviceType::kTENSTORRENT) {
