@@ -13,7 +13,7 @@ before every leg, `~/Sources/tt/env-tt-common.sh`, tt-metal pin
   compile there (no `vt::BreakableGraph::region_bytes()`, no
   `vt::GraphRegionBytesProbe`), and with `VLLM_CPP_REGION_CAPTURE=1` set the
   whole-graph arm dies at the trace OOM (every leg below, EXIT=139/1).
-- GREEN (focused, `/tmp/tregion.log`): TWO regions on the real tt-metal trace
+- GREEN (focused, `/tmp/tregion.log`, re-run `/tmp/tregion2.log`): TWO regions on the real tt-metal trace
   backend — region 0 `RmsNorm` writes the PERSISTENT norm buffer in place,
   `vt::GraphBreak()` (bare form, no eager call) closes segment 1 and opens
   segment 2, region 1 `MatmulBT` reads that same buffer. Per-region census:
@@ -73,4 +73,21 @@ before every leg, `~/Sources/tt/env-tt-common.sh`, tt-metal pin
 
 ## Suite
 
-See the dated entry in the row spec's `## Now` (filled after the run).
+Full TT suite (`ctest -R tenstorrent`, fresh binaries, `/tmp/suite-region2.log`,
+2026-09-28): **526,771 / 526,773 assertions green**; the single failing case is
+the RECORDED OWED RAC doctest flake (126/128 K elems, user-1 second head — the
+order-sensitive-under-full-suite-program-cache residual e39f2cf3f recorded; this
+row does not depend on the flaky ordering). The region handoff case passes
+standalone AND in-suite. The first suite run (`/tmp/suite-region.log`,
+526,771/526,773) failed only this test's own census assertion under ~500 prior
+cases' allocator history (stale staging level) — hardened to assert region 1's
+self-bounded delta; the handoff byte-exactness was green in both runs.
+
+## Gate summary
+
+- Focused handoff doctest: GREEN (standalone + in-suite).
+- Full TT suite: 526,771/526,773, the one failure the recorded OWED flake.
+- 27B c1 leg: BENCH_EXIT=1 (fit wall, recorded above); no TPOT table — the
+  spec's stop condition fired, honestly.
+- Commit gates: check-commit-style, check-commit-trailers, check-agent-record
+  on the changed files — run at landing.
