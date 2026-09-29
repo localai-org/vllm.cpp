@@ -2151,6 +2151,52 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
         errors = self._check_kernel_source(source.replace(template, malformed, 1))
         require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
 
+    def test_malformed_row_is_kept_so_the_ratchet_does_not_corrupt(self) -> None:
+        """A dropped row silently moved the ratchet and hid the next defect.
+
+        The ORPHAN-MODEL-ROWS repair hit exactly this: two one-cell-short
+        rows were dropped from the parse, so the ratchet counted a bogus
+        total AND every downstream contract check on those rows never ran;
+        each fix exposed the next defect only after another run
+        (ISSUE-LOCAL-01M3NC14GE995V9E6F7GTYSQJ3). The malformed row must
+        still be counted -- no ratchet error may appear, or the shape error
+        and the count error fight over which defect gets reported.
+        """
+        source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
+        template = next(
+            line for line in source.splitlines()
+            if line.startswith("| `KERNEL-CPU-A76-Q8-DOT` |")
+        )
+        malformed = template.rsplit(" | ", 1)[0] + " |"
+        errors = self._check_kernel_source(source.replace(template, malformed, 1))
+        require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
+        self.assertFalse(
+            any(re.search(r"KERNEL rows; expected", error) for error in errors),
+            "dropping the malformed row corrupted the ratchet count",
+        )
+
+    def test_malformed_row_is_still_seen_downstream(self) -> None:
+        """A malformed duplicate is reported as both malformed AND duplicate.
+
+        Under the drop rule the shape error fired and the duplicate was
+        invisible: parse_claim_rows discarded the row before duplicate
+        detection ever saw it. One run must name both, plus the ratchet the
+        extra row now breaks -- three findings, one run, no re-run ladder.
+        """
+        expected = agent_record.MATRICES["KERNEL"][1]
+        source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
+        template = next(
+            line for line in source.splitlines()
+            if line.startswith("| `KERNEL-CPU-A76-Q8-DOT` |")
+        )
+        malformed = template.rsplit(" | ", 1)[0] + " |"
+        errors = self._check_kernel_source(
+            source.replace(template, template + "\n" + malformed, 1)
+        )
+        require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
+        require(errors, r"duplicate ID KERNEL-CPU-A76-Q8-DOT")
+        require(errors, rf"{expected + 1} KERNEL rows; expected {expected}")
+
     def test_retired_history_payload_is_self_validating(self) -> None:
         self._assert_history_integrity(self.HISTORY.read_text(encoding="utf-8"))
 

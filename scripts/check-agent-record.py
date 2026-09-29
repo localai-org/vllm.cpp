@@ -587,18 +587,35 @@ def parse_claim_rows(path: Path, errors: list[str]) -> list[ClaimRow]:
         item_id = cells[0].strip().strip("`")
         if not ID_RE.fullmatch(item_id):
             continue
+        # A row that fails its shape check is REPORTED and still parsed, never
+        # dropped: dropping it hid every downstream contract defect behind the
+        # shape error and corrupted the matrix ratchet counts, so each fix
+        # exposed the next defect only after another run (three defects masked
+        # this way in the ORPHAN-MODEL-ROWS repair;
+        # ISSUE-LOCAL-01M3NC14GE995V9E6F7GTYSQJ3). The one error list reports
+        # the shape and the contracts in the same run.
+        malformed = False
         if len(cells) != len(header):
             errors.append(
                 f"{path.relative_to(ROOT)}:{line_no}: {item_id} has {len(cells)} cells; "
                 f"header has {len(header)}"
             )
-            continue
+            malformed = True
         state_index = field_index(header, "state")
         state_cell = cells[state_index] if state_index is not None else ""
         state_matches = STATE_RE.findall(state_cell)
         if len(state_matches) != 1:
             errors.append(
                 f"{path.relative_to(ROOT)}:{line_no}: {item_id} must have exactly one canonical state"
+            )
+            malformed = True
+        if malformed:
+            # Parsed with an empty state so the ratchet, duplicate detection
+            # and the summary rollups still see the row; no state-conditional
+            # contract can fire on the empty state, so the reported defects
+            # stay the shape ones.
+            rows.append(
+                ClaimRow(path, line_no, item_id, state_matches[0] if state_matches else "", header, tuple(cells), line)
             )
             continue
         rows.append(

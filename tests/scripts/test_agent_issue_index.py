@@ -326,5 +326,80 @@ class LocalCanonicalRendererIsOffline(unittest.TestCase):
                     )
 
 
+class LoadLocalFilesReportsEveryInvalidFile(unittest.TestCase):
+    """One run of the loader names EVERY invalid record, not just the first.
+
+    The loader used to raise on the first file whose record failed, so a run
+    revealed one defect and each fix exposed the next only after another
+    run; the first file alphabetically was always an _intake record nobody
+    was editing. Three separate defects hid behind one another exactly this
+    way during the ORPHAN-MODEL-ROWS repair
+    (ISSUE-LOCAL-01M3NC14GE995V9E6F7GTYSQJ3).
+    """
+
+    def setUp(self) -> None:
+        self.mod = load_module()
+
+    def record(self, number: int, title: str) -> records.IssueRecord:
+        return records.IssueRecord(
+            id=f"ISSUE-GH-{number}",
+            title=title,
+            row="ROW-A",
+            state="OPEN",
+            kind="bug",
+            github=number,
+            mirror="SYNCED",
+            availability="FULL",
+            created="2026-08-01",
+            updated="2026-08-01",
+            closed="-",
+            problem="Evidence.",
+            resolution="-",
+        )
+
+    def test_two_broken_files_are_both_named_in_one_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            issues_root = Path(temporary) / ".agents" / "issues"
+            row_dir = issues_root / "ROW-A"
+            for number, corrupt in ((7, "## Wrong"), (8, None)):
+                path = row_dir / f"ISSUE-GH-{number}.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if corrupt is None:
+                    text = records.render_issue_record(self.record(number, "fine"))
+                    # Break the path-owner contract only: point the record at
+                    # a row its directory does not carry.
+                    text = text.replace("Row: ROW-A", "Row: ROW-B")
+                    path.write_text(text, encoding="utf-8")
+                else:
+                    path.write_text(corrupt, encoding="utf-8")
+            with self.assertRaises(records.IssueRecordError) as caught:
+                self.mod.load_local_files(
+                    issues_root, rows={"ROW-A"}, owed=set(), frozen_archive=b""
+                )
+            message = str(caught.exception)
+            self.assertIn("ISSUE-GH-7.md", message)
+            self.assertIn("ISSUE-GH-8.md", message)
+            self.assertIn("missing the exact ## Problem heading", message)
+            self.assertIn("path row 'ROW-A' must equal Row field ROW-B", message)
+
+    def test_a_clean_collection_still_loads_and_validates_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            issues_root = Path(temporary) / ".agents" / "issues"
+            row_dir = issues_root / "ROW-A"
+            row_dir.mkdir(parents=True)
+            for number in (7, 8):
+                (row_dir / f"ISSUE-GH-{number}.md").write_text(
+                    records.render_issue_record(self.record(number, "fine")),
+                    encoding="utf-8",
+                )
+            records_loaded = self.mod.load_local_files(
+                issues_root, rows={"ROW-A"}, owed=set(), frozen_archive=b""
+            )
+            self.assertEqual(
+                [record.id for record in records_loaded],
+                ["ISSUE-GH-7", "ISSUE-GH-8"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
