@@ -11516,6 +11516,17 @@ TEST_CASE("kTENSTORRENT region replay: state handoff across a region boundary, r
     const bool in_budget = rb[1] > 0 && rb[1] <= 50 * 1024 * 1024;
     CHECK_MESSAGE(in_budget, "region 1 staged " << rb[1]
                                                 << " B, outside the 50 MiB region budget");
+    // The config-page KB floor (the repro note's refutation): a stock
+    // full-grid program records 17,408 B/launch because identical per-core
+    // config pages collapse into the packed relay. The keepquant program's
+    // common-args + uniform-CB shape must reach the same floor: RED on the
+    // pre-fix tree at the measured 2,965,504 B, GREEN at KB scale once the
+    // per-launch dominant class (the all-encodings kernel binary carried by
+    // the runtime enc_sel, streamed paged-to-ring-buffer every launch) is
+    // removed.
+    CHECK_MESSAGE(rb[1] <= 64 * 1024,
+                  "region 1 (keepquant) recorded " << rb[1]
+                                                   << " B, over the 64 KiB config-page floor");
     // The per-core RTA fix (docs/bench-evidence/tt-keepquant-rta-fix-
     // 20260929.md §3) proved region 1's record here is NOT the per-core
     // SetRuntimeArgs stream: it reads byte-identical 2,965,504 B before and

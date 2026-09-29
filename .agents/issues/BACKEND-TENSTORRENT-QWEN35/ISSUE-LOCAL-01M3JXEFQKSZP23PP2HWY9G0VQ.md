@@ -367,3 +367,12 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   64 KiB doctest gate is the arbiter. The 27B fit wall keeps its
   2,925,109,248 B bound; c1/c2 re-measure legs stay blocked behind the
   fusion. Issue stays OPEN.
+- 2026-09-29 (same leg, suite): the 64 KiB region gate landed RED by design
+  (commit 7a0f1ca3f). Full TT suite (build2, pin 6449cf13f7b): 99 cases,
+  97 passed, 2 failed — the owed 2261 flake (126 == 128) and the new
+  intentional red gate (11527, 2,965,504 > 65,536); 527,817/527,819
+  assertions; all keepquant bit-exact capture-x2 cases green
+  (/tmp/suite-final.log, teardown segfault after the run is pre-existing).
+  27B money legs NOT run: no fix landed this leg, so c1 would reproduce the
+  recorded 2,925,109,248 B / BENCH_EXIT=1 outcome; the legs stay blocked
+  behind the decode-fusion lever.
