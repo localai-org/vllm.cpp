@@ -80,3 +80,56 @@ upstream report (with the synthetic) or a local program-shape fix. Until
 then this row's remaining trace-fit wall keeps its recorded bound.
 
 Reproducer: `repro_trace_config_pages.cpp`; build and run recipe in §1.
+
+## 5. The named bisect: program-shape classes are ALL innocent (2026-09-29, late)
+
+The §4 leg ran. `repro_bisect_program_shape.cpp` in this directory builds raw
+tt-metal programs shaped exactly like the keepquant int8-dot program
+(DataMovement kernel over the FULL 11x10 grid via one `CoreRange`, CBs,
+`SetCommonRuntimeArgs` only, `DM_DEDICATED_NOC`, warm-then-trace) and varies
+one knob at a time. Recipe as §1, binary `/tmp/bisect`, log
+`/tmp/bisect-run.log` + `/tmp/bt32.log`, `EXIT=0`.
+
+| program | trace bytes/launch |
+|---|---|
+| 1 kernel, 4 CBs, 4 KiB pages (our shape, test scale) | 1,024 |
+| same, 16 KiB CB pages | 1,024 |
+| 8 CBs | 1,024 |
+| 32 KiB / 64 KiB / 128 KiB / 256 KiB .rodata table in the kernel | 1,024 (all) |
+
+Three refutations in one sweep: per-core CB descriptor count, CB page size,
+and KERNEL BINARY SIZE (to 256 KiB, far past our ~50 KiB source) each leave
+the record at the 1,024 B floor. The packed relay collapses all of them.
+Non-identical pages are NOT our 2.82 MB/launch.
+
+## 6. Where the 2,965,504 B actually lives
+
+The region-handoff doctest (KB-floor gate, this row) reads region 1 =
+2,965,504 B at [1,512] -> [1,1024] Q6_K on HEAD 600bfd60e
+(/tmp/region-red.log). The default dispatch there is the W4a GROUPED arm
+(VT_TT_KEEPQUANT_INT8DOT unset), so the captured region is not the int8-dot
+program at all: it is the chunked f32-exact chain
+(tenstorrent_keepquant.cpp:1323-1387) — ceil(N/8) = 8 chunks, and EACH chunk
+runs the eltwise Q6_K word decode `DecodeKeepQuantWordsF32`
+(tenstorrent_keepquant.cpp:629-719: per (h,r) ~12 elementwise/slice/concat
+programs, 2 halves = ~85 recorded programs) plus the slice/typecast/
+to_layout/multiply/sum/permute chain (~8 more). ~680 programs x the ~4-17 KB
+per-program command-sequence floor the reproducer measured = the ~2.97 MB
+region. The class is PROGRAM COUNT in our decode chain, not page identity —
+discriminator (a) from §3, at the whole-region scale, and the ~250
+one-shot-fetch census was these ops, not per-core pages.
+
+The KB single-program path already exists in the tree: the int8-dot kernel
+(one program per launch, bit-exact vs the CPU integer vec_dot oracle) records
+at the floor by §5. The next lever is therefore to collapse the decode chain
+to one custom-kernel program (generalize the int8-dot kernel to the default
+path, or fuse the eltwise decode), NOT any dispatch/config change. The
+region doctest's 64 KiB gate (landed RED at 2,965,504 B) is its arbiter.
+
+## 7. Re-scope (second)
+
+The §4 stop condition fired again, one level down: no program-shape knob
+moves the record; the multiplier is how many programs the keepquant grouped
+arm launches per call. Until that fusion lands, the 27B trace-fit wall keeps
+its recorded 2,925,109,248 B bound and the c1/c2 re-measure legs stay blocked
+behind it.

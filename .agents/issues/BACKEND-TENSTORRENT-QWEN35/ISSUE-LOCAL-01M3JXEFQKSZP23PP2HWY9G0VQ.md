@@ -348,3 +348,22 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   (records: docs/bench-evidence/tt-keepquant-rta-fix-20260929.md §3-§5). The
   fit wall stands at 2,925,109,248 B; next lever is the per-launch
   command-sequence payload class (issue stays OPEN, evidence above updated).
+- 2026-09-29 (worktree row/tt-27b-region-capture-spec, this leg): the
+  per-launch "config-page payload" hypothesis is REFUTED, and the record's
+  locus is now program COUNT in the grouped decode chain. The §4 synthetic
+  bisect (docs/bench-evidence/tt-trace-config-page-repro-20260929.md §5,
+  repro_bisect_program_shape.cpp) built the keepquant program's exact shape
+  raw (full-grid CoreRange DM kernel, common RTAs) and swept CB count
+  (4/8), CB page size (4/16 KiB) and kernel binary size (32-256 KiB .rodata
+  tables): every variant records 1,024 B/launch — the packed relay collapses
+  all of them, so non-identical per-core config pages are not the 2.82 MB.
+  The region-handoff doctest on HEAD (now gated at 64 KiB, RED measured
+  2,965,504 B, /tmp/region-red.log) showed the default dispatch there is the
+  W4a GROUPED arm: the region is ceil(N/8)=8 chunks x (~85 eltwise decode
+  programs from DecodeKeepQuantWordsF32 Q6_K + ~8 matmul-chain programs) ≈
+  680 programs x the 4-17 KB per-program floor = 2.97 MB. NEXT LEVER (one
+  step): collapse the decode to ONE custom-kernel program per launch — the
+  bit-exact int8-dot kernel is the existence proof at the floor — and the
+  64 KiB doctest gate is the arbiter. The 27B fit wall keeps its
+  2,925,109,248 B bound; c1/c2 re-measure legs stay blocked behind the
+  fusion. Issue stays OPEN.
