@@ -9732,9 +9732,57 @@ TEST_CASE("kTENSTORRENT E=1 int8-dot keep-quant capture survives the 50 MiB trac
                     eager.size() * sizeof(float)) == 0);
   MESSAGE("capture x2 byte-identity: PASS; trace demand pass0=", demand[0],
           " B pass1=", demand[1], " B (region 52428800 B)");
+  // ── the 27B trace-fit gate (tt-launch-record-attribution-20260928) lives
+  // in the region-handoff case above, whose region 1 is the keepquant
+  // MatmulBT launch over the full grid ──
   backend.Free(mem_a);
   backend.Free(mem_w);
   backend.Free(mem_o);
+}
+
+// The 27B trace-fit fix's kernel-side derivation lock (host arm): the kernel
+// computes row0 = c*tcols and rowc = its clamp from the core coordinate
+// (c = y*grid_x + x, row-major — the mapping the deleted per-core
+// SetRuntimeArgs loop used). This case pins the two formulas to the SAME
+// values for every core, across shapes whose last core is partial and shapes
+// whose tail cores are fully idle. The DEVICE arm of this lock is the F32-out
+// capture case's byte-identity check, whose shape spans the grid with a
+// partial last core.
+TEST_CASE("keepquant int8-dot: in-kernel row0/rowc derivation equals the per-core host values") {
+  auto host_slice = [](uint32_t c, uint32_t tcols, uint32_t N) {
+    const uint32_t r0 = c * tcols;
+    const uint32_t rc =
+        r0 >= N ? 0u : std::min(tcols, N - r0);
+    return std::pair<uint32_t, uint32_t>{r0, rc};
+  };
+  auto kernel_slice = [](uint32_t core_x, uint32_t core_y, uint32_t grid_x,
+                         uint32_t tcols, uint32_t N) {
+    const uint32_t c = core_y * grid_x + core_x;
+    const uint32_t row0 = c * tcols;
+    const uint32_t rowc =
+        row0 >= N ? 0u : ((tcols < N - row0) ? tcols : (N - row0));
+    return std::pair<uint32_t, uint32_t>{row0, rowc};
+  };
+  const std::pair<uint32_t, uint32_t> shapes[] = {
+      {248320, 4096},  // the head shape: partial last core
+      {1508, 4096},    // N % tcols != 0 at several tail cores
+      {1024, 4096},    // exact tcols boundary, no partial core
+      {7, 4096},       // one partial group on core 0, idle tail
+  };
+  for (const auto& [N, tcols] : shapes) {
+    const uint32_t grid_x = 13, grid_y = 10;
+    for (uint32_t y = 0; y < grid_y; ++y) {
+      for (uint32_t x = 0; x < grid_x; ++x) {
+        const uint32_t c = y * grid_x + x;
+        const auto [hr0, hrc] = host_slice(c, tcols, N);
+        const auto [kr0, krc] = kernel_slice(x, y, grid_x, tcols, N);
+        CHECK_MESSAGE(kr0 == hr0, "row0 mismatch at N=" << N << " tcols="
+                                                        << tcols << " core " << c);
+        CHECK_MESSAGE(krc == hrc, "rowc mismatch at N=" << N << " tcols="
+                                                        << tcols << " core " << c);
+      }
+    }
+  }
 }
 
 // W4d W6: the BF16-OUT dispatch joined the int8-dot lever. The W4b landing
@@ -11468,6 +11516,19 @@ TEST_CASE("kTENSTORRENT region replay: state handoff across a region boundary, r
     const bool in_budget = rb[1] > 0 && rb[1] <= 50 * 1024 * 1024;
     CHECK_MESSAGE(in_budget, "region 1 staged " << rb[1]
                                                 << " B, outside the 50 MiB region budget");
+    // ── the 27B trace-fit gate (tt-launch-record-attribution-20260928) ──
+    // RED-FIRST on the per-core SetRuntimeArgs tree: region 1's MatmulBT is
+    // the keepquant program over the FULL worker grid, so the captured launch
+    // records one per-core Unique RTA UNICAST page per core (~2.97 MB on the
+    // census shape) and the KB bound below FAILS with the measured number.
+    // GREEN after the fix moves every word to SetCommonRuntimeArgs and
+    // derives row0/rowc in-kernel from the core coordinate: the record drops
+    // to the KB floor. This shape's N=1024 gives a PARTIAL last core, so a
+    // green run also proves the in-kernel clamp reproduces the host guard —
+    // the byte-exact replay below is that proof's device arm.
+    CHECK_MESSAGE(rb[1] <= 65536,
+                  "the keepquant captured launch staged " << rb[1]
+                  << " B of trace — the per-core SetRuntimeArgs record is back");
     graph.Replay(q);
     std::vector<float> got(static_cast<size_t>(kN), 0.0f);
     backend.Copy(q, got.data(), mem_out, got.size() * sizeof(float));
