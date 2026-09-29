@@ -308,3 +308,23 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   LEVEL=TRACE, names verified at tt-logger.hpp:98,182 — current release builds
   compile LogDispatch out, which is why the cheap logger leg was silent) to
   name the dominant per-chunk class; the attribution does not depend on it.
+- 2026-09-29 (pin advanced to upstream-live 98134127a7b, pin head 6449cf13f7b,
+  logging build dir build_logging): the logger discriminator CLOSED the open
+  next step, and it flips the locus to OURS. On the new pin the focused leg
+  reads region 0 = 2,048 B; region 1 = 2,965,504 B (/tmp/tregion-newpin.log,
+  1/1 case, 1,032/1,032 assertions) — the record barely moved, so upstream's
+  576+ commits did not touch the per-core record path (create_trace_node /
+  issue_queue_reserve unchanged in dispatch.cpp). The capture window is
+  exactly 254 one-shot command-sequence fetches summing 2,961,024 B and
+  contains 11,040 per-core Unique RTA (UNICAST) writes (40-48 B payload each,
+  page-granular when recorded) plus 110 full-grid CB/DFB config pages. Those
+  per-core RTAs are OUR keepquant program's SetRuntimeArgs stream
+  (tenstorrent_keepquant.cpp:2108-2130): 12 words per core, 10 of them
+  shape-global constants and only r0 = c*tcols / rc = clamp(...) varying —
+  both derivable in-kernel from the core coordinate. CONCRETE FIX (ours):
+  compute r0/rc in the kernel, launch with SetCommonRuntimeArgs only, delete
+  the per-core SetRuntimeArgs stream. Expected record: ~2.97 MB -> the
+  RmsNorm-class floor (~2-16 KB per captured launch, ~200x), which closes the
+  27B whole-graph 3.15 GB trace demand. The earlier "tt-metal-side" locus is
+  thereby refined: tt-metal faithfully records what our program asks it to
+  dispatch per core; the shrink lever is ours.

@@ -1,5 +1,38 @@
 # tt launch-record attribution — what the ~3.04 MB per captured command is (2026-09-28)
 
+**UPDATE 2026-09-29 (advanced pin, logging-enabled discriminator).** The pin
+advanced from `9161e8fdb27+4` (head `d20b8e27f29`) to upstream-live
+`98134127a7b` + the same local series rebased (pin head `6449cf13f7b`, branch
+`vllm-cpp-pin/20260923-adv`), with `TT_METAL_ENABLE_LOGGING=ON` in a dedicated
+`build_logging` build dir (env `TT_METAL_LOGGER_LEVEL=TRACE`,
+`TT_METAL_LOGGER_TYPES=Dispatch`, names per
+`build_logging/include/tt-logger/tt-logger.hpp:98,182`). Upstream did NOT
+change the per-core trace record between the pins (576+ commits:
+`create_trace_node`/`issue_queue_reserve` in
+`tt_metal/impl/program/dispatch.cpp` untouched; the only nearby changes are
+sub-device setup caching `262a365421f` and trace-allocation-tracker fixes
+`c05eff45369`, neither of which touches the per-core record). The focused leg
+on the new pin reads `region 0 = 2,048 B; region 1 = 2,965,504 B`
+(`/tmp/tregion-newpin.log`, case 1/1 passed, 1,032/1,032 assertions) — the
+pin move shaved ~4% off the record; the mechanism stands. The logger
+discriminator closes the open question: the capture window is exactly 254
+`Writing Program Command Sequence` one-shot fetches summing 2,961,024 B
+(= region 1 + region 0 + trace header pages, `/tmp/burst.log` extraction of
+`/tmp/tregion-newpin.log`), and the window contains **11,040 per-core Unique
+RTA (UNICAST) writes** at 40–48 B payload each plus 110 full-grid CB/DFB
+config pages — i.e. the record is OUR keepquant program's per-core
+`SetRuntimeArgs` stream
+(`src/vt/tenstorrent/tenstorrent_keepquant.cpp:2108-2130`: 12 words per core,
+of which 10 are shape-global constants and only `r0`/`rc` vary, and those two
+are `c*tcols` and its clamp — computable in-kernel from the core coordinate).
+Verdict flips to **OURS** (see §3 below for the tt-metal-side framing this
+update refines): replacing the per-core `SetRuntimeArgs` with in-kernel
+`r0/rc` derivation + `SetCommonRuntimeArgs`-only launches drops the record to
+the RmsNorm-class floor (~2–16 KB per captured launch, ~200×), which closes
+the whole 27B decode-trace DRAM-fit site.
+
+---
+
 Worktree `row/tt-27b-region-capture-spec` at `5f7ac1fa7` (probes were
 uncommitted scratch, reverted before the commit). Fixes the open candidate from
 [tt-capture-upload-guard-20260928.md](tt-capture-upload-guard-20260928.md):
