@@ -328,3 +328,23 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   27B whole-graph 3.15 GB trace demand. The earlier "tt-metal-side" locus is
   thereby refined: tt-metal faithfully records what our program asks it to
   dispatch per core; the shrink lever is ours.
+- 2026-09-29 (worktree row/tt-27b-region-capture-spec, fix commits a1661114b +
+  the RTA-removal commit): the CONCRETE FIX above LANDED and was measured.
+  The keepquant program now launches SetCommonRuntimeArgs-only (14 words) and
+  derives r0/rc in-kernel from the core coordinate
+  (tenstorrent_keepquant.cpp, CARG_* table; host per-core SetRuntimeArgs loop
+  deleted). Correctness held: E=1 grouped keep-quant capture-x2 byte-identity
+  PASS with a partial last core, host derivation-parity doctest added. 27B c1
+  arbiter (fresh build2, pin 6449cf13f7b): trace demand
+  3,153,969,152 -> 2,925,109,248 B (-228,859,904 B = 1,037 launches x ~920
+  cores x one 256 B recorded RTA page) — the lever is real and SPENT, but
+  BENCH_EXIT=1: the whole-graph trace STILL does not fit; c1 does not serve.
+  Two small-shape A/Bs (region-handoff 2,965,504 B both binaries; grouped
+  capture 48,316,416 B both binaries, dispatch-log Unique-RTA counts
+  identical) show the ~2.9 MB per captured command at those shapes was never
+  the RTA stream: the dominant remaining class is per-launch full-grid
+  program command-sequence payload (CB/DFB config pages per sequence). The
+  KB-floor gate for this vehicle was removed as unreachable by this lever
+  (records: docs/bench-evidence/tt-keepquant-rta-fix-20260929.md §3-§5). The
+  fit wall stands at 2,925,109,248 B; next lever is the per-launch
+  command-sequence payload class (issue stays OPEN, evidence above updated).

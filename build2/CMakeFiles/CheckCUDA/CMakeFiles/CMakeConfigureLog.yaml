@@ -1,0 +1,161 @@
+
+---
+events:
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineSystem.cmake:12 (find_program)"
+      - "CMakeLists.txt:9 (project)"
+    mode: "program"
+    variable: "CMAKE_UNAME"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "uname"
+    candidate_directories:
+      - "/home/lu_zero/.local;/home/lu_zero/.local;/bin/"
+      - "/home/lu_zero/.local;/home/lu_zero/.local;/sbin/"
+      - "/home/lu_zero/.local;/home/lu_zero/.local;/"
+      - "/home/lu_zero/.local/bin/"
+      - "/home/lu_zero/.grok/bin/"
+      - "/home/lu_zero/.cargo/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/opt/bin/"
+      - "/usr/lib/llvm/22/bin/"
+      - "/usr/lib/llvm/21/bin/"
+      - "/usr/lib/llvm/20/bin/"
+      - "/bin/"
+    searched_directories:
+      - "/home/lu_zero/.local;/home/lu_zero/.local;/bin/uname"
+      - "/home/lu_zero/.local;/home/lu_zero/.local;/sbin/uname"
+      - "/home/lu_zero/.local;/home/lu_zero/.local;/uname"
+      - "/home/lu_zero/.local/bin/uname"
+      - "/home/lu_zero/.grok/bin/uname"
+      - "/home/lu_zero/.cargo/bin/uname"
+      - "/usr/local/sbin/uname"
+      - "/usr/local/bin/uname"
+    found: "/usr/bin/uname"
+    search_context:
+      ENV{CMAKE_PREFIX_PATH}:
+        - "/home/lu_zero/.local;/home/lu_zero/.local;"
+      ENV{PATH}:
+        - "/home/lu_zero/.local/bin"
+        - "/home/lu_zero/.grok/bin"
+        - "/home/lu_zero/.cargo/bin"
+        - "/home/lu_zero/.local/bin"
+        - "/usr/local/sbin"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/opt/bin"
+        - "/usr/lib/llvm/22/bin"
+        - "/usr/lib/llvm/21/bin"
+        - "/usr/lib/llvm/20/bin"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      The system is: Linux - 7.0.1-gentoo - aarch64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompiler.cmake:54 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCUDACompiler.cmake:39 (_cmake_find_compiler)"
+      - "CMakeLists.txt:9 (project)"
+    mode: "program"
+    variable: "CMAKE_CUDA_COMPILER"
+    description: "CUDA compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "nvcc"
+    candidate_directories:
+      - "/usr/bin/"
+    searched_directories:
+      - "/usr/bin/nvcc"
+    found: false
+    search_context:
+      ENV{CMAKE_PREFIX_PATH}:
+        - "/home/lu_zero/.local;/home/lu_zero/.local;"
+      ENV{PATH}:
+        - "/home/lu_zero/.local/bin"
+        - "/home/lu_zero/.grok/bin"
+        - "/home/lu_zero/.cargo/bin"
+        - "/home/lu_zero/.local/bin"
+        - "/usr/local/sbin"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/opt/bin"
+        - "/usr/lib/llvm/22/bin"
+        - "/usr/lib/llvm/21/bin"
+        - "/usr/lib/llvm/20/bin"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:1309 (message)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCUDACompiler.cmake:99 (CMAKE_DETERMINE_COMPILER_ID_VENDOR)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Checking whether the CUDA compiler is NVIDIA using "" did not match "nvcc: [^
+      ]+ Cuda compiler driver":
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:1309 (message)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCUDACompiler.cmake:99 (CMAKE_DETERMINE_COMPILER_ID_VENDOR)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Checking whether the CUDA compiler is Clang using "" did not match "(clang version)":
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/Internal/CMakeCUDAFindToolkit.cmake:15 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCUDACompiler.cmake:109 (cmake_cuda_find_toolkit)"
+      - "CMakeLists.txt:9 (project)"
+    mode: "program"
+    variable: "_CUDA_NVCC_EXECUTABLE"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "nvcc"
+      - "nvcc.exe"
+    found: false
+    search_context:
+      ENV{CMAKE_PREFIX_PATH}:
+        - "/home/lu_zero/.local;/home/lu_zero/.local;"
+      ENV{PATH}:
+        - "/home/lu_zero/.local/bin"
+        - "/home/lu_zero/.grok/bin"
+        - "/home/lu_zero/.cargo/bin"
+        - "/home/lu_zero/.local/bin"
+        - "/usr/local/sbin"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/opt/bin"
+        - "/usr/lib/llvm/22/bin"
+        - "/usr/lib/llvm/21/bin"
+        - "/usr/lib/llvm/20/bin"
+...

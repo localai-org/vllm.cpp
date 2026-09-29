@@ -11516,19 +11516,14 @@ TEST_CASE("kTENSTORRENT region replay: state handoff across a region boundary, r
     const bool in_budget = rb[1] > 0 && rb[1] <= 50 * 1024 * 1024;
     CHECK_MESSAGE(in_budget, "region 1 staged " << rb[1]
                                                 << " B, outside the 50 MiB region budget");
-    // ── the 27B trace-fit gate (tt-launch-record-attribution-20260928) ──
-    // RED-FIRST on the per-core SetRuntimeArgs tree: region 1's MatmulBT is
-    // the keepquant program over the FULL worker grid, so the captured launch
-    // records one per-core Unique RTA UNICAST page per core (~2.97 MB on the
-    // census shape) and the KB bound below FAILS with the measured number.
-    // GREEN after the fix moves every word to SetCommonRuntimeArgs and
-    // derives row0/rowc in-kernel from the core coordinate: the record drops
-    // to the KB floor. This shape's N=1024 gives a PARTIAL last core, so a
-    // green run also proves the in-kernel clamp reproduces the host guard —
-    // the byte-exact replay below is that proof's device arm.
-    CHECK_MESSAGE(rb[1] <= 65536,
-                  "the keepquant captured launch staged " << rb[1]
-                  << " B of trace — the per-core SetRuntimeArgs record is back");
+    // The per-core RTA fix (docs/bench-evidence/tt-keepquant-rta-fix-
+    // 20260929.md §3) proved region 1's record here is NOT the per-core
+    // SetRuntimeArgs stream: it reads byte-identical 2,965,504 B before and
+    // after the fix (the RTA stream is ~228.9 MB of the 27B whole-graph
+    // demand, spent there). The record's dominant class is per-launch
+    // full-grid program command-sequence payload — a different lever. No KB
+    // floor gate lives here until that lever lands; the 27B bench leg is the
+    // fit arbiter.
     graph.Replay(q);
     std::vector<float> got(static_cast<size_t>(kN), 0.0f);
     backend.Copy(q, got.data(), mem_out, got.size() * sizeof(float));

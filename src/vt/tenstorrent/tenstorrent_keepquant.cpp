@@ -1559,19 +1559,30 @@ constexpr const char* kKeepQuantInt8DotKernelSrc = R"TTKQ(
 #include "api/dataflow/dataflow_api.h"
 #include "keepquant_kernel_code.h"
 
-// Per-core runtime args (the SetRuntimeArgs stream).
-constexpr uint32_t ARG_M = 0;
-constexpr uint32_t ARG_K = 1;
-constexpr uint32_t ARG_N = 2;
-constexpr uint32_t ARG_NB = 3;        // weight blocks per row (K / elems)
-constexpr uint32_t ARG_WPB = 4;       // staged i32 words per block
-constexpr uint32_t ARG_ACT_F32 = 5;   // 1: f32 activation bytes, 0: bf16
-constexpr uint32_t ARG_ROW0 = 6;      // first weight column of this core (4*group0)
-constexpr uint32_t ARG_ROWC = 7;      // real columns this core dots (0: idle)
-constexpr uint32_t ARG_MTILE = 8;     // activation rows per quantize tile
-constexpr uint32_t ARG_QB_PAD = 9;    // 16B-aligned activation-quant row bytes
-constexpr uint32_t ARG_ENC = 10;      // 0/1/2/3/4 = Q4_K/Q5_K/Q6_K/Q8_0/IQ3_XXS
-constexpr uint32_t ARG_TCOLS = 11;    // padded tile width (uniform): groups_per_core*4
+// Shape-global runtime args (the SetCommonRuntimeArgs stream). The 27B
+// trace-fit fix (tt-launch-record-attribution-20260928): every word here is
+// identical across cores, so the program records ONE common-args page per
+// captured launch instead of one per-core Unique RTA UNICAST page per core —
+// 11,040 recorded pages ≈ 2.97 MB per launch is what blew the 27B whole-graph
+// trace out of DRAM. Indices 0-2 are the three bank bases the original
+// common-args set carried; the shape words follow. The only per-core-varying
+// words (row0 = c*tcols, rowc = its clamp) are derived in-kernel from the
+// core coordinate.
+constexpr uint32_t CARG_W_ADDR = 0;
+constexpr uint32_t CARG_A_ADDR = 1;
+constexpr uint32_t CARG_O_ADDR = 2;
+constexpr uint32_t CARG_M = 3;
+constexpr uint32_t CARG_K = 4;
+constexpr uint32_t CARG_N = 5;
+constexpr uint32_t CARG_NB = 6;        // weight blocks per row (K / elems)
+constexpr uint32_t CARG_WPB = 7;       // staged i32 words per block
+constexpr uint32_t CARG_ACT_F32 = 8;   // 1: f32 activation bytes, 0: bf16
+constexpr uint32_t CARG_MTILE = 9;     // activation rows per quantize tile
+constexpr uint32_t CARG_QB_PAD = 10;   // 16B-aligned activation-quant row bytes
+constexpr uint32_t CARG_ENC = 11;      // 0..13, the enc-select dispatch below
+constexpr uint32_t CARG_TCOLS = 12;    // padded tile width: groups_per_core*4
+constexpr uint32_t CARG_GRID_X = 13;   // core-grid width: c = y*grid_x + x
+constexpr uint32_t kNumCommonArgs = 14;
 
 // CB scratch (self-cycled: reserve -> use -> push -> pop; no consumer core).
 constexpr uint32_t CB_F32 = 0;  // one activation row widened to f32 (K*4 B)
@@ -1597,18 +1608,27 @@ void kernel_main() {
   const auto acc_o =
       TensorAccessor(args_o, get_common_arg_val<uint32_t>(2));
 
-  const uint32_t M = get_arg_val<uint32_t>(ARG_M);
-  const uint32_t K = get_arg_val<uint32_t>(ARG_K);
-  const uint32_t N = get_arg_val<uint32_t>(ARG_N);
-  const uint32_t nb = get_arg_val<uint32_t>(ARG_NB);
-  const uint32_t wpb = get_arg_val<uint32_t>(ARG_WPB);
-  const uint32_t act_f32 = get_arg_val<uint32_t>(ARG_ACT_F32);
-  const uint32_t row0 = get_arg_val<uint32_t>(ARG_ROW0);
-  const uint32_t rowc = get_arg_val<uint32_t>(ARG_ROWC);
-  const uint32_t mtile = get_arg_val<uint32_t>(ARG_MTILE);
-  const uint32_t qb_pad = get_arg_val<uint32_t>(ARG_QB_PAD);
-  const uint32_t enc = get_arg_val<uint32_t>(ARG_ENC);
-  const uint32_t tcols = get_arg_val<uint32_t>(ARG_TCOLS);  // padded tile width
+  const uint32_t M = get_common_arg_val<uint32_t>(CARG_M);
+  const uint32_t K = get_common_arg_val<uint32_t>(CARG_K);
+  const uint32_t N = get_common_arg_val<uint32_t>(CARG_N);
+  const uint32_t nb = get_common_arg_val<uint32_t>(CARG_NB);
+  const uint32_t wpb = get_common_arg_val<uint32_t>(CARG_WPB);
+  const uint32_t act_f32 = get_common_arg_val<uint32_t>(CARG_ACT_F32);
+  const uint32_t mtile = get_common_arg_val<uint32_t>(CARG_MTILE);
+  const uint32_t qb_pad = get_common_arg_val<uint32_t>(CARG_QB_PAD);
+  const uint32_t enc = get_common_arg_val<uint32_t>(CARG_ENC);
+  const uint32_t tcols = get_common_arg_val<uint32_t>(CARG_TCOLS);  // padded tile width
+  const uint32_t grid_x = get_common_arg_val<uint32_t>(CARG_GRID_X);
+  // The per-core slice, derived from the core coordinate instead of a
+  // per-core SetRuntimeArgs word (the 27B trace-fit fix): c enumerates the
+  // grid row-major, exactly the host's {c % grid.x, c / grid.x} mapping.
+  const uint32_t c =
+      static_cast<uint32_t>(get_relative_logical_y()) * grid_x +
+      static_cast<uint32_t>(get_relative_logical_x());
+  const uint32_t row0 = c * tcols;
+  const uint32_t rowc =
+      row0 >= N ? 0u
+                : ((tcols < N - row0) ? tcols : (N - row0));
   if (rowc == 0 || M == 0) return;
 
   const uint32_t word_bytes = wpb * 4;
@@ -1988,6 +2008,18 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
       std::to_string(grid.y);
 
   std::lock_guard<std::mutex> workload_guard(Int8DotWorkloadMutex());
+  // The ONE common-args vector the program runs (see the kernel's CARG_*
+  // table): the three bank bases followed by the shape-global words. Built per
+  // call, set once on a miss and updated in place on a hit.
+  const auto common_args = [&] {
+    return std::vector<uint32_t>{
+        static_cast<uint32_t>(words.mesh_buffer().address()),
+        static_cast<uint32_t>(dev_a.mesh_buffer().address()),
+        static_cast<uint32_t>(dev_out.mesh_buffer().address()),
+        static_cast<uint32_t>(M), static_cast<uint32_t>(K),
+        static_cast<uint32_t>(N), static_cast<uint32_t>(nb), wpb, act_f32,
+        mtile, qb_pad, enc_sel, tcols, static_cast<uint32_t>(grid.x)};
+  };
   auto& workload_cache = Int8DotWorkloadCache();
   auto workload_it = workload_cache.find(workload_key);
   const bool workload_miss = workload_it == workload_cache.end();
@@ -2070,12 +2102,12 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
             .opt_level = tt::tt_metal::KernelBuildOptLevel::O2,
             .compiler_include_paths = {KeepQuantKernelIncludeDir()}});
     // The ONE legal initial common-args set (kernel.cpp:786: common runtime
-    // args can only be set once; later calls update them in place).
-    tt::tt_metal::SetCommonRuntimeArgs(
-        program, kernel,
-        {static_cast<uint32_t>(words.mesh_buffer().address()),
-         static_cast<uint32_t>(dev_a.mesh_buffer().address()),
-         static_cast<uint32_t>(dev_out.mesh_buffer().address())});
+    // args can only be set once; later calls update them in place). ALL the
+    // runtime words live here since the 27B trace-fit fix: per-core
+    // SetRuntimeArgs recorded one Unique RTA UNICAST page per core (~2.97 MB
+    // per captured launch), and the two words that varied per core (row0,
+    // rowc) are derived in-kernel from the core coordinate.
+    tt::tt_metal::SetCommonRuntimeArgs(program, kernel, common_args());
 
     tt::tt_metal::distributed::MeshWorkload workload;
     workload.add_program(
@@ -2092,42 +2124,26 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
   // reaches its cached program the same way (workload.get_programs(),
   // device_operation.hpp:184). Per-call runtime args on it (the ttnn
   // override_runtime_arguments contract): the common args carry this call's
-  // buffer addresses; the per-core args the shape, encoding and column-slice
-  // words. Dispatch commands regenerate from these on every enqueue
-  // (mesh_workload.cpp:210), so a re-enqueued workload always runs this
-  // call's values.
+  // buffer addresses plus the shape/encoding words. Dispatch commands
+  // regenerate from these on every enqueue (mesh_workload.cpp:210), so a
+  // re-enqueued workload always runs this call's values. NO per-core
+  // SetRuntimeArgs remains on this program: the 27B trace-fit fix derives
+  // row0/rowc in-kernel from the core coordinate (grid is part of the
+  // workload key, so grid_x is shape-global per program), and every other
+  // word is identical across cores. This call is the only call site of the
+  // program — nothing else needs per-core args on it.
   tt::tt_metal::Program& program =
       workload_it->second.workload.get_programs().begin()->second;
   if (!workload_miss) {
     // Update the common args IN PLACE on a reused program (kernel.cpp:786
-    // forbids a second set). The three words are this call's bank bases: the
-    // words shadow, the activation, the out page — the GetCommonRuntimeArgs
-    // pattern (ttnn unary_program_factory.cpp:647-652). A miss just set them
-    // with this call's addresses.
-    auto& common_args =
+    // forbids a second set) — the GetCommonRuntimeArgs pattern (ttnn
+    // unary_program_factory.cpp:647-652). A miss just set them with this
+    // call's values.
+    auto& crta =
         tt::tt_metal::GetCommonRuntimeArgs(program, workload_it->second.kernel);
-    common_args[0] = static_cast<uint32_t>(words.mesh_buffer().address());
-    common_args[1] = static_cast<uint32_t>(dev_a.mesh_buffer().address());
-    common_args[2] = static_cast<uint32_t>(dev_out.mesh_buffer().address());
+    const std::vector<uint32_t> next = common_args();
+    for (uint32_t i = 0; i < next.size(); ++i) crta[i] = next[i];
   }
-
-  std::vector<tt::tt_metal::CoreCoord> core_coords;
-  std::vector<std::vector<uint32_t>> per_core;
-  core_coords.reserve(grid_cores);
-  per_core.reserve(grid_cores);
-  for (uint32_t c = 0; c < grid_cores; ++c) {
-    const uint32_t r0 = c * tcols;
-    const uint32_t rc =
-        r0 >= static_cast<uint32_t>(N)
-            ? 0u
-            : std::min(tcols, static_cast<uint32_t>(N) - r0);
-    core_coords.push_back(tt::tt_metal::CoreCoord{c % grid.x, c / grid.x});
-    per_core.push_back({static_cast<uint32_t>(M), static_cast<uint32_t>(K),
-                        static_cast<uint32_t>(N), static_cast<uint32_t>(nb),
-                        wpb, act_f32, r0, rc, mtile, qb_pad, enc_sel, tcols});
-  }
-  tt::tt_metal::SetRuntimeArgs(program, workload_it->second.kernel,
-                               core_coords, per_core);
   // A fresh runtime id before EVERY enqueue, hit or miss — what the ttnn
   // dispatch does unconditionally (device_operation.hpp:181-186).
   program.set_runtime_id(static_cast<uint64_t>(
