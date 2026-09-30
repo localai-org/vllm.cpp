@@ -309,12 +309,16 @@ policy).
 
 ## Now
 
-2026-09-29 (DRAFT, spec committed on `row/tt-decode-fusion-spec`, stacked
-on the region-capture branch HEAD `f92eae33f`): design only — the stage
-inventory of the ~85, the single-program kernel contract, the CB/RTA
-plan, the bit-exactness strategy, and the tests above. Nothing
-implemented. NEXT: the fresh implementer ports the Q6_K fused kernel
-smallest-test-first against the already-red gate at
-`tests/vt/test_tenstorrent_backend.cpp:11527`. The row's arbiter, the
-red gate, is planted; the money legs stay blocked behind the fusion per
-the fit site's record in ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ.
+2026-09-30 (row/tt-decode-fusion, commit 1d84f00a6): the fused Q6_K
+decode arm LANDED — `kKeepQuantDecodeFusedKernelSrc` +
+`DecodeKeepQuantWordsFusedQ6K` (src/vt/tenstorrent/
+tenstorrent_keepquant.cpp), dispatched from `DecodeKeepQuantWordsF32` on
+the served encoding, the chain kept as the named fallback
+(VT_TT_KEEPQUANT_FUSED=0, or an L1-budget decline by name). The bit-exact
+doctest (idle-core + partial-last-core tails, zero-d/zero-scale blocks)
+and the red gate are in tests/vt/test_tenstorrent_backend.cpp. MEASURED:
+the keepquant region gate reads 32,768 B (was 2,965,504 B RED) — GREEN at
+the 64 KiB floor, 90.5x. NEXT: full-suite green bar, then the 27B money
+legs (c1 INT8DOT=0 first) for BENCH_EXIT + TPOT and the whole-graph trace
+re-measure. Evidence lands in
+docs/bench-evidence/tt-decode-fusion-20260930.md.

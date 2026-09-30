@@ -376,3 +376,25 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   27B money legs NOT run: no fix landed this leg, so c1 would reproduce the
   recorded 2,925,109,248 B / BENCH_EXIT=1 outcome; the legs stay blocked
   behind the decode-fusion lever.
+- 2026-09-30 (worktree row/tt-decode-fusion, commit 1d84f00a6, TT-DECODE-FUSION):
+  the NEXT LEVER above LANDED and was measured. The ~85-program Q6_K
+  eltwise decode chain is now ONE full-grid custom kernel per chunk launch
+  (kKeepQuantDecodeFusedKernelSrc + DecodeKeepQuantWordsFusedQ6K,
+  tenstorrent_keepquant.cpp; int8dot house style: one SetCommonRuntimeArgs
+  vector, uniform self-cycled CBs, in-kernel row0/rowc, warm-first cache;
+  the chain stays as the named VT_TT_KEEPQUANT_FUSED=0 fallback). The 64 KiB
+  arbiter is GREEN: region 1 reads 32,768 B (was 2,965,504 B RED),
+  /tmp/kq-focused.log. Bit-exactness: fused vs chain byte-identity through
+  the grouped P=1 decode op on idle-core and partial-last-core tails with
+  planted zero-d/zero-scale blocks, 7/7 assertions (/tmp/kqf-bitexact.log).
+  Full TT suite: 99/100 cases, 527,825/527,826 assertions, the only failure
+  the owed 2261 flake (/tmp/kqf-suite.log). Evidence:
+  docs/bench-evidence/tt-decode-fusion-20260930.md. 27B c1 INT8DOT=0
+  (/tmp/kqf-c1-int8dot0.log): BENCH_EXIT=1 — the whole-graph trace still
+  does not fit (populate_mesh_buffer overlap fatal, buffer address
+  4,015,745,024, allocation high-water 4,228,372,992); no TPOT. The decode
+  region record fell ~90x at the vehicle shape, but the whole-graph demand
+  (matmul chain ~8 programs/chunk + the rest of the graph) still exceeds
+  free DRAM. NEXT LEVER (one step): the matmul-chain fuse, then re-measure
+  the whole-graph bound; the fit wall keeps standing until that lands.
+  INT8DOT=1 c1 and c2 queued behind the device lock. Issue stays OPEN.
