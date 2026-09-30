@@ -398,3 +398,19 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   free DRAM. NEXT LEVER (one step): the matmul-chain fuse, then re-measure
   the whole-graph bound; the fit wall keeps standing until that lands.
   INT8DOT=1 c1 and c2 queued behind the device lock. Issue stays OPEN.
+
+- 2026-09-30 (row/tt-matmul-record-audit @ 913392513): the matmul-class
+  attribution landed. Standalone repro `docs/bench-evidence/
+  tt-matmul-record-attribution-20260930.md` on pin 6449cf13f7b: stock
+  ttnn::matmul at 27B shapes ([64,5120]x[5120,5120] bf16, full 110-core
+  grid) records 8,484 B/launch (small shape 3,510; down-proj 4,242;
+  empty-trace floor 1,024). Control: the old inline-H2D attribution is
+  FALSIFIED on this pin — a from_vector issued inside a capture FATALS at
+  fd_mesh_command_queue.cpp:830 ("Writes are not supported during trace
+  capture") and aborts, /tmp/mmrepro-run3.log. Verdict OURS: the ~8
+  MB/launch the ~357 non-eltwise launches need cannot come from tt-metal's
+  matmul record path; fix locus is our MatmulBT/attention program
+  construction in src/vt/tenstorrent/ — next leg discriminates per-core
+  config-page packing failure vs prefetch-ring overflow vs captured
+  device-side movement on one post-fusion-pin MatmulBT region. No upstream
+  defect to file. Issue stays OPEN; whole-graph fit wall keeps standing.
