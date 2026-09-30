@@ -2060,10 +2060,13 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
 
         Under the drop rule the shape error fired and the duplicate was
         invisible: parse_claim_rows discarded the row before duplicate
-        detection ever saw it. One run must name both, plus the ratchet the
-        extra row now breaks -- three findings, one run, no re-run ladder.
+        detection ever saw it. One run must name both, no re-run ladder.
+
+        The restructured checker derives every matrix count from its rows, so
+        there is no count constant for the extra row to break; the malformed
+        row is kept and the duplicate detection still sees it, which is the
+        downstream visibility this test exists to pin.
         """
-        expected = agent_record.MATRICES["KERNEL"][1]
         source = (ROOT / ".agents/kernel-matrix.md").read_text(encoding="utf-8")
         template = next(
             line for line in source.splitlines()
@@ -2075,7 +2078,6 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
         )
         require(errors, r"KERNEL-CPU-A76-Q8-DOT has 7 cells; header has 8")
         require(errors, r"duplicate ID KERNEL-CPU-A76-Q8-DOT")
-        require(errors, rf"{expected + 1} KERNEL rows; expected {expected}")
 
     def test_retired_history_payload_is_self_validating(self) -> None:
         self._assert_history_integrity(self.HISTORY.read_text(encoding="utf-8"))
@@ -2130,7 +2132,9 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
                 continue
             try:
                 source = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, IsADirectoryError):
+                # Binary payload or a tracked symlink dereferenced to a
+                # directory: neither carries a checker line citation.
                 continue
             for match in citation.finditer(source):
                 start = int(match.group(1))
@@ -2148,12 +2152,12 @@ class DerivedMatrixMembershipTests(unittest.TestCase):
         # predecessor positions prove that padding was restored at each site,
         # rather than merely appended at end of file.
         expected_lines = {
-            1078: '"""Blank out fenced blocks and inline code, preserving line and column count.',
-            1169: "if source.is_relative_to(ISSUES_ROOT):",
-            1712: "baseline = load_record_anchor_baseline()",
-            1960: "errors.append(",
-            2000: "expected = {",
-            2018: 'pipes = len(re.findall(r"(?<!\\\\)\\|", line))',
+            1095: '"""Blank out fenced blocks and inline code, preserving line and column count.',
+            1186: "if source.is_relative_to(ISSUES_ROOT):",
+            1729: "baseline = load_record_anchor_baseline()",
+            1975: "errors.append(f\"active claim {claim} references unknown row {item_id}\")",
+            2017: "expected = {",
+            2035: 'pipes = len(re.findall(r"(?<!\\\\)\\|", line))',
         }
         for line_no, expected in expected_lines.items():
             with self.subTest(line_no=line_no):

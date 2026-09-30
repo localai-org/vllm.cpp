@@ -236,8 +236,7 @@ range into one 1 627 048 984-byte file (sha256 `314151d13e98016226d534a707e176f4
 ## Owed
 
 - The end-to-end image token gate against pinned vLLM (`dgx:gpu0` lease,
-  oracle run of `NemotronH_Nano_Omni_Reasoning_V3`). Tracked by
-  `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`.
+  oracle run of `NemotronH_Nano_Omni_Reasoning_V3`; see [Tracked](#tracked)).
 - Audio (`sound_encoder`) and video (`video_embedder`, EVS) arms. Refused by
   name. Tracked by the same issue.
 - The GGUF arm of the language tower (inherited from `NemotronHForCausalLM`,
@@ -247,16 +246,25 @@ range into one 1 627 048 984-byte file (sha256 `314151d13e98016226d534a707e176f4
   `NemotronH_Nano_VL_V2` release does (`llm_config.time_step_limit`). Found by
   this row, not fixed by it (developer direction: file, do not fix, anything
   outside the item). The refusal test sanitizes the literal before parsing.
-- `ISSUE-LOCAL-01M3S07X6Y4ADHHQ02FYMR4RXF`: the NVFP4 Omni language tower. The
+- The NVFP4 Omni language tower. The
   NemotronH loader does not resolve the ModelOpt scheme per module, so that
-  checkpoint is refused at load (row-owned issue, not an `_owed` one).
+  checkpoint is refused at load (row-owned issue, see [Tracked](#tracked)).
 - The static InternVL tiling arm (`NemotronH_Nano_VL_V2` 12B), refused by name
-  at config parse. Tracked by `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`.
+  at config parse (tracked, see [Tracked](#tracked)).
 - `NemotronH_Super_Omni_Reasoning_V3` and `NemotronH_Omni_Reasoning_V3`
   (`registry.py:514-515` @ `e126687a9a`), the same upstream class. Not
   registered: no public checkpoint exists at the pin (upstream's
   `tests/models/registry.py:1217-1223` points both at the Nano Omni repository
   with `is_available_online=False`), so no config shows whether their language
   tower is one the NemotronH loader and forward accept. A load under either name
-  is refused by the registry as an unknown architecture. Tracked by
-  `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`.
+  is refused by the registry as an unknown architecture (tracked, see
+  [Tracked](#tracked)).
+
+## Tracked
+
+- `ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS`, the row-owned issue under
+  `.agents/issues/MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2/`, tracks
+  the end-to-end image token gate, the refused audio and video arms, the
+  static InternVL tiling arm, and the Super/Omni registration gap above.
+- `ISSUE-LOCAL-01M3S07X6Y4ADHHQ02FYMR4RXF`, also under that row directory,
+  tracks the NVFP4 Omni language-tower refusal above.
