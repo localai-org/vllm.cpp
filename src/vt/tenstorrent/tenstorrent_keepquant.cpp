@@ -3,6 +3,8 @@
 // state and the cross-TU declarations live in tenstorrent_internal.h.
 #include "vt/tenstorrent/tenstorrent_internal.h"
 
+#include <optional>
+
 namespace vt::tenstorrent {
 
 // ---- KEEPQUANT W3: the resident i32 word shadow -----------------------------
@@ -323,10 +325,23 @@ ttnn::Tensor Neg0CacheGet(const ttnn::Shape& shape, MeshDevice& device) {
 // (MatmulBTQuantGroupedKernel) slices the tower's words to the P selected
 // [N,K] row-ranges per call and runs THIS. Same chain, same numerics, so the
 // W1/W3 bit-exact pins carry over unchanged.
+std::optional<ttnn::Tensor> DecodeKeepQuantWordsFusedQ6K(
+    const ttnn::Tensor& w, int64_t slice_rows, int64_t nb, MeshDevice& device);
+
 ttnn::Tensor DecodeKeepQuantWordsF32(const ttnn::Tensor& w, DType enc,
                                      int64_t slice_rows, int64_t nb,
                                      MeshDevice& device) {
   const uint32_t B = static_cast<uint32_t>(slice_rows * nb);
+  // TT-DECODE-FUSION: the fused single-program arm. Q6_K is the wave-1
+  // served encoding; anything else declines to the chain below by falling
+  // through. VT_TT_KEEPQUANT_FUSED=0 forces the proven chain (the named
+  // fallback arm); an unserved shape declines BY NAME inside the fused
+  // dispatcher and also falls through — never silently.
+  if (enc == DType::kQ6_K) {
+    if (std::optional<ttnn::Tensor> fused =
+            DecodeKeepQuantWordsFusedQ6K(w, slice_rows, nb, device))
+      return std::move(*fused);
+  }
   {  // W4d W0 (#3042) attribution: label carries the slice size.
     char lbl[64];
     std::snprintf(lbl, sizeof(lbl), "kq-decode/rows=%lld/nb=%lld",
@@ -1798,6 +1813,280 @@ std::map<std::string, Int8DotWorkloadEntry>& Int8DotWorkloadCache() {
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// TT-DECODE-FUSION: the fused single-program decode arm.
+//
+// ONE full-grid CreateKernelFromString data-movement kernel (RISCV_0,
+// DM_DEDICATED_NOC, O2, compiled against keepquant_kernel_code.h — the same
+// include path the int8dot kernel uses) replaces the ~85-program eltwise
+// chain DecodeKeepQuantWordsF32's Q6_K case runs per chunk. The kernel
+// unpacks exact integer nibbles and executes TWO IEEE f32 multiplies in the
+// host's left-to-right order, (d*sc)*q — no FMA contraction is possible (no
+// add consumes the first product) and no division exists, so the result is
+// bit-identical to the chain by construction. The zero-product sign algebra
+// the chain performs (the three-sign XOR polynomial + repair) DELETES: an
+// IEEE multiply carries the sign of a zero product through naturally, and
+// both operands' signs are the raw bits the chain XORs.
+//
+// Capture-safety is the int8dot shape verbatim (the precedent at
+// kKeepQuantInt8DotKernelSrc): ONE SetCommonRuntimeArgs vector, uniform
+// self-cycled CBs, per-core row0/rowc derived in-kernel from the core
+// coordinate (the a1661114b doctrine), workload cached and warmed eagerly —
+// a capture-time miss refuses by name (mesh_workload.cpp:153).
+constexpr const char* kKeepQuantDecodeFusedKernelSrc = R"TTDQ(
+#include "api/dataflow/dataflow_api.h"
+#include "keepquant_kernel_code.h"
+
+// The ONE common-args vector (see the int8dot kernel's CARG_* table). Every
+// word is identical across cores; the only per-core-varying values
+// (row0, rowc) are derived from the core coordinate below.
+constexpr uint32_t CARG_W_ADDR = 0;   // packed words bank base
+constexpr uint32_t CARG_O_ADDR = 1;   // f32 out bank base
+constexpr uint32_t CARG_ROWS = 2;     // decode rows (weight rows) in the slice
+constexpr uint32_t CARG_NB = 3;       // blocks per row
+constexpr uint32_t CARG_WPB = 4;      // staged i32 words per block (64, Q6_K)
+constexpr uint32_t CARG_GRID_X = 5;   // core-grid width: c = y*grid_x + x
+constexpr uint32_t CARG_RPC = 6;      // uniform rows per core
+constexpr uint32_t kNumCommonArgs = 7;
+
+// CB scratch (self-cycled: reserve -> use -> push -> pop; no consumer core).
+constexpr uint32_t CB_W = 0;  // one decode row's packed words (wpb*4*nb B)
+constexpr uint32_t CB_O = 1;  // one block's 256 f32 outputs (1024 B)
+
+void kernel_main() {
+  constexpr auto args_w = TensorAccessorArgs<0, 0>();
+  constexpr uint32_t cta_1 = args_w.next_compile_time_args_offset();
+  constexpr auto args_o = TensorAccessorArgs<cta_1, 0>();
+  const auto acc_w =
+      TensorAccessor(args_w, get_common_arg_val<uint32_t>(CARG_W_ADDR));
+  const auto acc_o =
+      TensorAccessor(args_o, get_common_arg_val<uint32_t>(CARG_O_ADDR));
+  const uint32_t rows = get_common_arg_val<uint32_t>(CARG_ROWS);
+  const uint32_t nb = get_common_arg_val<uint32_t>(CARG_NB);
+  const uint32_t wpb = get_common_arg_val<uint32_t>(CARG_WPB);
+  const uint32_t grid_x = get_common_arg_val<uint32_t>(CARG_GRID_X);
+  const uint32_t rpc = get_common_arg_val<uint32_t>(CARG_RPC);
+  // The per-core row slice, derived from the core coordinate (the int8dot
+  // kernel's derivation verbatim): c enumerates the grid row-major.
+  const uint32_t c =
+      static_cast<uint32_t>(get_relative_logical_y()) * grid_x +
+      static_cast<uint32_t>(get_relative_logical_x());
+  const uint32_t row0 = c * rpc;
+  const uint32_t rowc =
+      row0 >= rows ? 0u : ((rpc < rows - row0) ? rpc : (rows - row0));
+  if (rowc == 0 || rows == 0) return;  // idle tail: touches no DRAM
+
+  const uint32_t word_bytes = wpb * 4;
+  for (uint32_t r = 0; r < rowc; ++r) {
+    cb_reserve_back(CB_W, 1);
+    const uint32_t wp = get_write_ptr(CB_W);
+    // One page per block — the interleaved accessor maps page (row*nb + b)
+    // to its bank address (the int8dot kernel's per-block read).
+    for (uint32_t b = 0; b < nb; ++b)
+      noc_async_read(acc_w.get_noc_addr((row0 + r) * nb + b),
+                     wp + b * word_bytes, word_bytes);
+    noc_async_read_barrier();
+    const uint8_t* x = reinterpret_cast<const uint8_t*>(wp);
+    for (uint32_t b = 0; b < nb; ++b, x += word_bytes) {
+      // Q6_K block: ql[128] qh[64] sc[16] d(f16) — bytes 0..128, 128..192,
+      // 192..208, 208..210 (tenstorrent_keepquant.cpp:630-637 comment).
+      const float d = kq_f16_bits_to_f32(kq_load16(x + 208));
+      float scf[16];
+      for (uint32_t j = 0; j < 16; ++j)
+        scf[j] = static_cast<float>(static_cast<int8_t>(x[192 + j]));
+      cb_reserve_back(CB_O, 1);
+      float* outp = reinterpret_cast<float*>(get_write_ptr(CB_O));
+      // The host (h, r) nibble loop verbatim: per (half h, run r, l in
+      // 0..32) — ql byte 64h + 32*(r&1) + l, low nibble for r<2 / high
+      // otherwise, the 2 high bits (qh[32h + l] >> 2r) & 3 into bit 4,
+      // minus the 32 bias, scale s = 8h + 2r + l/16, column i = l%16.
+      // TWO IEEE f32 multiplies in the host's left-to-right order:
+      // (d*sc) FIRST, then *q. The IEEE sign of a zero product is the XOR
+      // of the operand signs — the chain's sign-algebra repair for free.
+      for (uint32_t h = 0; h < 2; ++h) {
+        for (uint32_t rn = 0; rn < 4; ++rn) {
+          const uint32_t qoff = 64 * h + 32 * (rn % 2);
+          const uint32_t soff = 8 * h + 2 * rn;
+          for (uint32_t l = 0; l < 32; ++l) {
+            const uint8_t qb = x[qoff + l];
+            const uint32_t nib = (rn < 2) ? (qb & 0xFu) : (qb >> 4);
+            const uint8_t hb = x[128 + 32 * h + l];
+            const uint32_t nib6 = nib | ((((hb >> (2 * rn)) & 3u) << 4));
+            const float q = static_cast<float>(static_cast<int32_t>(nib6) - 32);
+            const float t = d * scf[soff + l / 16];
+            outp[(soff + l / 16) * 16 + (l % 16)] = t * q;
+          }
+        }
+      }
+      noc_async_write(reinterpret_cast<uint32_t>(outp),
+                      acc_o.get_noc_addr(row0 + r, b * 1024), 1024);
+      cb_push_back(CB_O, 1);
+      cb_pop_front(CB_O, 1);
+    }
+    cb_push_back(CB_W, 1);
+    cb_pop_front(CB_W, 1);
+  }
+  noc_async_write_barrier();
+}
+)TTDQ";
+
+struct FusedDecodeWorkloadEntry {
+  tt::tt_metal::distributed::MeshWorkload workload;
+  tt::tt_metal::KernelHandle kernel;
+};
+std::mutex& FusedDecodeWorkloadMutex() {
+  static std::mutex m;
+  return m;
+}
+std::map<std::string, FusedDecodeWorkloadEntry>& FusedDecodeWorkloadCache() {
+  // Heap-allocated, never destroyed (#1486 — the int8dot cache's rationale).
+  static std::map<std::string, FusedDecodeWorkloadEntry>* c =
+      new std::map<std::string, FusedDecodeWorkloadEntry>();
+  return *c;
+}
+
+// The arm gate: fused is the DEFAULT on Q6_K; VT_TT_KEEPQUANT_FUSED=0 is the
+// named fallback to the proven chain (the spec's env-gated decline arm).
+bool KeepQuantFusedDecodeEnabled() {
+  const char* e = std::getenv("VT_TT_KEEPQUANT_FUSED");
+  return e == nullptr || e[0] == '\0' || e[0] != '0';
+}
+
+// The fused dispatcher for the Q6_K decode arm. Returns nullopt when the
+// shape is not served — the caller falls through to the chain, and the
+// decline is NAMED (a stderr line naming the missing part) whenever the arm
+// was requested, never silent.
+std::optional<ttnn::Tensor> DecodeKeepQuantWordsFusedQ6K(
+    const ttnn::Tensor& w, int64_t slice_rows, int64_t nb, MeshDevice& device) {
+  if (slice_rows <= 0 || nb <= 0) return std::nullopt;
+  if (!KeepQuantFusedDecodeEnabled()) return std::nullopt;
+  const uint32_t rows = static_cast<uint32_t>(slice_rows);
+  const uint32_t wpb = static_cast<uint32_t>(KeepQuantWordsPerBlock(DType::kQ6_K));
+  const uint32_t word_bytes = wpb * 4;
+  const uint32_t row_bytes = word_bytes * static_cast<uint32_t>(nb);
+  const auto grid = device.compute_with_storage_grid_size();
+  const uint32_t grid_cores =
+      static_cast<uint32_t>(grid.x) * static_cast<uint32_t>(grid.y);
+  const uint32_t rpc = (rows + grid_cores - 1) / grid_cores;
+  const auto align16 = [](uint32_t v) { return (v + 15u) & ~15u; };
+  // L1 budget: the words-row CB page + the 1 KB out CB page, with the
+  // int8dot kernel's 768 KiB per-core envelope. Over budget -> decline BY
+  // NAME; the chain serves the shape.
+  const uint32_t cb_w_page = align16(row_bytes);
+  const uint64_t l1_bytes = static_cast<uint64_t>(cb_w_page) + 1024u;
+  if (l1_bytes > (700u << 10)) {
+    std::fprintf(stderr,
+                 "[TT-KQ-FUSED] decline: rows=%lld nb=%lld needs %llu B of "
+                 "per-core L1 over the 700 KiB budget — chain serves\n",
+                 (long long)slice_rows, (long long)nb,
+                 (unsigned long long)l1_bytes);
+    return std::nullopt;
+  }
+  if (rpc == 0) return std::nullopt;
+
+  // The out tensor: ROW_MAJOR f32 [slice_rows, nb*256] — the chain's own
+  // return geometry (the caller's typecast/to_layout consume it unchanged).
+  ttnn::Tensor dev_out = ttnn::empty(
+      ttnn::Shape({rows, static_cast<uint32_t>(nb) * 256u}),
+      ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR, &device,
+      ttnn::MemoryConfig{});
+
+  // Program identity: rows, nb and the grid — everything the CB geometry and
+  // the compile args derive from. Addresses are runtime args (common args,
+  // re-set per call below).
+  const std::string workload_key =
+      "fusedq6k/" + std::to_string(rows) + "x" + std::to_string(nb) + "x" +
+      std::to_string(grid.x) + "x" + std::to_string(grid.y);
+
+  std::lock_guard<std::mutex> workload_guard(FusedDecodeWorkloadMutex());
+  const auto common_args = [&] {
+    return std::vector<uint32_t>{
+        static_cast<uint32_t>(w.mesh_buffer().address()),
+        static_cast<uint32_t>(dev_out.mesh_buffer().address()),
+        rows, static_cast<uint32_t>(nb), wpb,
+        static_cast<uint32_t>(grid.x), rpc};
+  };
+  auto& workload_cache = FusedDecodeWorkloadCache();
+  auto workload_it = workload_cache.find(workload_key);
+  const bool workload_miss = workload_it == workload_cache.end();
+  if (workload_miss) {
+    // Warm-first: a workload never enqueued eagerly cannot enter a trace
+    // (load_binaries fatals mid-capture, mesh_workload.cpp:148-153).
+    VT_CHECK(!tt_capture_active(),
+             "tenstorrent keep-quant fused decode: shape not warmed before "
+             "trace capture — run the shape eagerly once first (tt-metal "
+             "refuses new binaries mid-capture, mesh_workload.cpp:153)");
+    tt::tt_metal::Program program = tt::tt_metal::CreateProgram();
+    {
+      tt::tt_metal::CircularBufferConfig cfg(
+          cb_w_page, {{tt::CBIndex::c_0, tt::DataFormat::Float32}});
+      cfg.set_page_size(tt::CBIndex::c_0, cb_w_page);
+      tt::tt_metal::CreateCircularBuffer(
+          program,
+          tt::tt_metal::CoreRange(tt::tt_metal::CoreCoord{0, 0},
+                                  tt::tt_metal::CoreCoord{grid.x - 1, grid.y - 1}),
+          cfg);
+    }
+    {
+      tt::tt_metal::CircularBufferConfig cfg(
+          1024u, {{tt::CBIndex::c_1, tt::DataFormat::Float32}});
+      cfg.set_page_size(tt::CBIndex::c_1, 1024u);
+      tt::tt_metal::CreateCircularBuffer(
+          program,
+          tt::tt_metal::CoreRange(tt::tt_metal::CoreCoord{0, 0},
+                                  tt::tt_metal::CoreCoord{grid.x - 1, grid.y - 1}),
+          cfg);
+    }
+    std::vector<uint32_t> compile_args;
+    tt::tt_metal::TensorAccessorArgs(w.mesh_buffer()).append_to(compile_args);
+    tt::tt_metal::TensorAccessorArgs(dev_out.mesh_buffer()).append_to(compile_args);
+    tt::tt_metal::KernelHandle kernel = tt::tt_metal::CreateKernelFromString(
+        program, kKeepQuantDecodeFusedKernelSrc,
+        tt::tt_metal::CoreRange(tt::tt_metal::CoreCoord{0, 0},
+                                tt::tt_metal::CoreCoord{grid.x - 1, grid.y - 1}),
+        tt::tt_metal::DataMovementConfig{
+            .processor = tt::tt_metal::DataMovementProcessor::RISCV_0,
+            .noc = tt::tt_metal::NOC::RISCV_0_default,
+            .noc_mode = tt::tt_metal::NOC_MODE::DM_DEDICATED_NOC,
+            .compile_args = compile_args,
+            .defines = {},
+            .named_compile_args = {},
+            .opt_level = tt::tt_metal::KernelBuildOptLevel::O2,
+            .compiler_include_paths = {KeepQuantKernelIncludeDir()}});
+    // The ONE legal initial common-args set (kernel.cpp:786 — later calls
+    // update in place, the int8dot dispatch's pattern).
+    tt::tt_metal::SetCommonRuntimeArgs(program, kernel, common_args());
+    tt::tt_metal::distributed::MeshWorkload workload;
+    workload.add_program(
+        tt::tt_metal::distributed::MeshCoordinateRange(device.shape()),
+        std::move(program));
+    workload_it =
+        workload_cache
+            .emplace(workload_key,
+                     FusedDecodeWorkloadEntry{std::move(workload), kernel})
+            .first;
+  }
+  tt::tt_metal::Program& program =
+      workload_it->second.workload.get_programs().begin()->second;
+  if (!workload_miss) {
+    auto& crta =
+        tt::tt_metal::GetCommonRuntimeArgs(program, workload_it->second.kernel);
+    const std::vector<uint32_t> next = common_args();
+    for (uint32_t i = 0; i < next.size(); ++i) crta[i] = next[i];
+  }
+  program.set_runtime_id(static_cast<uint64_t>(
+      ttnn::CoreIDs::instance().fetch_and_increment_device_operation_id()));
+  // The eager drain (the int8dot dispatch's ordering contract); skipped
+  // under capture — finish() records a mesh event ttnn forbids mid-capture.
+  if (!tt_capture_active()) {
+    device.mesh_command_queue().finish();
+  }
+  tt::tt_metal::distributed::EnqueueMeshWorkload(device.mesh_command_queue(),
+                                                 workload_it->second.workload,
+                                                 /*blocking=*/false);
+  return dev_out;
+}
 
 // kMatmulBTQuant's W4b body: out[M,N] = a[M,K] @ b[N,K]^T with b PACKED
 // keep-quant blocks, computed entirely by the device kernel above. M, N, K,

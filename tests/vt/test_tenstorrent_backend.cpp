@@ -9407,6 +9407,129 @@ TEST_CASE("kTENSTORRENT kMatmulBTQuantGrouped decode (P=1) matches the CPU f32 q
                 bad, " of ", kN, " outputs (worst_rel=", worst_rel, ")");
 }
 // ---------------------------------------------------------------------------
+// TT-DECODE-FUSION: the fused single-program decode arm's bit-exactness
+// doctests. The spec's strategy: the unpack is exact integer work (identical
+// bits by construction), the arithmetic is TWO IEEE f32 multiplies in the
+// host's fixed order, and the zero-sign repair the chain performs by algebra
+// the kernel gets from IEEE multiply semantics — so the FUSED and CHAIN arms
+// must agree BIT-FOR-BIT. The vehicle is the grouped P=1 decode op: its f32
+// domain is decode -> typecast/to_layout -> broadcast-multiply -> sum, all
+// identical ops on both arms, so bit identity of the decode propagates to a
+// byte-identity of the op output. Tail classes per the spec: an IDLE-CORE
+// case (rows % rpc == 0, whole cores exit at rowc == 0) and a PARTIAL-LAST-
+// CORE case (rows % rpc != 0, the last active core reads/writes rowc rows).
+TEST_CASE("kTENSTORRENT fused keep-quant decode is bit-exact to the chain "
+          "(Q6_K: idle-core and partial-last-core tails)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuantGrouped,
+                           vt::DeviceType::kTENSTORRENT));
+
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  const vt::DType enc = vt::DType::kQ6_K;
+  const int64_t kElems = vt::BlockElems(enc);   // 256
+  const int64_t kBlockBytes = vt::BlockBytes(enc);  // 210
+  constexpr int64_t kNb = 2;                    // K = 512, a small decode row
+  const int64_t K = kNb * kElems;
+
+  // A packed generator with the sign-algebra edge classes IN: negative and
+  // POSITIVE d, zero-d blocks (product zero through d), and zero sc bytes
+  // (product zero through the scale) — the -0 repair the chain performs by
+  // algebra and the kernel gets from IEEE semantics must agree on exactly
+  // these, bit for bit.
+  auto make_packed = [&](int64_t rows, uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::vector<uint8_t> packed(static_cast<size_t>(rows) * kNb * kBlockBytes);
+    for (size_t b = 0; b < packed.size() / static_cast<size_t>(kBlockBytes);
+         ++b) {
+      uint8_t* p = packed.data() + b * kBlockBytes;
+      const bool zero_d = (b % 17) == 0;      // d = +0: zero product
+      const bool neg_d = (b % 3) == 0;
+      float dv = 0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f;
+      if (neg_d) dv = -dv;
+      if (zero_d) dv = 0.0f;
+      const uint16_t d_bits = vt::F32ToF16(dv);
+      for (int i = 0; i < 192; ++i)
+        p[i] = static_cast<uint8_t>(rng() & 0xFF);
+      if ((b % 13) == 0) p[192 + (b % 16)] = 0;  // a zero scale byte
+      for (int i = 192; i < 208; ++i)
+        if (p[i] == 0) p[i] = 1;  // keep only the planted zero scale
+      std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+    }
+    return packed;
+  };
+
+  // One decode of the op, with the fused arm forced on or off. The env var
+  // is set around the call and RESTORED — the fallback arm is a per-process
+  // gate, and later cases must not inherit it.
+  auto run_decode = [&](const std::vector<uint8_t>& packed, int64_t rows,
+                        bool fused) {
+    const char* want = fused ? "1" : "0";
+    ::setenv("VT_TT_KEEPQUANT_FUSED", want, 1);
+    std::vector<float> a_bf(K);
+    for (int64_t c = 0; c < K; ++c) a_bf[c] = -3.0f + 6.0f * (c % 97) / 97.0f;
+    std::vector<uint16_t> a_b16(a_bf.size());
+    for (size_t i = 0; i < a_bf.size(); ++i)
+      a_b16[i] = vt::F32ToBF16(a_bf[i]);
+    std::vector<int32_t> ids(1, 0);
+
+    void* mem_a = backend.Alloc(a_b16.size() * sizeof(uint16_t));
+    void* mem_w = backend.Alloc(packed.size());
+    void* mem_o = backend.Alloc(rows * sizeof(float));
+    void* mem_i = backend.Alloc(ids.size() * sizeof(int32_t));
+    backend.Copy(q, mem_a, a_b16.data(), a_b16.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_w, packed.data(), packed.size());
+    backend.Copy(q, mem_i, ids.data(), ids.size() * sizeof(int32_t));
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {1, K});
+    Tensor w_t = Tensor::Contiguous(mem_w, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {rows, K});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {1, rows});
+    Tensor i_t = Tensor::Contiguous(mem_i, vt::DType::kI32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {1});
+    vt::MatmulBTQuantGrouped(q, o_t, a_t, w_t, i_t);
+    std::vector<float> out(static_cast<size_t>(rows), 0.0f);
+    backend.Copy(q, out.data(), mem_o, out.size() * sizeof(float));
+    backend.Free(mem_a);
+    backend.Free(mem_w);
+    backend.Free(mem_o);
+    backend.Free(mem_i);
+    ::unsetenv("VT_TT_KEEPQUANT_FUSED");
+    return out;
+  };
+
+  // rows=8: rpc=1, grid_cores-8 fully IDLE cores; rows=251: rpc=2 on a
+  // >=126-core grid, the last active core carries ONE row (the partial
+  // tail); rows=250: the idle-tail shape at rpc=2.
+  for (const int64_t rows : {int64_t{8}, int64_t{250}, int64_t{251}}) {
+    const std::vector<uint8_t> packed = make_packed(rows, 20260929u + rows);
+    CAPTURE(rows);
+    const std::vector<float> fused = run_decode(packed, rows, true);
+    const std::vector<float> chain = run_decode(packed, rows, false);
+    REQUIRE(fused.size() == chain.size());
+    int64_t bad = 0;
+    for (size_t i = 0; i < fused.size(); ++i) {
+      if (std::memcmp(&fused[i], &chain[i], sizeof(float)) != 0) {
+        if (bad < 4)
+          MESSAGE("rows=", rows, " diff n=", i, " fused=", fused[i],
+                  " chain=", chain[i]);
+        ++bad;
+      }
+    }
+    CHECK_MESSAGE(bad == 0, "fused vs chain: ", bad, " of ", fused.size(),
+                  " outputs differ at the BIT level on rows=", rows);
+  }
+}
+// ---------------------------------------------------------------------------
 // KEEPQUANT W4a wave-3a (#3030): the E=1 (dense) grouped arm becomes
 // capture-compatible and memory-bounded. Three legs:
 //   1. THE TRACE-BOUND CASE (red-first, the wave-1b falsification class):
