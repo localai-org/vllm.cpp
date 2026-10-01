@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3JVCCKJ2NXT4TTSHNZT2GJS
 Title: Three rows named by specs and by open issues are declared in no matrix, so agent-issue-index.py cannot validate any record
 Row: GATE-ISSUE-INDEX-TABLE-SHAPE
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-27
-Closed: -
+Updated: 2026-10-01
+Closed: 2026-10-01
 
 ## Problem
 
