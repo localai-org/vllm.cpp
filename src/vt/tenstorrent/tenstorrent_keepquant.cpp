@@ -327,6 +327,7 @@ ttnn::Tensor Neg0CacheGet(const ttnn::Shape& shape, MeshDevice& device) {
 // W1/W3 bit-exact pins carry over unchanged.
 std::optional<ttnn::Tensor> DecodeKeepQuantWordsFusedQ6K(
     const ttnn::Tensor& w, int64_t slice_rows, int64_t nb, MeshDevice& device);
+bool KeepQuantFusedDecodeEnabled();
 
 ttnn::Tensor DecodeKeepQuantWordsF32(const ttnn::Tensor& w, DType enc,
                                      int64_t slice_rows, int64_t nb,
@@ -1321,6 +1322,29 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
     }
     if (tile_cap)
       chunk = std::min(chunk, std::max<int64_t>(plane_bytes / (K * 16), 1));
+    // == TT-DECODE-FUSION wave 2 (TT-MATMUL-FUSION): the whole-decode fused
+    // arm. When the served encoding is Q6_K and the WHOLE weight's decoded
+    // f32 plane fits the same budget the chunk loop already enforces (the
+    // prod plane counted too on the exact-f32 decode arm), the chunk loop is
+    // bypassed: ONE fused-kernel launch decodes the entire word shadow (the
+    // wave-1 kernel, whole-extent rows — no slice, no per-chunk programs),
+    // then the chain's own single-chunk tail runs unchanged (typecast ->
+    // TILE -> ONE matmul / exact-f32 broadcast-dot -> the ROW_MAJOR partial).
+    // A launch that enqueued ~20 tt-metal programs (the per-chunk
+    // slice/decode/typecast/layout/matmul chains plus the concat) now
+    // enqueues ~6 (the fused decode, the typecast/layout pair, the matmul,
+    // the partial's typecast/layout pair) — the class-split verdict's
+    // program-count lever, the safe route: the matmul itself stays stock.
+    // Bit-exact by construction: the decode is the same kernel on the same
+    // word rows (the whole-extent window the chain's sl_alias case names),
+    // and every downstream op is the chain's own single-chunk iteration at
+    // the identical shape (chunking splits OUTPUT columns only, so a
+    // whole-weight dot equals the concatenated chunk dots elementwise).
+    // Declines: an unserved decode shape (env off, L1 over budget) falls to
+    // the chunk chain BY NAME — and identically in the eager and the
+    // captured pass (the decline is shape-determined), so the two passes
+    // never diverge in arm.
+    AllocTraceSnapshot(device, "KQuantGrouped/chunk-loop/pre");
     AllocTraceSnapshot(device, "KQuantGrouped/chunk-loop/pre");
     // Decode (P == 1) keeps the decoded f32 weight tile and widens the
     // staged activation to f32; the chunk dot runs in exact f32 SFPU (see
@@ -1333,8 +1357,70 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
     const bool f32exact = P == 1;
     if (f32exact)
       dev_a_f32exact = ttnn::typecast(dev_a, ttnn::DataType::FLOAT32);
+    // The wave-2 arm gate (see the comment above the chunk loop): Q6_K on
+    // the fused decode kernel, the WHOLE decoded plane (the exact-f32
+    // broadcast-dot's prod plane counted too) inside the same budget the
+    // chunk loop enforces. VT_TT_KEEPQUANT_MM_CHAIN=1 forces the chunk
+    // chain even where the fused arm serves — the named fallback kill
+    // switch, and the doctest's chain baseline leg.
+    bool force_chain = false;
+    if (const char* mm_chain = std::getenv("VT_TT_KEEPQUANT_MM_CHAIN");
+        mm_chain != nullptr && mm_chain[0] != '\0' &&
+        std::strcmp(mm_chain, "0") != 0)
+      force_chain = true;
+    bool fused_tile_tail = false;
+    bool fused_mm = !force_chain && enc == DType::kQ6_K &&
+                    KeepQuantFusedDecodeEnabled() &&
+                    (f32exact ? 2 : 1) * N * K * 4 <= plane_bytes;
+    std::optional<ttnn::Tensor> fused_wf;
+    if (fused_mm) {
+      fused_wf = DecodeKeepQuantWordsFusedQ6K(words, N, nb, device);
+      if (!fused_wf) {
+        std::fprintf(stderr,
+                     "[TT-KQ-FUSED-MM] whole-decode fused arm declined "
+                     "(rows=%lld nb=%lld) — the chunk chain serves\n",
+                     (long long)N, (long long)nb);
+        fused_mm = false;
+      }
+    }
     std::vector<ttnn::Tensor> partials;
-    partials.reserve(static_cast<size_t>((N + chunk - 1) / chunk));
+    partials.reserve(static_cast<size_t>(
+        fused_mm ? 1 : (N + chunk - 1) / chunk));
+    if (fused_mm) {
+      // The fused arm's single "chunk": the whole [N, K] decoded plane from
+      // the ONE launch above, then the chain's own single-chunk tail verbatim
+      // (sl_alias holds — the decode consumed the full-extent window).
+      ttnn::Tensor wf = std::move(*fused_wf);
+      ttnn::Tensor part;
+      if (f32exact) {
+        ttnn::Tensor wft = ttnn::to_layout(wf, ttnn::Layout::TILE);
+        TTReclaimPlanes(device, {&wf});
+        ttnn::Tensor prod = ttnn::multiply(wft, dev_a_f32exact);
+        part = ttnn::permute(
+            ttnn::sum(prod, ttsl::SmallVector<int>{1}, /*keep_dim=*/true),
+            ttsl::SmallVector<int64_t>{1, 0});  // [rows,1] -> [1,rows]
+        TTReclaimPlanes(device, {&wft, &prod});
+      } else {
+        ttnn::Tensor wbf = ttnn::typecast(wf, ttnn::DataType::BFLOAT16);
+        TTReclaimPlanes(device, {&wf});
+        ttnn::Tensor wb = ttnn::to_layout(wbf, ttnn::Layout::TILE);
+        TTReclaimPlanes(device, {&wbf});
+        part = ttnn::operations::matmul::matmul(
+            dev_a, wb, /*transpose_a=*/false, /*transpose_b=*/true);
+        TTReclaimPlanes(device, {&wb});
+      }
+      // The prefill arm's TILE fast tail: the matmul output typecasts f32
+      // IN the TILE domain (an elementwise op — every value bit-identical
+      // to the chain's ROW_MAJOR round-trip, which only reorders), and the
+      // assembly below commits it as-is — two fewer programs per launch,
+      // which is what puts the whole launch under the 32 KiB gate. The
+      // exact-f32 arm keeps the chain's permuted tail (its partial is the
+      // [1, rows] column, not a TILE).
+      fused_tile_tail = !f32exact;
+      ttnn::Tensor partf = ttnn::typecast(part, ttnn::DataType::FLOAT32);
+      TTReclaimPlanes(device, {&part});
+      partials.push_back(std::move(partf));
+    } else {
     for (int64_t c0 = 0; c0 < N; c0 += chunk) {
       const int64_t c1 = std::min(N, c0 + chunk);
       ttnn::Tensor sl = ttnn::slice(
@@ -1400,8 +1486,15 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
         TTReclaimPlanes(device, {&part, &partf});
       partials.push_back(std::move(partl));
     }
+    }  // !fused_mm
     AllocTraceSnapshot(device, "KQuantGrouped/chunk-loop/post");
-    ttnn::Tensor assembled =
+    ttnn::Tensor assembled;
+    if (fused_tile_tail) {
+      // The TILE fast tail: the single f32 TILE partial IS the commit form;
+      // no concat, no ROW_MAJOR round-trip.
+      assembled = std::move(partials[0]);
+    } else {
+    assembled =
         partials.size() == 1
             ? std::move(partials[0])
             : ttnn::concat(partials, /*dim=*/1);
@@ -1409,6 +1502,7 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
     // single-partial form moved the only entry into assembled; its buffer
     // IS the output and is never freed here.
     if (partials.size() > 1) TTReclaimPlanes(device, partials);
+    }
     if (Pa == 1 && P > 1) {
       // Broadcast contract: every output row is the SAME [1, K] activation
       // against expert 0 — replicate the assembled row. Bit-identical to the

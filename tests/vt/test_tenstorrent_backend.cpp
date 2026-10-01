@@ -11764,7 +11764,8 @@ TEST_CASE("kTENSTORRENT matmul region record class split (VT_TT_MMCLASS=1)") {
   const int64_t kM = std::atoll(std::getenv("VT_TT_MMCLASS_ROWS") ? std::getenv("VT_TT_MMCLASS_ROWS") : "64");
   const int64_t kK = std::atoll(std::getenv("VT_TT_MMCLASS_K") ? std::getenv("VT_TT_MMCLASS_K") : "5120");
   const int64_t kN = std::atoll(std::getenv("VT_TT_MMCLASS_N") ? std::getenv("VT_TT_MMCLASS_N") : "5120");
-  const int kLaunches = std::atoi(std::getenv("VT_TT_MMCLASS_LAUNCHES") ? std::getenv("VT_TT_MMCLASS_LAUNCHES") : "1");
+  // (the launch count is fixed at 1 for the wave-2 gate; the env-driven
+  // delta-bisect grid rows/K/N remain).
   Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
   REQUIRE(backend.SupportsGraphCapture());
   Queue q = backend.CreateQueue();
@@ -11795,22 +11796,50 @@ TEST_CASE("kTENSTORRENT matmul region record class split (VT_TT_MMCLASS=1)") {
   Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
                                   Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, kN});
 
-  // Warm: every program in the chain compiled, cached, and resident so the
-  // capture records only the per-launch record cost.
-  vt::MatmulBT(q, o_t, a_t, w_t);
+  // Warm: every program compiled, cached, and resident so the capture
+  // records only the per-launch record cost. The wave-2 gate: the DEFAULT
+  // (fused whole-decode) arm's captured MatmulBT launch must record
+  // <= 32,768 B — ONE fused-decode program + ONE stock matmul + the small
+  // typecast/layout tail — where the wave-1 per-chunk chain recorded
+  // 147,456 B (docs/bench-evidence/tt-matmul-class-split-20261001.md) and
+  // the pre-wave-1 chain 6,070,272 B. The FUSED leg runs FIRST: the region
+  // probe reads the device's LIVE trace-buffer total, so a region that
+  // opens while an earlier graph's trace is still resident closes with a
+  // polluted delta — the first region in the process is the only clean
+  // one. The VT_TT_KEEPQUANT_MM_CHAIN=1 chain leg runs second as the
+  // reported baseline (numbers informational there for exactly that
+  // reason; the gate's red-before is the recorded 147,456 B).
+  auto capture_one_launch = [&](const char* tag) {
+    vt::MatmulBT(q, o_t, a_t, w_t);  // the eager warm pass for this arm
+    vt::BreakableGraph graph;
+    {
+      vt::GraphCaptureScope scope(backend, q, graph, vt::GraphCaptureMode::kPiecewise);
+      vt::MatmulBT(q, o_t, a_t, w_t);
+    }
+    REQUIRE(graph.captured());
+    graph.Replay(q);
+    const std::vector<int64_t>& r = graph.region_bytes();
+    REQUIRE(!r.empty());
+    std::string t(tag);
+    MESSAGE("MMCLASS ", t, " shape [", kM, ",", kK, "]x[", kK, ",", kN,
+            "] launches=1 region_close=", r.back(), " B");
+    return r.back();
+  };
 
-  vt::BreakableGraph graph;
-  {
-    vt::GraphCaptureScope scope(backend, q, graph, vt::GraphCaptureMode::kPiecewise);
-    for (int i = 0; i < kLaunches; ++i) vt::MatmulBT(q, o_t, a_t, w_t);
-  }
-  REQUIRE(graph.captured());
-  graph.Replay(q);
-  const std::vector<int64_t>& rb = graph.region_bytes();
-  REQUIRE(!rb.empty());
-  MESSAGE("MMCLASS shape [", kM, ",", kK, "]x[", kK, ",", kN,
-          "] launches=", kLaunches, " regions=", rb.size(),
-          " region_close=", rb.back(), " B");
+  // -- the wave-2 fused whole-decode arm (the default) — THE GATE --
+  const int64_t fused_bytes = capture_one_launch("fused");
+  CHECK_MESSAGE(fused_bytes <= 32768,
+                "the fused MatmulBT launch recorded " << fused_bytes
+                << " B over the 32,768 B gate (the per-chunk chain's "
+                << "147,456 B baseline) — the launch still enqueues a "
+                << "multi-program chain");
+
+  // -- the reported chain baseline leg (VT_TT_KEEPQUANT_MM_CHAIN=1) --
+  setenv("VT_TT_KEEPQUANT_MM_CHAIN", "1", 1);
+  const int64_t chain_bytes = capture_one_launch("chain");
+  unsetenv("VT_TT_KEEPQUANT_MM_CHAIN");
+  MESSAGE("MMCLASS chain baseline (informational, probe-polluted by the "
+          "fused leg's resident trace): ", chain_bytes, " B");
   backend.Free(mem_a);
   backend.Free(mem_w);
   backend.Free(mem_o);
