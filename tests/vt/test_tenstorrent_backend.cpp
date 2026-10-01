@@ -11744,3 +11744,74 @@ TEST_CASE("kTENSTORRENT capture-scope upload refuses and the warmed capture reco
 
   backend.Free(mem);
 }
+
+// ─── tt-matmul-class-split: the focused MatmulBT region-record repro ────────
+// Diagnostic harness for the last unexplained trace-record class (issue
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ). A warmed MatmulBT chain is
+// captured into ONE region; the region close (LastTraceBytes probe) is the
+// recorded-stream size attributable to OUR MatmulBT program. Shape and launch
+// count are env-driven so the delta bisect can regress bytes against one
+// factor at a time (grid rows, K, N, launches). No gate: this case reports.
+TEST_CASE("kTENSTORRENT matmul region record class split (VT_TT_MMCLASS=1)") {
+  if (std::getenv("VT_TT_MMCLASS") == nullptr) {
+    MESSAGE("SKIPPED: set VT_TT_MMCLASS=1");
+    return;
+  }
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  const int64_t kM = std::atoll(std::getenv("VT_TT_MMCLASS_ROWS") ? std::getenv("VT_TT_MMCLASS_ROWS") : "64");
+  const int64_t kK = std::atoll(std::getenv("VT_TT_MMCLASS_K") ? std::getenv("VT_TT_MMCLASS_K") : "5120");
+  const int64_t kN = std::atoll(std::getenv("VT_TT_MMCLASS_N") ? std::getenv("VT_TT_MMCLASS_N") : "5120");
+  const int kLaunches = std::atoi(std::getenv("VT_TT_MMCLASS_LAUNCHES") ? std::getenv("VT_TT_MMCLASS_LAUNCHES") : "1");
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+  Queue q = backend.CreateQueue();
+
+  const int64_t kQ6Elems = vt::BlockElems(vt::DType::kQ6_K);  // 256
+  const int64_t kQ6Bytes = vt::BlockBytes(vt::DType::kQ6_K);  // 210
+  const int64_t kNb = kK / kQ6Elems;
+  std::mt19937 rng(20261001u);
+  std::vector<uint16_t> a_bf(static_cast<size_t>(kM) * kK);
+  for (auto& v : a_bf) v = vt::F32ToBF16(0.25f * static_cast<float>(rng() % 5));
+  std::vector<uint8_t> w_packed(static_cast<size_t>(kN) * kNb * kQ6Bytes);
+  for (size_t blk = 0; blk < w_packed.size() / static_cast<size_t>(kQ6Bytes); ++blk) {
+    uint8_t* p = w_packed.data() + blk * kQ6Bytes;
+    for (int i = 0; i < 208; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+    const uint16_t d_bits = vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+    std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+  }
+
+  void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+  void* mem_w = backend.Alloc(w_packed.size());
+  void* mem_o = backend.Alloc(static_cast<size_t>(kM) * kN * sizeof(float));
+  backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_w, w_packed.data(), w_packed.size());
+  Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, kK});
+  Tensor w_t = Tensor::Contiguous(mem_w, vt::DType::kQ6_K,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, kK});
+  Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, kN});
+
+  // Warm: every program in the chain compiled, cached, and resident so the
+  // capture records only the per-launch record cost.
+  vt::MatmulBT(q, o_t, a_t, w_t);
+
+  vt::BreakableGraph graph;
+  {
+    vt::GraphCaptureScope scope(backend, q, graph, vt::GraphCaptureMode::kPiecewise);
+    for (int i = 0; i < kLaunches; ++i) vt::MatmulBT(q, o_t, a_t, w_t);
+  }
+  REQUIRE(graph.captured());
+  graph.Replay(q);
+  const std::vector<int64_t>& rb = graph.region_bytes();
+  REQUIRE(!rb.empty());
+  MESSAGE("MMCLASS shape [", kM, ",", kK, "]x[", kK, ",", kN,
+          "] launches=", kLaunches, " regions=", rb.size(),
+          " region_close=", rb.back(), " B");
+  backend.Free(mem_a);
+  backend.Free(mem_w);
+  backend.Free(mem_o);
+}

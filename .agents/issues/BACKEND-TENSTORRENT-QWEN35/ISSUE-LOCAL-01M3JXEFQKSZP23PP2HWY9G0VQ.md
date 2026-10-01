@@ -414,3 +414,22 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   config-page packing failure vs prefetch-ring overflow vs captured
   device-side movement on one post-fusion-pin MatmulBT region. No upstream
   defect to file. Issue stays OPEN; whole-graph fit wall keeps standing.
+
+- 2026-10-01 (row/tt-matmul-class-split, worktree /tmp/vllm-region-capture-spec):
+  the class split LANDED and the last unexplained class is attributed. New
+  focused doctest `VT_TT_MMCLASS` (tests/vt/test_tenstorrent_backend.cpp):
+  one warmed MatmulBT capture at [64,5120]x[5120,5120] closes at **147,456 B**
+  (stock ttnn::matmul same shape: 10,240 B); launches=8 is linear at
+  ~143,945 B/launch; N=17408 gate/up records 540,672 B/launch. Logging-build
+  dispatch census (/tmp/mmsplit/logging1.full.log): the launch enqueues **20
+  tt-metal programs**, whose Command Sequence Summary TOTALs sum to 147,264 B
+  — the region close minus the 192 B header floor, i.e. FULLY attributed.
+  Candidates (a) non-identical pages (packed MCAST relay works),
+  (b) prefetch-ring overflow (15,872 B max one-shot fetch vs 1,024 KB fit),
+  (c) captured D2D (guards held) all REFUTED. Dominant class: (d) many
+  programs per launch, each at tt-metal's KB floor. Wave-2 fix: fuse the
+  chain to 1-2 full-grid kernels (kKeepQuantDecodeFusedKernelSrc style),
+  locus tenstorrent_keepquant.cpp:1279 + MatmulBT dispatch in
+  tenstorrent_ops.cpp; expected 147,456 -> ~8-16 KB/launch (~10-18x).
+  Evidence: docs/bench-evidence/tt-matmul-class-split-20261001.md. Issue
+  stays OPEN; c1/c2 re-measure legs stay blocked behind the wave-2 fuse.
