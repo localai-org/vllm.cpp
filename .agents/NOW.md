@@ -22,12 +22,11 @@ no per-row change needs to touch this file at all.
 
 Token-exact (or ratified distributional) vs pinned vLLM; ≥ throughput and ≤
 latency/memory on every axis, both gate models, reproduced 2–3x idle. See
-[verification](verification.md). Pin: vLLM <!--pin:commit-->`e126687a9a`<!--/pin--> (<!--pin:label-->0.28.1rc1.dev132<!--/pin-->) since
-2026-09-03 (#2817). **A gate HAS now run at it and it PASSED** (2026-09-04, job
+[verification](verification.md). Pin: vLLM <!--pin:commit-->`a7c23ac96d`<!--/pin--> (<!--pin:label-->0.3.0.dev267<!--/pin-->), advanced
+2026-09-26 from `e126687a9a` (pinned 2026-09-03, #2817) by sync `4f11dfc10`. The gate named below ran at that PRIOR pin (2026-09-04, job
 `7386f034-246a-4af5-9a04-f98aafffce54`, `dgx:gpu0`, 2h15m): the OPT candidate
 captured at the target is byte-identical to the committed bar --
-`IDS mismatched_positions 0 of 96`, `IDS_BYTE_EQUAL True`,
-`SELECTOR K=5 multi_valued_cells 0`, `TOKENGATE_VERDICT PASS`. The default
+`IDS mismatched_positions 0 of 96`, `IDS_BYTE_EQUAL True`, `SELECTOR K=5 multi_valued_cells 0`, `TOKENGATE_VERDICT PASS`. The default
 FLASH_ATTN backend produced the tokens, so the FA-on-GB10 risk did not fire. Our
 arm's 96/96 carries over unchanged because the candidate's bytes are identical to
 the bar it already passed. The BENCHMARK baselines are still measured at
