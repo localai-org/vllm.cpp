@@ -1,9 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/tmp/vllm-region-capture-spec/build2/cmake_install.cmake",
-		"/tmp/vllm-region-capture-spec/build2/tests/cmake_install.cmake",
-		"/tmp/vllm-region-capture-spec/build2/examples/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
