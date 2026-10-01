@@ -40,6 +40,7 @@
 #include "vllm/model_executor/layers/attention/attention.h"
 #include "vllm/model_executor/layers/linear.h"            // UnquantizedMlpGateUpGeluMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // Pool
 #include "vllm/model_executor/models/gemma3_decode_graph.h"
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
@@ -469,9 +470,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   // matching torch's bf16-scalar multiply.
   DBuf hidden(d, DType::kBF16, {T, H});
   {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+    EmbedGather(d, hidden, token_ids, weights.embed_tokens, vocab, H,
+                "gemma3 embed");
   }
   StepInputs si = BuildStepInputs(d, positions, attn_meta, config);
   return ForwardLayers(d, std::move(hidden), si, attn_meta, attn_kv, weights, config,

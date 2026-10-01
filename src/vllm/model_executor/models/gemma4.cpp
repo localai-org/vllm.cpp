@@ -47,6 +47,7 @@
 
 #include "vllm/model_executor/layers/linear.h"             // UnquantizedMlpGateUpGeluMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // Pool
 #include "vllm/model_executor/models/gemma4_moe.h"
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
@@ -464,9 +465,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
     // one did H2D-into-`tok` then D2D-into-`hidden`). Recorded under `## Owed`.
     d.b.Copy(d.q, tok.ptr(), inputs_embeds_override->data, tok.bytes());
   } else {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, tok.t(), dtab, dids.t());
+    EmbedGather(d, tok, token_ids, weights.embed_tokens, vocab, H,
+                "gemma4 embed");
     const float nsqrt = std::sqrt(static_cast<float>(H));
     const double normalizer =
         static_cast<double>(vt::BF16ToF32(vt::F32ToBF16(nsqrt)));

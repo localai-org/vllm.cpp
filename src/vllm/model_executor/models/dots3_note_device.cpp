@@ -166,6 +166,7 @@
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/deepseek_v2.h"  // MlaStep / BuildMlaStep
 #include "vllm/model_executor/models/dense_attn_block.h"
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/dense_weight_loaders.h"
 #include "vllm/model_executor/models/mla_attention.h"
 #include "vt/backend.h"
@@ -1222,11 +1223,8 @@ ForwardLogits Dots3NoteModel::ForwardDevice(
     d.b.Copy(d.q, hidden_buf.ptr(), emb.data,
              static_cast<size_t>(T * H) * vt::SizeOf(DType::kBF16));
   } else {
-    DBuf ids(d, DType::kI32, {T}, token_ids.data());
-    Tensor tab = ResidentWeight(d, dw.embed_tokens, {vocab, H});
-    Tensor h = hidden_buf.t();
-    Tensor idt = ids.t();
-    vt::Embedding(d.q, h, tab, idt);
+    EmbedGather(d, hidden_buf, token_ids, dw.embed_tokens, vocab, H,
+                "dots3-note embed");
   }
 
   // ── the residual stream (deepseek_v2.py:1262-1345, unchanged by dots3) ────

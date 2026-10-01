@@ -389,7 +389,9 @@ ENGINE_PREFIXES = (
 # family, SERVE-RECIPE-ARGS / -REQUEST-LENGTH-GUARD, LOAD-GGUF-MMPROJ and the
 # attention-window row. Bumped because a new row EXISTS, never to make a
 # transition pass.
-ENGINE_ROWS = 179
+# 180 since 2026-09-29: +1 row (ENG-HOST-EMBEDDING, the host-resident token
+# table). Bumped because a new row EXISTS, never to make a transition pass.
+ENGINE_ROWS = 180
 
 ENGINE_SUMMARY_SECTIONS = (
     ("Engine and scheduling", "Engine core and scheduling"),

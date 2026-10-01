@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/ResidentWeight
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/muse_glimmer.h"
 #include "vllm/model_executor/models/qwen3_5.h"        // PagedKvCache, GdnStateCache
@@ -261,11 +262,12 @@ std::vector<uint16_t> MuseGlimmerMergeMultimodalEmbeds(
   {
     std::vector<uint16_t> ones_host(static_cast<size_t>(H), vt::F32ToBF16(1.0f));
     DBuf ones(d, DType::kBF16, {H}, ones_host.data());
-    Tensor tab = ResidentWeight(d, weights.embed_tokens, {t.vocab_size, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
     DBuf emb(d, DType::kBF16, {T, H});
     DBuf normed(d, DType::kBF16, {T, H});
-    vt::Embedding(d.q, emb.t(), tab, dids.t());
+    // This function downloads the normed rows anyway, so the host gather also
+    // skips building the device table on this arm.
+    EmbedGather(d, emb, token_ids, weights.embed_tokens, t.vocab_size, H,
+                "muse_glimmer mm embed");
     vt::RmsNorm(d.q, normed.t(), emb.t(), ones.t(),
                 vt::RmsNormArgs{t.rms_norm_eps, /*gemma=*/false});
     normed.Download(d, bits.data());

@@ -33,6 +33,7 @@
 #include "vllm/model_executor/layers/attention/mla_chunked_context.h"
 #include "vllm/model_executor/layers/linear.h"             // UnquantizedMlpGateUpMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/ResidentWeight glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/deepseek_v2.h"       // BuildMlaBatchSplit/MlaBatchSplit
 #include "vllm/model_executor/models/device_pool.h"       // Pool()
 #include "vllm/model_executor/models/mla_attention.h"
@@ -245,9 +246,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   // Embed then scale by scale_emb (minicpm.py:441-443).
   DBuf res(d, DType::kBF16, {T, H});
   {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, res.t(), dtab, dids.t());
+    EmbedGather(d, res, token_ids, weights.embed_tokens, vocab, H,
+                "minicpm3 embed");
   }
   vt::MulScalar(d.q, res.t(), res.t(), p.scale_emb);
 

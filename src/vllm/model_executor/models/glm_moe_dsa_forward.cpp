@@ -57,6 +57,7 @@
 #include "vllm/model_executor/moe_placement_seam.h"
 #include "vllm/model_executor/layers/linear.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/deepseek_v2.h"  // MlaStep / BuildMlaStep
 #include "vllm/model_executor/models/mla_attention.h"
 #include "vllm/platforms/interface.h"
@@ -656,27 +657,12 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   expert_stream::ExpertStreamStepGuard step_guard;
 
   DBuf hidden(d, DType::kBF16, {T, p.hidden_size});
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
-  // #1305/#2544/#2596 — TAKE the asynchronous runner's DEVICE identifiers and
-  // splice them over the ids just uploaded from the host. On the async serving
-  // path the runner's combine writes each decode row's sampled token into the
-  // DEVICE buffer on the main queue and leaves `token_ids` deliberately stale
-  // for decode rows (`v1/worker/gpu/runner.cpp`, the mirror arm, which is the
-  // DEFAULT on CUDA — integrated as well as discrete). Without this line this
-  // model embedded that stale host vector, so every step after the first
-  // generated from token id 0 while the run still returned rc=0. The copy is
-  // enqueued on the main queue, so it is ordered AFTER the combine that
-  // produced it rather than racing it, and it is a no-op returning false on
-  // every path that is not the asynchronous CUDA runner.
-  detail::ApplyDeviceTokenIds(d.b, d.q, dids.ptr(), T, "glm-dsa embed");
-  Tensor htab = ResidentWeight(d, weights.embed_tokens,
-                               {p.vocab_size, p.hidden_size});
-  Tensor h = hidden.t();
   // The embedding table is BLOCK-QUANTIZED (Q4_K on this artifact) and stays
   // that way: `vt::Embedding` dequantizes ONE ROW per gathered id, mirroring
   // `ggml_compute_forward_get_rows_q`. Expanding a `[154880, 6144]` table to
   // bf16 would be 1.77 GiB for the sake of a gather.
-  vt::Embedding(d.q, h, htab, dids.t());
+  dense_attn::EmbedGather(d, hidden, token_ids, weights.embed_tokens,
+                          p.vocab_size, p.hidden_size, "glm-dsa embed");
   return ForwardLayers(d, hidden.t(), positions, am, attn_kv, weights,
                        logits_indices);
 }

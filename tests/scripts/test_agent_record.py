@@ -1135,6 +1135,48 @@ class MtpDepthRowIsCounted(unittest.TestCase):
         index = tracked_issues(self)
         self.assertIn("issues/81)", index)
 
+class HostEmbeddingRowIsCounted(unittest.TestCase):
+    """The host-resident token table row is counted and carries its records.
+
+    Adding the row bumped the engine-matrix counts AND the pinned `ENGINE_ROWS`,
+    which the checker enforces as an anti-drift pin. This class is the executable
+    half of that bump: the row must exist exactly once, name its spec and its
+    claim, and its spec must carry the structured sections the checker requires
+    of an ACTIVE row's spec. Deleting the row, its spec link, its claim owner or
+    a required section each turns one of these red.
+    """
+
+    ROW = "ENG-HOST-EMBEDDING"
+
+    def test_the_row_exists_once_in_the_engine_matrix(self) -> None:
+        text = (ROOT / ".agents/engine-matrix.md").read_text(encoding="utf-8")
+        matching = [
+            line for line in text.splitlines() if line.startswith(f"| `{self.ROW}` |")
+        ]
+        self.assertEqual(len(matching), 1, f"{self.ROW} must appear exactly once")
+
+    def test_the_row_names_its_spec_and_its_claim(self) -> None:
+        text = (ROOT / ".agents/engine-matrix.md").read_text(encoding="utf-8")
+        row = next(l for l in text.splitlines() if l.startswith(f"| `{self.ROW}` |"))
+        self.assertIn("specs/host-embedding.md", row)
+        self.assertIn("`CLAIM-ENG-HOST-EMBEDDING`", row)
+
+    def test_the_spec_carries_the_structured_sections(self) -> None:
+        spec = (ROOT / ".agents/specs/host-embedding.md").read_text(encoding="utf-8")
+        for heading in (
+            "## Scope",
+            "## Upstream chain",
+            "## Our baseline",
+            "## Port map",
+            "## Tests to port",
+            "## Dependencies",
+            "## Work breakdown",
+            "## Risks and decisions",
+            "## Gates",
+        ):
+            self.assertIn(heading, spec, heading)
+
+
 class CanonicalIssueRecordTests(unittest.TestCase):
     def record(self, number: int) -> object:
         return agent_record.issue_records.IssueRecord(

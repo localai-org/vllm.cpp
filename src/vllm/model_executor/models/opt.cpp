@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/ResidentWeight/KvSlice glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // DevicePool/Pool/ActivePool (shared)
 #include "vllm/model_executor/models/qwen3_5_common.h"    // HostLogits
 #include "vllm/platforms/interface.h"
@@ -260,9 +261,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   OPTStepInputs si = BuildOPTStepInputs(d, positions, attn_meta);
   DBuf hidden(d, DType::kBF16, {T, H});
   {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+    EmbedGather(d, hidden, token_ids, weights.embed_tokens, vocab, H,
+                "opt embed");
 
     const int64_t p_rows = weights.embed_positions.shape[0];
     Tensor ptab = ResidentWeight(d, weights.embed_positions, {p_rows, H});

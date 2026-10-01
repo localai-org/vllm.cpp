@@ -104,6 +104,7 @@
 // header rather than dense_device_glue.h — `ResidentWeight`, the lazy
 // upload-once seam this row converts NemotronH's dense weights onto.
 #include "vllm/model_executor/models/dense_attn_block.h"
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/moe_placement_seam.h"
 #include "vt/backend.h"
 #include "vt/ops.h"
@@ -1085,10 +1086,8 @@ std::vector<float> NemotronHDeviceForward(const NemotronHHostWeights& host,
     for (int32_t id : ids) {
       VT_CHECK(id >= 0 && id < V, "NemotronH device forward: token id out of range");
     }
-    DBuf it(d, DType::kI32, {T}, ids.data());
-    d.b.Synchronize(d.q);  // `ids` is a local; see UploadAs for why this waits.
-    Tensor tab = ResidentWeight(d, host.embeddings);
-    vt::Embedding(d.q, residual.t(), tab, it.t());
+    EmbedGather(d, residual, token_ids, host.embeddings, V, H,
+                "nemotron_h embed");
   }
 
   vt::RmsNormArgs nargs;

@@ -29,6 +29,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/ResidentWeight
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/gemma4.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"        // GdnStateCache, PagedKvCache
@@ -147,11 +148,8 @@ std::vector<uint16_t> EmbedScaledBf16(Dev d, const Gemma4Weights& weights,
   const int64_t H = config.hidden_size;
   const int64_t T = static_cast<int64_t>(ids.size());
   DBuf emb(d, DType::kBF16, {T, H});
-  {
-    Tensor tab = ResidentWeight(d, weights.embed_tokens, {config.vocab_size, H});
-    DBuf dids(d, DType::kI32, {T}, ids.data());
-    vt::Embedding(d.q, emb.t(), tab, dids.t());
-  }
+  EmbedGather(d, emb, ids, weights.embed_tokens, config.vocab_size, H,
+              "gemma4 mm embed");
   const float nsqrt = std::sqrt(static_cast<float>(H));
   const double normalizer = static_cast<double>(vt::BF16ToF32(vt::F32ToBF16(nsqrt)));
   vt::MulScalar(d.q, emb.t(), emb.t(), normalizer);

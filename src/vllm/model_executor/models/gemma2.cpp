@@ -34,6 +34,7 @@
 
 #include "vllm/model_executor/layers/linear.h"             // UnquantizedMlpGateUpGeluMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // Pool
 #include "vllm/model_executor/models/qwen3_5_common.h"     // HostLogits
 #include "vt/backend.h"
@@ -308,9 +309,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   // Embed then scale by sqrt(hidden) cast to bf16 (gemma2.py:276-283).
   DBuf hidden(d, DType::kBF16, {T, H});
   {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+    EmbedGather(d, hidden, token_ids, weights.embed_tokens, vocab, H,
+                "gemma2 embed");
   }
   const float nsqrt = std::sqrt(static_cast<float>(H));
   const double normalizer = static_cast<double>(vt::BF16ToF32(vt::F32ToBF16(nsqrt)));

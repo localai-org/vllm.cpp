@@ -25,6 +25,7 @@
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/decode_graph_sizes.h"  // DecodeGraphSizes/PadToCaptureSize
 #include "vllm/model_executor/models/dense_attn_block.h"   // AttnBlock, BuildStepInputs, ResidentWeight
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/dense_weight_loaders.h"
 #include "vllm/model_executor/models/qwen3_vl_text.h"       // Qwen3VLMergeMultimodal (modality-agnostic merge)
 #include "vllm/model_executor/models/voxtral_loader_internal.h"  // the two mmap-reading loader steps (#772)
@@ -191,11 +192,9 @@ using dense_attn::MakeTensor;
 // then captures/replays ForwardLastLogits over that fixed hidden address.
 void VoxtralEmbedInto(Dev d, DBuf& hidden, const std::vector<int32_t>& token_ids,
                       const Qwen3DenseWeights& weights, const HfConfig& config) {
-  const int64_t T = static_cast<int64_t>(token_ids.size());
-  Tensor tab =
-      ResidentWeight(d, weights.embed_tokens, {config.vocab_size, config.hidden_size});
-  DBuf ids(d, DType::kI32, {T}, token_ids.data());
-  vt::Embedding(d.q, hidden.t(), tab, ids.t());
+  dense_attn::EmbedGather(d, hidden, token_ids, weights.embed_tokens,
+                          config.vocab_size, config.hidden_size,
+                          "voxtral embed");
 }
 
 // Overwrite dst's CONTENTS from src WITHOUT changing dst.data() when the sizes

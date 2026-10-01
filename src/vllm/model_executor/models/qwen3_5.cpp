@@ -22,6 +22,7 @@
 #include "vllm/model_executor/models/dense_exl3_linear.h"  // MODEL-QWEN35-EXL3 (#2495): the EXL3 linear seam
 #include "vllm/model_executor/models/dense_fp8_block_gemm.h"  // MODEL-FP8-BLOCK-LINEAR (#1189 M4)
 #include "vllm/model_executor/models/dense_device_glue.h"
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
 #include "vt/tenstorrent/tenstorrent_device.h"  // DebugDeviceReadbackF32 (TT-only debug seam)
 
@@ -807,6 +808,7 @@ using v1::GDNAttentionMetadata;
 // migrating them is a separate change with its own gate.
 using dense_attn::DBuf;
 using dense_attn::Dev;
+using dense_attn::HostEmbedInto;
 using dense_attn::MakeTensor;
 using dense_attn::Reshape;
 using dense_attn::ResolveDevicePoolPolicy;
@@ -8287,6 +8289,7 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
 // runs the (dense or MoE) decoder layer + final norm over it. `embed_tokens` is
 // the shared target embedding; `target_hidden_states` is the target model's
 // post-final-norm bf16 [T,H] output (the drafter's hidden-state tap).
+
 DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
                    const HfConfig& config, const OwnedTensor& embed_tokens,
                    const std::vector<int32_t>& input_ids,
@@ -8295,11 +8298,14 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
   const int64_t vocab_size = config.vocab_size;
   const float eps = static_cast<float>(config.rms_norm_eps);
 
-  Tensor embedding_table = Qwen3_5EmbeddingTable(device.b, device.q, embed_tokens,
-                                                vocab_size, hidden_size);
-  DBuf device_ids(device, DType::kI32, {tokens}, input_ids.data());
   DBuf embedding(device, DType::kBF16, {tokens, hidden_size});
-  vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
+  if (!HostEmbedInto(device, embedding, input_ids, embed_tokens, vocab_size,
+                     hidden_size)) {
+    Tensor embedding_table = Qwen3_5EmbeddingTable(
+        device.b, device.q, embed_tokens, vocab_size, hidden_size);
+    DBuf device_ids(device, DType::kI32, {tokens}, input_ids.data());
+    vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
+  }
 
   Tensor embedding_norm_weight =
       ResidentWeight(device, weights.pre_fc_norm_embedding, {hidden_size});
@@ -8760,17 +8766,19 @@ static void EmbedInto(Dev d, DBuf& hidden, const std::vector<int32_t>& token_ids
     std::fprintf(stderr, "[TT-FWD] EmbedInto T=%lld H=%lld\n",
                  static_cast<long long>(T), static_cast<long long>(H));
 const int64_t vocab = config.vocab_size;
-  Tensor dtab =
-      Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
-  // ENG-ASYNC-SCHED W4: when the async runner has already placed this step's
-  // input ids on the device (and spliced each decode row's sampled token into
-  // them there), embed straight from that buffer. `token_ids` is stale for
-  // decode rows in that case BY DESIGN — materializing it on the host is the
-  // synchronize W4 removes — so it must not be uploaded here. Its SIZE is still
-  // authoritative: the runner sized the device buffer from the same step.
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
-  ApplyDeviceTokenIdsOverride(d, dids, T);
-  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  if (!HostEmbedInto(d, hidden, token_ids, weights.embed_tokens, vocab, H)) {
+    Tensor dtab =
+        Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
+    // ENG-ASYNC-SCHED W4: when the async runner has already placed this step's
+    // input ids on the device (and spliced each decode row's sampled token into
+    // them there), embed straight from that buffer. `token_ids` is stale for
+    // decode rows in that case BY DESIGN — materializing it on the host is the
+    // synchronize W4 removes — so it must not be uploaded here. Its SIZE is still
+    // authoritative: the runner sized the device buffer from the same step.
+    DBuf dids(d, DType::kI32, {T}, token_ids.data());
+    ApplyDeviceTokenIdsOverride(d, dids, T);
+    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  }
 }
 
 // DFlash DF-AUX-TAPS (SPEC-DFLASH D1) — capture the residual-stream value at a
@@ -9430,12 +9438,14 @@ std::vector<float> Qwen3_5Model::ForwardDense(const std::vector<int32_t>& token_
   Dev d{vt::GetBackend(queue.device.type), queue};
   const float eps = static_cast<float>(config.rms_norm_eps);
 
-  // Embed: hidden = embed_tokens[token_ids] (bf16, device-resident). res = 0.
-  Tensor dtab =
-      Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
+  // Embed: hidden = embed_tokens[token_ids]. res = 0.
   DBuf hidden(d, ActDType(d), {T, H});
-  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  if (!HostEmbedInto(d, hidden, token_ids, weights.embed_tokens, vocab, H)) {
+    Tensor dtab =
+        Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
+    DBuf dids(d, DType::kI32, {T}, token_ids.data());
+    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  }
 
   DBuf res(d, ResidualDType(d), {T, H});
   res.Zero(d);
@@ -9479,11 +9489,14 @@ std::vector<float> Qwen3_5Model::ForwardMoeHidden(
   Dev d{vt::GetBackend(queue.device.type), queue};
   const float eps = static_cast<float>(config.rms_norm_eps);
 
-  Tensor dtab =
-      Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, config.vocab_size, H);
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
   DBuf hidden(d, ActDType(d), {T, H});
-  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  if (!HostEmbedInto(d, hidden, token_ids, weights.embed_tokens,
+                     config.vocab_size, H)) {
+    Tensor dtab = Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens,
+                                        config.vocab_size, H);
+    DBuf dids(d, DType::kI32, {T}, token_ids.data());
+    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  }
 
   DBuf res(d, ResidualDType(d), {T, H});
   res.Zero(d);
@@ -9519,15 +9532,17 @@ std::vector<float> Qwen3_5DenseModel::ForwardDense(
   Dev d{vt::GetBackend(queue.device.type), queue};
   const float eps = static_cast<float>(config.rms_norm_eps);
 
-  // Embed: hidden = embed_tokens[token_ids] (bf16, device-resident). res = 0.
+  // Embed: hidden = embed_tokens[token_ids]. res = 0.
   // For a TEXT-only step the three mRoPE position streams are identical, so the
   // partial NeoX RoPE in FullAttnBlock degenerates to 1-D RoPE over `positions`
   // (notes §2). The vision tower / image-video merger are DEFERRED.
-  Tensor dtab =
-      Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
   DBuf hidden(d, ActDType(d), {T, H});
-  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  if (!HostEmbedInto(d, hidden, token_ids, weights.embed_tokens, vocab, H)) {
+    Tensor dtab =
+        Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
+    DBuf dids(d, DType::kI32, {T}, token_ids.data());
+    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  }
 
   DBuf res(d, ResidualDType(d), {T, H});
   res.Zero(d);
@@ -9566,11 +9581,14 @@ std::vector<float> Qwen3_5DenseModel::ForwardDenseHidden(
   Dev d{vt::GetBackend(queue.device.type), queue};
   const float eps = static_cast<float>(config.rms_norm_eps);
 
-  Tensor dtab =
-      Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, config.vocab_size, H);
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
   DBuf hidden(d, ActDType(d), {T, H});
-  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  if (!HostEmbedInto(d, hidden, token_ids, weights.embed_tokens,
+                     config.vocab_size, H)) {
+    Tensor dtab = Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens,
+                                        config.vocab_size, H);
+    DBuf dids(d, DType::kI32, {T}, token_ids.data());
+    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  }
 
   DBuf res(d, ResidualDType(d), {T, H});
   res.Zero(d);
@@ -9967,6 +9985,9 @@ static void DenseEmbedInto(Dev d, DBuf& hidden,
   const int64_t T = static_cast<int64_t>(token_ids.size());
   const int64_t H = config.hidden_size;
   const int64_t vocab = config.vocab_size;
+  if (HostEmbedInto(d, hidden, token_ids, weights.embed_tokens, vocab, H)) {
+    return;
+  }
   Tensor dtab =
       Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
   DBuf dids(d, DType::kI32, {T}, token_ids.data());

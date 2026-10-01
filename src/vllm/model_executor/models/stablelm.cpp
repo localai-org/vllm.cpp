@@ -25,6 +25,7 @@
 
 #include "vllm/model_executor/layers/linear.h"             // UnquantizedMlpGateUpMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // shared device glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // DevicePool/Pool
 #include "vllm/model_executor/models/qwen3_5_common.h"     // HostLogits
 #include "vt/backend.h"
@@ -193,9 +194,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
 
   DBuf hidden(d, DType::kBF16, {T, H});
   {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+    EmbedGather(d, hidden, token_ids, weights.embed_tokens, vocab, H,
+                "stablelm embed");
   }
 
   StepInputs si = BuildStepInputs(d, positions, attn_meta, config);

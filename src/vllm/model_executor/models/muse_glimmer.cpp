@@ -54,6 +54,7 @@
 
 #include "vllm/model_executor/layers/linear.h"            // UnquantizedMlpGateUpMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // Pool
 #include "vllm/model_executor/models/qwen3_5_common.h"    // HostLogits
 #include "vt/backend.h"
@@ -392,10 +393,9 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
     // a buffer it reuses across steps (#2300).
     d.b.Copy(d.q, hidden.ptr(), inputs_embeds->data, hidden.bytes());
   } else {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
     DBuf emb(d, DType::kBF16, {T, H});
-    vt::Embedding(d.q, emb.t(), dtab, dids.t());
+    EmbedGather(d, emb, token_ids, weights.embed_tokens, vocab, H,
+                "muse_glimmer embed");
     vt::RmsNorm(d.q, hidden.t(), emb.t(), ones_hidden.t(),
                 vt::RmsNormArgs{g.norm_eps, /*gemma=*/false});
   }

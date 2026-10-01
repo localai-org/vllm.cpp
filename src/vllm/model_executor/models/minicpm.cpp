@@ -26,6 +26,7 @@
 
 #include "vllm/model_executor/layers/linear.h"             // UnquantizedMlpGateUpMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // shared device glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"       // DevicePool/Pool
 #include "vllm/model_executor/models/qwen3_5_common.h"     // HostLogits
 #include "vt/backend.h"
@@ -225,9 +226,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   // Embed then scale by scale_emb (minicpm.py:441-443).
   DBuf res(d, DType::kBF16, {T, H});
   {
-    Tensor dtab = ResidentWeight(d, weights.embed_tokens, {vocab, H});
-    DBuf dids(d, DType::kI32, {T}, token_ids.data());
-    vt::Embedding(d.q, res.t(), dtab, dids.t());
+    EmbedGather(d, res, token_ids, weights.embed_tokens, vocab, H,
+                "minicpm embed");
   }
   vt::MulScalar(d.q, res.t(), res.t(), scale_emb);
 

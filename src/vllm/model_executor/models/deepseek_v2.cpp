@@ -77,6 +77,7 @@
 #include "vllm/model_executor/moe_placement_seam.h"
 #include "vllm/model_executor/layers/linear.h"             // UnquantizedMlpGateUpMethod seam
 #include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/ResidentWeight glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/device_pool.h"
 #include "vllm/model_executor/models/mla_attention.h"
 #include "vllm/model_executor/models/qwen3_5_internal.h"  // detail::DeviceTokenIds
@@ -577,14 +578,9 @@ void EmbedInto(Dev d, DBuf& hidden, const Tensor& ids,
 
 void EmbedInto(Dev d, DBuf& hidden, const std::vector<int32_t>& token_ids,
                const DeepseekV2Weights& weights) {
-  const int64_t T = static_cast<int64_t>(token_ids.size());
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
-  // #1305: the eager arms of these two registrations had the SAME defect as the
-  // graph arm — they embedded the host vector and never looked at the device
-  // mirror. The override's copy is enqueued on the main queue, so it is ordered
-  // AFTER the combine that produced it rather than racing it.
-  detail::ApplyDeviceTokenIds(d.b, d.q, dids.ptr(), T, "deepseek v2 embed");
-  EmbedInto(d, hidden, dids.t(), weights);
+  const DeepseekV2Params& p = weights.params;
+  EmbedGather(d, hidden, token_ids, weights.embed_tokens, p.vocab_size,
+              p.hidden_size, "deepseek v2 embed");
 }
 
 // The CAPTURABLE region: everything after the embedding — the MLA step metadata

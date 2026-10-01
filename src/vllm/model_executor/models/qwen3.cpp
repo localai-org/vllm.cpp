@@ -52,6 +52,7 @@
 #include "vllm/model_executor/layers/quantization/compressed_tensors/schemes/nvfp4.h"  // LinearMethod seam
 #include "vllm/model_executor/models/decode_graph_sizes.h"  // DecodeGraphSizes/PadToCaptureSize
 #include "vllm/model_executor/models/dense_attn_block.h"  // shared AttnBlock + device glue
+#include "vllm/model_executor/models/host_embedding.h"  // VT_HOST_EMBEDDING gather
 #include "vllm/model_executor/models/dense_nvfp4_gemm.h"  // NVFP4 W4A16 dispatch
 #include "vllm/model_executor/models/device_pool.h"     // DevicePool/Pool/ActivePool (shared)
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
@@ -216,54 +217,17 @@ void GatherRows(Dev d, void* dst, const Tensor& src, const std::vector<int32_t>&
     d.b.Copy(d.q, dp + s * rb, sp + static_cast<size_t>(idx[s]) * rb, rb);
 }
 
-// ROW-SERVE-ASYNC-DENSE-MIRROR (ENG-ASYNC-SCHED W4 / the #31 P0, ported to the
-// classic dense family): overwrite the REAL prefix of a freshly uploaded input-id
-// buffer with the device-resident ids the async runner's combine produced. The
-// exact analogue of qwen3_5.cpp's ApplyDeviceTokenIdsOverride — that TU wired it
-// for the gate models (MoE + 27B dense); this is the identical consumer for the
-// SHARED pure-dense driver (Qwen3ForCausalLM and every registry that routes
-// through Qwen3DenseModel / EmbedInto: InternLM2, Mistral, Llama).
-//
-// WHY: on the async serving loop (AsyncLLM depth-2) the sampled token is NOT
-// written to token_ids_cpu synchronously; the runner's device combine splices each
-// decode row's real token into the device input-ids on the MAIN QUEUE while the
-// host `token_ids` vector stays stale. The default host upload below then RACES
-// that device write (unsynchronized device-write/host-read), nondeterministically
-// embedding the stale/zero placeholder -> token-0 degeneration. Copying the
-// device ids over the DBuf prefix here is main-queue-ordered AFTER the combine, so
-// the embed never does the racing host read — exactly upstream (states.py:64
-// device-resident prev_sampled_token_ids + gpu_model_runner.py GPU gather).
-//
-// The override is published by the registry forward's detail::DeviceTokenIdsScope
-// and CONSUMED here on first use; null on every path except the CUDA async runner,
-// so with no override this is byte-identical to the pre-fix host upload.
-// #1305: the take-and-clear and the bounds-checked copy this used to spell out
-// are `detail::ApplyDeviceTokenIds` (`qwen3_5_internal.h`), one body for the four
-// models that consume the scope. Behaviour, ordering and the refusal message are
-// unchanged; only the copy count is.
-static void ApplyDeviceTokenIdsOverride(Dev d, DBuf& dids, int64_t T) {
-  detail::ApplyDeviceTokenIds(d.b, d.q, dids.ptr(), T, "qwen3 dense embed");
-}
-
-// Embed: hidden[T,H] bf16 = embed_tokens[token_ids] (device-resident table). KEPT
-// OUTSIDE THE CUDA-GRAPH (mirrors qwen3_moe.cpp / qwen3_5.cpp EmbedInto): the CUDA
-// Embedding op allocates a device bounds-check flag (cudaMalloc/cudaFree) and syncs
-// the stream, both illegal inside a capture region — and it consumes the HOST
+// Embed: hidden[T,H] bf16 = embed_tokens[token_ids]. KEPT OUTSIDE THE
+// CUDA-GRAPH (mirrors qwen3_moe.cpp / qwen3_5.cpp EmbedInto): the CUDA Embedding
+// op allocates a device bounds-check flag (cudaMalloc/cudaFree) and syncs the
+// stream, both illegal inside a capture region — and it consumes the HOST
 // token_ids. The graph driver runs this per step into its PERSISTENT hidden buffer,
-// then captures/replays ForwardLayers over that fixed hidden address.
+// then captures/replays ForwardLayers over that fixed hidden address. The table
+// residency and the async device-id override are `EmbedGather`'s.
 void EmbedInto(Dev d, DBuf& hidden, const std::vector<int32_t>& token_ids,
                const Qwen3DenseWeights& weights, const HfConfig& config) {
-  const int64_t T = static_cast<int64_t>(token_ids.size());
-  Tensor dtab = ResidentWeight(d, weights.embed_tokens,
-                               {config.vocab_size, config.hidden_size});
-  // ROW-SERVE-ASYNC-DENSE-MIRROR: when the async runner has already placed this
-  // step's input ids on the device (and spliced each decode row's sampled token
-  // into them there), embed straight from that buffer. `token_ids` is stale for
-  // decode rows in that case BY DESIGN — materializing it on the host is the
-  // synchronize the async path removes — so its real prefix is overwritten here.
-  DBuf dids(d, DType::kI32, {T}, token_ids.data());
-  ApplyDeviceTokenIdsOverride(d, dids, T);
-  vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+  EmbedGather(d, hidden, token_ids, weights.embed_tokens, config.vocab_size,
+              config.hidden_size, "qwen3 dense embed");
 }
 
 // The CAPTURABLE region: everything AFTER the embedding — the residual stream

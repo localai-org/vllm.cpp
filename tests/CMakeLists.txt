@@ -4177,6 +4177,16 @@ vllm_cpp_add_test(test_qwen3_5_lm_head_dtypes
 vllm_cpp_add_test(test_qwen3_5_dense_load_residency
   vllm/models/test_qwen3_5_dense_load_residency.cpp)
 
+# ENG-HOST-EMBEDDING: the host-resident token table. The host arm must produce
+# the pinned-oracle rows AND leave the table off the device (d_dev null), which
+# is the half a gather that uploaded first would pass. The flag is process-static,
+# so the binary enables it before the first gather and is flag-ON by construction.
+vllm_cpp_add_test(test_host_embedding vllm/models/test_host_embedding.cpp)
+# The override cases publish through `detail::DeviceTokenIdsScope`, which lives
+# in the not-installed `src/vllm/model_executor/models/qwen3_5_internal.h` beside
+# the other `detail::` seams; same reach as test_expert_stream_steps.
+target_include_directories(test_host_embedding PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 # QUANT-QWEN38-27B-NVFP4-ARM W4 (#821, .agents/specs/qwen38-27b-quant-arms.md):
 # the compressed-tensors `mixed-precision` accounting + scheme-resolution gate
 # for `unsloth/Qwen3.8-27B-NVFP4`. Hermetic — it reads the two COMMITTED
