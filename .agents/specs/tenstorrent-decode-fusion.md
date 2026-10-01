@@ -309,16 +309,17 @@ policy).
 
 ## Now
 
-2026-09-30 (row/tt-decode-fusion, commit 1d84f00a6): the fused Q6_K
-decode arm LANDED — `kKeepQuantDecodeFusedKernelSrc` +
-`DecodeKeepQuantWordsFusedQ6K` (src/vt/tenstorrent/
-tenstorrent_keepquant.cpp), dispatched from `DecodeKeepQuantWordsF32` on
-the served encoding, the chain kept as the named fallback
-(VT_TT_KEEPQUANT_FUSED=0, or an L1-budget decline by name). The bit-exact
-doctest (idle-core + partial-last-core tails, zero-d/zero-scale blocks)
-and the red gate are in tests/vt/test_tenstorrent_backend.cpp. MEASURED:
-the keepquant region gate reads 32,768 B (was 2,965,504 B RED) — GREEN at
-the 64 KiB floor, 90.5x. NEXT: full-suite green bar, then the 27B money
-legs (c1 INT8DOT=0 first) for BENCH_EXIT + TPOT and the whole-graph trace
-re-measure. Evidence lands in
-docs/bench-evidence/tt-decode-fusion-20260930.md.
+2026-10-02 (row/tt-matmul-fusion, commit 443e70bc0): WAVE 2 LANDED — the
+whole-decode fused MatmulBT arm. When the encoding is Q6_K and the whole
+decoded f32 plane fits the chunk budget, ONE fused-kernel launch decodes
+the entire word shadow and ONE stock matmul consumes it (~6 tt-metal
+programs per launch, was ~20); the TILE-domain partial tail commits
+directly. The captured [64,5120]x[5120,5120] launch records 23,552 B
+(was 147,456 B — red-first recorded on HEAD; gate <= 32,768 B GREEN,
+6.26x). The fused-vs-chain memcmp golden is byte-identical on four tail
+shapes; VT_TT_KEEPQUANT_MM_CHAIN=1 is the named chain kill switch.
+Evidence: docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. NEXT:
+the 27B money legs (c1 INT8DOT=0 first) for BENCH_EXIT + TPOT, then c1
+INT8DOT=1, c2 INT8DOT=0, c2 INT8DOT=1 — each on its own reset — and the
+whole-graph trace re-measure. Full-suite green bar pending in the same
+session.

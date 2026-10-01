@@ -433,3 +433,21 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   tenstorrent_ops.cpp; expected 147,456 -> ~8-16 KB/launch (~10-18x).
   Evidence: docs/bench-evidence/tt-matmul-class-split-20261001.md. Issue
   stays OPEN; c1/c2 re-measure legs stay blocked behind the wave-2 fuse.
+
+- 2026-10-02 (row/tt-matmul-fusion, worktree /tmp/vllm-region-capture-spec):
+  the wave-2 whole-decode fuse LANDED on the safe route the class-split
+  verdict names. The E=1 dense arm now serves Q6_K shapes whose whole
+  decoded f32 plane fits the chunk budget through ONE fused-kernel decode
+  launch + ONE stock matmul + a TILE-domain partial tail (~6 tt-metal
+  programs per launch, was ~20); the exact-f32 decode arm, over-budget
+  planes, and every unserved encoding fall to the proven chunk chain by
+  name, and VT_TT_KEEPQUANT_MM_CHAIN=1 forces the chain (the named kill
+  switch). MEASURED: the captured [64,5120]x[5120,5120] launch records
+  **23,552 B** where the chain recorded 147,456 B (red-first: the new
+  gate read 147,456 B on HEAD — byte-exact the class-split number — and
+  failed the <= 32,768 B gate; green after). Bit-exactness: the
+  fused-vs-chain memcmp golden is byte-identical on four shapes (prefill
+  partial/idle tails, single-chunk prefill, exact-f32 P=1 both forms,
+  zero d/scale blocks mixed in). Evidence:
+  docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. Issue stays
+  OPEN pending the 27B c1/c2 re-measure legs this wave unblocks.
