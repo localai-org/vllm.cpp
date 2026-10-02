@@ -2082,9 +2082,10 @@ void kernel_main() {
     const uint8_t* x = reinterpret_cast<const uint8_t*>(wp);
     for (uint32_t b = 0; b < nb; ++b, x += word_bytes) {
       // Q4_K block: d(f16) dmin(f16) scales[12] qs[128]. The host's
-      // GetScaleMinK4 (tenstorrent_keepquant.cpp:493-522): groups is<4 take
-      // the low pair scales[is]/scales[is+4], groups is>=4 take scales[is+4]
-      // low/high nibbles plus the top 2 bits of scales[is-4]/scales[is].
+      // GetScaleMinK4 (tenstorrent_keepquant.cpp:493-524): groups is<4 take
+      // the low pair scales[is]&63/scales[is+4]&63; groups is>=4 take
+      // sc = scales[is+4]&0xF | scales[is-4] top-2-bits and
+      // m = scales[is+4]>>4 | scales[is] top-2-bits.
       const float d = kq_f16_bits_to_f32(kq_load16(x));
       const float dmin = kq_f16_bits_to_f32(kq_load16(x + 2));
       float scf[8];
@@ -2092,10 +2093,10 @@ void kernel_main() {
       for (uint32_t g = 0; g < 4; ++g) {
         scf[g] = static_cast<float>(x[4 + g] & 63);
         mmf[g] = static_cast<float>(x[4 + g + 4] & 63);
-        scf[g + 4] = static_cast<float>((x[4 + g + 4] & 0xF) |
+        scf[g + 4] = static_cast<float>((x[4 + g + 8] & 0xF) |
                                         ((x[4 + g] >> 6) << 4));
-        mmf[g + 4] = static_cast<float>((x[4 + g + 4] >> 4) |
-                                        ((x[4 + g] >> 6) << 4));
+        mmf[g + 4] = static_cast<float>((x[4 + g + 8] >> 4) |
+                                        ((x[4 + g + 4] >> 6) << 4));
       }
       cb_reserve_back(CB_O, 1);
       float* outp = reinterpret_cast<float*>(get_write_ptr(CB_O));
