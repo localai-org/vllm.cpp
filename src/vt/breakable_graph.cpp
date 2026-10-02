@@ -123,12 +123,27 @@ void CopyOutput(Backend& b, Queue& q, std::map<std::string, Tensor>& dst,
 
 BreakableGraph::~BreakableGraph() { Reset(); }
 
+// tt-27b-region-capture: the installed byte probe. Function-local static so TU
+// order never decides who owns it; the Tenstorrent registrar installs
+// `LastTraceBytesForTest`, everyone else leaves the null that records nothing.
+GraphRegionBytesProbe& RegionBytesProbe() {
+  static GraphRegionBytesProbe probe = nullptr;
+  return probe;
+}
+
+void SetGraphRegionBytesProbe(GraphRegionBytesProbe probe) {
+  RegionBytesProbe() = probe;
+}
+
 void BreakableGraph::Reset() {
   if (backend_ != nullptr) {
     for (void* g : segments_) backend_->DestroyGraph(g);
   }
   segments_.clear();
   break_fns_.clear();
+  // The census describes the released capture, the same rule `replays_` and the
+  // failure accessors below follow.
+  region_bytes_.clear();
   // The replay count describes the graph that was just released. Leaving it
   // behind makes the next capture report replays it never ran, and G3's whole
   // job is to be the number nobody has to trust twice.
@@ -252,6 +267,9 @@ GraphCaptureScope::~GraphCaptureScope() {
 
 void GraphCaptureScope::BeginSegment() {
   if (!active_ || segment_open_) return;
+  // tt-27b-region-capture: the byte level BEFORE this segment records, so the
+  // close computes what THIS region contributed alone.
+  if (GraphRegionBytesProbe probe = RegionBytesProbe()) region_bytes_base_ = probe();
   b_->BeginCapture(*q_);
   segment_open_ = true;
 }
@@ -266,6 +284,17 @@ void GraphCaptureScope::EndSegment() {
   segment_open_ = false;  // cleared FIRST: a throwing end must not be retried
   void* seg = b_->EndCaptureGraph(*q_);
   g_->segments_.push_back(seg);
+  // tt-27b-region-capture: the per-region census entry (see region_bytes()).
+  // VT_REGION_CENSUS prints per segment, because a capture that DIES
+  // mid-scope (the 27B fit collision does) must still leave its per-region
+  // record: the post-scope summary only exists for a capture that finished.
+  if (GraphRegionBytesProbe probe = RegionBytesProbe()) {
+    const int64_t bytes = probe() - region_bytes_base_;
+    g_->region_bytes_.push_back(bytes);
+    if (std::getenv("VT_REGION_CENSUS") != nullptr)
+      std::fprintf(stderr, "[REGION-CAPTURE] segment %zu: %lld B staging\n",
+                   g_->region_bytes_.size() - 1, static_cast<long long>(bytes));
+  }
   g_segments.fetch_add(1, std::memory_order_relaxed);
 }
 

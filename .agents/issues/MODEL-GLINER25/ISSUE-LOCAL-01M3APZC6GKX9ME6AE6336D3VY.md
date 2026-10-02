@@ -1,6 +1,6 @@
 ID: ISSUE-LOCAL-01M3APZC6GKX9ME6AE6336D3VY
 Title: Port fastino/GLiNER2.5-Decide SystemOne-class decision classifier
-Row: MODEL-GLINER25-DECIDE
+Row: MODEL-GLINER25
 State: OPEN
 Kind: feature
 GitHub: -

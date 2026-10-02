@@ -160,5 +160,11 @@ All on CPU, 2026-09-30.
 
 ## Owed
 
-- The bf16 token gate against pinned vLLM `a7c23ac96d` on a GPU lease.
-  Tracked by `ISSUE-LOCAL-01M3S0ZTRRVQWCZ35W33AJJNN8`.
+- The bf16 token gate against pinned vLLM `a7c23ac96d` on a GPU lease (see
+  [Tracked](#tracked)).
+
+## Tracked
+
+- `ISSUE-LOCAL-01M3S0ZTRRVQWCZ35W33AJJNN8`, the row-owned issue under
+  `.agents/issues/MODEL-MM-muse-glimmer-muse-glimmer-for-conditional-generation/`,
+  tracks the bf16 token gate above.

@@ -11,8 +11,8 @@ the agent-facing parity inventory with upstream file references see
 **Legend.** ✅ supported and gated. ◐ partial, usable with named gaps. ☐ not yet.
 n/a means the feature does not apply to that engine's design.
 
-Reference versions: vLLM <!--pin:label-->0.28.1rc1.dev132<!--/pin--> (<!--pin:commit-->`e126687a9a`<!--/pin-->, the parity pin since
-2026-09-03), SGLang v0.5.15, llama.cpp `b10451`, MLX-LM as of 2026-07. Rows
+Reference versions: vLLM <!--pin:label-->0.3.0.dev267<!--/pin--> (<!--pin:commit-->`a7c23ac96d`<!--/pin-->, the parity pin since
+2026-09-26), SGLang v0.5.15, llama.cpp `b10451`, MLX-LM as of 2026-07. Rows
 describing what vLLM has were read at the PRIOR pin `555967922` unless they say
 otherwise; the 290-commit-range PORT-NOW queue for the advance is classified and
 unworked (#2611). Competitor columns describe what those projects ship, and
@@ -43,8 +43,8 @@ The `GlmMoeDsaForCausalLM` ROCm arm is the worked example: the run was real at
 
 *Results.* Every "vs vLLM" figure on this page was captured at the **prior**
 parity pin `555967922` and **has not been re-validated** at the
-current pin <!--pin:commit-->`e126687a9a`<!--/pin-->, which advanced on
-2026-09-03. `.agents/oracles/vllm.md` states in its own words that the pin
+current pin <!--pin:commit-->`a7c23ac96d`<!--/pin-->, which advanced on
+2026-09-26. `.agents/oracles/vllm.md` states in its own words that the pin
 advance "does NOT say any gate in this tree has been run against it", and
 `.agents/NOW.md` records "**NO gate has run at it**". The rows below name
 `vLLM 0.25.0` where that is the version they were measured against. Tracked

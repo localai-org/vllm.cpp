@@ -70,7 +70,7 @@ stayed in the rule. `.agents/issue-index.md` is a *correct implementation* of a
 defective rule, which is why fixing the file alone would not hold.
 
 **Half of the checker is union-driver defense.** `check_issue_index`
-(`check-agent-record.py:2018`) spends its preamble-drift check, its duplicate-row
+(`check-agent-record.py:2044`) spends its preamble-drift check, its duplicate-row
 check and the whole of `check-issue-index-append-only.py` on failure modes that
 exist only because two branches append to one file. Their own messages say so:
 *"A union merge DUPLICATES an edited preamble line"*, *"Under `merge=union` a
@@ -116,7 +116,7 @@ and degradation to `REMOTE_UNVERIFIED` rather than an exception or a silent
 empty result. `--refresh` calls `gh issue list --state open --json
 number,title,body,labels`, parses `Row:` out of each body, and writes
 `.agents/issue-index.generated.md` in the table shape the consumers already
-parse, so `ISSUE_ROW` (`check-agent-record.py:1960`) needs no change. A failed
+parse, so `ISSUE_ROW` (`check-agent-record.py:2052`) needs no change. A failed
 call writes nothing — a partial snapshot is worse than none, because a consumer
 cannot tell it apart from a complete one.
 
@@ -138,7 +138,7 @@ files an issue anywhere, so a ratchet on it would red `main` for reasons no
 commit caused — a new lock in a new place. Instead the gate resolves the issues
 *this change references* (its branch commits and its PR body) and requires each
 to name a `Row:` or appear under a spec's `## Owed`. `owed_issues()`
-(`check-agent-record.py:2000`) already globs specs network-free and is unchanged.
+(`check-agent-record.py:2017`) already globs specs network-free and is unchanged.
 
 **5. Attribution is enforced once.** `scripts/agent-pr-body.py` stays and is the
 authority, because it reads the exact bytes `squash_merge_commit_message =
