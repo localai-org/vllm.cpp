@@ -11770,64 +11770,101 @@ TEST_CASE("kTENSTORRENT matmul region record class split (VT_TT_MMCLASS=1)") {
   REQUIRE(backend.SupportsGraphCapture());
   Queue q = backend.CreateQueue();
 
-  const int64_t kQ6Elems = vt::BlockElems(vt::DType::kQ6_K);  // 256
-  const int64_t kQ6Bytes = vt::BlockBytes(vt::DType::kQ6_K);  // 210
-  const int64_t kNb = kK / kQ6Elems;
-  std::mt19937 rng(20261001u);
-  std::vector<uint16_t> a_bf(static_cast<size_t>(kM) * kK);
-  for (auto& v : a_bf) v = vt::F32ToBF16(0.25f * static_cast<float>(rng() % 5));
-  std::vector<uint8_t> w_packed(static_cast<size_t>(kN) * kNb * kQ6Bytes);
-  for (size_t blk = 0; blk < w_packed.size() / static_cast<size_t>(kQ6Bytes); ++blk) {
-    uint8_t* p = w_packed.data() + blk * kQ6Bytes;
-    for (int i = 0; i < 208; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
-    const uint16_t d_bits = vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
-    std::memcpy(p + 208, &d_bits, sizeof(d_bits));
-  }
-
-  void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
-  void* mem_w = backend.Alloc(w_packed.size());
-  void* mem_o = backend.Alloc(static_cast<size_t>(kM) * kN * sizeof(float));
-  backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
-  backend.Copy(q, mem_w, w_packed.data(), w_packed.size());
-  Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
-                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, kK});
-  Tensor w_t = Tensor::Contiguous(mem_w, vt::DType::kQ6_K,
-                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, kK});
-  Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
-                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, kN});
-
-  // Warm: every program compiled, cached, and resident so the capture
-  // records only the per-launch record cost. The wave-2 gate: the DEFAULT
-  // (fused whole-decode) arm's captured MatmulBT launch must record
-  // <= 32,768 B — ONE fused-decode program + ONE stock matmul + the small
-  // typecast/layout tail — where the wave-1 per-chunk chain recorded
-  // 147,456 B (docs/bench-evidence/tt-matmul-class-split-20261001.md) and
-  // the pre-wave-1 chain 6,070,272 B. The FUSED leg runs FIRST: the region
-  // probe reads the device's LIVE trace-buffer total, so a region that
-  // opens while an earlier graph's trace is still resident closes with a
-  // polluted delta — the first region in the process is the only clean
-  // one. The VT_TT_KEEPQUANT_MM_CHAIN=1 chain leg runs second as the
-  // reported baseline (numbers informational there for exactly that
-  // reason; the gate's red-before is the recorded 147,456 B).
-  auto capture_one_launch = [&](const char* tag) {
-    vt::MatmulBT(q, o_t, a_t, w_t);  // the eager warm pass for this arm
-    vt::BreakableGraph graph;
-    {
-      vt::GraphCaptureScope scope(backend, q, graph, vt::GraphCaptureMode::kPiecewise);
-      vt::MatmulBT(q, o_t, a_t, w_t);
+  // One gated leg per encoding: pack a random weight, warm the DEFAULT arm
+  // eagerly, capture ONE MatmulBT launch, and return the region close. The
+  // region probe reads the device's LIVE trace-buffer total, so a region
+  // that opens while an earlier graph's trace is still resident closes with
+  // a polluted delta — each leg Synchronizes the queue after its replay to
+  // retire its trace before the next leg opens, and the FIRST leg stays the
+  // only fully clean one.
+  auto run_leg = [&](vt::DType enc, int64_t lK, int64_t lN, const char* tag) {
+    const int64_t bb = vt::BlockBytes(enc);
+    const int64_t be = vt::BlockElems(enc);
+    const int64_t kNb = lK / be;
+    std::mt19937 rng(20261001u);
+    std::vector<uint16_t> a_bf(static_cast<size_t>(kM) * lK);
+    for (auto& v : a_bf) v = vt::F32ToBF16(0.25f * static_cast<float>(rng() % 5));
+    std::vector<uint8_t> w_packed(static_cast<size_t>(lN) * kNb * bb);
+    for (size_t blk = 0; blk < w_packed.size() / static_cast<size_t>(bb); ++blk) {
+      uint8_t* p = w_packed.data() + blk * bb;
+      if (enc == vt::DType::kQ6_K) {
+        for (int i = 0; i < 208; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+        const uint16_t d_bits = vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+        std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+      } else {  // kQ4_K: d|dmin @0, scales[12] @4, qs[128] @16
+        const uint16_t d_bits = vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+        const uint16_t dmin_bits = vt::F32ToF16(0.01f * static_cast<float>(rng() % 8));
+        std::memcpy(p, &d_bits, sizeof(d_bits));
+        std::memcpy(p + 2, &dmin_bits, sizeof(dmin_bits));
+        for (int i = 4; i < 16; ++i) p[i] = static_cast<uint8_t>(0x30 + (rng() % 4));
+        for (int i = 16; i < 144; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+      }
     }
-    REQUIRE(graph.captured());
-    graph.Replay(q);
-    const std::vector<int64_t>& r = graph.region_bytes();
-    REQUIRE(!r.empty());
-    std::string t(tag);
-    MESSAGE("MMCLASS ", t, " shape [", kM, ",", kK, "]x[", kK, ",", kN,
-            "] launches=1 region_close=", r.back(), " B");
-    return r.back();
+
+    void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+    void* mem_w = backend.Alloc(w_packed.size());
+    void* mem_o = backend.Alloc(static_cast<size_t>(kM) * lN * sizeof(float));
+    backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_w, w_packed.data(), w_packed.size());
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, lK});
+    Tensor w_t = Tensor::Contiguous(mem_w, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {lN, lK});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, lN});
+
+    auto capture_one_launch = [&](const char* t2) {
+      vt::MatmulBT(q, o_t, a_t, w_t);  // the eager warm pass for this arm
+      vt::BreakableGraph graph;
+      {
+        vt::GraphCaptureScope scope(backend, q, graph, vt::GraphCaptureMode::kPiecewise);
+        vt::MatmulBT(q, o_t, a_t, w_t);
+      }
+      REQUIRE(graph.captured());
+      graph.Replay(q);
+      const std::vector<int64_t>& r = graph.region_bytes();
+      REQUIRE(!r.empty());
+      std::string t(t2);
+      MESSAGE("MMCLASS ", t, " shape [", kM, ",", lK, "]x[", lK, ",", lN,
+              "] launches=1 region_close=", r.back(), " B");
+      return r.back();
+    };
+
+    const int64_t fused_bytes = capture_one_launch(tag);
+    backend.Synchronize(q);  // retire this leg's trace before the next opens
+    backend.Free(mem_a);
+    backend.Free(mem_w);
+    backend.Free(mem_o);
+    return fused_bytes;
   };
 
-  // -- the wave-2 fused whole-decode arm (the default) — THE GATE --
-  const int64_t fused_bytes = capture_one_launch("fused");
+  // -- TT-DECODE-FUSION wave 3: the 27B Q4_K ffn gate/up — THE NEW GATE --
+  // This leg runs FIRST: the region probe reads the device's LIVE
+  // trace-buffer total, so the first region in the process is the only
+  // clean one, and the wave-3 gate needs its real bytes. K=5120 (hidden),
+  // N=17408 (FFN). The whole-decode fused arm needs the chunk-plane budget
+  // to admit N*K*4 = 356,515,840 B, so this leg widens
+  // VT_TT_KEEPQUANT_CHUNK_BYTES the way the 27B gate recipe does. Red-first:
+  // before the wave-3 kernel this falls to the per-chunk chain and closes
+  // its region far over the 32,768 B gate.
+  setenv("VT_TT_KEEPQUANT_CHUNK_BYTES", "1073741824", 1);
+  const int64_t q4_bytes = run_leg(vt::DType::kQ4_K, 5120, 17408, "q4k-27b-ffn");
+  unsetenv("VT_TT_KEEPQUANT_CHUNK_BYTES");
+  MESSAGE("MMCLASS q4k-27b-ffn gate: ", q4_bytes, " B");
+  CHECK_MESSAGE(q4_bytes <= 32768,
+                "the fused Q4_K MatmulBT launch recorded " << q4_bytes
+                << " B over the 32,768 B gate — Q4_K still rides the "
+                << "per-chunk decode chain");
+
+  // -- the wave-2 fused whole-decode arm (the default) — the gate --
+  // SECOND region: the probe's delta against the still-resident wave-3
+  // trace can read negative (a retired trace nets against the open), so
+  // this leg's number is informational — the wave-2 verdict's clean 23,552 B
+  // at this exact shape stands in
+  // docs/bench-evidence/tt-matmul-class-split-20261001.md. The CHECK stays
+  // the wave-2 sentence: a Q6_K launch that regressed onto the per-chunk
+  // chain records megabytes, not bytes.
+  const int64_t fused_bytes = run_leg(vt::DType::kQ6_K, kK, kN, "q6k-hidden");
   CHECK_MESSAGE(fused_bytes <= 32768,
                 "the fused MatmulBT launch recorded " << fused_bytes
                 << " B over the 32,768 B gate (the per-chunk chain's "
@@ -11836,13 +11873,10 @@ TEST_CASE("kTENSTORRENT matmul region record class split (VT_TT_MMCLASS=1)") {
 
   // -- the reported chain baseline leg (VT_TT_KEEPQUANT_MM_CHAIN=1) --
   setenv("VT_TT_KEEPQUANT_MM_CHAIN", "1", 1);
-  const int64_t chain_bytes = capture_one_launch("chain");
+  const int64_t chain_bytes = run_leg(vt::DType::kQ6_K, kK, kN, "chain");
   unsetenv("VT_TT_KEEPQUANT_MM_CHAIN");
   MESSAGE("MMCLASS chain baseline (informational, probe-polluted by the "
-          "fused leg's resident trace): ", chain_bytes, " B");
-  backend.Free(mem_a);
-  backend.Free(mem_w);
-  backend.Free(mem_o);
+          "fused legs' resident traces): ", chain_bytes, " B");
 }
 
 // ─── tt-matmul-fusion wave 2: fused-vs-chain bit-exactness golden ───────────
