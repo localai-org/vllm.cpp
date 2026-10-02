@@ -21,3 +21,19 @@ Scope: three rows in docs/ENVIRONMENT.md (two under "Rollback and bisect switche
 ## Resolution
 
 Fixed in the row PR: VT_VK_DISABLE and VT_VK_DISABLE_PAGED_ATTN documented under "Rollback and bisect switches" and VT_VK_FENCE_TIMEOUT_MS under "Diagnostic" (whose table already carries behaviour-changing bisect entries). The three allowlist lines an earlier attempt added are reverted; the allowlist is consumed as a plain set and is not sort-enforced, so removal is order-free. check-env-doc.py goes from the three-name failure to "OK: all 450 production env vars are documented or classified kernel-internal." plus "OK: all 213 env vars documented in a user-facing table are read by compiled code (0 declared exception(s))"; tests/scripts/test_check_env_doc.py passes; check-device-leakage stays green.
+
+## Executed verification, 2026-10-02 (Linux x86_64)
+
+Requested by the mudler-agent review (focused checker + remove-each-entry
+mutation, blocked upstream by host ENOSPC). Measured on this branch:
+
+- `python3 scripts/check-env-doc.py`: rc=0 -- all 452 production env vars
+  documented or classified kernel-internal; all 212 documented vars read by
+  compiled code.
+- `python3 tests/scripts/test_check_env_doc.py`: 30/30 OK.
+- Mutation, one allowlist line at a time: deleting `VT_VK_DISABLE_PAGED_ATTN`
+  makes the gate rc=1 naming exactly `VT_VK_DISABLE_PAGED_ATTN` as
+  undocumented; deleting `VT_VK_DISABLE` likewise names exactly it; both
+  restored -> rc=0. The allowlist entries are load-bearing and the gate
+  detects each removal individually.
+
