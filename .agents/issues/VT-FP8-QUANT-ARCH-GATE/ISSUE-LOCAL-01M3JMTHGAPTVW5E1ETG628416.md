@@ -25,3 +25,22 @@ Measured on Windows, Python 3.12, at upstream/main 1de097c46. The gate has never
 ## Resolution
 
 -
+
+## Executed verification, 2026-10-02 (Linux x86_64)
+
+Requested by the mudler-agent review (executed Windows-path focused test and
+mutation). The native host is POSIX, so the Windows spelling was emulated
+faithfully: `Path.relative_to` was monkeypatched to return `PureWindowsPath`,
+which makes `str()` produce backslashes exactly as a Windows host does, and
+the checker was driven through its real `check()` entry point.
+
+- Pre-fix checker (`HEAD^` revision) under Windows-spelled paths: 4 errors --
+  for each of kQuantFp8Static and kQuantFp8Group, `expected exactly ONE live
+  RegisterOp ... found 0` together with `src\vt\cuda\cuda_quant_fp8.cu ...
+  is ALSO registered for kCUDA here`. Both halves of the reported
+  contradiction, with the backslash key visible verbatim.
+- Fixed checker under the same emulation: 0 errors.
+- POSIX host, unmodified run: `check-cuda-op-arch-gate: OK (2 op(s) pinned to
+  an unconditional CUDA TU)`; `tests/scripts/test_check_cuda_op_arch_gate.py`
+  14/14 OK, including the four gate mutations.
+
