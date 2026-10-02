@@ -12131,9 +12131,6 @@ static bool RegionCaptureRequested() {
   }();
   return v;
 }
-// The GDN precedent's fit number (tenstorrent_capture.cpp:90).
-constexpr int64_t kRegionCaptureBudgetBytes = 50 * 1024 * 1024;
-
 // ─── Qwen3_5DenseDecodeGraph (27B dense decode CUDA-graph driver) ────────────
 // The 27B DENSE sibling of Qwen3_5DecodeGraph. Same cold→warm→replay state
 // machine, same padded-batch capture set (kDecodeGraphSizes), same persistent
