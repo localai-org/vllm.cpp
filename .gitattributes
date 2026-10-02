@@ -3,7 +3,7 @@
 src/vt/cuda/triton_aot_vendored/** linguist-generated=true
 
 # ---------------------------------------------------------------------------
-# Line endings. Scoped, NOT a blanket `* text=auto eol=lf`.
+# Line endings.
 #
 # Several checkers compare file content as EXACT BYTES, so a CRLF checkout
 # makes them fail on content that is correct. The worst case is
@@ -15,18 +15,24 @@ src/vt/cuda/triton_aot_vendored/** linguist-generated=true
 # `agent-issue-index.py --refresh` can never pass -- permanently, and for a
 # reason that reads like a bad record rather than a bad environment.
 #
-# These rules cover only the paths a byte-exact checker actually reads.
-# `ab-arms-differ.py` and `check-release-binary-contract.py` were audited and
-# are NOT line-ending sensitive (one scans an ELF for a byte root, the other
-# splits on a NUL pair), so they are deliberately left alone.
-.agents/**/*.md text eol=lf
-scripts/*.py text eol=lf
-tests/parity/goldens/deepseek_v4_vision/** text eol=lf
+# Measured scope, not a guess: a `core.autocrlf=true` clone + checkout of this
+# revision was compared against the LF worktree. The record surface is wider
+# than *.md -- .agents/completed/*.csv manifests, .agents/evidence/** JSON and
+# stdout captures, .agents/specs/*.log and *.patch, and .agents/scripts/*.sh /
+# *.py all arrived CRLF while the .md rows stayed LF. There are ZERO binary
+# blobs under .agents/ or scripts/ (2488 and 313 files scanned), so a
+# directory-wide text rule is safe; and there are ZERO tracked text blobs
+# outside docs/bench-evidence that contain \r\n, so this policy normalises
+# nothing that exists today -- it only stops the class from arriving.
+* text=auto eol=lf
 
 # Captured bench evidence, where a CR is part of the recorded artifact and must
-# survive verbatim. These are the ONLY tracked text blobs in the tree that
-# contain CRLF (3 of 7114, measured at 1de097c46); marking them -text means a
-# future blanket policy cannot silently rewrite evidence.
-docs/bench-evidence/oracle-vllm-gfx1151-20260903/job-phase2.txt -text
-docs/bench-evidence/strix-kernel-trace-3015-20260907/profile-dependencies.log.txt -text
-docs/bench-evidence/vllm-gguf-plugin-thor-20260903/gen-20260903T012806Z.log -text
+# survive verbatim. Pinned directory-wide rather than file-by-file: the tree
+# carries more CR-bearing text logs than the three files that contain \r\n
+# (progress-bar carriage returns in limb3-strict-gate and q4km-neartie logs),
+# and any of them committed from an autocrlf checkout would be rewritten.
+docs/bench-evidence/** -text
+
+# Parity goldens are fixture bytes -- .npy/.i32/.raw tensors and generated
+# manifests -- never line-ending-normalised.
+tests/parity/goldens/** -text

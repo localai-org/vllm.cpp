@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-27
+Updated: 2026-10-02
 Closed: -
 
 ## Problem
@@ -20,9 +20,12 @@ MEASURED 2026-09-27 on a Windows checkout at 1de097c46, for ISSUE-GH-148: the ar
 
 The fix is the line endings, NOT the checker. Making the comparison CR-tolerant would widen a checker to make a gate green, which AGENTS.md forbids without a spec and red-before evidence, and byte-exactness is the invariant the record actually depends on.
 
-SCOPE IS DELIBERATELY NARROW, and that is an evidence-backed choice rather than caution. A blanket * text=auto eol=lf was considered and rejected: scanning all 7114 tracked text blobs finds exactly 3 containing CRLF, and all three are captured bench-evidence logs (docs/bench-evidence/oracle-vllm-gfx1151-20260903/job-phase2.txt, docs/bench-evidence/strix-kernel-trace-3015-20260907/profile-dependencies.log.txt, docs/bench-evidence/vllm-gguf-plugin-thor-20260903/gen-20260903T012806Z.log) where the carriage returns are part of the recorded artifact and must never be renormalised. Those are marked -text so a future blanket rule cannot silently mutate evidence.
+SCOPE REVISED 2026-10-02 after review asked for the checkout test. The first cut covered only .agents/**/*.md, scripts/*.py and the DeepSeek-V4-Vision fixture dir, reasoning that those were the paths a byte-exact checker reads. A core.autocrlf=true clone + checkout of the branch showed that framing was wrong in BOTH directions:
 
-The rules cover only the paths a byte-exact checker reads: the .agents markdown records and frozen archive, the scripts themselves (whose literals are compared), and the DeepSeek-V4-Vision fixture directory that check-deepseek-v4-vision-manifests.py byte-compares against generated LF-terminated JSON. ab-arms-differ.py and check-release-binary-contract.py were audited and are NOT line-ending sensitive (one scans an ELF for a byte root, the other splits on a NUL pair), so they are left alone.
+- The record surface is wider than *.md. On the autocrlf checkout the .md rows stayed LF, but .agents/completed/*.csv manifests, .agents/evidence/** JSON/stdout captures, .agents/specs/*.log and *.patch, and .agents/scripts/*.sh / *.py all arrived CRLF -- the same byte-exact hazard one directory over.
+- The policy normalises nothing that exists. Scanning the index finds ZERO text blobs outside docs/bench-evidence containing \r\n, and ZERO binary blobs under .agents/ (2488 files) or scripts/ (313), so a whole-tree * text=auto eol=lf is safe and rewrites no stored content -- it only stops the class from arriving.
+
+The policy is therefore `* text=auto eol=lf` with two byte-preserving pins. docs/bench-evidence/** is pinned -text directory-wide, not file-by-file: the directory carries three true-CRLF text logs (job-phase2.txt, profile-dependencies.log.txt, gen-20260903T012806Z.log) PLUS eight more text logs with lone progress-bar CRs (limb3-strict-gate gen-*.log, job-phase3.txt, q4km-neartie harness-stdout-*.txt), and any of them committed from an autocrlf checkout would be rewritten. tests/parity/goldens/** is pinned -text because the .npy/.i32/.raw fixtures and generated manifests are bytes, not lines. After the change, the same autocrlf clone produces zero CR-bearing files outside the pinned evidence directory.
 
 ## Resolution
 
