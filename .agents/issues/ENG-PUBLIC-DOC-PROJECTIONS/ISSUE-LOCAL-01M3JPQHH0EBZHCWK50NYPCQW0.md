@@ -44,3 +44,17 @@ Once those are answered, the consolidation is mechanical: delete the nine inline
 ## Resolution
 
 -
+
+## Executed verification, 2026-10-02 (Linux x86_64)
+
+Requested by the mudler-agent review (focused checker + mutation).
+
+- `python3 scripts/check-benchmark-index.py`: `benchmark index OK: every ID
+  owns exactly one detail file` (was 16 orphan errors on main).
+- `python3 tests/scripts/test_check_benchmark_index.py`: 6/6 OK --
+  `test_shipped_index_passes` green for the first time since the checker
+  landed.
+- Mutation: deleting the `at-a-glance` index row makes the gate rc=1 with
+  `benchmark index error: orphan benchmark detail file at-a-glance.md`;
+  restoring the row returns rc=0. The table is load-bearing.
+
