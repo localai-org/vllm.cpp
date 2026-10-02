@@ -17,3 +17,19 @@ On main, scripts/check-test-registration.py exits 1 on a CPU-only Windows host, 
 ## Resolution
 
 Fixed in row/TEST-REG-HOST-PORTABILITY. _DEBUG_SYMBOL_SUFFIXES sets aside the debug-symbol artifact and _target_artifact still refuses anything but exactly one EXECUTABLE artifact; _include_spelling normalizes the separator before matching a prefix, which restores 6 of 6 gated declaring headers on Windows; NETWORK_FETCH_OPTIONS names the three FetchContent guards in the tree and CPU_ONLY_CONFIGURE_ARGS forces all three off, so the gate's configure reaches no network. Ten cases in a new HostPortabilityTests class, 5 FAIL plus 2 ERROR against the unmodified checker and 10 of 10 after, with four controls that pass on both sides. Gate rc=0; suite 84 cases, the one remaining failure being the pre-existing Ninja Multi-Config case that needs a Developer Command Prompt, red on main before this change for the same host reason.
+
+## Executed verification, 2026-10-02 (Linux x86_64, cmake 3.31.10, ninja)
+
+Requested by the mudler-agent review (focused checker + mutation, blocked
+upstream by host ENOSPC).
+
+- `python3 scripts/check-test-registration.py`: rc=0, full OK line -- the
+  CPU-only configure completes with no network fetch (all three
+  NETWORK_FETCH_OPTIONS forced off), required targets resolve in the
+  codemodel, and the pinned `-L gpu` selection reads 2 tests.
+- `python3 tests/scripts/test_check_test_registration.py`: 84/84 OK.
+- Red side executed: `HostPortabilityTests` rebound to the PRE-PR checker
+  (`HEAD^` revision) gives 5 FAIL + 2 ERROR -- the same count the PR
+  description measured -- and 10/10 against this branch. The controls pass
+  on both sides, so nothing was widened.
+
