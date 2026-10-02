@@ -393,6 +393,30 @@ std::vector<int32_t> ReadGenerationConfigEosIds(const std::string& path) {
   return out;
 }
 
+// tokenizer_config.json's eos_token beside `path` (config.json): a string, or
+// an AddedToken object whose "content" is the string. Empty on any failure,
+// with the same never-throw polarity as the generation_config.json reads.
+std::string ReadTokenizerConfigEosToken(const std::string& path) {
+  const auto slash = path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string(".")
+                                                       : path.substr(0, slash);
+  std::ifstream in(dir + "/tokenizer_config.json", std::ios::binary);
+  if (!in) return {};
+  nlohmann::json doc = nlohmann::json::parse(in, /*cb=*/nullptr,
+                                             /*allow_exceptions=*/false);
+  if (doc.is_discarded() || !doc.is_object()) return {};
+  const auto it = doc.find("eos_token");
+  if (it == doc.end()) return {};
+  if (it->is_string()) return it->get<std::string>();
+  if (it->is_object()) {
+    const auto content = it->find("content");
+    if (content != it->end() && content->is_string()) {
+      return content->get<std::string>();
+    }
+  }
+  return {};
+}
+
 // One optional numeric key out of a generation_config.json object. Absent,
 // null and wrong-typed all read as "the checkpoint did not declare it", which
 // is upstream's polarity: try_get_generation_config never raises, and
@@ -652,9 +676,40 @@ HfConfig ParseHfConfigDoc(nlohmann::json doc, const std::string& path,
                              e.what());
   }
 
+  // from_model_config's eos, read before `doc` moves into raw, sorted and
+  // unique like the file's. The OUTER config's eos_token_id wins; the text
+  // config's is used only when the outer one is unset or null, as
+  // GenerationConfig.from_model_config resolves it.
+  std::vector<int32_t> model_config_eos_ids;
+  {
+    const auto named = [](const nlohmann::json& j) -> const nlohmann::json* {
+      const auto it = j.find("eos_token_id");
+      return (it == j.end() || it->is_null()) ? nullptr : &*it;
+    };
+    const nlohmann::json* eos = named(doc);
+    if (eos == nullptr) eos = named(text);
+    if (eos != nullptr) {
+      std::set<int32_t> ids;
+      if (eos->is_number_integer()) {
+        ids.insert(eos->get<int32_t>());
+      } else if (eos->is_array()) {
+        for (const auto& e : *eos) {
+          if (e.is_number_integer()) ids.insert(e.get<int32_t>());
+        }
+      }
+      model_config_eos_ids.assign(ids.begin(), ids.end());
+    }
+  }
+
   cfg.raw = std::move(doc);
   if (sibling_generation_config) {
+    const bool has_generation_config =
+        std::ifstream(SiblingGenerationConfigPath(path), std::ios::binary).good();
     cfg.generation_config_eos_ids = ReadGenerationConfigEosIds(path);
+    if (!has_generation_config) {
+      cfg.model_config_eos_ids = std::move(model_config_eos_ids);
+    }
+    cfg.tokenizer_eos_token = ReadTokenizerConfigEosToken(path);
     cfg.generation_config_sampling =
         ReadGenerationConfigSamplingAt(SiblingGenerationConfigPath(path));
   }

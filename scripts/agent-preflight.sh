@@ -130,6 +130,7 @@ CHECKERS=(
   check-test-registration
   check-snapshot-pins
   check-oracle-pins
+  check-comparator-pins
   check-oracle-denominator-flags
   check-now-current
   check-gate-commands
@@ -183,6 +184,7 @@ SUITES=(
   test_check_test_registration
   test_check_snapshot_pins
   test_check_oracle_pins
+  test_check_comparator_pins
   test_dsv4v_w6_compare
   test_cpu_x86_llamacpp_floor
   test_audit_live_rows

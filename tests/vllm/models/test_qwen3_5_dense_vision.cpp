@@ -391,6 +391,47 @@ TEST_CASE("qwen3_5_dense_vision_config_mirrors_the_checkpoint_vision_config") {
   CHECK(v.out_hidden_size == 5120);
 }
 
+// ISSUE-LOCAL-01M3RT4GVEY4QBE5AYBT8RDM89: the geometry is the CHECKPOINT's,
+// not the 27B's. Upstream builds Qwen3_VisionTransformer from
+// config.vision_config (qwen3_vl.py:536-628 @ 5559679229), so a smaller tower
+// must load as itself. Before the fix every field below read the 27B constant
+// and Tev1-0.8B aborted at model.visual.blocks.12.
+TEST_CASE("qwen3_5_dense_vision_config_reads_a_smaller_checkpoint_tower") {
+  HfConfig c = MakeConfig();
+  c.hidden_size = 1024;
+  // config.json::vision_config of togethercomputer/Tev1-0.8B-experimental
+  // @ 6bb2dff1 (== Qwen/Qwen3.5-0.8B).
+  c.raw["vision_config"] = {
+      {"depth", 12},          {"hidden_size", 768},
+      {"num_heads", 12},      {"intermediate_size", 3072},
+      {"out_hidden_size", 1024}, {"patch_size", 16},
+      {"temporal_patch_size", 2}, {"spatial_merge_size", 2},
+      {"num_position_embeddings", 2304}, {"in_channels", 3},
+      {"deepstack_visual_indexes", nlohmann::json::array()}};
+  const vllm::multimodal::Qwen3VLVisionConfig v = vllm::Qwen3_5DenseVisionConfig(c);
+  CHECK(v.depth == 12);
+  CHECK(v.hidden_size == 768);
+  CHECK(v.num_heads == 12);
+  CHECK(v.head_dim() == 64);
+  CHECK(v.intermediate_size == 3072);
+  CHECK(v.out_hidden_size == 1024);
+  CHECK(v.deepstack_visual_indexes.empty());
+
+  // A key the checkpoint omits keeps the family value, not a zero.
+  HfConfig partial = MakeConfig();
+  partial.hidden_size = 2560;
+  partial.raw["vision_config"] = {{"depth", 24}, {"hidden_size", 1024},
+                                  {"intermediate_size", 4096}};
+  const vllm::multimodal::Qwen3VLVisionConfig p =
+      vllm::Qwen3_5DenseVisionConfig(partial);
+  CHECK(p.depth == 24);
+  CHECK(p.hidden_size == 1024);
+  CHECK(p.intermediate_size == 4096);
+  CHECK(p.num_heads == 16);
+  CHECK(p.num_position_embeddings == 2304);
+  CHECK(p.out_hidden_size == 2560);
+}
+
 TEST_CASE("qwen3_5_dense_vision_absent_visual_tensors_are_refused_by_name") {
   const std::string p = TmpDir() + "/vllmcpp_dense_novisual.safetensors";
   WriteShard(p, {"model.embed_tokens.weight", "model.norm.weight",

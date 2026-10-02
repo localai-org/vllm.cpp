@@ -149,6 +149,19 @@ struct HfConfig {
   // secondary stop ids gated on ignore_eos. Empty when the file is absent,
   // unparseable, or carries no eos_token_id.
   std::vector<int32_t> generation_config_eos_ids;
+  // What upstream's try_get_generation_config falls back to when the sibling
+  // generation_config.json does NOT exist: GenerationConfig.from_model_config,
+  // i.e. the TEXT config's own eos_token_id (transformers_utils/config.py:
+  // 1066-1090 @ 5559679229), sorted and unique. Empty whenever the file exists.
+  // A nested wrapper (text_config) that names no top-level eos otherwise stops
+  // on nothing (MODEL-TEV1 Phase 7).
+  std::vector<int32_t> model_config_eos_ids;
+  // The `eos_token` of the sibling tokenizer_config.json (a string, or an
+  // object's "content"), empty when absent. Upstream's PRIMARY eos is the
+  // tokenizer's eos_token_id (renderers/base.py:310-317); InputProcessor uses
+  // this only when config.json and the tokenizer.json post_processor name no
+  // eos (MODEL-TEV1 Phase 7, .agents/specs/tev1-eos-fallback.md).
+  std::string tokenizer_eos_token;
   // The six SAMPLING keys of the same sibling generation_config.json, which
   // upstream reads through the same one file read and then narrows in
   // ModelConfig.get_diff_sampling_param (config/model.py). Every field is unset

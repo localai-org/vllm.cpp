@@ -1052,7 +1052,8 @@ vt::DType ResolveNemotronHModelDType(const HfConfig& config) {
 
 NemotronHHostWeights LoadNemotronHHostWeights(
     const std::vector<SafetensorsFile>& shards, const NemotronHParams& params,
-    vt::DType act_dtype, NemotronHLoadReport* report) {
+    vt::DType act_dtype, NemotronHLoadReport* report,
+    const std::string& name_prefix) {
   NemotronHLoadReport local;
   NemotronHLoadReport& rep = report != nullptr ? *report : local;
   rep = NemotronHLoadReport{};
@@ -1060,7 +1061,8 @@ NemotronHHostWeights LoadNemotronHHostWeights(
   TensorIndex index;
   for (const SafetensorsFile& shard : shards) {
     for (const std::string& name : shard.Names()) {
-      if (!index.emplace(name, &shard.Get(name)).second) {
+      if (name.compare(0, name_prefix.size(), name_prefix) != 0) continue;
+      if (!index.emplace(name.substr(name_prefix.size()), &shard.Get(name)).second) {
         RefuseLoad("'" + name + "' appears in more than one shard");
       }
     }

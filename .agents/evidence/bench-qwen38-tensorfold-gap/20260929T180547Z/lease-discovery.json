@@ -1,0 +1,14 @@
+{
+  "device": "dgx:gpu0",
+  "jobs": [
+    {
+      "job_fingerprint_sha256": "9b8c269c1aae79510a8dd7d897d883837fb436775330c57b62877cf1b82a80cb",
+      "state": "succeeded"
+    }
+  ],
+  "gpu": {"name": "NVIDIA GB10", "driver": "580.173.02"},
+  "device_ready_after_jobs": true,
+  "raw_job_ids_retained": false,
+  "raw_receipt": "discovery-receipt.stdout",
+  "invocation_receipt": "discovery-invocation.txt"
+}

@@ -12,7 +12,7 @@ The first series free of both, at the pin, graphed, and at a pinned clock is in
 [the benchmark record](../../.agents/benchmark-record.md).
 
 **THE PIN MOVED UNDER THESE ROWS, AND THEY HAVE NOT BEEN RE-MEASURED.** The
-parity pin advanced to <!--pin:commit-->`e126687a9a`<!--/pin--> on 2026-09-03
+parity pin advanced to <!--pin:commit-->`a7c23ac96d`<!--/pin--> on 2026-09-26
 ([#2817](https://github.com/mudler/vllm.cpp/issues/2817)). Every row below that
 says "at the pin" was measured against the PREVIOUS pin `555967922`, with
 FlashInfer `0.6.15.post1`. FlashInfer moves to `0.6.18` at the new pin and is on

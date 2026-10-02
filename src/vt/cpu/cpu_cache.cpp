@@ -37,8 +37,10 @@ void ReshapeAndCacheKernel(Queue&, const Tensor& k, const Tensor& v, Tensor& k_c
   const int64_t num_slots = slot_mapping.shape[0];
   const int64_t block_size = k_cache.shape[1];
   const int64_t num_kv_heads = k_cache.shape[2];
-  const int64_t head_size = k_cache.shape[3];
-  const int64_t n_elems = num_kv_heads * head_size;  // one token's page (NHD)
+  const int64_t head_size_k = k_cache.shape[3];
+  const int64_t head_size_v = v_cache.shape[3];
+  const int64_t n_elems_k = num_kv_heads * head_size_k;  // one token's K page (NHD)
+  const int64_t n_elems_v = num_kv_heads * head_size_v;  // one token's V page (NHD)
   // Destination strides come from the tensors (unbind-slice aware), each cache
   // with ITS OWN strides. Source token stride comes from k/v.stride(0); the
   // per-token [H, D] payload is packed (input k/v are contiguous rows).
@@ -55,7 +57,8 @@ void ReshapeAndCacheKernel(Queue&, const Tensor& k, const Tensor& v, Tensor& k_c
   const auto* vsrc = static_cast<const uint8_t*>(v.data);
   auto* kdst = static_cast<uint8_t*>(k_cache.data);
   auto* vdst = static_cast<uint8_t*>(v_cache.data);
-  const size_t bytes = static_cast<size_t>(n_elems) * elem;
+  const size_t bytes_k = static_cast<size_t>(n_elems_k) * elem;
+  const size_t bytes_v = static_cast<size_t>(n_elems_v) * elem;
 
   for (int64_t t = 0; t < num_slots; ++t) {
     const int64_t slot = slots[t];
@@ -67,9 +70,9 @@ void ReshapeAndCacheKernel(Queue&, const Tensor& k, const Tensor& v, Tensor& k_c
     const int64_t ksrc_off = t * k_tok_stride;
     const int64_t vsrc_off = t * v_tok_stride;
     std::memcpy(kdst + static_cast<size_t>(kdst_off) * elem,
-                ksrc + static_cast<size_t>(ksrc_off) * elem, bytes);
+                ksrc + static_cast<size_t>(ksrc_off) * elem, bytes_k);
     std::memcpy(vdst + static_cast<size_t>(vdst_off) * elem,
-                vsrc + static_cast<size_t>(vsrc_off) * elem, bytes);
+                vsrc + static_cast<size_t>(vsrc_off) * elem, bytes_v);
   }
 }
 
@@ -150,8 +153,10 @@ void ReshapeAndCacheFp8Kernel(Queue&, const Tensor& k, const Tensor& v, Tensor& 
   const int64_t num_slots = slot_mapping.shape[0];
   const int64_t block_size = k_cache.shape[1];
   const int64_t num_kv_heads = k_cache.shape[2];
-  const int64_t head_size = k_cache.shape[3];
-  const int64_t n_elems = num_kv_heads * head_size;  // one token's page (NHD)
+  const int64_t head_size_k = k_cache.shape[3];
+  const int64_t head_size_v = v_cache.shape[3];
+  const int64_t n_elems_k = num_kv_heads * head_size_k;  // one token's K page (NHD)
+  const int64_t n_elems_v = num_kv_heads * head_size_v;  // one token's V page (NHD)
   const int64_t k_block_stride = k_cache.stride[0];
   const int64_t k_page_stride = k_cache.stride[1];
   const int64_t v_block_stride = v_cache.stride[0];
@@ -172,8 +177,10 @@ void ReshapeAndCacheFp8Kernel(Queue&, const Tensor& k, const Tensor& v, Tensor& 
     const int64_t vdst_base = block * v_block_stride + offset * v_page_stride;
     const int64_t ksrc_base = t * k_tok_stride;
     const int64_t vsrc_base = t * v_tok_stride;
-    for (int64_t e = 0; e < n_elems; ++e) {
+    for (int64_t e = 0; e < n_elems_k; ++e) {
       kdst[kdst_base + e] = StoreKvFp8E4M3(LoadSrcF32(k, ksrc_base + e), k_scale);
+    }
+    for (int64_t e = 0; e < n_elems_v; ++e) {
       vdst[vdst_base + e] = StoreKvFp8E4M3(LoadSrcF32(v, vsrc_base + e), v_scale);
     }
   }

@@ -127,6 +127,11 @@ struct MultiModalChatContext {
   // installs a REFUSING seam instead: HTTP 400 naming the architecture, text
   // path untouched.
   std::string mmproj_path;
+  // The ENGINE's resolved max_model_len, 0 when the installer did not supply
+  // it. A processor whose token budget is defined against it reads it here:
+  // Nemotron Nano VL's dynamic tiler sizes every image from
+  // `max_model_len - text_len - 4` (processors/nano_nemotron_vl.py:330-331).
+  int64_t max_model_len = 0;
 };
 
 // What a factory returns. `chat_fn` OWNS whatever processor state it needs —

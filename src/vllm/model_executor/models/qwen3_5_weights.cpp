@@ -1879,6 +1879,31 @@ multimodal::Qwen3VLVisionConfig Qwen3_5FamilyVisionConfig(
   v.in_channels = 3;
   v.deepstack_visual_indexes = {};  // NO DeepStack on this family.
   v.norm_eps = 1e-6f;
+  // The values above are the 27B/35B tower, kept as the fallback for a config
+  // that omits a key. Upstream sizes the tower from config.vision_config
+  // (qwen3_vl.py:536-628 @ 5559679229), and the 0.8B/2B/4B checkpoints ship a
+  // smaller one (0.8B: depth 12, hidden 768), so the checkpoint's value wins.
+  // ISSUE-LOCAL-01M3RT4GVEY4QBE5AYBT8RDM89.
+  const auto vc = config.raw.find("vision_config");
+  if (vc != config.raw.end() && vc->is_object()) {
+    const auto read = [&vc](const char* key, int64_t& field) {
+      const auto it = vc->find(key);
+      if (it != vc->end() && it->is_number_integer()) field = it->get<int64_t>();
+    };
+    read("hidden_size", v.hidden_size);
+    read("num_heads", v.num_heads);
+    read("depth", v.depth);
+    read("intermediate_size", v.intermediate_size);
+    read("out_hidden_size", v.out_hidden_size);
+    read("patch_size", v.patch_size);
+    read("temporal_patch_size", v.temporal_patch_size);
+    read("spatial_merge_size", v.spatial_merge_size);
+    read("num_position_embeddings", v.num_position_embeddings);
+    read("in_channels", v.in_channels);
+    const auto ds = vc->find("deepstack_visual_indexes");
+    if (ds != vc->end() && ds->is_array())
+      v.deepstack_visual_indexes = ds->get<std::vector<int>>();
+  }
   return v;
 }
 

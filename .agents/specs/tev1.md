@@ -12,9 +12,18 @@ CPU + GPU (CUDA), OpenAI-compatible serving through `/v1/chat/completions`.
 
 ## Now
 
-`SPEC` — Phases 1-5 pending implementation. The backbone, chat template,
-and `/v1/chat/completions` endpoint all exist on `main`; the work is model
-registration, decision-prompt verification, and E2E parity tests.
+`ACTIVE`. Phases 1-3 are on `main` (#3312, db5300836): the `Tev1Model`
+alias, the chat template, and `/v1/chat/completions`. Phase 6 (the SystemOne
+lane) is implemented and CPU-verified on both checkpoints against
+`transformers` (4B argmax 7/7, 0.8B 6/7 with one near tie). Phase 7 (the
+tokenizer EOS fallback, [`tev1-eos-fallback.md`](tev1-eos-fallback.md)) is done
+on CPU: chat stops on `<|im_end|>` without `stop_token_ids`. The vLLM gates (Phase 4, and Phase 6 against vLLM's generative
+scoring) are `PENDING`.
+
+Phase 6 found and fixed two engine defects on the way, each with its own
+issue: async scheduling dropped every sample logprob
+(ISSUE-LOCAL-01M3SE6RVKD6SCMA2YBS7F8X0R), which the lane reads, and a
+partial-UTF-8 top-k token made chat serialization answer HTTP 500 (same issue).
 
 ## Scope
 
@@ -31,9 +40,10 @@ registration, decision-prompt verification, and E2E parity tests.
 - **Out (owned by other rows).** ROCm kernel tuning. GGUF k-quants (owed).
   Regex `response_format` constraint (Together-specific extension, not in vLLM
   at pin — Tev1 produces the correct letter at temperature=0 without it).
-  The `/v1/systemone` API and `vllm_decide` C ABI — Tev1 does NOT use these;
-  it uses standard `/v1/chat/completions`. LocalAI backend is a separate PR
-  in a separate repo.
+  The LocalAI backend is a separate PR in a separate repo. (Before Phase 6
+  this bullet also excluded `/v1/systemone` and `vllm_decide`. Ollama 0.35
+  serves `tev1` on `/v1/systemone`, and LocalAI reaches this engine only
+  through the C ABI, so Phase 6 brings both into scope.)
 - **Reuse.** The Qwen3.5 dense backbone forward path (`DenseForwardLayers`,
   `ForwardDense`, `qwen3_5_dense.cpp`). The Qwen3.5 chat template
   (`chat_template.cpp`, already supports `enable_thinking` via
@@ -171,6 +181,111 @@ Repository: `togethercomputer/tev1` (GitHub, MIT-licensed code).
   via `LoadQwen3_5Dense`.
 - The README says "full model weights," so this phase is likely not needed.
 
+### Phase 6: the SystemOne lane (`/v1/systemone` and `vllm_decide`)
+
+Issue: `ISSUE-LOCAL-01M3SD3BFFA0A04ZNF05ZKBGGT`.
+
+**References.**
+
+- Ollama @ `1abe35e6e6e777e858bbfbba283667ee8d516801`: `decision/systemone.go`
+  (`Compile`, `compileField`, `Answer`), `decision/types.go`,
+  `server/routes.go:841-925` (`SystemOneHandler`: 64 KiB body cap, model system
+  prompt plus chat template with thinking off), `llm/llama_server_score.go`
+  (`Score`: 1-64 rows, 1-26 candidates, each candidate must add exactly one
+  ordinary token, logits read with a shared logit bias, one generated token per
+  row counted in `output_tokens`). The `tev1` manifest config carries
+  `"capabilities": ["decision"]`, its SYSTEM layer is the model card's system
+  prompt with two line breaks inserted, and its params are `{"num_ctx": 2050}`.
+- vLLM @ `5559679229`: `entrypoints/generate/generative_scoring/serving.py:247-255`
+  (`max_tokens=1`, `logprob_token_ids=label_token_ids`) and `:456-470`
+  (`apply_softmax`: softmax over the label logprobs only). A raw logprob differs
+  from the logit by one per-row constant, so this softmax equals the softmax of
+  the candidate logits.
+- The model author: `togethercomputer/tev1` @ `1dde7782382c9f49d627153759b8d1deab426ce0`,
+  `examples/decide.py` (`SYSTEM`, `payload`: 2-24 options labelled A-X, nonempty
+  string question, unique keys) and `build_dataset.py` `messages()` (the user
+  turn is `json.dumps({"state", "question", "options"}, ensure_ascii=False)`,
+  where `state` is a string or a JSON object); `build_new_v1.py:46-47` (the
+  prompt is `apply_chat_template(..., enable_thinking=False)` and the target is
+  the letter plus EOS).
+
+**Where the model's format and Ollama's differ, this lane follows the model.**
+Ollama renders every decision model with Nimble's `{"context", "schema"}` user
+turn and `Requested field:` suffix, and says in `SystemOneHandler` that
+"callers must select weights trained for the prompt format". Tev1 was trained
+on a different turn: one question per prompt, the question text, and an
+`options` list of `{label, key, description}`. The differences, each recorded
+in `docs/models/tev1.md`:
+
+| | Ollama `tev1` | this lane |
+|---|---|---|
+| user turn | `{"context": C, "schema": [all fields]}` + `Requested field: "name"` | `{"state": S, "question": Q, "options": [...]}`, one field |
+| state | compacted JSON text as a string | the JSON value itself (string or object), as in training |
+| system prompt | the card's sentence with two line breaks inserted | the card's sentence verbatim (`decide.py`) |
+| widest field | 26 candidates | 24 (`decide.py`: labels A-X); 25 or 26 is refused by name |
+| blank description | Ollama accepts it | refused, as `decide.py` does; blank means ASCII whitespace only, so a description of only U+00A0 is accepted where Python's `strip()` would refuse it |
+
+**Mapping.** The question compilation is Nimble's (`compiler.py`, which matches
+Ollama's `compileField`): `choice` keys in order, a `null` description replaced
+by the key; `noul` as `false`/`true` with the defaults `No`/`Yes`; `score` as
+`"0"`..`"L-1"`. Each field becomes one option list, labelled A.. in that order.
+The `question` is the instructions string, or its Python `json.dumps` text when
+the instructions are an object or array (Tev1 has no documented form for that,
+and Ollama also flattens them to text).
+
+**The answer.** Ollama's `Answer`, which is openjev's at T=1: `p =
+softmax(candidate logits)`, `noul` = p[true], `choice` = the first maximum,
+`score` = sum(i * p_i) with a `legend`, `confidence = clamp(1 - H(p)/ln(N), 0,
+1)`, no rounding. `usage.input_tokens` is the sum of the prompt lengths and
+`usage.output_tokens` is one per field, because the engine samples one token per
+field, as Ollama counts.
+
+**Design: one shared scorer, two logit sources.**
+
+1. Move the Jev compilation, the candidate-token check and the answer out of
+   `nimble_inference` into one request-level scorer
+   (`decision_scorer.{h,cpp}`) with a pluggable "candidate logits for these
+   prompts" function. Nimble keeps its names and behavior; its tests must not
+   change.
+2. `tev1_inference.{h,cpp}`: the Tev1 prompt and `Tev1Decide(async_llm,
+   tokenizer, max_model_len, body)`. Its logit source is the engine itself: one
+   request per field, submitted as one wave, with `max_tokens=1`, greedy, no
+   detokenization, and `logprob_token_ids` = the candidate ids (vLLM's
+   generative scoring). The decision therefore shares the scheduler, KV cache
+   and batching with chat traffic on the same engine. It does not run a second
+   forward beside the engine loop, which is what Nimble's side forward would do
+   on an engine that also generates.
+3. `vllm_decide` accepts an engine whose architecture resolves to `Tev1Model`.
+   The vllm-server generation path registers `/v1/systemone` (only that route,
+   through the existing request-level hook) when the architecture is
+   `Tev1Model`; `/v1/chat/completions` keeps working on the same engine.
+4. Selection is explicit, like Ollama's `decision` capability: both published
+   checkpoints declare `Qwen3_5ForConditionalGeneration`, so a directory whose
+   `config.json` names `Tev1Model` opts in. A plain Qwen3.5 engine stays
+   refused by `vllm_decide`, and the refusal names `Tev1Model`.
+
+**Tests.**
+
+- Prompt goldens: the exact strings from running `decide.py`'s `payload()`
+  messages through `transformers` `apply_chat_template(add_generation_prompt=True,
+  enable_thinking=False)` on BOTH checkpoints' `chat_template.jinja`, plus the
+  token ids from each checkpoint's tokenizer.
+- Answer goldens: Ollama's own `decision.Compile` and `Answer`, run from Go on
+  fixed logits.
+- Refusals: 25 options, a blank state, 65 questions, a non-object body.
+- Reachability: `Tev1Decide` over a synthetic Qwen3.5 dense `Tev1Model` engine
+  (the real `LoadedEngine` and `AsyncLLM`), compared with an independent
+  `ForwardDense` last row at the candidate ids; and `vllm_decide` over a
+  `Tev1Model` engine handle.
+- Nimble: `test_nimble` unchanged and green after the extraction.
+- Real weights, CPU: both checkpoints served on `/v1/systemone`, compared with
+  `transformers` BF16 next-token logits at the candidate ids on the same
+  prompts.
+
+**Owed after Phase 6.** A token gate against the pinned vLLM generative-scoring
+path; CUDA; GGUF; shared-prefix reuse is whatever the engine's prefix cache
+gives.
+
 ## Our baseline
 
 Before this row: the Qwen3.5 dense backbone, chat template, and
@@ -192,9 +307,8 @@ documentation or tests exist.
 - Chat completions: existing
   `src/vllm/entrypoints/openai/api_server.cpp:handle_chat_completions`,
   `serving_chat.cpp` (no changes).
-- C ABI: NOT `vllm_decide` (Tev1 is autoregressive, refused by name — the ABI
-  only accepts "KevModel", "LayaModel", "CuaS1Forms"). Uses standard chat
-  completion path.
+- C ABI: `vllm_decide` for a `Tev1Model` engine (Phase 6), besides the
+  standard chat completion path.
 - Tests: `tests/vllm/models/test_tev1.cpp` (new file).
 
 ## Tests to port
@@ -223,8 +337,9 @@ authored from the Tev1 reference implementation (`togethercomputer/tev1`):
 - The `/v1/chat/completions` endpoint and `ChatCompletionRequest` protocol
   (existing on `main`).
 - No new CUDA kernels — Tev1 routes through existing Qwen3.5 dense ops.
-- No dependency on the `/v1/systemone` API, `vllm_decide` C ABI, or
-  `DecisionFn` callback (those are for pooling models; Tev1 is autoregressive).
+- Phase 6 depends on the request-level `/v1/systemone` hook
+  (`ApiServer::set_systemone_request`, MODEL-NIMBLE) and on the engine's
+  `logprob_token_ids` support; it does not use the per-question `DecisionFn`.
 
 ## Work breakdown
 
@@ -233,6 +348,8 @@ authored from the Tev1 reference implementation (`togethercomputer/tev1`):
 - Phase 3: Decision prompting (document + test) — TODO.
 - Phase 4: E2E parity test vs vLLM oracle — TODO.
 - Phase 5: LoRA merge (if needed) — TODO / likely skip.
+- Phase 6: SystemOne lane (`/v1/systemone`, `vllm_decide`): DONE (CPU).
+- Phase 7: tokenizer EOS fallback (`tev1-eos-fallback.md`): DONE (CPU).
 
 ## Risks
 
@@ -274,6 +391,8 @@ authored from the Tev1 reference implementation (`togethercomputer/tev1`):
 - GPU (CUDA) build verification.
 - GGUF k-quant arm.
 - Regex response_format support (if needed for production constraints).
+- Phase 6: a token gate for the SystemOne lane against the pinned vLLM
+  generative-scoring path, and CUDA serving of the lane.
 
 ## Git integration
 

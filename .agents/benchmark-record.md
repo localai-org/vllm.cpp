@@ -30070,3 +30070,33 @@ dependence is open and belongs to the follow-up row. Leg 2 (8-request repeat)
 skipped: the staircase is unambiguous and the OOM signature reproduced in-leg.
 
 Log: `/tmp/dram-leg1.log` (raw trace, ~125k lines).
+
+## BENCH-QWEN38-TENSORFOLD-GAP W1 — BLOCKED_MISSING_ARTIFACTS, no benchmark number (2026-09-29, `dgx:gpu0`, source `4c89728bc740ca2886def8f191d28a2a5f912c6d`)
+
+A fresh successful repository `rc` audit lease executed the committed bounded
+scan script on `dgx:gpu0` (NVIDIA GB10, driver 580.173.02); evidence retains its
+SHA-256 lease fingerprint rather than a raw job ID. Its raw marker receipt found
+the two documented staging paths absent and zero matches in `/workspace` to
+depth 3 for the committed TensorFold/MiaAI/Vontra and
+MLX-MTP/Flash-Next-MTP patterns. This establishes absence only in those bounded
+locations, not across the host. Required artifacts/source were not found in the
+retained scope, so runner prerequisites could not be populated and measurement
+did not start.
+
+This is a prerequisite blocker, not a timing result. No server or executable
+correctness gate ran; serial decode, drafted decode, prefill and serving ladders,
+clock and memory windows, and both same-tool profiles are
+`NOT_RUN_PREREQUISITE`. No number and no cross-engine ratio are recorded.
+Production vLLM remains the named denominator and is `NOT_RUN`: blocked
+discovery did not stage or inspect a runnable production-vLLM denominator.
+TensorFold publisher figures remain unverified. Task 5/W2 is `NO_PORT_DECISION`;
+Task 6/W3 is `BLOCKED_NO_MTP_WEIGHTS`; W4-W5 are `SKIPPED_NO_PROFILE`; Task 7/W6
+completed synthesis as `SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION` and made no
+product edit.
+
+The independent selected-GGUF verdict is `BLOCKED_NO_MTP_WEIGHTS`. The committed
+real-header manifest has 1,224 tensor entries, trunk blocks 0 through 47, and no
+name matching `mtp`, `nextn`, `draft`, `eh_proj`, `enorm`, or `hnorm`. This does
+not inspect or characterize the absent TensorFold checkpoint. Evidence:
+`.agents/evidence/bench-qwen38-tensorfold-gap/20260929T180547Z/`; public summary:
+`docs/benchmarks/qwen38-tensorfold-gap.md`.

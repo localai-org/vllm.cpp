@@ -45,7 +45,8 @@ template <typename Word>
 __global__ void ReshapeAndCacheKernel(
     const Word* __restrict__ key, const Word* __restrict__ value,
     Word* __restrict__ key_cache, Word* __restrict__ value_cache,
-    const int64_t* __restrict__ slot_mapping, int64_t block_size, int64_t n_elems,
+    const int64_t* __restrict__ slot_mapping, int64_t block_size,
+    int64_t n_elems_k, int64_t n_elems_v,
     int64_t k_block_stride, int64_t k_page_stride, int64_t v_block_stride,
     int64_t v_page_stride, int64_t k_tok_stride, int64_t v_tok_stride) {
   const int64_t token = blockIdx.x;
@@ -57,8 +58,10 @@ __global__ void ReshapeAndCacheKernel(
   const int64_t vdst = block * v_block_stride + offset * v_page_stride;
   const int64_t ksrc = token * k_tok_stride;
   const int64_t vsrc = token * v_tok_stride;
-  for (int64_t e = threadIdx.x; e < n_elems; e += blockDim.x) {
+  for (int64_t e = threadIdx.x; e < n_elems_k; e += blockDim.x) {
     key_cache[kdst + e] = key[ksrc + e];
+  }
+  for (int64_t e = threadIdx.x; e < n_elems_v; e += blockDim.x) {
     value_cache[vdst + e] = value[vsrc + e];
   }
 }
@@ -67,8 +70,10 @@ void ReshapeAndCacheKernelCuda(Queue& q, const Tensor& k, const Tensor& v, Tenso
                                Tensor& v_cache, const Tensor& slot_mapping) {
   const int64_t num_slots = slot_mapping.shape[0];
   const int64_t block_size = k_cache.shape[1];
-  const int64_t n_elems = k_cache.shape[2] * k_cache.shape[3];
-  if (num_slots == 0 || n_elems == 0) return;
+  const int64_t n_elems_k = k_cache.shape[2] * k_cache.shape[3];
+  const int64_t n_elems_v = v_cache.shape[2] * v_cache.shape[3];
+  const int64_t max_elems = n_elems_k > n_elems_v ? n_elems_k : n_elems_v;
+  if (num_slots == 0 || max_elems == 0) return;
   const int64_t k_block_stride = k_cache.stride[0];
   const int64_t k_page_stride = k_cache.stride[1];
   const int64_t v_block_stride = v_cache.stride[0];
@@ -76,20 +81,20 @@ void ReshapeAndCacheKernelCuda(Queue& q, const Tensor& k, const Tensor& v, Tenso
   const int64_t k_tok_stride = k.stride[0];
   const int64_t v_tok_stride = v.stride[0];
   const unsigned grid = static_cast<unsigned>(num_slots);
-  const unsigned block = static_cast<unsigned>(n_elems < 512 ? n_elems : 512);
+  const unsigned block = static_cast<unsigned>(max_elems < 512 ? max_elems : 512);
   const cudaStream_t s = AsStream(q);
   const int64_t* slots = slot_mapping.Ptr<int64_t>();
   switch (SizeOf(k.dtype)) {
     case 4:
       ReshapeAndCacheKernel<uint32_t><<<grid, block, 0, s>>>(
           k.Ptr<uint32_t>(), v.Ptr<uint32_t>(), k_cache.Ptr<uint32_t>(), v_cache.Ptr<uint32_t>(),
-          slots, block_size, n_elems, k_block_stride, k_page_stride, v_block_stride,
+          slots, block_size, n_elems_k, n_elems_v, k_block_stride, k_page_stride, v_block_stride,
           v_page_stride, k_tok_stride, v_tok_stride);
       break;
     case 2:
       ReshapeAndCacheKernel<uint16_t><<<grid, block, 0, s>>>(
           k.Ptr<uint16_t>(), v.Ptr<uint16_t>(), k_cache.Ptr<uint16_t>(), v_cache.Ptr<uint16_t>(),
-          slots, block_size, n_elems, k_block_stride, k_page_stride, v_block_stride,
+          slots, block_size, n_elems_k, n_elems_v, k_block_stride, k_page_stride, v_block_stride,
           v_page_stride, k_tok_stride, v_tok_stride);
       break;
     default: VT_CHECK(false, "cuda reshape_and_cache: unsupported dtype element size");
@@ -156,10 +161,11 @@ template <typename Tin>
 __global__ void ReshapeAndCacheFp8Kernel(
     const Tin* __restrict__ key, const Tin* __restrict__ value,
     uint8_t* __restrict__ key_cache, uint8_t* __restrict__ value_cache,
-    const int64_t* __restrict__ slot_mapping, int64_t block_size, int64_t n_elems,
+    const int64_t* __restrict__ slot_mapping, int64_t block_size,
+    int64_t n_elems_k, int64_t n_elems_v,
     int64_t k_block_stride, int64_t k_page_stride, int64_t v_block_stride,
-    int64_t v_page_stride, int64_t k_tok_stride, int64_t v_tok_stride, float k_scale,
-    float v_scale) {
+    int64_t v_page_stride, int64_t k_tok_stride, int64_t v_tok_stride,
+    float k_scale, float v_scale) {
   const int64_t token = blockIdx.x;
   const int64_t slot = slot_mapping[token];
   if (slot < 0) return;  // padded token → skip (upstream `:328-331`)
@@ -169,8 +175,10 @@ __global__ void ReshapeAndCacheFp8Kernel(
   const int64_t vdst = block * v_block_stride + offset * v_page_stride;
   const int64_t ksrc = token * k_tok_stride;
   const int64_t vsrc = token * v_tok_stride;
-  for (int64_t e = threadIdx.x; e < n_elems; e += blockDim.x) {
+  for (int64_t e = threadIdx.x; e < n_elems_k; e += blockDim.x) {
     key_cache[kdst + e] = StoreKvFp8E4M3Dev(Fp8SrcToF32(key, ksrc + e), k_scale);
+  }
+  for (int64_t e = threadIdx.x; e < n_elems_v; e += blockDim.x) {
     value_cache[vdst + e] = StoreKvFp8E4M3Dev(Fp8SrcToF32(value, vsrc + e), v_scale);
   }
 }
@@ -183,8 +191,10 @@ void ReshapeAndCacheFp8KernelCuda(Queue& q, const Tensor& k, const Tensor& v, Te
            "(fp8_e5m2 is a named later brick, spec W5)");
   const int64_t num_slots = slot_mapping.shape[0];
   const int64_t block_size = k_cache.shape[1];
-  const int64_t n_elems = k_cache.shape[2] * k_cache.shape[3];
-  if (num_slots == 0 || n_elems == 0) return;
+  const int64_t n_elems_k = k_cache.shape[2] * k_cache.shape[3];
+  const int64_t n_elems_v = v_cache.shape[2] * v_cache.shape[3];
+  const int64_t max_elems = n_elems_k > n_elems_v ? n_elems_k : n_elems_v;
+  if (num_slots == 0 || max_elems == 0) return;
   const int64_t k_block_stride = k_cache.stride[0];
   const int64_t k_page_stride = k_cache.stride[1];
   const int64_t v_block_stride = v_cache.stride[0];
@@ -192,7 +202,7 @@ void ReshapeAndCacheFp8KernelCuda(Queue& q, const Tensor& k, const Tensor& v, Te
   const int64_t k_tok_stride = k.stride[0];
   const int64_t v_tok_stride = v.stride[0];
   const unsigned grid = static_cast<unsigned>(num_slots);
-  const unsigned block = static_cast<unsigned>(n_elems < 512 ? n_elems : 512);
+  const unsigned block = static_cast<unsigned>(max_elems < 512 ? max_elems : 512);
   const cudaStream_t s = AsStream(q);
   const int64_t* slots = slot_mapping.Ptr<int64_t>();
   uint8_t* kc = k_cache.Ptr<uint8_t>();
@@ -203,19 +213,19 @@ void ReshapeAndCacheFp8KernelCuda(Queue& q, const Tensor& k, const Tensor& v, Te
   switch (k.dtype) {
     case DType::kF32:
       ReshapeAndCacheFp8Kernel<float><<<grid, block, 0, s>>>(
-          k.Ptr<float>(), v.Ptr<float>(), kc, vc, slots, block_size, n_elems, k_block_stride,
+          k.Ptr<float>(), v.Ptr<float>(), kc, vc, slots, block_size, n_elems_k, n_elems_v, k_block_stride,
           k_page_stride, v_block_stride, v_page_stride, k_tok_stride, v_tok_stride, k_scale,
           v_scale);
       break;
     case DType::kBF16:
       ReshapeAndCacheFp8Kernel<__nv_bfloat16><<<grid, block, 0, s>>>(
-          k.Ptr<__nv_bfloat16>(), v.Ptr<__nv_bfloat16>(), kc, vc, slots, block_size, n_elems,
+          k.Ptr<__nv_bfloat16>(), v.Ptr<__nv_bfloat16>(), kc, vc, slots, block_size, n_elems_k, n_elems_v,
           k_block_stride, k_page_stride, v_block_stride, v_page_stride, k_tok_stride,
           v_tok_stride, k_scale, v_scale);
       break;
     case DType::kF16:
       ReshapeAndCacheFp8Kernel<__half><<<grid, block, 0, s>>>(
-          k.Ptr<__half>(), v.Ptr<__half>(), kc, vc, slots, block_size, n_elems, k_block_stride,
+          k.Ptr<__half>(), v.Ptr<__half>(), kc, vc, slots, block_size, n_elems_k, n_elems_v, k_block_stride,
           k_page_stride, v_block_stride, v_page_stride, k_tok_stride, v_tok_stride, k_scale,
           v_scale);
       break;

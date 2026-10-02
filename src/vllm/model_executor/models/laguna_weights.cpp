@@ -605,7 +605,14 @@ LagunaParams LagunaParamsFromGguf(const GgufFile& g) {
       OptInt(g, p + "rope.scaling.original_context_length", 8192);
   d.yarn_beta_fast = OptFloat(g, p + "rope.scaling.yarn_beta_fast", 32.0);
   d.yarn_beta_slow = OptFloat(g, p + "rope.scaling.yarn_beta_slow", 1.0);
-  d.yarn_attn_factor = OptFloat(g, p + "rope.scaling.yarn_attn_factor", 1.0);
+  // `rope.scaling.yarn_attn_factor` is NOT read. llama.cpp `b10451` reads that
+  // key for grok only (src/models/grok.cpp:25); for every other YaRN model it
+  // derives the factor from `rope.scaling.factor` (src/llama-context.cpp:176-213)
+  // and ggml's rope multiplies in (1 + 0.1 ln factor) itself. The UD-Q4_K S-2.1
+  // file stores 1.0, so reading it was harmless there; the XS-2.1 APEX file stores
+  // the already-multiplied 1.34657, and reading it applied the mscale twice on
+  // every full-attention layer (1.813 instead of 1.347).
+  d.yarn_attn_factor = 1.0;
 
   // vocab: prefer the KV, else the token_embd leading (out) dim.
   const GgufValue* vk = g.FindKv(p + "vocab_size");
@@ -618,6 +625,62 @@ LagunaParams LagunaParamsFromGguf(const GgufFile& g) {
   VT_CHECK(d.rotary_dim_full > 0 && d.rotary_dim_full <= d.head_dim,
            "laguna gguf: partial rotary_dim (full-attn) out of range");
   return d;
+}
+
+HfConfig LagunaHfConfigFromGguf(const GgufFile& g) {
+  const LagunaParams d = LagunaParamsFromGguf(g);
+  int64_t vocab = d.vocab_size;
+  if (vocab <= 0) vocab = g.Get("token_embd.weight").shape[0];
+  // A tied file omits `output.weight` (llama.cpp TENSOR_DUPLICATED); the weight
+  // loader handles both, so the config reports which one this file is.
+  bool has_output = false;
+  for (const GgufTensorInfo& t : g.Tensors())
+    if (t.name == "output.weight") has_output = true;
+  const double yarn_base =
+      d.yarn_factor > 1.0 ? 1.0 + 0.1 * std::log(d.yarn_factor) : 1.0;
+  nlohmann::json doc = {
+      {"architectures", {"LagunaForCausalLM"}},
+      {"model_type", "laguna"},
+      {"torch_dtype", "bfloat16"},
+      {"hidden_size", d.hidden_size},
+      {"num_hidden_layers", d.num_hidden_layers},
+      {"vocab_size", vocab},
+      {"num_attention_heads", d.num_attention_heads},
+      {"num_key_value_heads", d.num_key_value_heads},
+      {"head_dim", d.head_dim},
+      {"intermediate_size", d.intermediate_size},
+      {"rms_norm_eps", d.rms_norm_eps},
+      {"tie_word_embeddings", !has_output},
+      {"max_position_embeddings", d.max_position_embeddings},
+      {"sliding_window", d.sliding_window},
+      {"layer_types", d.layer_types},
+      {"num_attention_heads_per_layer", d.num_attention_heads_per_layer},
+      {"gating", d.per_head_output_gate ? "per-head" : "none"},
+      {"num_experts", d.num_experts},
+      {"num_experts_per_tok", d.num_experts_per_tok},
+      {"moe_intermediate_size", d.moe_intermediate_size},
+      {"shared_expert_intermediate_size", d.shared_expert_intermediate_size},
+      {"norm_topk_prob", d.norm_topk_prob},
+      {"moe_routed_scaling_factor", d.moe_routed_scaling_factor},
+      {"mlp_only_layers", d.mlp_only_layers},
+      {"rope_parameters",
+       {{"full_attention",
+         {{"rope_type", "yarn"},
+          {"rope_theta", d.rope_theta_full},
+          {"factor", d.yarn_factor},
+          {"original_max_position_embeddings", d.yarn_orig_max_pos},
+          {"beta_fast", d.yarn_beta_fast},
+          {"beta_slow", d.yarn_beta_slow},
+          // ParseLagunaParams backs yarn_attn_factor out of this product.
+          {"attention_factor", d.yarn_attn_factor * yarn_base},
+          {"partial_rotary_factor", d.partial_rotary_factor_full}}},
+        {"sliding_attention",
+         {{"rope_type", "default"},
+          {"rope_theta", d.rope_theta_sliding},
+          {"partial_rotary_factor",
+           static_cast<double>(d.rotary_dim_sliding) / d.head_dim}}}}},
+  };
+  return ParseHfConfig(doc, "laguna gguf");
 }
 
 namespace {

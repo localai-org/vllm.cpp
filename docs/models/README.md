@@ -18,6 +18,7 @@ which checkpoint was used, the exact command, and what has not been measured.
 | [Qwen3.5](qwen3-5.md) | The Qwen3.5 Gated DeltaNet family | The `output_gate_type` key, and one load refusal that is about this code |
 | [Qwen3-Next](qwen3-next.md) | The Qwen3-Next Gated DeltaNet family | The `output_gate_type` key and its refusals |
 | [Nemotron 3.5 Lightning](nemotron-3-5-lightning.md) | A 30B-A3B hybrid of attention, Mamba2, and MoE | Which arms run on the device, which run on the host, and what that costs per token |
+| [Nemotron 3 Nano Omni](nemotron-nano-omni.md) | The Nemotron-H hybrid with a RADIO image encoder | Which checkpoint loads, what the image path was checked against, and what is refused |
 | [Muse Glimmer](muse-glimmer.md) | A 30B multimodal model, text with image and video input | Running the text tower from a 17 GB GGUF, and how narrow the verified surface is |
 | [Gemma 4](gemma-4.md) | The Gemma 4 family | The ROCm RDNA4 dual-GPU FP8 recipe |
 
@@ -28,7 +29,8 @@ which checkpoint was used, the exact command, and what has not been measured.
 | [CLM](clm.md) | A bi-encoder (Qwen3-8B + dual MLP heads) decision model | The projection-head conversion, the confidence formula, and what has not been measured |
 | [GLiNER2.5-Decide](gliner25-decide.md) | A DeBERTa-v3-large + classification head decision model | The checkpoint, the sequence layout, and what has not been measured |
 | [xor](xor.md) | A 35B MoE (Qwen3.6-35B-A3B) decision model with forward+reverse calibration | The checkpoint, the double-pass cost, and what has not been measured |
-| [Tev1](tev1.md) | An autoregressive (Qwen3.5-4B SFT) decision model | The chat-completions prompt format, the `enable_thinking=false` flag, and what has not been measured |
+| [Nimble](nimble.md) | A Qwen3.5-9B LoRA decision model that reads answer-letter logits (Ollama's `nimble`) | Converting the adapter, the openjev answer semantics, and why the 9B checkpoint is not yet measured end to end |
+| [Tev1](tev1.md) | A decision model, 4B and 0.8B (Qwen3.5 SFTs), on `/v1/systemone`, `vllm_decide` and chat completions | Enabling the decision route, the prompt and where it differs from Ollama, and the CPU check against `transformers` |
 
 ## Speech, music, and video
 

@@ -18,6 +18,8 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -537,4 +539,128 @@ TEST_CASE("process_inputs rejects logprobs above the vocabulary cap (#249)") {
     params.logprobs = 5;
     CHECK_NOTHROW(proc.process_inputs("r", "hi", params));
   }
+}
+
+// ─── MODEL-TEV1 Phase 7: the tokenizer's EOS when the checkpoint names none ───
+// ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA, .agents/specs/tev1-eos-fallback.md.
+// vLLM takes the PRIMARY eos from the tokenizer (renderers/base.py:310-317,
+// tokenizer_config.json eos_token) and the secondary ids from
+// generation_config.json, or from GenerationConfig.from_model_config when that
+// file is absent (transformers_utils/config.py:1066-1090 @ 5559679229). These
+// cases load real sibling files, as a checkpoint lays them out, and use the
+// Qwen3.6 tokenizer: 248044 <|endoftext|>, 248046 <|im_end|>.
+namespace {
+
+class EosModelDir {
+ public:
+  EosModelDir(const std::string& config, const std::string& gen,
+              const std::string& tokenizer_config) {
+    static int counter = 0;
+    dir_ = (std::filesystem::temp_directory_path() /
+            ("vllm_eos_fallback_" + std::to_string(counter++)))
+               .string();
+    std::filesystem::create_directories(dir_);
+    std::ofstream(dir_ + "/config.json", std::ios::binary) << config;
+    if (!gen.empty()) {
+      std::ofstream(dir_ + "/generation_config.json", std::ios::binary) << gen;
+    }
+    if (!tokenizer_config.empty()) {
+      std::ofstream(dir_ + "/tokenizer_config.json", std::ios::binary)
+          << tokenizer_config;
+    }
+  }
+  ~EosModelDir() { std::filesystem::remove_all(dir_); }
+  std::string config_path() const { return dir_ + "/config.json"; }
+
+ private:
+  std::string dir_;
+};
+
+// A nested Qwen3.5 wrapper, the shape both Tev1 checkpoints ship.
+std::string NestedConfig(const std::string& top_level_eos) {
+  return std::string(R"({"architectures": ["Qwen3_5ForConditionalGeneration"],
+    "model_type": "qwen3_5",)") + top_level_eos + R"(
+    "text_config": {"model_type": "qwen3_5_text", "hidden_size": 8,
+      "num_hidden_layers": 1, "vocab_size": 248320, "num_attention_heads": 2,
+      "num_key_value_heads": 1, "max_position_embeddings": 4096,
+      "eos_token_id": 248044}})";
+}
+
+EngineCoreRequest ProcessWith(const std::string& config_path,
+                              SamplingParams params = SamplingParams{}) {
+  const HfConfig cfg = vllm::LoadHfConfig(config_path);
+  InputProcessor proc(GoldenTokenizer(), cfg);
+  return proc.process_inputs("r", "hi", params);
+}
+
+}  // namespace
+
+TEST_CASE("eos fallback: a checkpoint that lists its ids keeps its stop set") {
+  // Pinned BEFORE the change: a top-level eos plus a generation_config.json,
+  // and a tokenizer_config.json whose eos_token is a DIFFERENT id. Neither the
+  // primary id nor stop_token_ids may move.
+  EosModelDir model(NestedConfig(R"("eos_token_id": 248044,)"),
+                    R"({"eos_token_id": [248044, 248045]})",
+                    R"({"eos_token": "<|im_end|>"})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  REQUIRE(req.sampling_params.eos_token_id.has_value());
+  CHECK(*req.sampling_params.eos_token_id == 248044);
+  CHECK(req.sampling_params.stop_token_ids == std::vector<int32_t>{248045});
+}
+
+TEST_CASE("eos fallback: a top-level eos without generation_config.json keeps its stop set") {
+  // from_model_config lets the OUTER eos_token_id win over text_config's, so a
+  // nested checkpoint that names 248046 at the top and 248044 inside, with no
+  // generation_config.json, stops on 248046 alone, before and after the change.
+  EosModelDir model(NestedConfig(R"("eos_token_id": 248046,)"), "",
+                    R"({"eos_token": "<|endoftext|>"})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  REQUIRE(req.sampling_params.eos_token_id.has_value());
+  CHECK(*req.sampling_params.eos_token_id == 248046);
+  CHECK(req.sampling_params.stop_token_ids.empty());
+}
+
+TEST_CASE("eos fallback: the Tev1 shape stops on the tokenizer's eos_token") {
+  // No top-level eos, no generation_config.json, eos_token <|im_end|>: vLLM's
+  // primary is 248046 and from_model_config adds the text config's 248044.
+  EosModelDir model(NestedConfig(""), "", R"({"eos_token": "<|im_end|>"})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  REQUIRE(req.sampling_params.eos_token_id.has_value());
+  CHECK(*req.sampling_params.eos_token_id == 248046);
+  CHECK(req.sampling_params.stop_token_ids == std::vector<int32_t>{248044});
+
+  SUBCASE("ignore_eos still suppresses both") {
+    SamplingParams p;
+    p.ignore_eos = true;
+    const EngineCoreRequest r = ProcessWith(model.config_path(), p);
+    CHECK_FALSE(r.sampling_params.eos_token_id.has_value());
+    CHECK(r.sampling_params.stop_token_ids.empty());
+  }
+}
+
+TEST_CASE("eos fallback: the object form of eos_token is read") {
+  EosModelDir model(NestedConfig(""), "",
+                    R"({"eos_token": {"content": "<|im_end|>", "special": true}})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  REQUIRE(req.sampling_params.eos_token_id.has_value());
+  CHECK(*req.sampling_params.eos_token_id == 248046);
+}
+
+TEST_CASE("eos fallback: a present generation_config.json wins over the text config") {
+  // try_get_generation_config reads the file when it exists and only falls
+  // back to from_model_config when it does not.
+  EosModelDir model(NestedConfig(""), R"({"eos_token_id": 248045})",
+                    R"({"eos_token": "<|im_end|>"})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  REQUIRE(req.sampling_params.eos_token_id.has_value());
+  CHECK(*req.sampling_params.eos_token_id == 248046);
+  CHECK(req.sampling_params.stop_token_ids == std::vector<int32_t>{248045});
+}
+
+TEST_CASE("eos fallback: an eos_token that is not one token is not guessed") {
+  EosModelDir model(NestedConfig(""), R"({"eos_token_id": 248045})",
+                    R"({"eos_token": "not one token"})");
+  const EngineCoreRequest req = ProcessWith(model.config_path());
+  CHECK_FALSE(req.sampling_params.eos_token_id.has_value());
+  CHECK(req.sampling_params.stop_token_ids == std::vector<int32_t>{248045});
 }

@@ -1,0 +1,13 @@
+{
+  "approved_runner_source_sha": "4c89728bc740ca2886def8f191d28a2a5f912c6d",
+  "correctness_gate": "NOT_RUN_PREREQUISITE",
+  "focused_tests": {
+    "command": "python3 -m pytest -q tests/scripts/test_qwen38_endpoint_bench.py tests/scripts/test_run_qwen38_tensorfold_gap.py",
+    "failed": 0,
+    "passed": 36,
+    "status": "PASSED"
+  },
+  "profile_gate": "NOT_RUN_PREREQUISITE",
+  "reason": "Required artifacts/source were not found in the retained receipt scope, so runner prerequisites could not be populated and measurement did not start.",
+  "timing_gate": "NOT_RUN_PREREQUISITE"
+}

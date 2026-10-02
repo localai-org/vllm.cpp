@@ -7,7 +7,7 @@ wired, so an image or video prompt runs instead of being refused.
 **What has been measured is much narrower than "it works."** Read
 [what has actually been checked](#what-has-actually-been-checked) before you rely
 on any of it. Nothing has run end to end through the server, and no speed number
-exists for this model on any axis.
+exists against vLLM (a secondary llama.cpp bar exists, #333).
 
 ## Run the text tower from a GGUF
 
@@ -33,12 +33,23 @@ in a form a block encoding cannot take.
 `mmproj-kquant.gguf` ships its patch embedding without the `patch_temporal`
 axis, so half the weight is not in the file. Loading it is refused by name.
 
-### The GGUF k-quant is not token-exact against llama.cpp
+### The GGUF k-quant against llama.cpp: token gate, 16/16 inside the near-tie band
 
-`"The capital of France is"` at `--temperature 0` continues
-`" Paris. The capital of France is Paris. ..."`. llama.cpp on the same file
-agrees on the first token and then diverges. Whether that residual is
-quantization drift or a second defect is open.
+`tests/parity/test_muse_glimmer_gguf_paged_engine.cpp` drives the standard
+16-prompt battery, 32 greedy tokens each, through `LoadedEngine::FromModelDir`
+on `Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf` (sha256 `4cc57c0f...f60e`), CPU,
+and compares with the registered llama.cpp oracle at its pin `b10451` on the
+same file (`scripts/llamacpp/llamacpp_oracle.cpp`, 2026-09-30). 10 of 16
+prompts are token-exact over all 32 tokens. The other 6 differ from the
+oracle's free-running greedy, and at every one of their cells the oracle's own
+teacher-forced gap on our prefix is at most **93 mnats** (the band is 500), so
+there are zero forward-divergent cells. Several of those cells have gap 0: our
+token is llama.cpp's own argmax on our prefix, and the difference is between
+llama.cpp's batched and single-token numerics. The earlier record ("agrees on
+the first token, then diverges") predates this gate and is superseded.
+
+This is quantization-matched agreement with llama.cpp, not a bf16 claim and
+not a vLLM result. The golden is `tests/parity/goldens/muse_glimmer_30b_q4km/`.
 
 Two defects had to be fixed to get that far: the GGUF tokenizer gap
 ([#347](https://github.com/mudler/vllm.cpp/issues/347), where `pre llama4` is the
@@ -78,23 +89,33 @@ converter that emits `muse-glimmer.attention.post_norm_rms_epsilon` or
 - The text tower ran on real tensors from the released 30B checkpoint at
   **reduced depth, 4 of its 52 layers.** Its **5 prefill argmax positions** are
   identical to a standalone torch transcription of the upstream source and to
-  Hugging Face's own `muse_glimmer` implementation. The full-depth 52-layer arm
-  of this forward has **never run**.
+  Hugging Face's own `muse_glimmer` implementation. The full-depth 52-layer
+  bf16 safetensors arm has generated once, 4 ungated tokens (`" Paris. It is"`,
+  2026-08-11); no bf16 token gate exists. The full-depth GGUF Q4_K_M arm is
+  token-gated (see the llama.cpp token gate above).
 - Those are argmax positions from a single prefill, not generated tokens.
-  **Multi-step decode is untested**, and so is the sliding window across steps.
+  **Multi-step decode on the bf16 safetensors arm is ungated**; on the GGUF
+  arm it is gated for 32 tokens (prompts are far shorter than the sliding
+  window, so the window across steps is still untested).
 - Even at reduced depth, this is agreement with independent transcriptions of the
-  same upstream source, not agreement with the model's own runtime. The pinned
-  oracle cannot load `muse_glimmer` at all.
-- The perception encoder has **no reference check of any kind**. The wiring gate
-  proves the tower is reachable and that its output lands on the image and video
-  placeholder rows. It does not prove that an image produces the right tokens.
-  The encoder normalizes merged multimodal embeddings again as of #405. Its
-  config key is absent from the released checkpoint and defaults on, which had
-  been read as off, so image and video prompts before that fix skipped a
-  normalization step.
+  same upstream source, not agreement with the model's own runtime. The vLLM
+  parity pin `a7c23ac96d` registers `MuseGlimmerForConditionalGeneration`, but
+  no bf16 token gate against it has run (it needs a GPU lease; owed).
+- The perception encoder has **one reference run**, on the released tensors
+  (2026-09-30, `test_muse_glimmer_vision_real`, env-gated): a 588x644 image,
+  483 soft-token rows, against a torch transcription of the pinned formulas.
+  f32: `ln_pre` 1.22e-6, tower 7.87e-5, soft tokens 4.07e-5 relative max error.
+  bf16 against the f32 truth: worst row cosine 0.967, mean 0.99875, where the
+  reference's own bf16 arm reaches 0.970 / 0.99856. The image processor is not
+  ported (the tower is fed the reference's pixels), and no image-to-text result
+  exists. The encoder normalizes merged multimodal embeddings again as of #405.
+  Its config key is `null` in the released checkpoint, which the pinned config
+  class reads as on. It had been read as off, so image and video prompts before
+  that fix skipped a normalization step.
 - **Nothing has run end to end through the server**, and **no speed number exists
-  for this model in any weight format**. The pinned vLLM oracle cannot load
-  `muse_glimmer`, so there is no denominator to quote and none is claimed.
+  for this model in any weight format** against vLLM: the parity pin now
+  registers the model, but its speed on this fleet is unmeasured, so no
+  denominator is quoted.
 - The ATEM reasoning and tool parsers are ported and unit-gated. At the server's
   default `skip_special_tokens: true` the framing tokens they key on
   (`<|start|>`, `<|message|>`, `<|eom|>`, `<|eot|>`) are stripped before the

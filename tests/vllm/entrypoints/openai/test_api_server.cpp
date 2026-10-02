@@ -6082,6 +6082,44 @@ TEST_CASE("api_server: systemone without a ner or decision callback is a 500") {
         "The model does not support SystemOne");
 }
 
+// MODEL-NIMBLE: the request-level seam owns the whole body, wins over the
+// per-question path, and maps its std::invalid_argument to a 400.
+TEST_CASE("api_server: systemone request-level seam") {
+  vllm::entrypoints::openai::OpenAIServingModels models{"nimble-served"};
+  ApiServer server{models, "test-version"};
+  std::string seen;
+  server.set_systemone_request(
+      [&seen](const nlohmann::ordered_json& body) -> nlohmann::ordered_json {
+        seen = body.dump();
+        if (!body.contains("questions")) {
+          throw std::invalid_argument("questions is required");
+        }
+        nlohmann::ordered_json out;
+        out["answers"] = {{"q", {{"type", "noul"}, {"noul", 0.25}}}};
+        out["usage"] = {{"input_tokens", 11}, {"output_tokens", 0}};
+        return out;
+      });
+  // A body the per-question parser would refuse (unknown question type)
+  // reaches the seam untouched: the seam owns validation.
+  const std::string body =
+      R"({"state":{"k":[1,"<b>"]},"questions":{"q":{"type":"custom"}}})";
+  ApiServer::DispatchResult r = server.handle_systemone(body);
+  CHECK(r.status == 200);
+  CHECK(seen == nlohmann::ordered_json::parse(body).dump());
+  json j = json::parse(r.body);
+  CHECK(j.at("model") == "nimble-served");
+  CHECK(j.at("answers").at("q").at("noul") == doctest::Approx(0.25));
+  CHECK(j.at("usage").at("input_tokens").get<int64_t>() == 11);
+  // The request's own model name is echoed, as openjev does.
+  r = server.handle_systemone(R"({"model":"nimble","state":"s","questions":{}})");
+  CHECK(json::parse(r.body).at("model") == "nimble");
+  // std::invalid_argument is the request's fault.
+  r = server.handle_systemone(R"({"state":"s"})");
+  CHECK(r.status == 400);
+  CHECK(json::parse(r.body).at("error").at("message") == "questions is required");
+  CHECK(server.handle_systemone("not json").status == 400);
+}
+
 // ── kev full-compatibility: choice, score, permute, separate ─────────────────
 
 TEST_CASE("api_server: systemone choice question") {

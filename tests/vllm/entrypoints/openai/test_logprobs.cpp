@@ -174,3 +174,31 @@ TEST_CASE("logprobs: LogprobsProcessor inert when logprobs not requested") {
   CHECK_FALSE(proc.prompt_logprobs().has_value());
   CHECK_FALSE(proc.cumulative_logprob().has_value());
 }
+
+// ISSUE-LOCAL-01M3SE6RVKD6SCMA2YBS7F8X0R: a byte-level token that is half of a
+// UTF-8 character decodes, upstream, through tokenizer.decode([id]) with
+// errors="replace", so its logprob token is U+FFFD and its bytes are
+// EF BF BD. Our decoded_token keeps the raw byte, and serializing it threw
+// inside json::dump, so a served chat request with top_logprobs answered 500
+// with an empty body as soon as a partial-UTF-8 token reached the top-k.
+TEST_CASE("logprobs: a partial UTF-8 token serializes as U+FFFD, not a throw") {
+  SampleLogprobs scratch;
+  vllm::AppendLogprobsForNextPosition(
+      scratch, /*token_ids=*/{7, 7, 2},
+      /*logprobs=*/{-0.1f, -0.1f, -1.5f},
+      /*decoded=*/{std::string("G"), std::string("G"), std::string("\xF0\x9F")},
+      /*rank=*/1, /*num_logprobs=*/2);
+  auto chat = BuildChatLogprobs(/*token_ids=*/{7}, scratch,
+                                /*num_output_top_logprobs=*/2);
+  json j = chat;
+  std::string dumped;
+  CHECK_NOTHROW(dumped = j.dump());
+  CHECK(j["content"][0]["top_logprobs"][1]["token"] == "\xEF\xBF\xBD");
+  CHECK(j["content"][0]["top_logprobs"][1]["bytes"] == json::array({239, 191, 189}));
+
+  auto completion = BuildCompletionLogProbs(/*token_ids=*/{7}, scratch,
+                                            /*num_output_top_logprobs=*/1);
+  json jc = completion;
+  CHECK_NOTHROW(dumped = jc.dump());
+  CHECK(jc["top_logprobs"][0].contains("\xEF\xBF\xBD"));
+}

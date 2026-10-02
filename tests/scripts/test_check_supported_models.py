@@ -120,6 +120,15 @@ class DriftTests(unittest.TestCase):
         text = _features(TWO + ["`CuaS1Forms`"])
         self.assertEqual(chk.supported_models_errors(registered, text), [])
 
+    def test_versioned_suffix_registered_arch_passes_self_check(self) -> None:
+        # Upstream registers the Nemotron Nano VL wrappers under names that end
+        # in a version, not a task suffix (`NemotronH_Nano_VL_V2`,
+        # `NemotronH_Nano_Omni_Reasoning_V3`, registry.py:512-513). They must
+        # be compared, never dropped as unrepresentable.
+        registered = REGISTERED | {"NemotronH_Nano_VL_V2", "NemotronH_Nano_Omni_Reasoning_V3"}
+        text = _features(TWO + ["`NemotronH_Nano_VL_V2`", "`NemotronH_Nano_Omni_Reasoning_V3`"])
+        self.assertEqual(chk.supported_models_errors(registered, text), [])
+
     def test_unrepresentable_registered_arch_fails_the_self_check(self) -> None:
         # A registered string the FEATURES arch-token pattern cannot express must
         # surface as an error, never be silently excluded from the comparison.

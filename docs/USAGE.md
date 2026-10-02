@@ -175,6 +175,12 @@ Two more example binaries ship alongside it:
 
 ### Which HF tokenizers load
 
+The loader reads `<model_dir>/tokenizer.json`. When that file is absent, it reads
+`<model_dir>/tokenizer/tokenizer.json` instead, and the same applies to
+`tokenizer_config.json`. The root file always wins. This lets a snapshot such as
+`convaiinnovations/laya`, which keeps its tokenizer in `tokenizer/`, load as
+downloaded, without a symlink.
+
 A checkpoint's `tokenizer.json` is accepted when its `pre_tokenizer` is one this
 build recognises. Recognition is by exact regex or pipeline shape, not by model
 name, so a checkpoint from any vendor loads if it carries one of these:
@@ -327,24 +333,83 @@ than "it works", so it is worth stating precisely.
 - The text tower ran on real tensors from the released 30B checkpoint at
   **reduced depth — 4 of its 52 layers.** Its **5 prefill argmax positions** are
   identical to a standalone torch transcription of the upstream source and to
-  HF's own `muse_glimmer` implementation. The full-depth 52-layer arm of our
-  forward has **never run**.
+  HF's own `muse_glimmer` implementation. The full-depth 52-layer bf16 arm has
+  generated once, 4 ungated tokens (2026-08-11); no bf16 token gate exists.
 - Those are argmax positions from a single prefill, not generated tokens.
-  **Multi-step decode is untested**, and so is the sliding window across steps.
+  **bf16 multi-step decode is ungated**, and the sliding window across steps is
+  untested on either arm. The GGUF Q4_K_M arm IS token-gated at full depth
+  against llama.cpp `b10451` (next section).
 - Even at reduced depth this is agreement with independent transcriptions of the
-  same upstream source, not agreement with the model's own runtime: the pinned
-  oracle cannot load `muse_glimmer` at all.
-- The perception encoder has **no reference check of any kind** — the wiring gate
-  proves the tower is reachable and that its output lands on the image/video
-  placeholder rows, not that an image produces the right tokens.
-- Nothing has run end to end through the server, and **no speed number exists for
-  this model on any axis**; there is no denominator to state one against.
+  same upstream source, not agreement with the model's own runtime. The vLLM
+  parity pin `a7c23ac96d` registers `muse_glimmer`, but no bf16 gate against it
+  has run (it needs a GPU lease).
+- The perception encoder has **one reference run** on the released tensors
+  (2026-09-30): f32 soft tokens within 4.07e-5 relative of a torch
+  transcription of the pinned formulas; bf16 within the gate's tolerance of the
+  reference's own bf16 arm (worst row cosine 0.967 vs 0.970). The image processor is not ported, and no image-to-text result
+  exists.
+- Nothing has run end to end through the server, and **no speed number exists
+  against vLLM**; a secondary llama.cpp bar exists (#333).
 - The ATEM reasoning and tool parsers are ported and unit-gated, but at the
   server's default `skip_special_tokens: true` the framing tokens they key on
   (`<|start|>`, `<|message|>`, `<|eom|>`, `<|eot|>`) are stripped before the
   parser sees the text. Channel scoping is therefore an **open gap at server
   defaults** — see [FEATURES.md](FEATURES.md) and
   [the spec](../.agents/specs/muse-glimmer.md) §6.7.
+
+### Nemotron 3 Nano Omni: which weights, and what has been checked
+
+`NemotronH_Nano_Omni_Reasoning_V3` serves IMAGE input over the OpenAI API. Audio
+and video are refused by name, and no end-to-end token gate against vLLM exists
+yet. See [the model page](models/nemotron-nano-omni.md) for the measured bounds.
+
+| Arm | Artifact | Size | Status |
+|---|---|---|---|
+| bf16 | [nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16](https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16) @ `e5e9932441de940c9a62185c870ea5bcd4cd24e2`, 17 shards (shard 1 sha256 `de952574c9189925ad15f8cf164184117b6e5eec2d8b7f092e1268c1f0872244`) | 66 032 308 536 B (61.5 GiB) | loads; image path gated per stage on the real tensors |
+| NVFP4 | [nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4](https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4) @ `16993199e436da4ba75ddc410855f87e0d996ee6` | 22 409 034 192 B (20.9 GiB) | **refused**: per-module ModelOpt scheme (FP8 `o_proj` and shared experts, bf16 `lm_head`) not resolved |
+| GGUF | none | | **refused**, as for `NemotronHForCausalLM` |
+| 12B VL V2 | [nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-Nano-12B-v2-VL-BF16) @ `ca9543b126e8bf3176916d3d305ccc415f89fd4d` | | **refused**: static InternVL tiling not ported |
+
+The image processor sizes each image from the engine's `max_model_len`, as
+upstream does, so a short `--max-model-len` shrinks the patch grid.
+
+### North (`Cohere2MoeForCausalLM`): which weights, and what has been checked
+
+The port was built and gated against the first-party bf16 release. There is
+one arm; every other arm is refused at load with a message that names it.
+
+| artifact | size | source |
+|---|---|---|
+| `model-00001-of-00049.safetensors` ... `model-00049-of-00049.safetensors`, with `config.json`, `model.safetensors.index.json` and the tokenizer files | 60,968,607,744 bytes (56.8 GiB) of bf16 weights, 18,730 tensors | [CohereLabs/North-Mini-Code-1.0](https://huggingface.co/CohereLabs/North-Mini-Code-1.0) at revision `d11e61a842617a22dc328552fa5bb86231ee4f37` |
+
+The resident size is the weight size: 56.8 GiB of bf16, plus a 128 MiB RoPE
+table for the 500,000-position context. The loader copies each expert's gate
+and up rows into one owner, so plan for the whole checkpoint in host memory.
+
+Refused arms:
+
+- **GGUF.** llama.cpp `b10451` defines `cohere2moe`; the loader arm is owed.
+- **Quantized siblings** (FP8, W4A16, NVFP4, anything with a
+  `quantization_config`). Load the bf16 checkpoint.
+- **`use_qk_norm: true`.** The pinned vLLM `cohere2_moe.py` has no q/k norm.
+- **The EAGLE drafter** (`North-Mini-Code-1.0-eagle`) and the EAGLE3
+  auxiliary hidden states. Not ported.
+- **`--disable-sliding-window`.** The pinned model file computes
+  `sliding_window + 1` for every sliding layer and cannot run without it.
+
+What has been measured, on CPU only:
+
+- Three tiny checkpoints that switch every mechanism on and off, loaded through
+  the production loader, match a torch transcription of the pinned
+  `cohere2_moe.py` within 6e-7 relative in f32 and within the bf16 envelope in
+  bf16, for prefill and for decode through the paged cache past the window.
+- Layers 0 (dense, RoPE), 1 (sliding window, MoE) and 4 (full attention, NoPE,
+  MoE) of the real checkpoint, fetched by HTTP range, match the same
+  transcription within 8e-6 relative in f32.
+- The model loads through the engine registry and decodes through the runner.
+- **No token gate against vLLM exists yet**, and no speed number exists on any
+  axis. Both need a GPU lease and the full checkpoint
+  ([the spec](../.agents/specs/cohere2-moe.md) `## Owed`).
 
 ## OpenAI-compatible server
 
@@ -686,6 +751,16 @@ secondary ids are merged into the request's `stop_token_ids`, so a chat model
 stops on its turn-level token rather than running to the length cap. A missing
 or malformed `generation_config.json` is a silent no-op.
 
+When neither `config.json` nor the `tokenizer.json` post-processor names an
+eos, the engine takes the tokenizer's own `eos_token` from the sibling
+`tokenizer_config.json` as the primary eos id, which is vLLM's primary source.
+When no `generation_config.json` exists, it also adds the text config's
+`eos_token_id` as a secondary id, as vLLM's `from_model_config` fallback does.
+Tev1 is such a checkpoint: it stops on `<|im_end|>` without a
+`stop_token_ids` field. A checkpoint that already names its eos keeps it; the
+engine does not yet move the primary id to the tokenizer's for every model, as
+vLLM does ([spec](../.agents/specs/tev1-eos-fallback.md)).
+
 `ignore_eos: true` suppresses **all** of them, primary and secondary alike, and
 generation then runs to the token budget. The ids still count toward
 `min_tokens` masking either way, so `min_tokens` cannot be satisfied by emitting
@@ -749,6 +824,59 @@ For a production deployment, use [LocalAI](https://localai.io), which can embed
 engines like this behind a model gallery, multi-model serving, the full OpenAI
 API surface, auth, and metrics.
 
+## System 1 decisions with `/v1/systemone`
+
+A decision model answers typed questions about a `state` without generating
+text. The server registers `POST /v1/systemone` when the model directory
+resolves to a decision architecture, and `vllm_decide` takes the same body
+through the C ABI ([C API reference](reference/c-api.md#decisions-and-option-scoring)).
+
+```sh
+curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
+  "state": "I was charged twice. Please refund the duplicate.",
+  "questions": {
+    "refund": {"type": "noul", "instructions": "Does the user request a refund?"},
+    "department": {"type": "choice", "instructions": "Which department?",
+                   "criteria": {"billing": "Payments and refunds", "technical": "Software bugs"}},
+    "urgency": {"type": "score", "instructions": "How urgent is this?",
+                "criteria": ["Routine", "Urgent", "Emergency"]}}}'
+```
+
+Each model page carries its checkpoint, its answer semantics, and what is
+measured: [CLM](models/clm.md), [GLiNER2.5-Decide](models/gliner25-decide.md),
+[xor](models/xor.md), [Nimble](models/nimble.md), and [Tev1](models/tev1.md).
+Tev1 is a generation model: a directory whose `config.json` names `Tev1Model`
+serves `/v1/systemone` beside the chat routes, and scores each question's answer
+letters through the engine's own scheduler.
+
+### Nimble: the exact weights
+
+Nimble is an adapter, so it runs only after `scripts/convert-nimble.py` merges
+it into its base. The [Nimble page](models/nimble.md) has the commands.
+
+| arm | repo @ revision | file | sha256 |
+|---|---|---|---|
+| base, BF16 | `Qwen/Qwen3.5-9B` @ `c202236235762e1c871ad0ccb60c8ee5ba337b9a` | four `model.safetensors-0000N-of-00004` shards | as published at that revision |
+| adapter (Ollama `nimble`), T=1.0 | `bespokelabs/Bespoke-Nimble-9B` @ `bd792f44ec8e265be861bfcdf4e05967ffe0e858` | `adapter_model.safetensors`, 173,188,512 bytes | `29ef39b072dee97287947455337879c1e916705c2f727287922a2d81f5e2f20a` |
+| adapter (earlier release), T=2.179078721266035 | `bespokelabs/Bespoke-Nimble-9B-v2` @ `4b8c04d1ac2cea3e41e5e3c4d2130bcead2c0abe` | `adapter_model.safetensors`, 173,188,512 bytes | `1bd126be997be6d9a0c25ce483ccf858c31b3422d480c33f02ba47b614be68ae` |
+
+GGUF k-quant arms are not implemented; `NimbleModel` refuses a GGUF source by
+name.
+
+### CLM: the exact weights
+
+CLM ships its two projection heads as a torch pickle beside an unmodified
+base, so it runs only after `scripts/convert-clm.py` writes a `ClmModel`
+directory. The [CLM page](models/clm.md) has the commands.
+
+| arm | repo @ revision | file | sha256 |
+|---|---|---|---|
+| base, BF16 | `Qwen/Qwen3-8B` @ `b968826d9c46dd6066d109eabc6255188de91218` | five `model-0000N-of-00005.safetensors` shards | as published at that revision |
+| heads, F32 | `Contrastive-LM/CLM-v0.1-8B` @ `e939398d4556fcd9400c76fa8c5a513202f42b0a` | `CLM_v0.1-8B.pt`, 75,557,149 bytes | `b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5` |
+
+GGUF k-quant arms are not implemented; `ClmModel` refuses a GGUF source by
+name.
+
 ## Muse Glimmer 30B from a GGUF k-quant
 
 The text tower loads from a `muse-glimmer`-architecture GGUF, so the 30B model
@@ -769,21 +897,21 @@ shared forward consumes them in a form a block encoding cannot take.
 
 Three caveats:
 
-- **The k-quant generates coherent text, but is not token-exact against
-  llama.cpp.** Two defects had to be fixed to get there: the GGUF tokenizer gap
+- **The k-quant is token-gated against llama.cpp `b10451`** on the same file
+  (`test_muse_glimmer_gguf_paged_engine`, `VLLM_MUSE_GGUF_PARITY=<file>`,
+  2026-09-30): 16/16 battery prompts inside the 500 mnat near-tie band over 32
+  greedy tokens, 10/16 token-exact. Quantization-matched agreement, not a bf16
+  or vLLM claim. Two defects had to be fixed first: the GGUF tokenizer gap
   ([#347](https://github.com/mudler/vllm.cpp/issues/347), pre `llama4` = the
   GPT-4o / o200k family) and the converter's Q/K RoPE row permutation
   ([#359](https://github.com/mudler/vllm.cpp/issues/359), which produced
-  `" is is is ..."`). `"The capital of France is"` at `--temperature 0` now
-  continues `" Paris. The capital of France is Paris. ..."`. llama.cpp on the
-  same file agrees on the first token and then diverges; whether that residual is
-  quantization drift or a second defect is open.
+  `" is is is ..."`).
 - **Image and video need the bf16 safetensors.** The released
   `mmproj-kquant.gguf` ships its patch embedding without the `patch_temporal`
   axis, so half the weight is not in the file; loading it is refused by name.
-- **No speed number exists for this model in any weight format.** The pinned
-  vLLM oracle cannot load `muse_glimmer` at all, so there is no denominator to
-  quote and none is claimed.
+- **No speed number exists against vLLM in any weight format.** The parity pin
+  `a7c23ac96d` registers `muse_glimmer`, but no vLLM run exists on this fleet;
+  the secondary llama.cpp bar is #333.
 
 Set `VLLM_MUSE_GGUF=<file>` (or `VLLM_MUSE_GGUF_LOAD=<file>` for the full
 materialization) to run `test_muse_glimmer_gguf` against a real checkpoint;

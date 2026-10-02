@@ -5666,7 +5666,14 @@ std::unique_ptr<AsyncModelRunnerOutput> GPUModelRunner::sample_tokens_async(
   void* dev_ids = slot->device_sampled_ids;
   vt::Tensor dev_ids_t = vt::Tensor::Contiguous(
       dev_ids, vt::DType::kI64, dev, {static_cast<int64_t>(num_reqs)});
-  (void)sampler_.forward(queue_, logits, sm, &dev_ids_t);
+  SamplerOutput sampler_output = sampler_.forward(queue_, logits, sm, &dev_ids_t);
+  // The sampler's logprobs ride on the async output, as upstream's
+  // AsyncGPUModelRunnerOutput carries logprobs_tensors and get_output returns
+  // them (gpu_model_runner.py:264-295, 320-325 @ 5559679229). A request that
+  // asks for logprobs already took the sampler's host path, so they are host
+  // rows here; nullopt when nobody asked. Discarding them emptied every
+  // AsyncLLM logprobs request (ISSUE-LOCAL-01M3SE6RVKD6SCMA2YBS7F8X0R).
+  skeleton.logprobs = std::move(sampler_output.logprobs_tensors);
 
   // post_update (input_batch.py:457-543 post_update / states.py): record this
   // step's last sampled id per req_state so the NEXT step's

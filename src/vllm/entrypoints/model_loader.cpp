@@ -39,6 +39,7 @@
 #include "vllm/model_executor/models/interfaces.h"  // #607 L3 SkipTowerForModalities
 #include "vllm/model_executor/models/glm5_next_weights.h"  // glm5next GGUF arm
 #include "vllm/model_executor/models/glm_moe_dsa.h"  // glm-dsa GGUF arm
+#include "vllm/model_executor/models/laguna.h"  // laguna GGUF arm
 #include "vllm/model_executor/models/muse_glimmer_gguf_weights.h"  // muse-glimmer GGUF arm
 #include "vllm/model_executor/models/qwen4_exp_gguf_weights.h"  // qwen4exp GGUF arm
 #include "vllm/model_executor/models/nemotron_h.h"  // the OWED nemotron_h* GGUF refusal (#809)
@@ -49,6 +50,7 @@
 #include "vllm/model_executor/models/qwen3_dflash.h"  // SPEC-DFLASH D5 draft load
 #include "vllm/transformers_utils/hf_cache.h"  // ENG-HF-MODEL-DOWNLOAD (#1280)
 #include "vllm/transformers_utils/hf_config.h"  // SPEC-DFLASH D5 draft config
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/platforms/interface.h"  // CurrentPlatform() — SelectQueue
 #include "vllm/v1/core/hybrid_kv_budget.h"
 #include "vllm/v1/core/kv_cache_utils.h"  // check_enough_kv_cache_memory (M4)
@@ -1249,6 +1251,11 @@ std::unique_ptr<vllm::v1::kv_offload::KVConnector> BuildKvConnector(
 //    the row that discharges O9: `scripts/convert-glm5-next-gguf.py` is the
 //    only writer of that container -- no upstream tool can produce one -- and
 //    until this row existed the file it wrote was refused as unrecognized.
+//  * `laguna` -> LagunaHfConfigFromGguf. The Laguna registry has carried a GGUF
+//    load arm (and `LagunaParamsFromGguf`) since W5, but no row here reached
+//    it, so every Laguna GGUF was refused at this table and only
+//    `examples/laguna_gen` could load one (#2841). The builder is derived from
+//    the loader's own GGUF resolve, so the two cannot disagree on geometry.
 struct GgufArchArm {
   const char* arch;
   HfConfig (*build)(const vllm::GgufFile&);
@@ -1264,6 +1271,7 @@ constexpr GgufArchArm kGgufArchArms[] = {
     {vllm::kQwen4ExpGgufArch, &vllm::Qwen4ExpHfConfigFromGguf},
     {vllm::kGlm5NextGgufArch, &vllm::Glm5NextHfConfigFromGguf},
     {vllm::kGlmMoeDsaGgufArch, &vllm::GlmMoeDsaHfConfigFromGguf},
+    {"laguna", &vllm::LagunaHfConfigFromGguf},
 };
 
 std::string SupportedGgufArchitectures() {
@@ -2167,8 +2175,8 @@ LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5MoeWeights weights,
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5DenseWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::optional<Qwen3_5MTPWeights> mtp_weights)
-    : LoadedEngine(std::move(config),
-                   AttachMtp(MakeQwen3_5DenseLoadedModel(std::move(weights)),
+    : LoadedEngine(config,
+                   AttachMtp(MakeQwen3_5DenseLoadedModel(std::move(weights), config),
                              std::move(mtp_weights)),
                    std::move(tokenizer), params) {}
 
@@ -2177,7 +2185,7 @@ LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5DenseWeights weights,
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5DenseWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::unique_ptr<DflashDraft> dflash_draft)
-    : LoadedEngine(std::move(config), MakeQwen3_5DenseLoadedModel(std::move(weights)),
+    : LoadedEngine(config, MakeQwen3_5DenseLoadedModel(std::move(weights), config),
                    std::move(tokenizer), params, /*preselected_queue=*/nullptr,
                    std::move(dflash_draft)) {}
 
@@ -3355,7 +3363,10 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
       config_path = rl_path;
     }
   }
-  const std::string tokenizer_path = (dir / "tokenizer.json").string();
+  // Root tokenizer.json, else tokenizer/tokenizer.json (MODEL-LAYA ships it
+  // there). ISSUE-LOCAL-01M3SDXGYYTS9FDXKZDAE24N0R.
+  const std::string tokenizer_path =
+      vllm::ResolveTokenizerFile(dir, "tokenizer.json").string();
 
   // Refuse-by-task (ARCH-ONE-SURFACE ROW 1), BEFORE the full HfConfig parse: a
   // SupportsTranscription-ONLY architecture (Parakeet CTC/RNNT/TDT) has no

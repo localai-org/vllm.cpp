@@ -34,6 +34,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -116,6 +117,9 @@ std::tuple<ttnn::Tensor, std::optional<ttnn::Tensor>> chunk_gated_delta_rule(
     const std::optional<ttnn::Tensor>& initial_state = std::nullopt,
     bool output_final_state = false, uint32_t chunk_size = 64,
     bool use_qk_l2norm = false, bool output_head_major = false,
+    // The advanced pin (98134127a7b, chunk_gated_delta_rule.hpp:41) adds the
+    // multicast flag at this position; mirror 1:1.
+    bool use_mcast = true,
     const std::optional<ttnn::MemoryConfig>& memory_config = std::nullopt,
     const std::optional<DeviceComputeKernelConfig>& compute_kernel_config = std::nullopt,
     const std::optional<ttnn::Tensor>& eye = std::nullopt,

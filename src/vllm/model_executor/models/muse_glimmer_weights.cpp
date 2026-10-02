@@ -740,6 +740,27 @@ MuseGlimmerVisionTower LoadVisionTower(const TensorResolver& get,
 
 }  // namespace
 
+MuseGlimmerVisionTower LoadMuseGlimmerVisionTower(const std::vector<SafetensorsFile>& shards,
+                                                  const MuseGlimmerParams& params) {
+  VT_CHECK(params.vision.present,
+           "muse_glimmer: this config declares no vision_config, so there is no "
+           "perception encoder to load");
+  std::unordered_map<std::string, TensorSite> where;
+  for (const SafetensorsFile& shard : shards) {
+    for (const std::string& raw_name : shard.Names()) {
+      std::string canonical;
+      if (!NormalizeMuseGlimmerWeightName(raw_name, &canonical)) continue;
+      where.emplace(canonical, TensorSite{&shard, raw_name});
+    }
+  }
+  const TensorResolver get = [&where](const std::string& name) -> const StTensor& {
+    auto it = where.find(name);
+    VT_CHECK(it != where.end(), "muse_glimmer: tensor not found: " + name);
+    return it->second.shard->Get(it->second.raw_name);
+  };
+  return LoadVisionTower(get, params);
+}
+
 MuseGlimmerWeights LoadMuseGlimmerForConditionalGenerationWeights(
     const std::vector<SafetensorsFile>& shards, const HfConfig& config,
     const MultiModalConfig* mm_config) {

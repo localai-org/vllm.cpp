@@ -286,6 +286,7 @@ only when it appears in this table and has a recorded pin:
 | vLLM TT plugin | `vllm-tt-plugin` | the qwen35 and other TT-prefixed architectures on Tenstorrent mesh devices, from HF weights — vLLM's own TT platform plugin (blog 2026-09-07); NOT a GGUF-decode reference |
 | `ddickmann/vllm-factory` | `vllm-factory` | GLiNER2.5 on vLLM (DeBERTa v2 encoder with disentangled attention + GLiNER2 pooler head + IO processor), which vLLM does not implement at the pin; no DeBERTa, no disentangled attention, and no GLiNER pooler exists in-tree or upstream |
 | `trycua/cua` | `cua` | the cua-s1-forms TinyTransformerScorer (byte-level 2-layer transformer encoder + cross-attention scoring head) for GUI form-filling decisions, which neither vLLM nor vLLM-Omni registers |
+| `Contrastive-LM/CLM` | `clm` | the CLM bi-encoder decision model (Qwen3-8B pooling + state/action projection heads), which neither vLLM nor vLLM-Omni registers |
 
 <!-- oracle-registry:end -->
 

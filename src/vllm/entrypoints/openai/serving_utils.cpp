@@ -21,7 +21,11 @@ namespace {
 // None) — our serving layer holds no tokenizer, so this stands in for the
 // `tokenizer.decode([token_id])` branch (recorded deviation).
 std::string DecodedToken(const vllm::Logprob& lp, int32_t token_id) {
-  if (lp.decoded_token.has_value()) return *lp.decoded_token;
+  // Upstream's decoded token is a Python str from tokenizer.decode([id]),
+  // errors="replace": a byte-level token that is part of a UTF-8 character is
+  // U+FFFD there. Ours keeps the raw byte, which json::dump refuses, so it is
+  // replaced the same way (ISSUE-LOCAL-01M3SE6RVKD6SCMA2YBS7F8X0R).
+  if (lp.decoded_token.has_value()) return SanitizeUtf8(*lp.decoded_token);
   return "token_id:" + std::to_string(token_id);
 }
 

@@ -91,13 +91,16 @@ The loaded architecture selects the request format:
 
 | Architecture | Request format |
 |---|---|
-| `KevModel`, `LayaModel`, `ClmModel`, `SpanExtractor` (GLiNER2.5-Decide), `XorModel` | [`/v1/systemone`](../USAGE.md#system-1-decisions-with-v1systemone): `state` and a nonempty `questions` object with `choice`, `score`, or `noul` questions |
+| `KevModel`, `LayaModel`, `SpanExtractor` (GLiNER2.5-Decide), `XorModel` | [`/v1/systemone`](../USAGE.md#system-1-decisions-with-v1systemone): `state` and a nonempty `questions` object with `choice`, `score`, or `noul` questions |
+| `NimbleModel` | The same `/v1/systemone` body, validated as Nimble's own server validates it (openjev): unknown keys are refused, and a field has at most 26 choices. Answers are unrounded and `confidence` is the normalized negative entropy. See [Nimble](../models/nimble.md) |
+| `ClmModel` | The same `/v1/systemone` body plus an optional `temperature` in (0, 100], validated and answered as the CLM reference server does: unrounded probabilities, margin `confidence`, no `confidence` on a `noul` answer, and `usage.billing_units`. See [CLM](../models/clm.md) |
+| `Tev1Model` | The same `/v1/systemone` body, with at most 24 options per question and a nonempty description for each. The engine scores each question's answer letters through its own scheduler (one sampled token per question, counted in `usage.output_tokens`), so the call can run beside `vllm_chat` on the same handle. See [Tev1](../models/tev1.md) |
 | `CuaS1Forms` | [`/v1/score`](../USAGE.md#option-scoring-with-v1score): a `context` string and a nonempty `options` array of strings |
 
 Use the linked HTTP examples as request bodies, without the `curl` command.
 Decision responses contain `answers`, keyed by question ID. Option scoring returns
 `probabilities`, `winner`, and `confidence`. Both include `model`, `usage`, and `latency_ms`.
-Tev1 uses ordinary chat generation. `vllm_decide` also rejects the
+A plain Qwen3.5 engine is refused, and the refusal names `Tev1Model`. `vllm_decide` also rejects the
 `BoundaryExtractor` NER architecture, although its server can expose `/v1/systemone`.
 
 On `VLLM_OK`, `out_json` owns a library-allocated, NUL-terminated response.

@@ -91,12 +91,15 @@
 #include "vllm/platform/console_shutdown.h"
 #include "vllm/platform/process.h"
 #include "vllm/transformers_utils/hf_config.h"
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/gliner2_ner.h"  // Gliner2NerInference (MODEL-GLINER25)
 #include "vllm/model_executor/models/cua_s1_inference.h"  // CuaS1ScoreInference (MODEL-CUA-S1-FORMS)
 #include "vllm/model_executor/models/laya_inference.h"  // LayaInference (MODEL-LAYA)
 #include "vllm/model_executor/models/kev_inference.h"  // KevInference (MODEL-KEV)
-#include "vllm/model_executor/models/clm_inference.h"  // ClmInference (MODEL-CLM)
+#include "vllm/model_executor/models/nimble_inference.h"  // NimbleDecide (MODEL-NIMBLE)
+#include "vllm/model_executor/models/tev1_inference.h"  // Tev1Decide (MODEL-TEV1)
+#include "vllm/model_executor/models/clm_inference.h"  // ClmDecide (MODEL-CLM)
 #include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (MODEL-GLINER25-DECIDE)
 #include "vllm/model_executor/models/xor_inference.h"  // XorInference (MODEL-XOR)
 #include "vllm/multimodal/minimax_h3_video.h"
@@ -1074,10 +1077,13 @@ int VllmServerMain(int argc, char** argv) {
         config_path = rl_path;
       }
     }
-    const std::string tokenizer_path = PathUtf8(dir / "tokenizer.json");
+    // Root file, else the tokenizer/ subdirectory; the same resolution the
+    // loader applies (ISSUE-LOCAL-01M3SDXGYYTS9FDXKZDAE24N0R).
+    const std::string tokenizer_path =
+        PathUtf8(vllm::ResolveTokenizerFile(dir, "tokenizer.json"));
     const std::string tokenizer_config_path =
         args.tokenizer_config.empty()
-            ? PathUtf8(dir / "tokenizer_config.json")
+            ? PathUtf8(vllm::ResolveTokenizerFile(dir, "tokenizer_config.json"))
             : args.tokenizer_config;
     const std::string served_model_name =
         args.served_model_name.empty()
@@ -1368,6 +1374,68 @@ int VllmServerMain(int argc, char** argv) {
         return 0;
       }
 
+      // ── NIMBLE DECISION TASK DISPATCH (MODEL-NIMBLE): a model dir whose
+      // architectures resolve to "NimbleModel" (scripts/convert-nimble.py
+      // output) serves /v1/systemone through the REQUEST-level seam
+      // (NimbleDecide, the same function vllm_decide calls), and registers no
+      // generate, embedding, or NER routes. Checked before the pooling check
+      // for the same reason as kev below.
+      bool nimble_model = false;
+      if (!archs.empty()) {
+        try {
+          nimble_model =
+              vllm::ModelRegistry::Resolve(std::span<const std::string>(archs))
+                  .architecture == "NimbleModel";
+        } catch (const std::exception&) {
+          nimble_model = false;
+        }
+      }
+      if (nimble_model) {
+        std::cerr << "server: nimble decision model (" << archs[0]
+                  << "); serving /v1/systemone\n";
+        vllm::entrypoints::EngineParams decision_params;
+        decision_params.block_size = args.block_size;
+        decision_params.num_blocks = args.num_blocks;
+        decision_params.gpu_memory_utilization = args.gpu_memory_utilization;
+        decision_params.kv_cache_memory_bytes = args.kv_cache_memory_bytes;
+        decision_params.max_model_len = args.max_model_len;
+        decision_params.max_num_seqs = args.max_num_seqs;
+        decision_params.max_num_batched_tokens = args.max_num_batched_tokens;
+        decision_params.enable_prefix_caching = args.enable_prefix_caching;
+        decision_params.offload_config = parsed_offload_config;
+        decision_params.weight_residency = parsed_weight_residency;
+        auto loaded_decision = std::shared_ptr<vllm::entrypoints::LoadedEngine>(
+            vllm::entrypoints::LoadedEngine::FromModelDir(args.model_dir,
+                                                          decision_params));
+        namespace oai = vllm::entrypoints::openai;
+        oai::OpenAIServingModels decision_models(served_model_name);
+        oai::ApiServer decision_server(decision_models, vllm::Version());
+        auto decision_mutex = std::make_shared<std::mutex>();
+        decision_server.set_systemone_request(
+            [loaded_decision, decision_mutex](const nlohmann::ordered_json& body)
+                -> nlohmann::ordered_json {
+              std::lock_guard<std::mutex> lock(*decision_mutex);
+              vllm::NimbleResponse r = vllm::NimbleDecide(
+                  loaded_decision->loaded_model(), loaded_decision->tokenizer(),
+                  body);
+              nlohmann::ordered_json out = nlohmann::ordered_json::object();
+              out["answers"] = std::move(r.answers);
+              out["usage"] = {{"input_tokens", r.input_tokens},
+                              {"output_tokens", 0}};
+              return out;
+            });
+        std::cerr << "server: listening on http://" << args.host << ":"
+                  << args.port << "\n";
+        vllm::platform::ConsoleShutdown shutdown_on_signal(
+            [&]() { decision_server.stop(); });
+        if (!decision_server.listen(args.host, args.port)) {
+          std::cerr << "server: failed to bind " << args.host << ":"
+                    << args.port << "\n";
+          return 1;
+        }
+        return 0;
+      }
+
       // ── KEV DECISION TASK DISPATCH (MODEL-KEV): a model dir whose
       // architectures resolve to "KevModel" serves /v1/systemone through the
       // decision callback (KevInference — the same path the C ABI will drive)
@@ -1535,25 +1603,16 @@ int VllmServerMain(int argc, char** argv) {
         oai::OpenAIServingModels decision_models(served_model_name);
         oai::ApiServer decision_server(decision_models, vllm::Version());
         auto decision_mutex = std::make_shared<std::mutex>();
-        decision_server.set_decision(
-            [loaded_decision, decision_mutex](
-                const std::string& state,
-                const std::string& qtype,
-                const std::string& instructions,
-                const std::vector<std::string>& options)
-                -> oai::ApiServer::DecisionResult {
+        // Request-level, like Nimble: ClmDecide renders the raw state and
+        // criteria JSON the way the reference does, which the per-question
+        // DecisionFn strings cannot carry, and answers in the reference's
+        // own shape.
+        decision_server.set_systemone_request(
+            [loaded_decision, decision_mutex](const nlohmann::ordered_json& body)
+                -> nlohmann::ordered_json {
               std::lock_guard<std::mutex> lock(*decision_mutex);
-              const vllm::LoadedModel& model =
-                  loaded_decision->loaded_model();
-              const vllm::tok::Tokenizer& tokenizer =
-                  loaded_decision->tokenizer();
-              vllm::ClmDecisionResult result =
-                  vllm::ClmInference(model, tokenizer, state, qtype,
-                                     instructions, options);
-              oai::ApiServer::DecisionResult out;
-              out.scores = std::move(result.scores);
-              out.prompt_tokens = result.prompt_tokens;
-              return out;
+              return vllm::ClmDecide(loaded_decision->loaded_model(),
+                                     loaded_decision->tokenizer(), body);
             });
         std::cerr << "server: listening on http://" << args.host << ":"
                   << args.port << "\n";
@@ -2070,6 +2129,7 @@ int VllmServerMain(int argc, char** argv) {
     // The `--mmproj` second file, so a factory can refuse a tower-free load at
     // INSTALL rather than inside the engine's busy loop.
     mm_ctx.mmproj_path = args.mmproj_path;
+    mm_ctx.max_model_len = loaded->max_model_len();
     oai::InstallMultiModalChatSeam(chat, loaded->is_multimodal_model(), mm_ctx,
                                    std::cerr);
 
@@ -2236,6 +2296,27 @@ int VllmServerMain(int argc, char** argv) {
     endpoint_opts.enable_server_dev_mode = args.enable_server_dev_mode;
     oai::ConfigureUtilityEndpoints(server, tokenizer, loaded->max_model_len(),
                                    engine, endpoint_opts);
+
+    // ── Tev1 on /v1/systemone (MODEL-TEV1 Phase 6). A model dir whose
+    // architectures name "Tev1Model" keeps every generation route and ALSO
+    // answers /v1/systemone through the request-level seam: Tev1Decide, the
+    // function vllm_decide calls. It scores through this same AsyncLLM, so no
+    // lock is needed beside the chat traffic.
+    if (loaded->architecture() == "Tev1Model") {
+      const int64_t tev1_max_model_len = loaded->max_model_len();
+      server.set_systemone_request(
+          [&engine, &tokenizer, tev1_max_model_len](
+              const nlohmann::ordered_json& body) -> nlohmann::ordered_json {
+            vllm::Tev1Response r =
+                vllm::Tev1Decide(engine, tokenizer, tev1_max_model_len, body);
+            nlohmann::ordered_json out = nlohmann::ordered_json::object();
+            out["answers"] = std::move(r.answers);
+            out["usage"] = {{"input_tokens", r.input_tokens},
+                            {"output_tokens", r.output_tokens}};
+            return out;
+          });
+      std::cerr << "server: Tev1 decision model; /v1/systemone on\n";
+    }
     std::cerr << "server: utility endpoints: /tokenize /detokenize on"
               << (args.enable_tokenizer_info_endpoint ? ", /tokenizer_info on"
                                                       : "")

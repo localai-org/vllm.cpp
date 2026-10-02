@@ -107,7 +107,16 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // LLM (48 layers, full-attn every 6th + SWA, v_head_dim != head_dim, MoE)
   // with no vLLM registration. The weight loader (W2) and forward (W3) are
   // stubs; W1 gate is: config parses, KV-cache spec builds, model resolves.
-  REQUIRE(registrations.size() == 54);
+  // 54 -> 56 on MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2
+  // (ISSUE-LOCAL-01M3RY6G385D41W5SNF1C85RRS): `NemotronH_Nano_VL_V2` and
+  // `NemotronH_Nano_Omni_Reasoning_V3`, one additive TU
+  // (nano_nemotron_vl_registry.cpp), upstream registry.py:512-513 @ e126687a9a.
+  // 54 -> 55 on MODEL-TEXT-cohere2-moe (ISSUE-LOCAL-01M3S23H9B25EFPFJN75Y1XBWY):
+  // `Cohere2MoeForCausalLM` (North), its own additive TU, registered upstream at
+  // `registry.py:86` @ `a7c23ac96d`. Its EAGLE drafter is not registered.
+  // Combined: 54 + 2 (Nemotron Nano VL/Omni) + 1 (Nimble) + 1 (Cohere2 North) = 58.
+  // `NimbleModel` (MODEL-NIMBLE) is a POOLING decision model like ClmModel.
+  REQUIRE(registrations.size() == 58);
 
   for (const ModelRegistration& registration : registrations) {
     CAPTURE(registration.architecture);
@@ -177,6 +186,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // forward/loader/registry TU + one REGISTER_VLLM_MODEL line, ZERO shared-array
   // edit — the cross-family dense/MoE seam absorbing the recent-model breadth pass.
   CHECK(has_arch("CohereForCausalLM"));        // Cohere Command-R
+  CHECK(has_arch("Cohere2MoeForCausalLM"));    // Cohere North (MoE, sliding window)
   CHECK(has_arch("GraniteForCausalLM"));       // IBM Granite-3
   CHECK(has_arch("InternLM2ForCausalLM"));     // InternLM2
   CHECK(has_arch("InternLM3ForCausalLM"));     // InternLM3 (reuses the Llama TU)
@@ -212,6 +222,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   CHECK(has_arch("XorModel"));
   // MODEL-TEV1: Qwen3.5-4B SFT, text-generation (NOT pooling), /v1/chat/completions.
   CHECK(has_arch("Tev1Model"));
+  CHECK(has_arch("NimbleModel"));
 
   // Registration arrival order across TUs is unspecified under C++ static init,
   // so the registry imposes a stable canonical sort by architecture name (byte
@@ -220,7 +231,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // with the kExampleConfigArchitectures ledger; adding a model appends its two
   // entries here.
   const std::vector<std::string_view> supported = ModelRegistry::SupportedArchs();
-  REQUIRE(supported.size() == 54);
+  REQUIRE(supported.size() == 58);
   CHECK(std::is_sorted(supported.begin(), supported.end()));
   // The full byte-order sequence. Note "MiniCPM3" < "MiniCPMF" and "Phi3" <
   // "PhiF" ('3' 0x33 < 'F' 0x46); "OPT" < "Olmo" ('P' 0x50 < 'l' 0x6C); and among
@@ -233,6 +244,9 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
+      // "Cohere2Moe" < "CohereFor": they agree through "Cohere" and then
+      // differ at '2' 0x32 against 'F' 0x46.
+      "Cohere2MoeForCausalLM",
       "CohereForCausalLM",
       // 'C' 0x43: "CuaS1Forms" sorts after "CohereForCausalLM" ('u' 0x75 > 'o'
       // 0x6F) and before "DeepseekV2ForCausalLM" ('C' 0x43 < 'D' 0x44).
@@ -271,6 +285,11 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "MuseGlimmerForCausalLM",
       "MuseGlimmerForConditionalGeneration",
       "NemotronHForCausalLM",
+      // "NemotronHF" < "NemotronH_" ('F' 0x46 < '_' 0x5F), and "..._Nano_O" <
+      // "..._Nano_V" ('O' 0x4F < 'V' 0x56).
+      "NemotronH_Nano_Omni_Reasoning_V3",
+      "NemotronH_Nano_VL_V2",
+      "NimbleModel",
       "OPTForCausalLM",
       "Olmo2ForCausalLM",
       "Olmo3ForCausalLM",
@@ -389,6 +408,7 @@ TEST_CASE("registry_model_property: Qwen registrations match pinned _ModelInfo")
       continue;
     }
     if (registration.architecture == "ClmModel" ||
+        registration.architecture == "NimbleModel" ||
         registration.architecture == "SpanExtractor" ||
         registration.architecture == "XorModel") {
       // MODEL-CLM, MODEL-GLINER25-DECIDE, MODEL-XOR: pooling decision models
@@ -446,6 +466,15 @@ TEST_CASE("registry_model_property: Qwen registrations match pinned _ModelInfo")
       // short-circuits on is_hybrid). Text-only: no vision or audio tower.
       CHECK(registration.info.is_hybrid);
       CHECK_FALSE(registration.info.supports_multimodal);
+    } else if (registration.architecture == "NemotronH_Nano_VL_V2" ||
+               registration.architecture == "NemotronH_Nano_Omni_Reasoning_V3") {
+      // The NemotronH hybrid language tower (a Mamba2 recurrent-state group)
+      // WITH a vision tower: upstream's class carries HasInnerState, IsHybrid
+      // and SupportsMultiModal (nano_nemotron_vl.py:899-901), and
+      // kNanoNemotronVLFactory carries encode_mm/embed_mm, so the flag is
+      // backed. Audio and video are refused by name at encode time.
+      CHECK(registration.info.is_hybrid);
+      CHECK(registration.info.supports_multimodal);
     } else if (registration.architecture == "KimiLinearForCausalLM") {
       // Kimi-Linear-48B-A3B: text-only HYBRID (20 KDA linear-attn layers ⇒ a GDN
       // recurrent-state KV group + 7 NoPE-MLA layers) — is_hybrid YES,
@@ -825,10 +854,13 @@ TEST_CASE("Qwen3.5 SSM cache dtype accepts upstream torch aliases exactly") {
 TEST_CASE("hf_registry_coverage: every registration has an example config fixture") {
   // C++ fixture registry for the currently implemented subset. Keep this list
   // alias-for-alias with the central ordered table, mirroring HF_EXAMPLE_MODELS.
-  constexpr std::array<std::string_view, 54> kExampleConfigArchitectures{
+  constexpr std::array<std::string_view, 58> kExampleConfigArchitectures{
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
+      // "Cohere2Moe" < "CohereFor": they agree through "Cohere" and then
+      // differ at '2' 0x32 against 'F' 0x46.
+      "Cohere2MoeForCausalLM",
       "CohereForCausalLM",
       "CuaS1Forms",
       "DeepseekV2ForCausalLM",
@@ -865,6 +897,11 @@ TEST_CASE("hf_registry_coverage: every registration has an example config fixtur
       "MuseGlimmerForCausalLM",
       "MuseGlimmerForConditionalGeneration",
       "NemotronHForCausalLM",
+      // "NemotronHF" < "NemotronH_" ('F' 0x46 < '_' 0x5F), and "..._Nano_O" <
+      // "..._Nano_V" ('O' 0x4F < 'V' 0x56).
+      "NemotronH_Nano_Omni_Reasoning_V3",
+      "NemotronH_Nano_VL_V2",
+      "NimbleModel",
       "OPTForCausalLM",
       "Olmo2ForCausalLM",
       "Olmo3ForCausalLM",
@@ -958,7 +995,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       ModelRegistry::Resolve(unknown),
       "Model architectures ['Gemma4ForCausalLM'] are not supported for now. "
       "Supported architectures: "
-      "dict_keys(['BoundaryExtractor', 'ClmModel', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
+      "dict_keys(['BoundaryExtractor', 'ClmModel', 'Cohere2MoeForCausalLM', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
       "'DeepseekV41ForCausalLM', "
       "'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
       "'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', "
@@ -969,7 +1006,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       "'LagunaForCausalLM', 'LayaModel', "
       "'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', "
       "'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
-      "'NemotronHForCausalLM', "
+      "'NemotronHForCausalLM', 'NemotronH_Nano_Omni_Reasoning_V3', 'NemotronH_Nano_VL_V2', 'NimbleModel', "
       "'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', "
       "'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', "
       "'Phi3ForCausalLM', 'PhiForCausalLM', 'Qwen3ForCausalLM', "

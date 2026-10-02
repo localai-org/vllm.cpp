@@ -403,6 +403,15 @@ class MuseGlimmerModel {
       vt::Queue& queue, const std::vector<int32_t>& logits_indices = {});
 };
 
+// The perception encoder, adapter and projection ALONE, read from the shards
+// through the same name normalization and slot loader the full-model load uses
+// (`LoadMuseGlimmerForConditionalGenerationWeights` calls the same
+// `LoadVisionTower`). A vision reference run needs only these ~3.7 GB, not the
+// 60 GB text tower. Throws BY NAME when a tensor is missing or the checkpoint
+// declares no `vision_config`.
+MuseGlimmerVisionTower LoadMuseGlimmerVisionTower(const std::vector<SafetensorsFile>& shards,
+                                                  const MuseGlimmerParams& params);
+
 // The perception-encoder geometry, bridged from the resolved model config to the
 // W3 tower's own config struct. `compute_dtype` stays the tower default (bf16 —
 // what the checkpoint ships and what production runs).

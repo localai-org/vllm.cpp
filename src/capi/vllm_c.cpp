@@ -51,9 +51,11 @@
 #include "vllm/model_executor/models/model_registry.h"  // refuse-by-task (v11)
 #include "vllm/model_executor/models/gliner2_ner.h"  // Gliner2NerInference (v27)
 #include "vllm/model_executor/models/kev_inference.h"      // KevInference (v28)
+#include "vllm/model_executor/models/nimble_inference.h"   // NimbleDecide (MODEL-NIMBLE)
+#include "vllm/model_executor/models/tev1_inference.h"     // Tev1Decide (MODEL-TEV1)
 #include "vllm/model_executor/models/laya_inference.h"      // LayaInference (v28)
 #include "vllm/model_executor/models/cua_s1_inference.h"    // CuaS1ScoreInference (v28)
-#include "vllm/model_executor/models/clm_inference.h"        // ClmInference (v29)
+#include "vllm/model_executor/models/clm_inference.h"        // ClmDecide (MODEL-CLM)
 #include "vllm/model_executor/models/gliner25_decide_inference.h"  // Gliner25DecideInference (v29)
 #include "vllm/model_executor/models/xor_inference.h"        // XorInference (v29)
 #include "vllm/entrypoints/openai/systemone.h"  // shared SystemOne helpers (v28)
@@ -72,6 +74,7 @@
 #include "vllm/outputs.h"
 #include "vllm/sampling_params.h"
 #include "vllm/transformers_utils/hf_config.h"  // PeekHfArchitectures (v11)
+#include "vllm/transformers_utils/tokenizer_files.h"
 #include "vllm/version.h"
 #include "vllm/v1/engine/async_llm.h"
 
@@ -329,7 +332,8 @@ vllm::entrypoints::openai::ChatPromptFn ResolveChatPromptFn(
       // mirroring the server's --tokenizer-config.
       tmpl = vllm::entrypoints::LoadChatTemplateFromConfig(
           tokenizer_config_path.empty()
-              ? (fs::path(model_path) / "tokenizer_config.json").string()
+              ? vllm::ResolveTokenizerFile(model_path, "tokenizer_config.json")
+                    .string()
               : tokenizer_config_path);
     }
     if (out_raw_template != nullptr) *out_raw_template = tmpl;
@@ -469,6 +473,7 @@ vllm::entrypoints::openai::OpenAIServingChat& EnsureChatServing(
     mm_ctx.mm_config = &engine->loaded->mm_config();
     mm_ctx.config = &engine->loaded->config();
     mm_ctx.mmproj_path = engine->mmproj_path;
+    mm_ctx.max_model_len = engine->loaded->max_model_len();
     // The install announces every outcome on the stream it is given, exactly as
     // it does for the server; there is no arm that installs nothing on a model
     // that says it is multimodal.
@@ -2105,19 +2110,129 @@ VLLM_API vllm_status vllm_decide(vllm_engine* engine,
   const bool is_clm = (arch == "ClmModel");
   const bool is_gliner25_decide = (arch == "SpanExtractor");
   const bool is_xor = (arch == "XorModel");
+  const bool is_nimble = (arch == "NimbleModel");
+  const bool is_tev1 = (arch == "Tev1Model");
   if (!is_kev && !is_laya && !is_cua_s1 && !is_clm && !is_gliner25_decide &&
-      !is_xor) {
+      !is_xor && !is_nimble && !is_tev1) {
     SetError(
         "vllm_decide: this engine's architecture is '" + arch +
         "', not 'KevModel', 'LayaModel', 'CuaS1Forms', 'ClmModel', "
-        "'SpanExtractor', or 'XorModel'; "
-        "use vllm_complete / vllm_embed");
+        "'SpanExtractor', 'XorModel', 'NimbleModel', or 'Tev1Model'; "
+        "use vllm_complete / vllm_embed. A Tev1 checkpoint opts in by naming "
+        "'Tev1Model' in config.json architectures");
     return VLLM_ERR_INVALID_ARGUMENT;
   }
   namespace so = vllm::entrypoints::openai::systemone;
 
-  if (is_kev || is_laya || is_clm || is_gliner25_decide || is_xor) {
-    // ── Decision pipeline (kev / laya / clm / gliner25_decide / xor) ──
+  if (is_clm) {
+    // ── Request-level CLM (MODEL-CLM): ClmDecide is the same seam the
+    // server registers, and it answers in the reference's shape, usage
+    // included.
+    nlohmann::ordered_json body;
+    try {
+      body = nlohmann::ordered_json::parse(request_json);
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: invalid JSON body: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    }
+    try {
+      const auto start = std::chrono::steady_clock::now();
+      nlohmann::ordered_json r;
+      {
+        std::lock_guard<std::mutex> lock(engine->embed_mutex);
+        r = vllm::ClmDecide(engine->loaded->loaded_model(),
+                            engine->loaded->tokenizer(), body);
+      }
+      const double latency_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - start)
+                                    .count();
+      nlohmann::ordered_json out = nlohmann::ordered_json::object();
+      out["model"] = (body.contains("model") && body["model"].is_string())
+                         ? body["model"].get<std::string>()
+                         : engine->model_path;
+      out["answers"] = std::move(r["answers"]);
+      out["usage"] = std::move(r["usage"]);
+      out["latency_ms"] = so::R2(latency_ms);
+      char* dup = DupString(out.dump());
+      if (dup == nullptr) {
+        SetError("vllm_decide: out-of-memory allocating response");
+        return VLLM_ERR_RUNTIME;
+      }
+      *out_json = dup;
+      ClearError();
+      return VLLM_OK;
+    } catch (const vllm::clm::RequestError& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_RUNTIME;
+    } catch (...) {
+      SetError("vllm_decide: unknown error");
+      return VLLM_ERR_UNKNOWN;
+    }
+  }
+
+  if (is_nimble || is_tev1) {
+    // ── Request-level decision pipeline (MODEL-NIMBLE, MODEL-TEV1) ──
+    // NimbleDecide / Tev1Decide own parsing and validation: the request
+    // contract is openjev's and Ollama's, and a question is one prompt.
+    nlohmann::ordered_json body;
+    try {
+      body = nlohmann::ordered_json::parse(request_json);
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: invalid JSON body: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    }
+    try {
+      const auto start = std::chrono::steady_clock::now();
+      vllm::decision_scorer::ScoredRequest r;
+      if (is_nimble) {
+        // Nimble runs its own forward beside the engine, one call at a time.
+        std::lock_guard<std::mutex> lock(engine->embed_mutex);
+        r = vllm::NimbleDecide(engine->loaded->loaded_model(),
+                               engine->loaded->tokenizer(), body);
+      } else {
+        // Tev1 scores through this handle's AsyncLLM (generative scoring), so
+        // it interleaves with vllm_chat / vllm_complete in the scheduler and
+        // needs no lock of its own.
+        r = vllm::Tev1Decide(engine->loaded->async_engine(),
+                             engine->loaded->tokenizer(),
+                             engine->loaded->max_model_len(), body);
+      }
+      const double latency_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - start)
+                                    .count();
+      nlohmann::ordered_json out = nlohmann::ordered_json::object();
+      out["model"] = (body.contains("model") && body["model"].is_string())
+                         ? body["model"].get<std::string>()
+                         : engine->model_path;
+      out["answers"] = std::move(r.answers);
+      out["usage"] = {{"input_tokens", r.input_tokens},
+                      {"output_tokens", r.output_tokens}};
+      out["latency_ms"] = so::R2(latency_ms);
+      char* dup = DupString(out.dump());
+      if (dup == nullptr) {
+        SetError("vllm_decide: out-of-memory allocating response");
+        return VLLM_ERR_RUNTIME;
+      }
+      *out_json = dup;
+      ClearError();
+      return VLLM_OK;
+    } catch (const vllm::decision_scorer::RequestError& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_INVALID_ARGUMENT;
+    } catch (const std::exception& e) {
+      SetError(std::string("vllm_decide: ") + e.what());
+      return VLLM_ERR_RUNTIME;
+    } catch (...) {
+      SetError("vllm_decide: unknown error");
+      return VLLM_ERR_UNKNOWN;
+    }
+  }
+
+  if (is_kev || is_laya || is_gliner25_decide || is_xor) {
+    // ── Decision pipeline (kev / laya / gliner25_decide / xor) ──
     nlohmann::ordered_json body;
     try {
       body = nlohmann::ordered_json::parse(request_json);
@@ -2149,12 +2264,6 @@ VLLM_API vllm_status vllm_decide(vllm_engine* engine,
           dr.scores = std::move(result.scores);
           dr.act_logits = std::move(result.act_logits);
           dr.prompt_tokens = result.prompt_tokens;
-        } else if (is_clm) {
-          vllm::ClmDecisionResult result =
-              vllm::ClmInference(model, tokenizer, parsed.text,
-                                  q.type, q.instructions, options);
-          dr.scores = std::move(result.scores);
-          dr.prompt_tokens = result.prompt_tokens;
         } else if (is_gliner25_decide) {
           vllm::Gliner25DecideResult result =
               vllm::Gliner25DecideInference(model, tokenizer, parsed.text,
@@ -2176,9 +2285,7 @@ VLLM_API vllm_status vllm_decide(vllm_engine* engine,
           dr.prompt_tokens = result.prompt_tokens;
         }
         total_tokens += dr.prompt_tokens;
-        answers[q.id] = is_clm
-            ? so::BuildSystemOneAnswerClm(q, dr)
-            : so::BuildSystemOneAnswerDecision(q, dr);
+        answers[q.id] = so::BuildSystemOneAnswerDecision(q, dr);
       }
       auto end = std::chrono::steady_clock::now();
       double latency_ms =

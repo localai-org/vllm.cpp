@@ -1,0 +1,29 @@
+{
+  "prompts": [
+    {
+      "id": "utf8-factual",
+      "text": "In one concise paragraph, explain why café signs in 東京 may use multiple writing systems.",
+      "max_tokens": 64
+    },
+    {
+      "id": "reasoning",
+      "text": "A box contains 4 red, 3 blue, and 2 green balls. Two are drawn without replacement. Compute the probability that they have different colors, showing the calculation.",
+      "max_tokens": 96
+    },
+    {
+      "id": "code",
+      "text": "Write a Python function that returns the first non-repeating Unicode character in a string. Include its time complexity.",
+      "max_tokens": 128
+    },
+    {
+      "id": "structured",
+      "text": "Return JSON with keys language, greeting, and transliteration for the greeting ‘hello’ in Greek. Output JSON only.",
+      "max_tokens": 48
+    },
+    {
+      "id": "summarization",
+      "text": "Summarize in one sentence: A benchmark is reproducible only when its workload, decoding parameters, model identity, raw repetitions, and comparison criteria are recorded.",
+      "max_tokens": 48
+    }
+  ]
+}

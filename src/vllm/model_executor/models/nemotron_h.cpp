@@ -863,7 +863,8 @@ std::vector<float> NemotronHForward(const NemotronHHostWeights& host,
                                     const NemotronHParams& params,
                                     const std::vector<int32_t>& token_ids,
                                     const std::vector<int32_t>& logits_indices,
-                                    vt::Queue& queue, NemotronHTrace* trace) {
+                                    vt::Queue& queue, NemotronHTrace* trace,
+                                    const std::vector<float>* inputs_embeds) {
   VT_CHECK(host.materialized,
            "NemotronHForCausalLM forward: host weights are not materialized. W4 "
            "ports the forward MECHANISM; the safetensors/NVFP4/FP8 weight load "
@@ -896,7 +897,18 @@ std::vector<float> NemotronHForward(const NemotronHHostWeights& host,
   // fused_add_rms_norm residual. Widening it is numerically correct, invisible
   // to a token gate, and doubles the bytes — the trap AGENTS.md names.
   Buf residual(adt, {T, H});
-  {
+  if (inputs_embeds != nullptr) {
+    VT_CHECK(static_cast<int64_t>(inputs_embeds->size()) == T * H,
+             "NemotronHForCausalLM forward: inputs_embeds must be [T, hidden]");
+    Tensor ot = residual.t(dev);
+    if (adt == DType::kBF16) {
+      std::vector<uint16_t> bits(inputs_embeds->size());
+      for (size_t i = 0; i < bits.size(); ++i) bits[i] = vt::F32ToBF16((*inputs_embeds)[i]);
+      std::memcpy(ot.data, bits.data(), bits.size() * sizeof(uint16_t));
+    } else {
+      std::memcpy(ot.data, inputs_embeds->data(), inputs_embeds->size() * sizeof(float));
+    }
+  } else {
     std::vector<int32_t> ids = token_ids;
     for (int32_t id : ids) {
       VT_CHECK(id >= 0 && id < V, "NemotronHForCausalLM forward: token id out of range");

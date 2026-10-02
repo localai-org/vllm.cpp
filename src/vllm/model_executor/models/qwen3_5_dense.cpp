@@ -301,6 +301,23 @@ std::unique_ptr<LoadedModel> MakeQwen3_5DenseLoadedModel(
       RegistrationFor("Qwen3_5ForConditionalGeneration"), std::move(weights));
 }
 
+std::unique_ptr<LoadedModel> MakeQwen3_5DenseLoadedModel(
+    Qwen3_5DenseWeights weights, const HfConfig& config) {
+  const ModelRegistration* registration =
+      &RegistrationFor("Qwen3_5ForConditionalGeneration");
+  try {
+    const ModelRegistration& resolved = ModelRegistry::Resolve(config);
+    if (resolved.factory != nullptr &&
+        resolved.factory->load_weights == kQwen3_5DenseFactory.load_weights) {
+      registration = &resolved;
+    }
+  } catch (const std::exception&) {
+    // An unregistered architecture keeps the default, as before.
+  }
+  return std::make_unique<Qwen3_5DenseLoadedModel>(*registration,
+                                                   std::move(weights));
+}
+
 std::unique_ptr<LoadedModel> BorrowQwen3_5DenseLoadedModel(
     const Qwen3_5DenseWeights& weights) {
   return std::make_unique<Qwen3_5DenseLoadedModel>(

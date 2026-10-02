@@ -57,9 +57,12 @@ REGISTER_RE = re.compile(
 # (or the GLiNER2 "Extractor" suffix); the arch key in the FEATURES table is
 # written verbatim in backticks. If a future registered arch stops matching this,
 # the self-check below fails loudly rather than silently dropping it.
+# `_V<n>` covers upstream's versioned wrapper names, which carry no task suffix
+# (`NemotronH_Nano_VL_V2`, `NemotronH_Nano_Omni_Reasoning_V3`,
+# registry.py:512-513 @ e126687a9a).
 ARCH_TOKEN_RE = re.compile(
     r"`([A-Za-z0-9_]+(?:For(?:CausalLM|ConditionalGeneration|CTC|RNNT|TDT)"
-    r"|Model|Extractor|Forms))`"
+    r"|Model|Extractor|Forms|_V[0-9]+))`"
 )
 
 

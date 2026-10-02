@@ -1,0 +1,13 @@
+{
+  "scan_scope": "two documented staging labels plus /workspace maxdepth 3 with committed patterns",
+  "scan_completed": true,
+  "scan_device": "dgx:gpu0",
+  "expected_vllm_cpp_directories": [
+    {"name": "VLLM_CPP_CKPT_A", "present": false},
+    {"name": "VLLM_CPP_CKPT_B", "present": false}
+  ],
+  "tensorfold_artifact_candidates": 0,
+  "tensorfold_source_candidates": 0,
+  "raw_receipt": "discovery-receipt.stdout",
+  "command_manifest": "discovery-command.json"
+}

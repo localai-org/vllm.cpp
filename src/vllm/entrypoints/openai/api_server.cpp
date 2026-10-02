@@ -904,6 +904,38 @@ ApiServer::DispatchResult ApiServer::handle_score(
 
 ApiServer::DispatchResult ApiServer::handle_systemone(
     const std::string& request_body) const {
+  // MODEL-NIMBLE: the request-level seam owns parsing and validation, because
+  // its request contract (openjev's) is not ParseSystemOneBody's.
+  if (systemone_request_) {
+    nlohmann::ordered_json body;
+    try {
+      body = nlohmann::ordered_json::parse(request_body);
+    } catch (const std::exception& e) {
+      return MakeError(400, "BadRequestError",
+                       std::string("invalid JSON body: ") + e.what());
+    }
+    const auto start = std::chrono::steady_clock::now();
+    try {
+      nlohmann::ordered_json result = systemone_request_(body);
+      const double latency_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - start)
+                                    .count();
+      const bool named = body.is_object() && body.contains("model") &&
+                         body["model"].is_string();
+      nlohmann::ordered_json out = nlohmann::ordered_json::object();
+      out["model"] = named ? body["model"].get<std::string>() : models_.model_name();
+      out["answers"] = std::move(result["answers"]);
+      out["usage"] = std::move(result["usage"]);
+      out["latency_ms"] = R2(latency_ms);
+      DispatchResult r;
+      r.body = out.dump();
+      return r;
+    } catch (const std::invalid_argument& e) {
+      return MakeError(400, "BadRequestError", e.what());
+    } catch (const std::exception& e) {
+      return MakeError(500, "InternalServerError", e.what());
+    }
+  }
   if (!ner_ && !decision_) {
     return MakeError(500, "InternalServerError",
                     "The model does not support SystemOne");
@@ -1769,6 +1801,15 @@ void ApiServer::register_routes() {
                 [this, write](const httplib::Request& req,
                               httplib::Response& res) {
                   write(handle_ner(req.body), res);
+                });
+  }
+  if (systemone_request_ && !ner_ && !decision_) {
+    // MODEL-NIMBLE: /v1/systemone only. permute and separate are defined over
+    // the per-question callbacks and stay unregistered (404) here.
+    server.Post("/v1/systemone",
+                [this, write](const httplib::Request& req,
+                              httplib::Response& res) {
+                  write(handle_systemone(req.body), res);
                 });
   }
   if (ner_ || decision_) {

@@ -1246,6 +1246,13 @@ std::unique_ptr<LoadedModel> MakeQwen3_5MoeLoadedModel(
     Qwen3_5MoeWeights weights);
 std::unique_ptr<LoadedModel> MakeQwen3_5DenseLoadedModel(
     Qwen3_5DenseWeights weights);
+// The same, under the registration `config` resolves to when that
+// registration is an alias of the Qwen3.5 dense factory (Qwen3_5ForCausalLM,
+// Tev1Model), so the synthetic engine carries the architecture a disk load of
+// that config would. Any other config keeps Qwen3_5ForConditionalGeneration,
+// which is what the one-argument form always uses.
+std::unique_ptr<LoadedModel> MakeQwen3_5DenseLoadedModel(
+    Qwen3_5DenseWeights weights, const HfConfig& config);
 std::unique_ptr<LoadedModel> BorrowQwen3_5MoeLoadedModel(
     const Qwen3_5MoeWeights& weights);
 std::unique_ptr<LoadedModel> BorrowQwen3_5DenseLoadedModel(

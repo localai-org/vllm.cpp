@@ -204,6 +204,20 @@ TEST_CASE("a glm-dsa GGUF reaches ITS OWN builder through the dispatch") {
   CHECK(message.find("qwen3_5 gguf:") == std::string::npos);
 }
 
+TEST_CASE("a laguna GGUF reaches ITS OWN builder through the dispatch") {
+  // MODEL-TEXT-laguna-laguna-for-causal-lm, #2841: the registry's Laguna GGUF
+  // arm was unreachable from FromModelDir, which refused `laguna` as an
+  // unsupported architecture. Proven by the message, as the rows above are:
+  // only the Laguna resolve names `laguna.embedding_length` as its first
+  // missing key.
+  const std::string message = RefusalFor(GgufWithArchitecture("laguna"));
+  REQUIRE_FALSE(message.empty());
+  CHECK(message.find("laguna gguf: missing required key laguna.embedding_length") !=
+        std::string::npos);
+  CHECK(message.find("is not supported by this build") == std::string::npos);
+  CHECK(message.find("qwen3_5 gguf:") == std::string::npos);
+}
+
 TEST_CASE("FromModelDir rejects an unknown dense architecture before loading") {
   // The rejection must fire during architecture resolution, BEFORE any tokenizer
   // or weight I/O — so the arch must be one the registry does NOT know. (Note:
@@ -226,27 +240,18 @@ TEST_CASE("FromModelDir rejects an unknown dense architecture before loading") {
       LoadedEngine::FromModelDir(dir.path().string(), EngineParams{}),
       "Model architectures ['Gemma4ForCausalLM'] are not supported for now. "
       "Supported architectures: "
-      "dict_keys(['BoundaryExtractor', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
-      "'DeepseekV41ForCausalLM', 'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', "
-      "'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
-      "'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', "
-      "'Glm4ForCausalLM', 'Glm4MoeLiteForCausalLM', 'Glm5NextForConditionalGeneration', "
-      "'GlmMoeDsaForCausalLM', "
-      "'GraniteForCausalLM', "
-      "'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', "
-      "'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', "
-      "'LagunaForCausalLM', 'LayaModel', "
-      "'LlamaForCausalLM', 'LlamaModel', "
-      "'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
-      "'NemotronHForCausalLM', "
-      "'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', "
-      "'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', "
-      "'Phi3ForCausalLM', 'PhiForCausalLM', 'Qwen3ForCausalLM', "
-      "'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', "
-      "'Qwen3_5ForCausalLM', 'Qwen3_5ForConditionalGeneration', "
-      "'Qwen3_5MoeForCausalLM', "
-      "'Qwen3_5MoeForConditionalGeneration', "
-      "'Qwen4ExpForConditionalGeneration', 'StableLmForCausalLM'])",
+      "dict_keys(['BoundaryExtractor', 'ClmModel', 'Cohere2MoeForCausalLM', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
+      "'DeepseekV41ForCausalLM', 'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
+      "'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', 'Glm4ForCausalLM', "
+      "'Glm4MoeLiteForCausalLM', 'Glm5NextForConditionalGeneration', 'GlmMoeDsaForCausalLM', 'GraniteForCausalLM', "
+      "'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', 'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', "
+      "'LagunaForCausalLM', 'LayaModel', 'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', 'MiniCPM3ForCausalLM', "
+      "'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
+      "'NemotronHForCausalLM', 'NemotronH_Nano_Omni_Reasoning_V3', 'NemotronH_Nano_VL_V2', 'NimbleModel', 'OPTForCausalLM', "
+      "'Olmo2ForCausalLM', 'Olmo3ForCausalLM', 'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', 'Phi3ForCausalLM', "
+      "'PhiForCausalLM', 'Qwen3ForCausalLM', 'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', 'Qwen3_5ForCausalLM', "
+      "'Qwen3_5ForConditionalGeneration', 'Qwen3_5MoeForCausalLM', 'Qwen3_5MoeForConditionalGeneration', 'Qwen4ExpForConditionalGeneration', "
+      "'SpanExtractor', 'StableLmForCausalLM', 'Tev1Model', 'XorModel'])",
       std::runtime_error);
 }
 

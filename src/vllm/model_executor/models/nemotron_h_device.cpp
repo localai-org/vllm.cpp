@@ -1766,7 +1766,19 @@ ForwardLogits NemotronHPagedForward(const NemotronHHostWeights& host,
   {
     Tensor tab = ResidentWeight(d, host.embeddings);
     Tensor rt = residual.t();
-    if (input.device_token_ids != nullptr) {
+    if (input.mm.has_value() && input.mm->inputs_embeds.data != nullptr) {
+      // A multimodal step (`NemotronH_Nano_VL_V2`, nano_nemotron_vl.py:1462-
+      // 1481): the wrapper's `embed_mm` already embedded the ids and spliced
+      // the projected image rows, so the residual STARTS from those rows and
+      // the ids are not looked up again (upstream passes `inputs_embeds` and
+      // the language model skips `embed_input_ids`). It is a COPY: the merged
+      // rows are already in the model dtype.
+      const Tensor& e = input.mm->inputs_embeds;
+      VT_CHECK(e.rank == 2 && e.shape[0] == T && e.shape[1] == H && e.dtype == adt,
+               "NemotronH paged forward: the multimodal inputs_embeds must be "
+               "[num_tokens, hidden] in the model dtype");
+      d.b.Copy(d.q, rt.data, e.data, static_cast<size_t>(T * H) * vt::SizeOf(adt));
+    } else if (input.device_token_ids != nullptr) {
       // ★ ENG-ASYNC-SCHED W4 (#1157). `ModelForwardInput::device_token_ids` is
       // non-null exactly when the async runner's device combine has already
       // spliced each DECODE row's sampled token into ITS device buffer and left

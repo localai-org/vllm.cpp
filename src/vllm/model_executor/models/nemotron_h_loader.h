@@ -123,9 +123,18 @@ vt::DType ResolveNemotronHModelDType(const HfConfig& config);
 // checkpoint does not ship, a tensor the checkpoint ships and the enumeration
 // does not name, a dtype or shape that disagrees with the scheme its consumer
 // declares, or a missing scale companion.
+//
+// `name_prefix` (default empty) scopes the load to the tensors under that
+// prefix, stripped before the enumeration sees them. A wrapper checkpoint
+// (`NemotronH_Nano_Omni_Reasoning_V3`) ships its language tower as
+// `language_model.backbone.*` beside `vision_model.*`, `mlp1.*` and
+// `sound_*` tensors that the wrapper accounts for itself; upstream maps the
+// same prefix away (`hf_to_vllm_mapper`, nano_nemotron_vl.py:904-908). Both
+// accounting directions still hold, over the prefixed set.
 NemotronHHostWeights LoadNemotronHHostWeights(
     const std::vector<SafetensorsFile>& shards, const NemotronHParams& params,
-    vt::DType act_dtype, NemotronHLoadReport* report);
+    vt::DType act_dtype, NemotronHLoadReport* report,
+    const std::string& name_prefix = "");
 
 // The report of the load that produced `model`. The load happens inside the
 // type-erased `ModelRegistry::Load` factory, so a structural gate has no other

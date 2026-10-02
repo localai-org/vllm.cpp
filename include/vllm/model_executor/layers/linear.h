@@ -89,15 +89,20 @@ class MlpGateUpMethodBase : public QuantizeMethodBase {
 // vt::SiluAndMul — byte-for-byte the inline bf16 MLP path.
 class UnquantizedMlpGateUpMethod : public MlpGateUpMethodBase {
  public:
-  UnquantizedMlpGateUpMethod(const OwnedTensor* gate_up, int64_t intermediate)
-      : gate_up_(gate_up), I_(intermediate) {}
+  // `act_dtype` is the dtype of the gate_up product and of the activation. It
+  // defaults to bf16, which every caller before Cohere2Moe used, so their op
+  // sequence is unchanged. Cohere2Moe's f32 ARITHMETIC gate arm passes f32
+  // (specs/cohere2-moe.md); its served path stays bf16.
+  UnquantizedMlpGateUpMethod(const OwnedTensor* gate_up, int64_t intermediate,
+                             vt::DType act_dtype = vt::DType::kBF16)
+      : gate_up_(gate_up), I_(intermediate), act_dtype_(act_dtype) {}
 
   DBuf Apply(Dev d, const vt::Tensor& x) const override {
     const int64_t M = x.shape[0];
     vt::Tensor wgu = ResidentWeight(d, *gate_up_);  // [2I, H] raw-NK
-    DBuf gate_up(d, vt::DType::kBF16, {M, 2 * I_});
+    DBuf gate_up(d, act_dtype_, {M, 2 * I_});
     vt::MatmulBT(d.q, gate_up.t(), x, wgu);
-    DBuf act(d, vt::DType::kBF16, {M, I_});
+    DBuf act(d, act_dtype_, {M, I_});
     vt::SiluAndMul(d.q, act.t(), gate_up.t());  // silu(gate)*up
     return act;
   }
@@ -107,6 +112,7 @@ class UnquantizedMlpGateUpMethod : public MlpGateUpMethodBase {
  private:
   const OwnedTensor* gate_up_;
   int64_t I_;
+  vt::DType act_dtype_;
 };
 
 // Unquantized (bf16) GeGLU gate_up: one MatmulBT over the merged [2I,H] weight then

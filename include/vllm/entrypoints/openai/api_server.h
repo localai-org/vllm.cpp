@@ -353,6 +353,18 @@ class ApiServer {
       const std::vector<std::string>& options)>;
   void set_decision(DecisionFn decision) { decision_ = std::move(decision); }
 
+  // MODEL-NIMBLE: a REQUEST-level SystemOne seam, for a model whose per-field
+  // prompt embeds the whole schema and so cannot run one question at a time.
+  // ADDITIVE and OPT-IN: absent => handle_systemone is unchanged. The callback
+  // receives the parsed body and returns {"answers": {...}, "usage": {...}};
+  // a std::invalid_argument it throws is the request's fault (HTTP 400). It
+  // wraps the ONE library seam (NimbleDecide) that vllm_decide also calls.
+  using SystemOneRequestFn =
+      std::function<nlohmann::ordered_json(const nlohmann::ordered_json& body)>;
+  void set_systemone_request(SystemOneRequestFn fn) {
+    systemone_request_ = std::move(fn);
+  }
+
   // Attach the speech/music synthesis seam backing POST /v1/audio/speech (W6 of
   // #672). ADDITIVE and OPT-IN like the embedder above: absent => route
   // unregistered => 404, byte-identical to a server without a speech model. The
@@ -459,6 +471,7 @@ class ApiServer {
   NerFn ner_;
   ScoreFn score_;
   DecisionFn decision_;
+  SystemOneRequestFn systemone_request_;
   SynthesizeFn synthesizer_;
   ::vllm::openai::SpeechCapabilities speech_capabilities_;
   mutable ::vllm::openai::VideoJobStore video_jobs_;

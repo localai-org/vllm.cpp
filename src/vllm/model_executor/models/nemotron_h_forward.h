@@ -460,11 +460,16 @@ struct NemotronHTrace {
 
 // Logits `[num_requested, vocab_size]` in f32 for the requested positions (all
 // positions when `logits_indices` is empty).
+//
+// `inputs_embeds` (optional, [T*H] f32 holding model-dtype values) replaces
+// the embedding lookup: a multimodal wrapper's merged rows
+// (nano_nemotron_vl.py:1462-1481). `token_ids` still sizes the step.
 std::vector<float> NemotronHForward(const NemotronHHostWeights& host,
                                     const NemotronHParams& params,
                                     const std::vector<int32_t>& token_ids,
                                     const std::vector<int32_t>& logits_indices,
-                                    vt::Queue& queue, NemotronHTrace* trace = nullptr);
+                                    vt::Queue& queue, NemotronHTrace* trace = nullptr,
+                                    const std::vector<float>* inputs_embeds = nullptr);
 
 // Greedy argmax decode over a fresh forward per step. Single sequence; the
 // incremental paged/recurrent decode is W6's.

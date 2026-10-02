@@ -195,6 +195,34 @@ struct GraphBreakStats {
 GraphBreakStats GetGraphBreakStats();
 void ResetGraphBreakStats();
 
+// ---------------------------------------------------------------------------
+// The per-region trace-staging byte probe (tt-27b-region-capture).
+// ---------------------------------------------------------------------------
+// The seam is backend-agnostic and cannot name tt-metal's trace buffer; the
+// Tenstorrent registrar installs `LastTraceBytesForTest` here, and every
+// segment close then records what it contributed to the staging (see
+// `BreakableGraph::region_bytes`). Uninstalled (nullptr, the default) records
+// nothing: the census is opt-in per backend, never a cross-backend cost.
+using GraphRegionBytesProbe = int64_t (*)();
+void SetGraphRegionBytesProbe(GraphRegionBytesProbe probe);
+
+// The WHOLE-GRAPH FIT predicate (tt-27b-region-capture, spec `## Design`).
+// Pure and injectable so a unit case can decide both arms without a device.
+// vLLM's capture-size list walks capture sizes DOWNWARD past a size that does
+// not fit (gpu_model_runner.py's `may_replay_capture`/eager fallback): the
+// same polarity — over budget declines capture, names nothing here, the
+// caller names it. Zeroed fields (a backend with no census, a lane with no
+// measurement) answer TRUE: no measurement is never evidence of no fit.
+struct WholeGraphFitEstimate {
+  int64_t recorded_command_count = 0;  // the VT_TT_TRACE_DEBUG census
+  int64_t per_command_bytes = 0;       // measured staging bytes per command
+  int64_t free_bytes = 0;              // device free DRAM at decision time
+};
+inline bool WholeGraphTraceFits(const WholeGraphFitEstimate& e) {
+  if (e.per_command_bytes <= 0 || e.recorded_command_count <= 0) return true;
+  return e.recorded_command_count * e.per_command_bytes <= e.free_bytes;
+}
+
 // The one kill switch, read ONCE per process into a function-local static.
 // Today six drivers each read `VLLM_CPP_CUDAGRAPH` for themselves and the three
 // single-shape drivers invented their own switch instead, so there is no one
@@ -275,6 +303,16 @@ class BreakableGraph {
   // marker in `qwen3_5.cpp`, which is a bench-only build.
   void* segment(size_t i) const { return i < segments_.size() ? segments_[i] : nullptr; }
   size_t break_count() const { return break_fns_.size(); }
+  // THE PER-REGION TRACE-STAGING CENSUS (tt-27b-region-capture). One entry per
+  // segment, in capture order: the bytes the backend's trace staging held at
+  // that segment's close MINUS the bytes held at its open — i.e. what THIS
+  // segment alone contributed to the trace buffer. Filled only when a probe is
+  // installed (`SetGraphRegionBytesProbe`); empty (and never consulted) on a
+  // backend that registers none, so the CUDA lane records no census and pays
+  // nothing. A driver that captures regions asserts each entry against its
+  // per-region budget and declines by name when one is over — the whole graph
+  // fit question, answered per region instead of once for 1,037 commands.
+  const std::vector<int64_t>& region_bytes() const { return region_bytes_; }
   bool captured() const { return !segments_.empty(); }
   int64_t replay_count() const { return replays_; }
 
@@ -323,6 +361,7 @@ class BreakableGraph {
   Backend* backend_ = nullptr;
   std::vector<void*> segments_;
   std::vector<std::function<void()>> break_fns_;
+  std::vector<int64_t> region_bytes_;
   int64_t replays_ = 0;
   bool capture_failed_ = false;
   std::exception_ptr capture_error_;
@@ -471,6 +510,9 @@ class GraphCaptureScope {
     Event* e;
   };
   std::vector<ForkedQueue> forks_;
+  // The trace-staging byte level when THIS segment opened, so the close can
+  // record what the segment contributed (see `BreakableGraph::region_bytes`).
+  int64_t region_bytes_base_ = 0;
   // Joins every outstanding fork onto the capture queue and clears the set.
   // Called by `EndSegment` BEFORE `Backend::EndCaptureGraph`.
   void JoinOutstandingForks();

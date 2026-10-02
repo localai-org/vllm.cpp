@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3JXGKKHK4WE6054PWPR67RA
 Title: Merge c12b376b2 deleted the record-anchor subsystem; its suite survived and 58 of 106 cases have been red since, and the data file it reads outlived the code
 Row: ENG-RECORD-ANCHOR-RATCHET
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-28
-Closed: -
+Updated: 2026-10-02
+Closed: 2026-10-02
 
 ## Problem
 
@@ -16,4 +16,14 @@ scripts/check-agent-record.py lost 23 definitions to merge c12b376b2 (Merge bran
 
 ## Resolution
 
-Partly fixed in row/RECORD-ANCHOR-UNWIRED, and the shape of what remains was not what the first measurement implied. 35 definitions restored from 4fcce96b5 by ast span extraction rather than by retyping, scope-audited so every name they read resolves; the extractor first dropped @dataclass because ast reports lineno at the class line, which produced a parse-clean restore whose RecordAnchorResult.counts was still a Field object at run time, and that was caught by running the gate rather than by reading the diff. main() gains argv plus --report and --write-baseline, with the baseline write AFTER the errors gate per #1270, and nothing in main() calls check_record_anchors, check_claim_state_consistency or check_canonical_issue_references. Gate rc=0 unwired, and --report, which ci.yml:187 and agent-preflight.sh:418 both pass and which was silently ignored, now measures the rot: ok=974, stale=39, broken=5, rot 44. Suite 106 cases, 58 failures to 24, and the 24 are TWO populations, not one. Fourteen subtests of test_every_tracked_checker_line_citation_still_resolves are the 44 rotted citations themselves, which is the debt this row exists to hand over. The other TEN are restore gaps and are recorded as such rather than as debt: test_checker_keeps_preexisting_citation_line_floor requires the file to be at least 2446 lines because the tree's own records cite check-agent-record.py by line and retiring below that invalidates them, and the selective splice reaches 1969, so the next iteration must restore the whole pre-merge file reconciled with HEAD's restructure rather than splice 35 definitions; two baseline tests want a baseline equal to the tree; six claim and lifecycle tests get an empty error list where a POSIX-spelled diagnostic was expected, and one archived-link test needs the link_bases two-base behaviour HEAD deliberately flattened to link_base. check-symbol-anchors goes 5 stale to 0 because the restoration brings back the five symbols engine-matrix.md:231 cites, which makes this branch supersede #3338: that PR corrects the same cell to say the ratchet is absent, and with the code back that correction would be the false statement.
+upstream/main now carries the full subsystem WIRED, which supersedes this
+row's restored-but-unwired transplant: scan_record_anchors at
+check-agent-record.py:1632, check_record_anchors at :1728 called from
+main() inside the errors gate, --report prints the offenders, and
+--write-baseline writes scripts/record-anchor-baseline.json only after
+the gate passes. check_claim_state_consistency is called at :1980 and
+canonical_intake_debt / check_canonical_issue_references at :2305. The
+baseline file exists upstream. On the merged tree the checker's
+remaining ERRORs are the shared issue-reference debt identical on
+upstream/main, not this row's. This record is what the pull request
+still adds.

@@ -131,13 +131,6 @@ nlohmann::json BuildSystemOneAnswer(const SystemOneQuestion& q,
 nlohmann::json BuildSystemOneAnswerDecision(const SystemOneQuestion& q,
                                              const DecisionResult& result);
 
-// Build one CLM answer from bi-encoder scores (MODEL-CLM). CLM uses a
-// DIFFERENT confidence formula from kev/laya:
-//   confidence = max(0, min(1, p_max - mean(rest)))
-// No probability rounding (unlike kev/laya's R2/R4).
-nlohmann::json BuildSystemOneAnswerClm(const SystemOneQuestion& q,
-                                        const DecisionResult& result);
-
 // Render option texts for the Laya decision path, matching
 // rl_common.py:render_options. The GLiNER NER path uses NerLabels(q)
 // (the instruction for noul, the option texts for choice/score); the Laya

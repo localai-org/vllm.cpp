@@ -19,6 +19,7 @@
 
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1118,4 +1119,41 @@ TEST_CASE(
   REQUIRE(fa != nullptr);
   // 2 target layers + 1 draft layer, not 1 + 1 and not 2 + 2.
   CHECK(vllm::v1::KVBytesPerBlock(kv) == fa->page_size_bytes() * 3);
+}
+
+// ISSUE-LOCAL-01M3SE6RVKD6SCMA2YBS7F8X0R: the async-scheduling runner path must
+// hand the sampler's logprobs to the scheduler, as upstream's
+// AsyncGPUModelRunnerOutput does (gpu_model_runner.py:264-295, 320-325 @
+// 5559679229). Every OpenAI route runs on AsyncLLM, and async scheduling is the
+// default, so before the fix every logprobs request came back with zero
+// positions. The synchronous engine is the control: it always returned them.
+TEST_CASE("loaded_engine: async scheduling returns sample and explicit-id logprobs") {
+  ::unsetenv("VT_ASYNC_RUNNER");
+  ::unsetenv("VT_ASYNC_SCHED");
+  const HfConfig c = MakeDenseConfig();
+  LoadedEngine eng(c, MakeDenseWeights(c), FreshFixture(), EngineParams{});
+  REQUIRE(eng.async_scheduling_enabled());
+  for (const int max_tokens : {1, 3}) {
+    SamplingParams top = Greedy(max_tokens);
+    top.logprobs = 2;
+    const RequestOutput a = eng.async_engine().generate(
+        std::string("hello"), top, "top" + std::to_string(max_tokens));
+    REQUIRE(a.outputs.size() == 1);
+    REQUIRE(a.outputs[0].logprobs.has_value());
+    CHECK(a.outputs[0].logprobs->size() == a.outputs[0].token_ids.size());
+    CHECK(a.outputs[0].token_ids.size() == static_cast<size_t>(max_tokens));
+
+    SamplingParams ids = Greedy(max_tokens);
+    ids.logprob_token_ids = std::vector<int32_t>{3, 5};
+    const RequestOutput b = eng.async_engine().generate(
+        std::string("hello"), ids, "ids" + std::to_string(max_tokens));
+    REQUIRE(b.outputs[0].logprobs.has_value());
+    REQUIRE(b.outputs[0].logprobs->size() == static_cast<size_t>(max_tokens));
+    for (const vllm::LogprobsOnePosition& pos : *b.outputs[0].logprobs) {
+      REQUIRE(pos.find(3) != nullptr);
+      REQUIRE(pos.find(5) != nullptr);
+      CHECK(std::isfinite(pos.find(3)->logprob));
+      CHECK(pos.find(3)->logprob <= 0.0F);
+    }
+  }
 }

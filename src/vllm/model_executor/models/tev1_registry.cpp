@@ -5,9 +5,10 @@
 // text-generation model that produces a single option letter via
 // /v1/chat/completions (temperature=0, max_tokens=8, enable_thinking=false).
 //
-// It does NOT use /v1/systemone or vllm_decide — the standard chat completions
-// path is sufficient. The registration is therefore a thin alias: re-using the
-// Qwen3.5 dense text-only factory, with a Tev1-specific ModelInfo.
+// The registration is a thin alias: the Qwen3.5 dense text-only factory with a
+// Tev1-specific ModelInfo. Naming it in config.json also opts the engine in to
+// /v1/systemone and vllm_decide (MODEL-TEV1 Phase 6, tev1_inference.h), which
+// score through this same generation engine.
 //
 // We cannot extern kQwen3_5DenseFactory directly because it lives in an
 // anonymous namespace in qwen3_5_dense.cpp. Instead, at first-use time we look

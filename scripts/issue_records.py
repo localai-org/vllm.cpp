@@ -13,6 +13,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+import posixpath
 import re
 from typing import TypeAlias
 
@@ -38,11 +39,21 @@ _GITHUB_ID = re.compile(r"ISSUE-GH-([1-9][0-9]*)\Z")
 _LOCAL_ID = re.compile(r"ISSUE-LOCAL-([0-7][0-9A-HJKMNP-TV-Z]{25})\Z")
 _ROW_ID = re.compile(r"[A-Z0-9][A-Za-z0-9_.-]*\Z")
 _GITHUB_NUMBER = re.compile(r"[1-9][0-9]*\Z")
+# The one frozen archive an intake record's Problem must quote, in
+# repository-relative form. The record that HOLDS a quote lives deeper than
+# the file the quote was cut from, which is why the comparison below
+# resolves relative link targets instead of comparing their spelling: the
+# same row is `../specs/x.md` in the archive and `../../specs/x.md` in the
+# record, and both gates (this one and check-links) must be satisfiable at
+# once.
+FROZEN_ARCHIVE_RELPATH = ".agents/completed/issue-index.md"
 _INTAKE_PROBLEM = re.compile(
-    r"Archive: `\.agents/completed/issue-index\.md:([1-9][0-9]*)`\n\n"
+    r"Archive: `" + re.escape(FROZEN_ARCHIVE_RELPATH) + r":([1-9][0-9]*)`\n\n"
     r"### Frozen archive evidence\n\n"
     r"> ([^\n]+)\Z"
 )
+_LINK_TARGET = re.compile(r"(\[[^\]]*\]\()([^)]+)(\))")
+_REMOTE_TARGET = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 class IssueRecordError(ValueError):
@@ -303,11 +314,67 @@ def intake_archive_evidence(record: IssueRecord) -> tuple[int, str] | None:
     return int(match.group(1)), match.group(2)
 
 
+def _resolve_relative_links(line: str, base: str) -> str:
+    """Rewrite every relative Markdown link target to the file it denotes.
+
+    A relative link resolves against the file that QUOTES it, so one frozen
+    row cannot keep one spelling in the archive (`.agents/completed/`) and in
+    the record that quotes it (`.agents/issues/<owner>/`). Resolving both
+    sides to the repository-relative path they point at is what lets the
+    evidence comparison ask the question it means to ask -- is this the
+    archived row? -- instead of which directory holds the quote.
+
+    Remote (`https:`, `mailto:`, ...) and root-absolute (`/...`) targets are
+    left exactly as written: only a rebase of a relative target is
+    comparable, so a swapped remote URL, a truncated link, or any other
+    difference still fails the comparison byte for byte.
+    """
+
+    def rewrite(match: re.Match[str]) -> str:
+        raw = match.group(2)
+        lead = raw[: len(raw) - len(raw.lstrip())]
+        trail = raw[len(raw.rstrip()) :]
+        target = raw.strip()
+        angled = target.startswith("<") and target.endswith(">")
+        if angled:
+            target = target[1:-1]
+        path, separator, fragment = target.partition("#")
+        if (
+            not path
+            or path.startswith(("/", "?"))
+            or _REMOTE_TARGET.match(path) is not None
+        ):
+            return match.group(0)
+        resolved = posixpath.normpath(posixpath.join(base, path))
+        rendered = f"{resolved}{separator}{fragment}"
+        if angled:
+            rendered = f"<{rendered}>"
+        return f"{match.group(1)}{lead}{rendered}{trail}{match.group(3)}"
+
+    return _LINK_TARGET.sub(rewrite, line)
+
+
 def _archive_evidence_matches_source(
     evidence: tuple[int, str],
     frozen_archive: bytes | None,
+    record_base: str = "",
 ) -> bool:
-    """Require exact UTF-8 evidence bytes at the declared one-based source line."""
+    """Require the declared line to be the quote, modulo relative link rebase.
+
+    Byte equality is tried first and answers almost every record: an archive
+    that has not moved and a record that copied the line verbatim need
+    nothing resolved. Only when the bytes differ is the quote compared with
+    each side's relative link targets resolved, which admits exactly the
+    spelling a MOVE forces (`../specs/x.md` vs `../../specs/x.md`) and
+    nothing else. `record_base` is the record's repository-relative
+    directory; with no base to resolve against, only byte equality passes.
+
+    A trailing CR on the archived line is stripped before comparing: the
+    committed blob is LF, but a Windows working copy checks the archive out
+    CRLF, and byte equality must answer the CONTENT of the line, not which
+    checkout read it. The quote side is parsed from record text, so it has
+    no CR to strip.
+    """
 
     if frozen_archive is None:
         return False
@@ -315,7 +382,18 @@ def _archive_evidence_matches_source(
     source_lines = frozen_archive.split(b"\n")
     if line_number > len(source_lines):
         return False
-    return source_lines[line_number - 1] == archived_line.encode("utf-8")
+    source_line = source_lines[line_number - 1].removesuffix(b"\r")
+    if source_line == archived_line.encode("utf-8"):
+        return True
+    if not record_base:
+        return False
+    try:
+        decoded = source_line.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return _resolve_relative_links(
+        decoded, posixpath.dirname(FROZEN_ARCHIVE_RELPATH)
+    ) == _resolve_relative_links(archived_line, record_base)
 
 
 def _archive_row_owner(line: str, github: int | None) -> str | None:
@@ -342,17 +420,55 @@ def _archive_row_owner(line: str, github: int | None) -> str | None:
 def valid_intake_archive_evidence(
     record: IssueRecord,
     frozen_archive: bytes | None = None,
+    record_base: str = "",
 ) -> tuple[int, str] | None:
-    """Return evidence only when exact source bytes identify ownerless self."""
+    """Return evidence only when the source line identifies ownerless self.
+
+    `record_base` is the record's repository-relative directory, so a quote
+    whose links were re-pointed to resolve from there still matches the line
+    it was cut from; see `_resolve_relative_links`.
+    """
 
     evidence = intake_archive_evidence(record)
     if evidence is None or not _archive_evidence_matches_source(
         evidence,
         frozen_archive,
+        record_base,
     ):
         return None
     _, line = evidence
     return evidence if _archive_row_owner(line, record.github) in {"", "-", "—"} else None
+
+
+def _quoted_evidence_errors(
+    evidence: tuple[int, str] | None,
+    frozen_archive: bytes | None,
+    record_base: str,
+    github: int | None,
+) -> list[str]:
+    """Contract errors for a record that QUOTES an archived row.
+
+    Wherever a record carries a Frozen archive evidence block -- _intake,
+    _owed, or row-owned -- the quote must be the line it declares, modulo
+    the relative-link rebase the record's directory forces, and the line
+    must be about this record's own GitHub number. Absence of the block is
+    legal everywhere except _intake; presence is not, in any owner
+    directory. Measured over the corpus at d15b1cc09 with the 27 dropped
+    archive rows restored (GATE-ISSUE-ARCHIVE-RESTORE): all 831 existing
+    blocks satisfy both halves, so the ratchet adds no new red.
+    """
+
+    if evidence is None:
+        return []
+    if not _archive_evidence_matches_source(evidence, frozen_archive, record_base):
+        return [
+            "Frozen archive evidence must equal the declared line in the frozen "
+            "archive source (a relative link may differ only by spelling, and "
+            "must resolve to the same file)"
+        ]
+    if _archive_row_owner(evidence[1], github) is None:
+        return ["Frozen archive evidence must identify this issue"]
+    return []
 
 
 def validate_issue_record(
@@ -455,7 +571,7 @@ def validate_issue_record(
                 errors.append(f"{name} must be UNKNOWN for Availability METADATA_ONLY")
         if normalize_body(record.resolution).strip() != "-":
             errors.append("Resolution must be - for Availability METADATA_ONLY")
-        archive = ".agents/completed/issue-index.md"
+        archive = FROZEN_ARCHIVE_RELPATH
         exact_number = (
             record.github is not None
             and re.search(rf"(?<![0-9])#{record.github}(?![0-9])", record.problem)
@@ -470,6 +586,11 @@ def validate_issue_record(
         )
 
     owner = path.parent.name
+    # The record's own directory, repository-relative, so the frozen-evidence
+    # comparison can resolve a re-pointed relative link against where the
+    # quote lives instead of where the quote was cut from. Two levels under
+    # .agents/, against the archive's one.
+    record_base = f".agents/issues/{owner}"
     owed_count = _owed_count(owed, record.id)
     if owner == "_intake":
         intake_shape = (
@@ -498,10 +619,13 @@ def validate_issue_record(
             archived_owner = _archive_row_owner(archived_line, record.github)
             if archived_owner not in {"", "-", "—"}:
                 errors.append("_intake frozen evidence must contain archived Row -")
-            if not _archive_evidence_matches_source(evidence, frozen_archive):
+            if not _archive_evidence_matches_source(
+                evidence, frozen_archive, record_base
+            ):
                 errors.append(
                     "_intake Frozen archive evidence must equal the declared line "
-                    "in the frozen archive source"
+                    "in the frozen archive source (a relative link may differ only "
+                    "by spelling, and must resolve to the same file)"
                 )
         if owed_count:
             errors.append("_intake must not have an owning spec reference")
@@ -510,6 +634,14 @@ def validate_issue_record(
             errors.append("Row must be - for a file under _owed")
         if owed_count != 1:
             errors.append("an _owed issue must have exactly one owning spec reference")
+        errors.extend(
+            _quoted_evidence_errors(
+                intake_archive_evidence(record),
+                frozen_archive,
+                record_base,
+                record.github,
+            )
+        )
     else:
         if record.row != owner:
             errors.append(f"path row {owner!r} must equal Row field {record.row or '-'}")
@@ -517,6 +649,14 @@ def validate_issue_record(
             errors.append(f"row {owner!r} is not canonical and claimable")
         if owed_count:
             errors.append("a row-owned issue must not retain an owed reference")
+        errors.extend(
+            _quoted_evidence_errors(
+                intake_archive_evidence(record),
+                frozen_archive,
+                record_base,
+                record.github,
+            )
+        )
 
     if errors:
         raise IssueRecordError("; ".join(errors))

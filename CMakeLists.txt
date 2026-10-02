@@ -756,6 +756,7 @@ add_library(vllm STATIC
   src/vllm/config/speculative.cpp
   src/vllm/outputs.cpp
   src/vllm/transformers_utils/hf_config.cpp
+  src/vllm/transformers_utils/tokenizer_files.cpp
   # ENG-HF-MODEL-DOWNLOAD (#1280): the HuggingFace cache layout. Pure file
   # system, no transport, so it builds in every lane. The DFlash draft path
   # in model_loader.cpp reaches it and is not behind VLLM_CPP_SERVER.
@@ -879,6 +880,11 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/muse_glimmer.cpp
   src/vllm/model_executor/models/muse_glimmer_vision.cpp
   src/vllm/model_executor/models/muse_glimmer_mm.cpp
+  # RADIO ViT-H tower + the Nemotron Nano VL projector (row
+  # MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2).
+  src/vllm/model_executor/models/radio.cpp
+  src/vllm/model_executor/models/nano_nemotron_vl.cpp
+  src/vllm/model_executor/models/nano_nemotron_vl_registry.cpp
   src/vllm/model_executor/models/kimi_k3_registry.cpp
   src/vllm/model_executor/models/kimi_k3_weights.cpp
   src/vllm/model_executor/models/kimi_k3.cpp
@@ -1070,6 +1076,10 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/gliner25_decide_registry.cpp
   src/vllm/model_executor/models/xor_registry.cpp
   src/vllm/model_executor/models/tev1_registry.cpp
+  src/vllm/model_executor/models/tev1_inference.cpp
+  src/vllm/model_executor/models/decision_scorer.cpp
+  src/vllm/model_executor/models/nimble_inference.cpp
+  src/vllm/model_executor/models/nimble_registry.cpp
   src/vllm/model_executor/models/llama_weights.cpp
   src/vllm/model_executor/models/mistral_registry.cpp
   src/vllm/model_executor/models/mistral_weights.cpp
@@ -1110,6 +1120,9 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/commandr_registry.cpp
   src/vllm/model_executor/models/commandr_weights.cpp
   src/vllm/model_executor/models/commandr.cpp
+  src/vllm/model_executor/models/cohere2_moe_registry.cpp
+  src/vllm/model_executor/models/cohere2_moe_weights.cpp
+  src/vllm/model_executor/models/cohere2_moe.cpp
   src/vllm/model_executor/models/phi_registry.cpp
   src/vllm/model_executor/models/phi_weights.cpp
   src/vllm/model_executor/models/phi.cpp
@@ -1140,6 +1153,9 @@ add_library(vllm STATIC
   # cubic (dots3-note W6c, #2537).
   src/vllm/multimodal/pil_resize.cpp
   src/vllm/multimodal/qwen3vl_processor.cpp
+  # Nemotron Nano VL / Omni dynamic-resolution tiler and torch's antialiased
+  # bicubic resize (a third algorithm beside Pillow's and torchvision's).
+  src/vllm/multimodal/nano_nemotron_vl_processor.cpp
   src/vllm/multimodal/deepseek_v4_processor.cpp
   src/vllm/multimodal/audio_processor.cpp
   src/vllm/multimodal/audio_resample.cpp
@@ -1313,6 +1329,7 @@ add_library(vllm STATIC
   # SELF-REGISTERING and is reached through vllm's INTERFACE --whole-archive.
   src/vllm/entrypoints/openai/mm_chat_registry.cpp
   src/vllm/entrypoints/openai/mm_chat_deepseek_v4.cpp
+  src/vllm/entrypoints/openai/mm_chat_nano_nemotron_vl.cpp
   src/vllm/entrypoints/openai/mm_chat_dots3note.cpp
   src/vllm/entrypoints/openai/mm_chat_qwen3vl.cpp
   src/vllm/entrypoints/openai/serving_utils.cpp
@@ -1589,20 +1606,49 @@ option(VLLM_CPP_WITH_DIARIZATION "Enable diarization support via parakeet.cpp" O
 if(VLLM_CPP_WITH_DIARIZATION)
   set(VLLM_CPP_PARAKEET_CPP_DIR "" CACHE PATH
     "Path to a parakeet.cpp source tree. If empty, FetchContent from GitHub.")
+  # parakeet.cpp builds its own ggml; we only need libparakeet.a and the
+  # headers. Suppress its tests, CLI and server to keep the build lean.
+  set(PARAKEET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(PARAKEET_BUILD_CLI OFF CACHE BOOL "" FORCE)
+  set(PARAKEET_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+  # Link parakeet.cpp's ggml statically. Its default is shared, which made
+  # libvllm.so NEED libggml*.so.0 through a RUNPATH into this build tree, so the
+  # library stopped being self-contained. Same save-and-restore as boringssl.
+  set(_vllm_saved_shared ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS OFF)
+  # parakeet.cpp forces GGML_NATIVE (-march=native) unless the caller sets it.
+  # A release library must run on hosts other than the builder; this project
+  # selects ISA per file instead (see the -mavx2 sources above).
+  if(NOT DEFINED GGML_NATIVE)
+    set(GGML_NATIVE OFF CACHE BOOL "ggml: optimize the build for the current system")
+  endif()
   if(VLLM_CPP_PARAKEET_CPP_DIR)
     set(parakeet_cpp_SOURCE_DIR "${VLLM_CPP_PARAKEET_CPP_DIR}")
+    # Setting the source dir alone defines no `parakeet` target, so the link
+    # below would fall back to a bare -lparakeet. Build the local tree.
+    add_subdirectory("${parakeet_cpp_SOURCE_DIR}"
+      "${CMAKE_BINARY_DIR}/_deps/parakeet_cpp-build" EXCLUDE_FROM_ALL)
   else()
     include(FetchContent)
+    # Pinned to the commit the seam in src/vllm/multimodal/diarization.cpp and
+    # src/capi/vllm_c.cpp was written and compiled against (ABI v8 on the
+    # parakeet.cpp feat/diarization-sas branch). A branch name is not a pin:
+    # `main` does not exist there (the default branch is `master`), and master
+    # changed the signatures of parakeet_capi_transcribe_and_diarize and
+    # parakeet_capi_free_sas_results after this seam was written. Move the pin
+    # only together with the seam. GIT_SHALLOW stays off because a shallow
+    # clone cannot check out an arbitrary commit hash.
     FetchContent_Declare(parakeet_cpp
       GIT_REPOSITORY https://github.com/mudler/parakeet.cpp.git
-      GIT_TAG        main
-      GIT_SHALLOW    ON)
-    # parakeet.cpp builds its own ggml; we only need libparakeet.a and the
-    # headers. Suppress its tests/examples to keep the build lean.
-    set(PARAKEET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(PARAKEET_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+      GIT_TAG        394d270fabb1d6125f05c772aa3ca078a574b19d)
     FetchContent_MakeAvailable(parakeet_cpp)
   endif()
+  set(BUILD_SHARED_LIBS ${_vllm_saved_shared})
+  # parakeet.cpp finds dr_wav.h through ${CMAKE_SOURCE_DIR}/third_party, which
+  # is this project's root when it is built as a subproject. Add its own
+  # third_party directory so audio_io.cpp compiles here.
+  target_include_directories(parakeet PRIVATE
+    ${parakeet_cpp_SOURCE_DIR}/third_party)
   target_include_directories(vllm PUBLIC
     ${parakeet_cpp_SOURCE_DIR}/include)
   target_link_libraries(vllm PUBLIC parakeet)

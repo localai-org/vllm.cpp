@@ -64,6 +64,18 @@ InputProcessor::InputProcessor(const tok::Tokenizer& tokenizer,
   if (!found && tokenizer_.EosId() >= 0) {
     eos_token_id_ = tokenizer_.EosId();
     generation_config_eos_ids_.push_back(tokenizer_.EosId());
+    found = true;
+  }
+  // Neither source named an eos: take tokenizer_config.json's eos_token, which
+  // is upstream's primary source (renderers/base.py:310-317 @ 5559679229). It
+  // must be exactly one token, or it is not guessed at. Every checkpoint that
+  // already resolved an id above is untouched (ISSUE-LOCAL-01M3RTGVTN34YQFBR1KZH117XA).
+  if (!found && !config.tokenizer_eos_token.empty()) {
+    const std::vector<int32_t> ids = tokenizer_.Encode(config.tokenizer_eos_token);
+    if (ids.size() == 1) {
+      eos_token_id_ = ids.front();
+      generation_config_eos_ids_.push_back(ids.front());
+    }
   }
 
   // Upstream draws update_from_generation_config's id set from
@@ -73,7 +85,12 @@ InputProcessor::InputProcessor(const tok::Tokenizer& tokenizer,
   // only config.json never stops on 50. Union them, appending only ids not
   // already present so the PRIMARY eos id resolved above -- which is
   // generation_config_eos_ids_.front() on the list path -- keeps its position.
-  for (const int32_t id : config.generation_config_eos_ids) {
+  // from_model_config's ids stand in for the file when it is absent; the
+  // loader leaves them empty whenever the file exists.
+  std::vector<int32_t> secondary = config.generation_config_eos_ids;
+  secondary.insert(secondary.end(), config.model_config_eos_ids.begin(),
+                   config.model_config_eos_ids.end());
+  for (const int32_t id : secondary) {
     if (std::find(generation_config_eos_ids_.begin(),
                   generation_config_eos_ids_.end(),
                   id) == generation_config_eos_ids_.end()) {

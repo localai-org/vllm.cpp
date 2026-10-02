@@ -65,23 +65,37 @@ def load_local_files(
     owed: issue_records.OwedLookup | None = None,
     frozen_archive: bytes | None = None,
 ) -> list[issue_records.IssueRecord]:
-    """Parse and validate every canonical issue file without network access."""
+    """Parse and validate every canonical issue file without network access.
+
+    Every invalid file is reported in one run. Stopping at the first failure
+    is what let three separate defects hide behind one another in the
+    ORPHAN-MODEL-ROWS repair (ISSUE-LOCAL-01M3NC14GE995V9E6F7GTYSQJ3): each
+    fix exposed the next only after another run, and the first failure was
+    always an _intake record nobody was editing.
+    """
 
     effective_rows = issue_records.canonical_rows(ROOT) if rows is None else rows
     effective_owed = issue_records.owed_issue_counts(ROOT) if owed is None else owed
     if frozen_archive is None:
         frozen_archive = FROZEN_ARCHIVE.read_bytes()
     records: list[issue_records.IssueRecord] = []
+    failures: list[str] = []
     for path in sorted(issues_root.glob("**/*.md")):
-        record = issue_records.parse_issue_file(path)
-        issue_records.validate_issue_record(
-            record,
-            path,
-            effective_rows,
-            effective_owed,
-            frozen_archive=frozen_archive,
-        )
+        try:
+            record = issue_records.parse_issue_file(path)
+            issue_records.validate_issue_record(
+                record,
+                path,
+                effective_rows,
+                effective_owed,
+                frozen_archive=frozen_archive,
+            )
+        except (OSError, issue_records.IssueRecordError) as error:
+            failures.append(f"{path}: {error}")
+            continue
         records.append(record)
+    if failures:
+        raise issue_records.IssueRecordError("; ".join(failures))
     issue_records.validate_issue_collection(records)
     return records
 

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "script": "tools/bench/qwen38_tensorfold_discovery.sh",
+  "script_sha256": "dbd4d245d42ddea93623a931bf8dc75904678e3a1cd67f67c8ebb1d37935c7a0",
+  "remote_command": ["bash", "/workspace/qwen38_tensorfold_discovery.sh"],
+  "device": "dgx:gpu0",
+  "max_runtime": "3m",
+  "idle_timeout": "3m",
+  "receipt": "discovery-receipt.stdout",
+  "invocation_receipt": "discovery-invocation.txt",
+  "scope": {
+    "documented_staging_labels": ["VLLM_CPP_CKPT_A", "VLLM_CPP_CKPT_B"],
+    "search_root_label": "workspace",
+    "search_maxdepth": 3,
+    "directory_patterns": ["*tensorfold*", "*miaai*", "*vontra*"],
+    "file_patterns": ["*mlx*mtp*", "*flash-next*mtp*"]
+  }
+}

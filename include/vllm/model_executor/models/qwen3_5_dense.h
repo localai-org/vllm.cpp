@@ -484,6 +484,19 @@ class Qwen3_5DenseModel {
       const Qwen3_5DenseWeights& weights,
       const HfConfig& config,
       vt::Queue& queue);
+
+  // MODEL-NIMBLE: single-sequence forward that returns the LAST position's
+  // logits only, [vocab] f32. Mirrors HF `model(..., logits_to_keep=1)`, which
+  // is what the Nimble reference scorer calls: the final-norm row T-1 is
+  // gathered on-device (the same GatherRows the paged Forward uses for
+  // logits_indices) and only that row goes through DenseLogitsF32D. ForwardDense
+  // would materialize [T, vocab] f32, about 1 GB at T=1000 on a 248320 vocab.
+  static std::vector<float> ForwardDenseLastLogits(
+      const std::vector<int32_t>& token_ids,
+      const std::vector<int32_t>& positions,
+      const Qwen3_5DenseWeights& weights,
+      const HfConfig& config,
+      vt::Queue& queue);
 };
 
 // M3-b — single-image, single-sequence GREEDY image->text generation on the

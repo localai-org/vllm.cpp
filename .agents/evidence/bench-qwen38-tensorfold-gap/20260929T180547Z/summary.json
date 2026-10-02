@@ -1,0 +1,67 @@
+{
+  "artifacts": {
+    "tensorfold": {
+      "hash_manifest_present": false,
+      "present": false,
+      "required": true
+    },
+    "vllm-cpp": {
+      "hash_manifest_present": false,
+      "present": false,
+      "required": true
+    }
+  },
+  "benchmark_id": "bench-qwen38-tensorfold-gap",
+  "cross_engine_ratio": null,
+  "lease_checks": [
+    {
+      "device": "dgx:gpu0",
+      "job_fingerprint_sha256": "9b8c269c1aae79510a8dd7d897d883837fb436775330c57b62877cf1b82a80cb",
+      "state": "succeeded"
+    }
+  ],
+  "mtp": {
+    "manifest": "tests/vllm/models/qwen4_exp_gguf_manifest.inc",
+    "max_block": 47,
+    "mtp_name_matches": 0,
+    "search_terms": [
+      "mtp",
+      "nextn",
+      "draft",
+      "eh_proj",
+      "enorm",
+      "hnorm"
+    ],
+    "tensor_count": 1224,
+    "verdict": "BLOCKED_NO_MTP_WEIGHTS"
+  },
+  "numbers_published": false,
+  "production_vllm_denominator": {
+    "reason": "Blocked discovery did not stage or inspect a runnable production-vLLM denominator.",
+    "status": "NOT_RUN"
+  },
+  "profiles": {
+    "tensorfold": "NOT_RUN_PREREQUISITE",
+    "vllm-cpp": "NOT_RUN_PREREQUISITE"
+  },
+  "run_id": "20260929T180547Z",
+  "scan_assertions": {
+    "workspace_tensorfold_artifact_candidates": 0,
+    "workspace_tensorfold_source_candidates": 0,
+    "workspace_vllm_cpp_artifact_directories_present": 0
+  },
+  "schema_version": 1,
+  "source_sha": "4c89728bc740ca2886def8f191d28a2a5f912c6d",
+  "status": "BLOCKED_MISSING_ARTIFACTS",
+  "task_outcomes": {
+    "task_5": "NO_PORT_DECISION",
+    "task_6": "BLOCKED_NO_MTP_WEIGHTS",
+    "task_7": "SYNTHESIS_COMPLETED_NO_PRODUCT_OPTIMIZATION"
+  },
+  "workloads": {
+    "drafted_decode": "NOT_RUN_PREREQUISITE",
+    "prefill_ladder": "NOT_RUN_PREREQUISITE",
+    "serial_decode": "NOT_RUN_PREREQUISITE",
+    "serving_ladder": "NOT_RUN_PREREQUISITE"
+  }
+}

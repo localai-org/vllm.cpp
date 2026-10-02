@@ -4258,14 +4258,18 @@ void ReshapeAndCache(Queue& q, const Tensor& k, const Tensor& v, Tensor& k_cache
            "reshape_and_cache: k_cache/v_cache must be rank-4 "
            "[num_blocks,block_size,num_kv_heads,head_size]");
   VT_CHECK(slot_mapping.rank == 1, "reshape_and_cache: slot_mapping must be rank-1 [num_slots]");
-  const int64_t num_kv_heads = k.shape[1], head_size = k.shape[2];
-  VT_CHECK(v.shape[0] == k.shape[0] && v.shape[1] == num_kv_heads && v.shape[2] == head_size,
-           "reshape_and_cache: k and v must share [num_tokens,num_kv_heads,head_size]");
-  VT_CHECK(k_cache.shape[2] == num_kv_heads && k_cache.shape[3] == head_size,
+  const int64_t num_kv_heads = k.shape[1];
+  const int64_t head_size_k = k.shape[2];
+  const int64_t head_size_v = v.shape[2];
+  VT_CHECK(v.shape[0] == k.shape[0] && v.shape[1] == num_kv_heads,
+           "reshape_and_cache: k and v must share [num_tokens,num_kv_heads]; "
+           "head_size may differ (MiMoV2 asymmetric K/V: Dh_k != Dh_v)");
+  VT_CHECK(k_cache.shape[2] == num_kv_heads && k_cache.shape[3] == head_size_k,
            "reshape_and_cache: k_cache num_kv_heads/head_size must match k");
   VT_CHECK(v_cache.shape[0] == k_cache.shape[0] && v_cache.shape[1] == k_cache.shape[1] &&
-               v_cache.shape[2] == k_cache.shape[2] && v_cache.shape[3] == k_cache.shape[3],
-           "reshape_and_cache: k_cache and v_cache must share shape");
+               v_cache.shape[2] == num_kv_heads && v_cache.shape[3] == head_size_v,
+           "reshape_and_cache: v_cache must match k_cache in num_blocks/block_size/"
+           "num_kv_heads, and v_cache head_size must match v");
   // Upstream uses slot_mapping.size(0) as the token count: k/v may carry extra
   // trailing rows (CUDA-graph padding) that are ignored.
   VT_CHECK(k.shape[0] >= slot_mapping.shape[0],
@@ -4300,15 +4304,15 @@ void ReshapeAndCache(Queue& q, const Tensor& k, const Tensor& v, Tensor& k_cache
   // while stride(0) still spans Q+K+V. The kernels already consume the explicit
   // token strides, matching upstream reshape_and_cache_flash.
   VT_CHECK(k.stride[2] == 1 && v.stride[2] == 1 &&
-               k.stride[1] == head_size && v.stride[1] == head_size &&
-               k.stride[0] >= num_kv_heads * head_size &&
-               v.stride[0] >= num_kv_heads * head_size &&
+               k.stride[1] == head_size_k && v.stride[1] == head_size_v &&
+               k.stride[0] >= num_kv_heads * head_size_k &&
+               v.stride[0] >= num_kv_heads * head_size_v &&
                slot_mapping.IsContiguous(),
            "reshape_and_cache: k/v token pages must be inner-contiguous and "
            "slot_mapping contiguous");
   VT_CHECK(k_cache.stride[3] == 1 && v_cache.stride[3] == 1,
            "reshape_and_cache: k_cache/v_cache innermost (head_size) stride must be 1");
-  VT_CHECK(k_cache.stride[2] == head_size && v_cache.stride[2] == head_size,
+  VT_CHECK(k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v,
            "reshape_and_cache: k_cache/v_cache page must be head-contiguous "
            "(stride[2] == head_size) — the NHD unbind-slice layout");
   VT_CHECK(k.device == q.device && v.device == q.device && k_cache.device == q.device &&
@@ -4336,14 +4340,18 @@ void ReshapeAndCacheFp8(Queue& q, const Tensor& k, const Tensor& v, Tensor& k_ca
            "[num_blocks,block_size,num_kv_heads,head_size]");
   VT_CHECK(slot_mapping.rank == 1,
            "reshape_and_cache_fp8: slot_mapping must be rank-1 [num_slots]");
-  const int64_t num_kv_heads = k.shape[1], head_size = k.shape[2];
-  VT_CHECK(v.shape[0] == k.shape[0] && v.shape[1] == num_kv_heads && v.shape[2] == head_size,
-           "reshape_and_cache_fp8: k and v must share [num_tokens,num_kv_heads,head_size]");
-  VT_CHECK(k_cache.shape[2] == num_kv_heads && k_cache.shape[3] == head_size,
+  const int64_t num_kv_heads = k.shape[1];
+  const int64_t head_size_k = k.shape[2];
+  const int64_t head_size_v = v.shape[2];
+  VT_CHECK(v.shape[0] == k.shape[0] && v.shape[1] == num_kv_heads,
+           "reshape_and_cache_fp8: k and v must share [num_tokens,num_kv_heads]; "
+           "head_size may differ (MiMoV2 asymmetric K/V: Dh_k != Dh_v)");
+  VT_CHECK(k_cache.shape[2] == num_kv_heads && k_cache.shape[3] == head_size_k,
            "reshape_and_cache_fp8: k_cache num_kv_heads/head_size must match k");
   VT_CHECK(v_cache.shape[0] == k_cache.shape[0] && v_cache.shape[1] == k_cache.shape[1] &&
-               v_cache.shape[2] == k_cache.shape[2] && v_cache.shape[3] == k_cache.shape[3],
-           "reshape_and_cache_fp8: k_cache and v_cache must share shape");
+               v_cache.shape[2] == num_kv_heads && v_cache.shape[3] == head_size_v,
+           "reshape_and_cache_fp8: v_cache must match k_cache in num_blocks/block_size/"
+           "num_kv_heads, and v_cache head_size must match v");
   VT_CHECK(k.shape[0] >= slot_mapping.shape[0],
            "reshape_and_cache_fp8: num_tokens (k.shape[0]) must be >= slot_mapping length");
   // Source K/V are model floats; cache pages are fp8 bytes (kI8).
@@ -4358,15 +4366,15 @@ void ReshapeAndCacheFp8(Queue& q, const Tensor& k, const Tensor& v, Tensor& k_ca
   // unbind-slice cache). Element size 1 for the cache; the source uses its float
   // element size.
   VT_CHECK(k.stride[2] == 1 && v.stride[2] == 1 &&
-               k.stride[1] == head_size && v.stride[1] == head_size &&
-               k.stride[0] >= num_kv_heads * head_size &&
-               v.stride[0] >= num_kv_heads * head_size &&
+               k.stride[1] == head_size_k && v.stride[1] == head_size_v &&
+               k.stride[0] >= num_kv_heads * head_size_k &&
+               v.stride[0] >= num_kv_heads * head_size_v &&
                slot_mapping.IsContiguous(),
            "reshape_and_cache_fp8: k/v token pages must be inner-contiguous and "
            "slot_mapping contiguous");
   VT_CHECK(k_cache.stride[3] == 1 && v_cache.stride[3] == 1,
            "reshape_and_cache_fp8: k_cache/v_cache innermost (head_size) stride must be 1");
-  VT_CHECK(k_cache.stride[2] == head_size && v_cache.stride[2] == head_size,
+  VT_CHECK(k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v,
            "reshape_and_cache_fp8: k_cache/v_cache page must be head-contiguous "
            "(stride[2] == head_size) — the NHD unbind-slice layout");
   // NO device-class guard. W1 hard-refused every non-CPU queue here, which is
@@ -5162,11 +5170,12 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
            "paged_attention: k_cache/v_cache rank-4 "
            "[num_blocks,block_size,num_kv_heads,head_size]");
   const int64_t num_tokens = query.shape[0], hq = query.shape[1], d = query.shape[2];
-  const int64_t num_kv_heads = k_cache.shape[2], head_size = k_cache.shape[3];
+  const int64_t num_kv_heads = k_cache.shape[2], head_size_k = k_cache.shape[3];
   // MiMoV2: V head dim can differ from K head dim (v_head_dim=128 vs
   // head_dim=192). The query's d == K head dim (QK dot-product width); V is
   // read from v_cache.shape[3].
   const int64_t head_size_v = v_cache.shape[3];
+  const int64_t head_size = head_size_k;  // legacy alias used below
   VT_CHECK(out.shape[0] == num_tokens && out.shape[1] == hq && out.shape[2] == head_size_v,
            "paged_attention: out must match [num_tokens, num_q_heads, head_size_v]");
   VT_CHECK(d == head_size, "paged_attention: query head_size must match the K cache head_size");
@@ -5235,7 +5244,7 @@ void PagedAttention(Queue& q, Tensor& out, const Tensor& query, const Tensor& k_
            "paged_attention: query/out/seq_lens/query_start_loc must be contiguous");
   VT_CHECK(k_cache.stride[3] == 1 && v_cache.stride[3] == 1,
            "paged_attention: k_cache/v_cache innermost (head_size) stride must be 1");
-  VT_CHECK(k_cache.stride[2] == head_size && v_cache.stride[2] == head_size,
+  VT_CHECK(k_cache.stride[2] == head_size_k && v_cache.stride[2] == head_size_v,
            "paged_attention: k_cache/v_cache page must be head-contiguous "
            "(stride[2] == head_size) — the NHD unbind-slice layout");
   VT_CHECK(query.device == q.device && out.device == q.device && k_cache.device == q.device &&

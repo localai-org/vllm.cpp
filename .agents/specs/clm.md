@@ -13,14 +13,15 @@ GPU (CUDA), OpenAI-compatible serving.
 
 ## Now
 
-`SPEC` — not yet implemented. The `/v1/systemone` API, the C ABI
-`vllm_decide` (ABI v29), the `DecisionFn` callback mechanism, the shared
-`systemone.{h,cpp}` helpers, and the `Qwen3DenseModel::ForwardHidden` pooling
-forward all exist on `main`. The Qwen3-8B dense backbone is fully supported
-(`qwen3.cpp`, `qwen3_weights.cpp`, `qwen3_dense.cpp`). CLM adds a new
-registry TU that loads the frozen Qwen3-8B backbone via `ForwardHidden`,
-loads the two projection heads from `CLM_v0.1-8B.pt`, and plugs into the
-existing decision dispatch.
+`ACTIVE`. The fidelity repair (ISSUE-LOCAL-01M3T6ZZ2WBM4FSMTQZAWM8974) is
+implemented and CPU-verified; see `## Fidelity repair`. On 2026-09-30 the
+published checkpoint, converted by `scripts/convert-clm.py` and served by
+`vllm-server` on CPU, matched the reference `Engine.answer` on 5 requests and
+8 questions: argmax 8/8, max probability difference 0.029 against the
+reference with a bf16 encoder (0.077 against fp32; the reference's own bf16
+versus fp32 difference is 0.049). The first port scored 5/8 and 0.98 on the
+same requests. The independent review of the repair, CUDA and GGUF are
+`PENDING`.
 
 ## Scope
 
@@ -32,7 +33,7 @@ existing decision dispatch.
   1e6, rms_norm_eps=1e-6, attention_bias=false, tie_word_embeddings=false)
   in feature-extraction mode (ForwardHidden, no LM head, last-token
   pooling); two MLP projection heads (state head + action head), each
-  `Linear(4096, 1536) → GELU → LayerNorm(1536) → Linear(1536, 1536) → GELU
+  `Linear(4096, 1536) → GELU → Linear(1536, 1536) → LayerNorm(1536) → GELU
   → Linear(1536, 512)` (width=1536, depth=3, activation=gelu,
   layernorm=true, residual=false), L2-normalized after projection;
   logit_scale (scalar, `exp(logit_scale)` clamped to 100.0) learned
@@ -130,9 +131,9 @@ Repository: `Contrastive-LM/CLM` @ `bb42c6c5bf914fd449bed2f6ca65be80602cb1f7`.
 
 - Script: `scripts/convert-clm.py` — loads `CLM_v0.1-8B.pt` via torch,
   saves `head.safetensors` (the state-head and action-head weight tensors
-  as F32) + `meta.json` (`width`, `depth`, `projection_dim`,
-  `activation`, `layernorm`, `residual`, `hidden_size`, `logit_scale`
-  as `exp(logit_scale).clamp(max=100.0)`).
+  as F32), and records the checkpoint `cfg` and the raw `logit_scale` as
+  `clm_*` keys in `config.json` (see `## Fidelity repair`; the first plan
+  here named a `meta.json` and a pre-clamped scale).
 - Head tensor names in `head.safetensors` (following the PyTorch state-dict
   convention from `make_head`):
   - State head: `state_head.inp.weight` [1536, 4096],
@@ -231,6 +232,79 @@ Repository: `Contrastive-LM/CLM` @ `bb42c6c5bf914fd449bed2f6ca65be80602cb1f7`.
   within tolerance for bf16 paths.
 - Server E2E test through `/v1/systemone` HTTP endpoint.
 
+## Fidelity repair
+
+Filed as ISSUE-LOCAL-01M3T6ZZ2WBM4FSMTQZAWM8974. Each point below was checked
+against the reference source at `bb42c6c` and against `CLM_v0.1-8B.pt` @
+`Contrastive-LM/CLM-v0.1-8B` `e939398d4556fcd9400c76fa8c5a513202f42b0a`
+(sha256 `b2b4a8c9...4eda5`) before any change.
+
+| # | Engine before | Reference | Where |
+|---|---|---|---|
+| 1 | head tensors `<head>.0/.2/.4/.6` | `<head>.inp`, `.hidden.0`, `.norms.0`, `.out` (`weight`, `bias`) | `heads.py:44-66`, the `.pt` state dicts |
+| 2 | Linear, GELU, LayerNorm, Linear, GELU, Linear | `act(inp(x))`, then per hidden block `act(norm(lin(x)))` (plus `x` when residual), then `out` | `heads.py:60-64` |
+| 3 | `exp(min(ls, 100))` = 100.81; a missing key falls back to 4.6 | `exp(ls).clamp(max=100.0)` in float32 = 100.0 | `heads.py:92` |
+| 4 | state text is the state alone | `state_text`: `to_text(state).strip() + "\n\n" + to_text(instructions).strip()` | `schema.py:62-65` |
+| 5 | head input is the raw last-token hidden state | L2-normalized: vLLM pooling normalizes, and `Embedder._fetch` applies `l2` again | `embedder.py:61`, vLLM `adapters.py:as_embedding_model` |
+| 6 | candidates from the shared kev `OptionText`: `key: description`, `no`/`yes` | choice: the description alone, else the key; noul: `true: <d>` / `false: <d>` with `d` defaulting to `Yes. This is true: <instructions>`; score: `to_text(level)`; objects through `to_text`, not `RenderJson` | `schema.py:30-59, 76-100` |
+| 7 | HTTP `/v1/systemone` answers through `BuildSystemOneAnswerDecision` (4-decimal rounding, kev confidence, `rl_agent`) | `answer_from_probs`: no rounding, margin confidence, noul carries no confidence | `schema.py:118-148`, `api_server.cpp` decision path |
+
+Design of the repair:
+
+- `scripts/convert-clm.py` writes a self-contained directory: the base
+  Qwen3-8B shards and tokenizer copied, `head.safetensors` with the reference
+  tensor names under `state_head.` / `action_head.` (F32), and a
+  `config.json` that is the base config with `architectures: ["ClmModel"]`
+  and the checkpoint's `cfg` and raw `logit_scale` as `clm_*` keys. The
+  engine computes the scale itself, so the formula lives in one place.
+- The loader reads those names, checks every shape against the config, and
+  refuses a missing `clm_*` key by name instead of defaulting.
+- The head forward follows `make_head` for any depth, LayerNorm on or off,
+  residual on or off, and GELU, ReLU or SiLU.
+- CLM gets a request-level seam, `ClmDecide(model, tokenizer, body)`, that
+  ports `build_pairs`, `to_text`, `Engine.answer` and `answer_from_logits`,
+  including the `temperature` field and the reference's refusals. The server
+  registers it with `set_systemone_request` and `vllm_decide` calls it, like
+  Nimble. The per-question `DecisionFn` path and `BuildSystemOneAnswerClm`
+  go away, so HTTP and FFI cannot drift.
+- Identical texts in one request are encoded once, as the reference
+  embedder's `dict.fromkeys` does, and a text longer than 2048 tokens keeps
+  its first 2048, as `truncate_prompt_tokens=2048` does with the Qwen3
+  tokenizer's `truncation_side="right"`.
+
+Tests (every golden from running the reference, `scripts/gen-clm-goldens.py`):
+heads (both `make_head` branches) loaded through the real loader from a
+safetensors file with the reference names, the scale including the published
+`logit_scale`, `build_pairs`, `answer_from_logits`, refusals, the whole
+`Engine.answer` pipeline with raw (unnormalized) embeddings, `ClmDecide` over a
+synthetic ClmModel against an independent `ForwardHidden` last row, and
+`vllm_decide` reachability. With `VLLM_CPP_CLM_MODEL_DIR` set, the real
+converted checkpoint must reproduce the reference's answers on five requests.
+
+Gate: on CPU, the real checkpoint served by `vllm-server` must pick the
+reference's argmax on every question, with the maximum probability difference
+recorded next to the reference's own bf16-versus-fp32 difference on the same
+requests.
+
+### Measured (2026-09-30, CPU)
+
+- Reference: `Engine.answer` @ `bb42c6c` with its own heads, schema and
+  answer code; encoder Qwen3-8B @ `b968826d` through `transformers` 5.3.0,
+  last token of the post-norm hidden state, L2-normalized (the stand-in for
+  `vllm serve --runner pooling`, which the reference's `Embedder` calls).
+- Engine: `vllm-server` Release CPU build of this branch, the converted
+  directory, `/v1/systemone`; the same numbers through `vllm_decide`
+  (`VLLM_CPP_CLM_MODEL_DIR`).
+- Result: argmax 8/8, max probability difference 0.0286 (bf16 reference),
+  0.0767 (fp32 reference). Reference bf16 versus fp32: 0.0491, 8/8.
+- Before the repair, with the reference tensors loaded under the names the
+  first port read: 5/8, 0.9808.
+- Mutation: reintroducing each first-port behavior (old tensor names, the
+  LayerNorm order, clamp before exp, the state without instructions, no
+  pooling normalization, `key: ` candidates, the first row pooled, and
+  deleting the `clm::Answer` call in `ClmDecide`) turns at least one
+  default-run case of `test_clm` red.
+
 ## Our baseline
 
 Before this row: the Qwen3-8B dense backbone forward and `ForwardHidden`
@@ -249,7 +323,7 @@ scaled-cosine scoring existed.
   `Contrastive-LM/CLM` `src/clm/heads.py` (not in vLLM) →
   `src/vllm/model_executor/models/clm_registry.cpp` (new file).
 - Checkpoint conversion: `scripts/convert-clm.py` (new file, loads
-  `CLM_v0.1-8B.pt` torch save, writes `head.safetensors` + `meta.json`).
+  `CLM_v0.1-8B.pt` torch save, writes `head.safetensors` + `clm_*` config keys).
 - SystemOne dispatch: shared `src/vllm/entrypoints/openai/systemone.{h,cpp}`
   (reused from Laya PR).
 - C ABI: `vllm_decide` / `vllm_decide_free` in `include/vllm.h` /
@@ -371,11 +445,9 @@ authored from the CLM reference implementation:
 - Action embedding caching optimization (reuse candidate embeddings across
   questions — the reference caches action embeddings so repeated
   candidates skip re-encoding).
-- Server dispatch via `DecisionFn` callback: `ClmInference` is defined in
-  `clm_registry.cpp` and compiles, but the server dispatch code in
-  `server_main.cpp` must route the `"ClmModel"` architecture to the CLM
-  decision callback. The `DecisionFn` callback and `set_decision` API
-  already exist from the Laya/kev work; only the CLM wiring remains.
+- The reference's `model` field (named head checkpoints, the `clm-raw`
+  ablation) and its `/v1/rank` route: the engine serves the one converted
+  head and ignores `model`.
 
 ## Git integration
 
@@ -386,6 +458,9 @@ implementation commits in the same pull request.
 
 - Base: `Qwen/Qwen3-8B` — bf16, ~16 GB. Already loadable via
   `LoadQwen3ForCausalLMWeights`.
-- Heads: `Contrastive-LM/CLM-v0.1-8B` — `CLM_v0.1-8B.pt` (torch save, ~80
-  MB, converted to `head.safetensors` + `meta.json`), `config.json`,
-  `tokenizer.json`.
+- Heads: `Contrastive-LM/CLM-v0.1-8B` @ `e939398d4556fcd9400c76fa8c5a513202f42b0a`
+  : `CLM_v0.1-8B.pt` (torch save, 75557149 bytes, sha256
+  `b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5`),
+  converted by `scripts/convert-clm.py` to `head.safetensors` plus `clm_*`
+  keys in `config.json`. The repo carries no tokenizer; the converter copies
+  the base's.

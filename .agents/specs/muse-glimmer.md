@@ -873,7 +873,8 @@ Adjacent gates unchanged and green on the same build: `test_muse_glimmer_text`
 - **No speed axis, still.** §0 is unchanged: the pinned oracle cannot load
   `muse_glimmer`, so there is no denominator and none is claimed here.
 - The bf16 safetensors arm at full depth has still never generated; it is
-  unaffected by this fix, which is GGUF-only.
+  unaffected by this fix, which is GGUF-only. (Superseded by §14: it generated
+  4 ungated tokens on 2026-08-11.)
 
 ## 14. The speed re-run — first binding numbers on any axis (2026-08-11, `row/MUSE-BENCH-2`, issue [#333](https://github.com/mudler/vllm.cpp/issues/333))
 

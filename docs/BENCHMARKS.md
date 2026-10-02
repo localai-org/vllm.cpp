@@ -15,6 +15,7 @@
 | **DSR fix: async readback capability (2026-08-08)** | **No number owed**: behavior-neutral (CPU/CUDA async-ON, discrete non-CUDA async-OFF, unchanged); moves a `kCUDA` check onto `Backend`, unblocking red CI on #127/#154/#155 |
 | **`ROAD-V1-MEM` M1+M2 (2026-08-08)** | KV auto-sizing CPU brick: `--kv-cache-memory` sizes the pool from a byte budget via the group-aware `KVBytesPerBlock` divisor (ABI v16, CPU-gated). M3 profile run dgx-gated |
 | **Record/checker repair 2026-08-07–08** | Gates fixed. Public: `VT_GEMMA4_EXPERT_VRAM_MB` (positive-MiB LRU cap; unset/0 unlimited), `VT_SERVER_MAX_{PROMPT_CHARS,NEW_TOKENS}` (200000/4096; 0 disables); nine Gemma4/ROCm tuners internal. No runtime/perf change. |
+| **Qwen3.8 Flash Next / TensorFold gap** | `dgx:gpu0`, required GGUF and MLX-MTP artifacts | **BLOCKED_MISSING_ARTIFACTS:** no timing or ratio; committed GGUF manifest gives `BLOCKED_NO_MTP_WEIGHTS` ([detail](benchmarks/qwen38-tensorfold-gap.md)) | not run |
 | **vLLM** | Qwen3.6-27B NVFP4 `unsloth` @`890bdef7`, GB10 | ahead 4.5% at c1, **tie** at c2 to c32 | identical |
 | **vLLM** | Qwen3.6-27B NVFP4 `nvidia` @`0893e160` (ModelOpt `modelopt_mixed`), GB10 | **0.8289x to 0.8639x, BEHIND** at c1 to c8 (canonical 2026-08-10; confirms the prior 0.843-0.861x). Gap fully ATTRIBUTED | near-tie |
 | **vLLM** | Qwen3.6-35B-A3B NVFP4 `nvidia` @`491c2f1e`, GB10 | **CANONICAL 2026-08-11 @`348c265d`: 0.918x-0.972x** over c1-c32 (first c16/c32); best c4 0.9719. Supersedes the ad-hoc grid | near-tie |
@@ -30,6 +31,28 @@ Reading the ratios: throughput is ours/reference, latency is reference/ours, so
 **1.0 or higher is a win** everywhere on this page. Which architecture each number
 is measured on, and the per-architecture correctness gate behind it, is the
 registry-bound list in [FEATURES.md](FEATURES.md).
+
+## Benchmark detail index
+
+| Benchmark ID | Disposition | Detail |
+|---|---|---|
+| `qwen38-tensorfold-gap` | `BLOCKED_MISSING_ARTIFACTS`; no number | [Qwen3.8 TensorFold gap](benchmarks/qwen38-tensorfold-gap.md) |
+| `at-a-glance` | portfolio snapshot, current W5/W6 state | [At a glance](benchmarks/at-a-glance.md) |
+| `dwarfstar-gguf` | `DONE`: byte-exact decode, 1.144x vs DwarfStar `ds4` with `VT_V4_RESIDENT_W` | [DwarfStar, GGUF](benchmarks/dwarfstar-gguf.md) |
+| `how-we-measure` | methodology reference for every binding number | [How we measure](benchmarks/how-we-measure.md) |
+| `llama-cpp-cpu` | `DONE`: prefill 1.18x ahead, decode tie, memory parity (aarch64) | [llama.cpp, CPU](benchmarks/llama-cpp-cpu.md) |
+| `memory` | `PASS`: peak PSS/RSS/GPU-memory ratios vs vLLM, 27B NVFP4 GB10 | [Memory](benchmarks/memory.md) |
+| `mlx-lm-apple-m4` | INDICATIVE: 97.6% warm total vs MLX-LM, Qwen3-0.6B | [MLX-LM, Apple M4](benchmarks/mlx-lm-apple-m4.md) |
+| `open-gaps` | ledger of open performance gaps and their next gates | [Open gaps](benchmarks/open-gaps.md) |
+| `qwen38-27b-exl3-gb10` | EXL3 3.5bpw decode, with and without the DFlash2 draft | [Qwen3.8-27B EXL3 GB10](benchmarks/qwen38-27b-exl3-gb10.md) |
+| `qwen38-27b-exl3-variadic-gb10` | EXL3 under a mixed-length serving load | [Qwen3.8-27B EXL3 variadic GB10](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
+| `qwen38-27b-q4km-gfx1151` | Q4_K_M three-engine comparison on Strix Halo | [Qwen3.8-27B Q4_K_M gfx1151](benchmarks/qwen38-27b-q4km-gfx1151.md) |
+| `reproduce` | entry points and recipes to reproduce each benchmark | [Reproduce](benchmarks/reproduce.md) |
+| `speculative-decoding` | MTP/DFlash/n-gram/DSpark spec-decode rows vs vLLM | [Speculative decoding](benchmarks/speculative-decoding.md) |
+| `tt-capture-default-decode` | Tenstorrent capture-default decode rate | [Tenstorrent capture-default decode](benchmarks/tt-capture-default-decode.md) |
+| `tt-keepquant-27b-decode` | Tenstorrent keep-quant 27B decode, capture-default | [Tenstorrent keep-quant 27B decode](benchmarks/tt-keepquant-27b-decode.md) |
+| `variadic-load-methodology` | methodology of the mixed-load serving benchmark | [Variadic-load methodology](benchmarks/variadic-load-methodology.md) |
+| `vllm-online-serving` | the binding vLLM online-serving comparison grids | [vLLM, online serving](benchmarks/vllm-online-serving.md) |
 
 ## vLLM, online serving
 

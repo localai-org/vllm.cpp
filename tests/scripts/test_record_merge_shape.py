@@ -305,8 +305,12 @@ class PerClaimFiles(unittest.TestCase):
             errors: list[str] = []
             claims = record.parse_active_claims(errors)
             self.assertIn("CLAIM-MERGE-SHAPE-PROBE", claims)
+            # The restructured checker returns a ClaimRecord per claim (it
+            # carries the lifecycle annotation and claim state that #3099's
+            # claim-state consistency gate needs), so compare its row IDs.
             self.assertEqual(
-                claims["CLAIM-MERGE-SHAPE-PROBE"], {"ENG-RECORD-CONFLICT-SURFACES"}
+                claims["CLAIM-MERGE-SHAPE-PROBE"].row_ids,
+                {"ENG-RECORD-CONFLICT-SURFACES"},
             )
         finally:
             probe.unlink()
