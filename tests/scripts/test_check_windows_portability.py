@@ -2257,6 +2257,61 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
         self.assertIn("required implementation is not reachable",
                       result.stdout + result.stderr)
 
+    def test_fetch_content_deps_sources_are_out_of_scan_scope(self) -> None:
+        # CI run 37034253522: the Windows release build configures into
+        # build-pr-windows-vulkan/ INSIDE the source tree, so the codemodel
+        # carries the vendored ggml of the FetchContent parakeet_cpp
+        # dependency (build-pr-windows-vulkan/_deps/parakeet_cpp-src/...),
+        # and the POSIX rule flagged amx.cpp:12, mmq.cpp:18, ggml-cpu.c:2542
+        # and ggml.c:85-88. That code is third-party; the checker's contract
+        # is THIS project's sources reaching Windows-incompatible POSIX.
+        # The Linux self-configure uses a build dir OUTSIDE the root, so the
+        # same sources silently dropped out there and hid the asymmetry.
+        root = self.make_tree()
+        vendored = (root /
+                    "build-pr-windows-vulkan/_deps/parakeet_cpp-src/"
+                    "third_party/ggml/src/ggml-cpu/amx/amx.cpp")
+        vendored.parent.mkdir(parents=True, exist_ok=True)
+        vendored.write_text(
+            "#include <unistd.h>\nvoid leaked_posix() { fork(); }\n",
+            encoding="utf-8",
+        )
+        cmake_contract = textwrap.dedent(SAFE_FILES["CMakeLists.txt"])
+        (root / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.20)\n"
+            "project(portability LANGUAGES CXX)\n" + cmake_contract +
+            "\nadd_library(runtime STATIC\n"
+            "  src/vllm/platform/process.cpp\n"
+            "  src/vllm/platform/console_shutdown.cpp\n"
+            "  src/vllm/v1/kv_offload/lmcache/remote_client.cpp\n"
+            "  src/vllm/v1/kv_offload/fs_io.cpp)\n"
+            "target_include_directories(runtime PRIVATE src include)\n"
+            "add_executable(server src/vllm/entrypoints/openai/server_main.cpp)\n"
+            "target_link_libraries(server PRIVATE runtime)\n"
+            "add_library(parakeet STATIC\n"
+            "  build-pr-windows-vulkan/_deps/parakeet_cpp-src/third_party/"
+            "ggml/src/ggml-cpu/amx/amx.cpp)\n"
+            "target_link_libraries(server PRIVATE parakeet)\n",
+            encoding="utf-8",
+        )
+        build = root / "build-pr-windows-vulkan"
+        query = build / ".cmake/api/v1/query"
+        query.mkdir(parents=True)
+        (query / "codemodel-v2").touch()
+        configured = subprocess.run(
+            ["cmake", "-S", str(root), "-B", str(build), "-G", "Ninja"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(configured.returncode, 0,
+                         configured.stdout + configured.stderr)
+        result = subprocess.run(
+            [sys.executable, str(CHECKER), "--root", str(root),
+             "--build-dir", str(build)],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("unguarded POSIX", result.stdout + result.stderr)
+
     def test_representative_real_source_mutations_fail(self) -> None:
         console = (REPO / "src/vllm/platform/console_shutdown.cpp").read_text(
             encoding="utf-8"
