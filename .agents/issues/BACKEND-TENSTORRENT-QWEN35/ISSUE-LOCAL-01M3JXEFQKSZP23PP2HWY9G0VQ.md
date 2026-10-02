@@ -451,3 +451,17 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   zero d/scale blocks mixed in). Evidence:
   docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. Issue stays
   OPEN pending the 27B c1/c2 re-measure legs this wave unblocks.
+
+- 2026-10-02, second entry (row/tt-matmul-fusion): the 27B re-measure
+  legs RAN on the wave-2 tree. c1 INT8DOT=1 **BENCH_EXIT=0 with a full
+  TPOT table — the first 27B serve on the live capture arm** (TPOT mean
+  6,758.97 ms, TTFT 821,024 ms); c2 INT8DOT=1 BENCH_EXIT=0 (TPOT
+  25,684.37 ms, TTFT 1,218,612 ms — the two streams serialize on the one
+  replay queue). Both INT8DOT=0 legs still die on the whole-graph fit
+  wall (mesh_trace.cpp:126) — attributed to the checkpoint's Q4_K ffn/attn
+  weights, which the wave-2 Q6_K fuse does not serve: the P=1 dense arm
+  runs the per-chunk chain there. OWED NEXT: the Q4_K arm of the fused
+  whole-decode dispatch (each encoding through its golden before its
+  default flips, per the standing rule). Evidence:
+  docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. Issue stays
+  OPEN; the fit wall keeps standing on the Q4_K arm only.

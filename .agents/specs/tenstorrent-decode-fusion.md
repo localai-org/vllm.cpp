@@ -318,8 +318,10 @@ directly. The captured [64,5120]x[5120,5120] launch records 23,552 B
 (was 147,456 B — red-first recorded on HEAD; gate <= 32,768 B GREEN,
 6.26x). The fused-vs-chain memcmp golden is byte-identical on four tail
 shapes; VT_TT_KEEPQUANT_MM_CHAIN=1 is the named chain kill switch.
-Evidence: docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. NEXT:
-the 27B money legs (c1 INT8DOT=0 first) for BENCH_EXIT + TPOT, then c1
-INT8DOT=1, c2 INT8DOT=0, c2 INT8DOT=1 — each on its own reset — and the
-whole-graph trace re-measure. Full-suite green bar pending in the same
-session.
+Evidence: docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. MONEY
+LEGS RAN: c1 INT8DOT=1 BENCH_EXIT=0 TPOT 6,758.97 ms (the first 27B
+serve on the live capture arm), c2 INT8DOT=1 BENCH_EXIT=0 TPOT
+25,684.37 ms; both INT8DOT=0 legs still behind the fit wall, now
+attributed to the checkpoint's Q4_K weights (the Q6_K fuse does not
+serve them) — NEXT LEVER: the Q4_K arm of the fused whole-decode
+dispatch. Full suite: 101/102, the 2261-class RAC flake only.

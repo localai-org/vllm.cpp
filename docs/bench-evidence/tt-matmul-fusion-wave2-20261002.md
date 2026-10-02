@@ -73,10 +73,32 @@ suite (below) with the fused arm default-on.
 ## 4. Full TT suite
 
 `build2/build2-rescue2` `test_tenstorrent_backend`, whole binary, one
-process under the lock. See the row spec's `## Now` and the issue entry
-for the result line.
+process under the lock: **101/102 cases, 527,829/527,830 assertions
+green**; the single failure is the pre-recorded 2261-class RAC flake
+(`kTENSTORRENT batched decode RAC is capture-safe (num_slots=2)`,
+token-exact V 126/128), and the exit segfault (139) is the recorded
+teardown fault. Bar MET.
 
-## 5. Records
+## 5. The 27B money legs (Qwen3.8-27B Q4_K_M, 128-in / 32-out, seed 0,
+`VT_TT_TRACE_DEBUG=1`, own `luwen reset` + 15 s each)
+
+| leg | BENCH_EXIT | TPOT mean/median (ms) | TTFT mean (ms) | note |
+|---|---|---|---|---|
+| c1 INT8DOT=0 | **1** | — | — | whole-graph capture fit wall: `mesh_trace.cpp:126` overlap fatal, DRAM high-water 4,211,219,712 B — the Q4_K dense arm (P=1) still runs the per-chunk chain, which the Q6_K wave-2 fuse does not serve |
+| c1 INT8DOT=1 | **0** | **6,758.97 / 6,758.97** | 821,024.27 | **THE CAMPAIGN GOAL: the first BENCH_EXIT=0 27B serve on the live capture arm, full TPOT table** (P99 TPOT 6,847.02, ITL mean 6,758.97) |
+| c2 INT8DOT=0 | **1** | — | — | same fit wall (`mesh_trace.cpp:126`, high-water 4,220,733,312 B) |
+| c2 INT8DOT=1 | **0** | **25,684.37 / 25,684.37** | 1,218,612.26 | serves; 2 streams interleave on the one replay queue — per-stream rate halves and TPOT doubles vs c1, the queue-serialization shape, not a kernel regression |
+
+Logs `/tmp/leg-c{1,2}-int8dot{0,1}.log`. The c1/c2 INT8DOT=1 TPOTs
+(~0.15 tok/s/stream) are honest first numbers, not targets — the
+trace-replay serve path is now measurable and the TPOT levers are
+individually traceable from here. The INT8DOT=0 legs' fit wall is
+NOW ATTRIBUTED TO A DIFFERENT ENCODING: this checkpoint stores its
+ffn/attn weights in Q4_K, which the wave-2 Q6_K fuse does not serve —
+the P=1 dense arm runs the per-chunk chain there, and the next lever is
+the Q4_K arm of the fused whole-decode dispatch (owed below).
+
+## 6. Records
 
 Same issue (`ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ`), same row
 (TT-DECODE-FUSION wave 2). Commits `d20f5ae5c` (the fused arm + the
