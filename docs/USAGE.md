@@ -1402,3 +1402,30 @@ waiting on the engine (long prefill / TTFT). Interval is `VT_SERVER_SSE_PING_S`
 (default 15s; `0` disables). Comment frames are not `data:` events and do not
 carry tokens. Token streaming still uses a timed wait on the request collector
 so deltas are not collapsed by a poll loop.
+
+## Diagnosing a CPU/CUDA divergence (Qwen4-EXP LayerFp)
+
+When the CPU and CUDA arms of a Qwen4-EXP decode disagree on tokens, arm the
+fingerprint tap with `VT_Q4EXP_LAYER_FP=9` on both arms and diff the server
+logs:
+
+```sh
+python3 scripts/q4exp-layerfp-diff.py A-CPU/server.log B-CUDA/server.log --top 50
+```
+
+The differ reports `rel(sumabs)` per tap. `rel(sumabs)` is a DIFFERENCE OF
+NORMS, not a norm of differences: its zero means "equal L1 norm", not "equal",
+and a zero-mean perturbation cancels in it at `O(sqrt(n))`. At the tap's real
+size (`n = 12800`), over the 400 seeds of the `MetricSpread` control in
+`tests/scripts/test_q4exp_layerfp_diff.py`, the under-report is MEDIAN 75x-140x
+with a p05..p95 of 34..1500. Hold the true divergence fixed: two readings differ by
+a median **2.1x** and by **24x** at p95. A ratio between two `rel(sumabs)`
+numbers is worth what that says and no more: NO CHANGE AT ALL produces a ratio at
+least as large as 16.7x or 19.9x in 7% and 6% of draws. Those two ratios sit at
+6% and 7% of the metric. No change at all produces a ratio at least as large as
+1.80x, 2.02x, 2.34x and 3.15x in 59%, 52%, 45% and 33% of draws, and 3.15x sits
+at the **67th** percentile — it is the LEAST ordinary of the four, and still an
+ordinary reading. So read any single `rel(sumabs)` ratio as an order of
+magnitude, and confirm a real divergence with `head_dmax` or the sign-sensitive
+`rel_proj` column. Worked example and evidence:
+[`docs/bench-evidence/qwen4exp-layerfp-2999-20260923.md`](bench-evidence/qwen4exp-layerfp-2999-20260923.md).
