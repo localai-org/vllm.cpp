@@ -465,3 +465,18 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   default flips, per the standing rule). Evidence:
   docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. Issue stays
   OPEN; the fit wall keeps standing on the Q4_K arm only.
+
+- 2026-10-02 (row/tt-q4k-fusion, worktree /tmp/vllm-region-capture-spec,
+  HEAD 640709002): the wave-3 Q4_K arm's money legs RAN — the fit wall
+  is GONE. All four legs BENCH_EXIT=0 with full TPOT tables: c1
+  INT8DOT=0 **31,345.59 ms** TPOT (THE GOAL — the first INT8DOT=0 27B
+  serve; wave 2 died here on `mesh_trace.cpp:126`, DRAM high-water
+  4,211,219,712 B), c2 INT8DOT=0 31,573.54 ms, c1 INT8DOT=1 6,680.05 ms
+  (wave-2 6,758.97, −1.2%, no regression), c2 INT8DOT=1 25,434.18 ms
+  (wave-2 25,684.37, −1.0%, no regression). The checkpoint's
+  quantization serving coverage is COMPLETE: both arms, both
+  concavities. The INT8DOT=0 f32-out arm runs ~4.7x the INT8DOT=1 TPOT
+  (twice the decode-plane bytes) — honest first numbers, TPOT levers
+  stay individually traceable. Evidence:
+  docs/bench-evidence/tt-q4k-fusion-20261001.md. Logs
+  /tmp/leg-c{1,2}-i{0,1}.log.

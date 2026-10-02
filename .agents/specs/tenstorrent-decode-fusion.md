@@ -309,19 +309,16 @@ policy).
 
 ## Now
 
-2026-10-02 (row/tt-matmul-fusion, commit 443e70bc0): WAVE 2 LANDED — the
-whole-decode fused MatmulBT arm. When the encoding is Q6_K and the whole
-decoded f32 plane fits the chunk budget, ONE fused-kernel launch decodes
-the entire word shadow and ONE stock matmul consumes it (~6 tt-metal
-programs per launch, was ~20); the TILE-domain partial tail commits
-directly. The captured [64,5120]x[5120,5120] launch records 23,552 B
-(was 147,456 B — red-first recorded on HEAD; gate <= 32,768 B GREEN,
-6.26x). The fused-vs-chain memcmp golden is byte-identical on four tail
-shapes; VT_TT_KEEPQUANT_MM_CHAIN=1 is the named chain kill switch.
-Evidence: docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. MONEY
-LEGS RAN: c1 INT8DOT=1 BENCH_EXIT=0 TPOT 6,758.97 ms (the first 27B
-serve on the live capture arm), c2 INT8DOT=1 BENCH_EXIT=0 TPOT
-25,684.37 ms; both INT8DOT=0 legs still behind the fit wall, now
-attributed to the checkpoint's Q4_K weights (the Q6_K fuse does not
-serve them) — NEXT LEVER: the Q4_K arm of the fused whole-decode
-dispatch. Full suite: 101/102, the 2261-class RAC flake only.
+2026-10-02 (row/tt-q4k-fusion, commit 640709002): WAVE 3 LANDED — the
+Q4_K arm of the fused whole-decode dispatch, with the scale-index
+repair (the `is >= 4` super-block groups read `scales[g+8]` and
+`scales[g+4]`), is golden-pinned bit-exact to the chain. MONEY LEGS RAN:
+all four 27B legs BENCH_EXIT=0 with full TPOT tables — c1 INT8DOT=0
+31,345.59 ms (THE GOAL: the first INT8DOT=0 serve; the wave-2
+`mesh_trace.cpp:126` fit wall is gone), c2 INT8DOT=0 31,573.54 ms,
+c1 INT8DOT=1 6,680.05 ms (−1.2% vs wave 2, no regression), c2
+INT8DOT=1 25,434.18 ms (−1.0%, no regression). The checkpoint's
+quantization serving coverage is COMPLETE — both arms, both
+concavities. Evidence:
+docs/bench-evidence/tt-q4k-fusion-20261001.md. Full suite: 101/102,
+the 2261-class RAC flake only.
