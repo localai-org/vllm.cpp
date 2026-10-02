@@ -7,14 +7,14 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-27
+Updated: 2026-10-02
 Closed: -
 
 ## Problem
 
 Three records about the Intel Arc Pro B60 are wrong, and one planned deliverable is answered by hardware rather than by code.
 
-(1) FALSE CODE COMMENT. src/vt/vulkan/vulkan_ops.cpp:2109 asserts 'The B60 is integrated'. Measured on garlic-clove with vulkaninfo, the device reports deviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, with two separate heaps (20.91 GiB DEVICE_LOCAL, 23.44 GiB host-visible). The CODE is right for the stated WRONG reason: VulkanBackend::DeviceMemoryIsHostAddressable() (vulkan_backend.cpp:135) returns true unconditionally, and vulkan_context.cpp:873 prefers a DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT type, which memoryTypes[3] and memoryTypes[6] (propertyFlags 0x0007) satisfy. The property the code depends on holds; the stated reason does not. This is a trap rather than a typo: a non-ReBAR Arc card would be discrete AND non-host-visible, and this comment would tell the next reader it is fine.
+(1) FALSE CODE COMMENT. src/vt/vulkan/vulkan_ops.cpp:2109 asserts 'The B60 is integrated'. Measured on garlic-clove with vulkaninfo, the device reports deviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, with two separate heaps (20.91 GiB DEVICE_LOCAL, 23.44 GiB host-visible). The CODE is right for the stated WRONG reason: VulkanBackend::DeviceMemoryIsHostAddressable() (vulkan_backend.cpp:135) returns true unconditionally, and vulkan_context.cpp:873 prefers a DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT type, which memoryTypes[3] and memoryTypes[6] (propertyFlags 0x0007) satisfy. The property the code depends on holds; the stated reason does not. This is a trap rather than a typo: the comment grounds host addressability in the card being integrated, but the allocator guarantees it on any board -- vulkan_context.cpp:872-875 prefers DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT and falls back to plain HOST_VISIBLE|HOST_COHERENT, refusing to initialize only if that fails too. A non-ReBAR Arc card is therefore still host-addressable through the second type; what it loses is device locality, so the keep-quant fall-through and the portable reference tier run slower there, not unsafe.
 
 (2) FALSE REGISTRY LINE. .agents/environment.md asserts 'No Intel GPU exists on any box here, so BACKEND-XPU end-to-end work is HW-BLOCKED'. garlic-clove is an Intel Arc Pro B60 (8086:e211, ASUS subsys 1849:6023) on the xe driver.
 
