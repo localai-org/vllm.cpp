@@ -18,7 +18,7 @@ memory compete; end-to-end wall-clock on a cold page cache is unusable there,
 and steady-state per-step timing or `nsys` GPU-busy is the anchor. The
 2026-08-06 #77-slip tree-revert changed no benchmark content or number.
 
-**Oracle pin.** vLLM <!--pin:label-->0.28.1rc1.dev132<!--/pin--> (<!--pin:commit-->`e126687a9a`<!--/pin-->) since 2026-09-03, with
+**Oracle pin.** vLLM <!--pin:label-->0.3.0.dev267<!--/pin--> (<!--pin:commit-->`a7c23ac96d`<!--/pin-->) since 2026-09-26, with
 FlashInfer `0.6.18` and CUTLASS DSL `4.6.2`.
 
 **EVERY BINDING RATIO ON THESE PAGES WAS MEASURED AGAINST THE PREVIOUS PIN**,

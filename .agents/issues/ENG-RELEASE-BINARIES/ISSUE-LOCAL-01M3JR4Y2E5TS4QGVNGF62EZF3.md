@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3JR4Y2E5TS4QGVNGF62EZF3
 Title: the roadmap REL row carries no release lifecycle, so two release gates are red, and its "no published binary exists" clause is false against tag v0.0.2
 Row: ENG-RELEASE-BINARIES
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-27
-Closed: -
+Updated: 2026-10-02
+Closed: 2026-10-02
 
 ## Problem
 
@@ -30,4 +30,11 @@ This change writes that lifecycle into the Next-gate cell, sourced from the engi
 
 ## Resolution
 
--
+upstream/main landed the same lifecycle the pull request wrote: the REL /
+ROAD-V1-RELEASE row carries the single ENG-RELEASE-WINDOWS anchor, the
+ENG-RELEASE-WINDOWS link, the Windows pre-alpha spec link, the v0.0.2
+publication sentence and the W14-W16/v0.0.3-pre.1/32-asset pending clauses,
+and the false "no published binary exists" clause is gone. On the merged
+tree check-release-binary-contract reports OK and
+check-windows-release-state reports the release truthfully ACTIVE, pending
+and unpublished. This record is what the pull request still adds.

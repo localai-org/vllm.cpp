@@ -1,7 +1,7 @@
 # Speculative decoding
 
 **THE PIN MOVED UNDER TWO OF THESE ROWS.** The parity pin
-advanced to <!--pin:commit-->`e126687a9a`<!--/pin--> on 2026-09-03
+advanced to <!--pin:commit-->`a7c23ac96d`<!--/pin--> on 2026-09-26
 ([#2817](https://github.com/mudler/vllm.cpp/issues/2817)). The **MTP** row and
 the **DFlash** row carry a vLLM denominator measured against the PREVIOUS pin
 `555967922` with FlashInfer `0.6.15.post1`, which is the oracle's attention

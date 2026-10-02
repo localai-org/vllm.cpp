@@ -16,11 +16,11 @@ id = vllm
 role = primary
 upstream = https://github.com/vllm-project/vllm
 scope = every behavior vLLM implements — defaults, modes, errors, edge cases, and both correctness and speed gates
-pin = e126687a9a828d513c01a07cd69f025f27d63280
-pin_label = 0.28.1rc1.dev132
-pinned_on = 2026-09-03
+pin = a7c23ac96d7806e7c7e7d862eadbce5a33529b94
+pin_label = 0.3.0.dev267
+pinned_on = 2026-09-26
 gateable = yes
-evidence = .agents/sync/2026-09-03-e126687-runhalf.md
+evidence = .agents/sync/2026-09-22-a7c23ac96d.md
 ```
 
 ## What this pin establishes, and what it does NOT
