@@ -903,6 +903,40 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
                 )
                 self.assertFalse(contract_kwargs.get("shell", False))
 
+    def test_powershell_ast_audit_is_scoped_to_real_roots(self) -> None:
+        # CI: test_fetch_content_deps_sources_are_out_of_scan_scope ran the
+        # checker on a synthetic root without the fixture manifest, so the
+        # native AST audit parsed the synthetic stub release script and
+        # errored "missing active configure in PowerShell AST" on every
+        # pwsh lane. The stub exercises the source contract; only a real
+        # run -- one without --test-source-manifest -- owns the AST and
+        # fake-tool execution contract.
+        root = self.make_tree()
+
+        with mock.patch.object(checker.shutil, "which", return_value="pwsh"), \
+                mock.patch.object(checker, "subprocess") as fake_subprocess, \
+                mock.patch.object(checker, "_validate_powershell_ast") as audit:
+            fake_subprocess.run.return_value = subprocess.CompletedProcess(
+                [], 0, "", ""
+            )
+            checker.check(root, source_manifest=root / "m")
+
+        self.assertFalse(audit.called)
+
+        with mock.patch.object(checker.shutil, "which", return_value="pwsh"), \
+                mock.patch.object(checker, "subprocess") as fake_subprocess, \
+                mock.patch.object(checker, "_validate_powershell_ast") as audit:
+            fake_subprocess.run.return_value = subprocess.CompletedProcess(
+                [], 0, "", ""
+            )
+            checker.check(root)
+
+        self.assertTrue(audit.called)
+        self.assertEqual(
+            audit.call_args[0][0],
+            root / "scripts/build-windows-release.ps1",
+        )
+
     def test_rejects_missing_winsock_support(self) -> None:
         self.assert_rejected(
             "src/vllm/v1/kv_offload/lmcache/remote_client.cpp",
@@ -2308,7 +2342,8 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
                          configured.stdout + configured.stderr)
         result = subprocess.run(
             [sys.executable, str(CHECKER), "--root", str(root),
-             "--build-dir", str(build)],
+             "--build-dir", str(build),
+             "--test-source-manifest", str(self.source_manifest)],
             text=True, capture_output=True, check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
