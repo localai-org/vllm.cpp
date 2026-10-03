@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3JMTHGAPTVW5E1ETG628416
 Title: check-cuda-op-arch-gate compares a native-separator path against a POSIX literal, so it reports a correct tree as having no registration AND a duplicate one
 Row: VT-FP8-QUANT-ARCH-GATE
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-27
-Closed: -
+Updated: 2026-10-02
+Closed: 2026-10-02
 
 ## Problem
 
@@ -24,7 +24,7 @@ Measured on Windows, Python 3.12, at upstream/main 1de097c46. The gate has never
 
 ## Resolution
 
--
+scripts/check-cuda-op-arch-gate.py keys the registration map by the POSIX spelling, path.relative_to(root).as_posix(), so the key matches the POSIX literal REQUIRED carries on every host. The home lookup then finds the registration it has already located, and the exclusivity loop no longer reads the home file as a second file. This pull request ships that change, and this record is closed with it. The Windows spelling was emulated on a POSIX host (executed verification below): 4 errors before the change, 0 after; the unmodified POSIX run and the 14 gate tests stay green. The other sites named above compare against no literal and stay as they are.
 
 ## Executed verification, 2026-10-02 (Linux x86_64)
 
