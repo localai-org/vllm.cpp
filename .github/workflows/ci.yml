@@ -1069,6 +1069,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # `scripts/check-windows-portability.py` skips its PowerShell AST stage
+      # when `pwsh` is absent (scripts/check-windows-portability.py:2029), so a
+      # lane without pwsh cannot see the defects that stage catches. The
+      # semantic-evidence gate re-runs the changed checker test at HEAD and at
+      # the merge base; when the changed test is red only through the ps1
+      # stage, a pwsh-less BASE lane stays green and `scripts/check-pr-size.py`
+      # rejects the evidence with "BASE checker stayed green ... changed test
+      # is not semantic evidence". Install pwsh so HEAD and BASE run under the
+      # same toolchain the windows contract expects. The windows-msvc-* jobs
+      # get pwsh from the `windows-2022` image, so this tarball install is the
+      # ubuntu-latest counterpart, pinned to the same 7.5.x line.
+      - name: Install PowerShell (pwsh) for the checker evidence lanes
+        run: |
+          curl -sSfL \
+            https://github.com/PowerShell/PowerShell/releases/download/v7.5.2/powershell-7.5.2-linux-x64.tar.gz \
+            -o /tmp/pwsh.tar.gz
+          sudo mkdir -p /opt/pwsh
+          sudo tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh
+          sudo ln -s /opt/pwsh/pwsh /usr/local/bin/pwsh
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
       - name: PR path classification and checker evidence
         run: |
           python3 scripts/check-pr-size.py \
