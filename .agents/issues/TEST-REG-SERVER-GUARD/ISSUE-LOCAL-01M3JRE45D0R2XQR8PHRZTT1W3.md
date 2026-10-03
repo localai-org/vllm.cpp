@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3JRE45D0R2XQR8PHRZTT1W3
 Title: check-test-registration reports three false verdicts on a Windows host: a parakeet.cpp configure fetch, the MSVC .pdb artifact, and a separator that blinds the server guard to 5 of 6 gated units
 Row: TEST-REG-SERVER-GUARD
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-09-27
-Closed: -
+Updated: 2026-10-02
+Closed: 2026-10-02
 
 ## Problem
 
