@@ -2132,7 +2132,7 @@ void AttnQkNormRopeGateKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& gate
 // host kernel.
 //
 // WHY `DeviceMemoryIsHostAddressable()` IS TRUE HERE, AND WHY IT IS NOT FREE.
-// It is NOT because the board is integrated. MEASURED on `garlic-clove`
+// It is NOT because the board is integrated. MEASURED on the Intel test host
 // (Intel Arc Pro B60, `8086:e211`, `xe` driver) 2026-09-27 with `vulkaninfo`:
 // the device reports `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU` with two heaps —
 // 20.91 GiB `DEVICE_LOCAL` and 23.44 GiB host — so "integrated" was the wrong
