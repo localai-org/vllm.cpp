@@ -38,3 +38,21 @@ and the false "no published binary exists" clause is gone. On the merged
 tree check-release-binary-contract reports OK and
 check-windows-release-state reports the release truthfully ACTIVE, pending
 and unpublished. This record is what the pull request still adds.
+
+## Executed verification, 2026-10-02 (Linux x86_64)
+
+Requested by the mudler-agent review (focused release-checker runs and
+lifecycle/publication mutations). Measured on this branch:
+
+- `python3 scripts/check-release-binary-contract.py`: `Release binary
+  contract: OK`.
+- `python3 scripts/check-windows-release-state.py`: `Windows release
+  remains truthfully ACTIVE, pending, and unpublished` (rc=0).
+- `python3 tests/scripts/test_check_release_binary_contract.py`: 30/30 OK.
+- Publication mutation, one surface at a time: flipping the
+  `publication=pending artifact=unpublished` anchor to `done/published`
+  in each of engine-matrix.md, roadmap_v1.md and
+  windows-binary-release.md makes the state checker rc=1 with
+  `must carry exactly one ACTIVE/pending/unpublished anchor` naming that
+  surface; each restore returns rc=0.
+
