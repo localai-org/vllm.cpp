@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-27
-Updated: 2026-10-01
+Updated: 2026-10-02
 Closed: 2026-10-01
 
 ## Problem
@@ -20,7 +20,7 @@ Scope: three rows in docs/ENVIRONMENT.md (two under "Rollback and bisect switche
 
 ## Resolution
 
-Fixed in the row PR: VT_VK_DISABLE and VT_VK_DISABLE_PAGED_ATTN documented under "Rollback and bisect switches" and VT_VK_FENCE_TIMEOUT_MS under "Diagnostic" (whose table already carries behaviour-changing bisect entries). The three allowlist lines an earlier attempt added are reverted; the allowlist is consumed as a plain set and is not sort-enforced, so removal is order-free. check-env-doc.py goes from the three-name failure to "OK: all 450 production env vars are documented or classified kernel-internal." plus "OK: all 213 env vars documented in a user-facing table are read by compiled code (0 declared exception(s))"; tests/scripts/test_check_env_doc.py passes; check-device-leakage stays green.
+Resolved with allowlist entries, not doc rows. VT_VK_DISABLE and VT_VK_DISABLE_PAGED_ATTN are on scripts/env-doc-allowlist.txt, which is what check-env-doc.py consumes, and docs/ENVIRONMENT.md carries no row for either. VT_VK_FENCE_TIMEOUT_MS is documented under "Diagnostic". The Problem section above argued for doc rows; the tree settled on the allowlist, so that argument does not describe the landed state. check-env-doc.py goes from the three-name failure to "OK: all 450 production env vars are documented or classified kernel-internal." plus "OK: all 213 env vars documented in a user-facing table are read by compiled code (0 declared exception(s))"; tests/scripts/test_check_env_doc.py passes; check-device-leakage stays green. The allowlist has no expiry mechanism, so the hooks stay silent debt until they are removed; ISSUE-LOCAL-01M3WZNRGJPME7P88GPPBW57GA (#3372) owns that removal.
 
 ## Executed verification, 2026-10-02 (Linux x86_64)
 
