@@ -847,6 +847,8 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
             with self.subTest(backend=backend):
                 root = Path(self.tempdir.name) / windows_root
                 script = root / "scripts" / "build-windows-release.ps1"
+                script.parent.mkdir(parents=True, exist_ok=True)
+                script.write_text("", encoding="utf-8")
                 calls: list[tuple[list[str], dict[str, object]]] = []
 
                 def fake_run(

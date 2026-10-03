@@ -2025,6 +2025,11 @@ def _validate_console_protocol(console: str, errors: list[str]) -> None:
 
 
 def _validate_powershell_ast(script: Path, errors: list[str]) -> None:
+    if not script.exists():
+        # A tree without the release script has no PowerShell contract to
+        # audit (synthetic roots, lanes that do not ship it); fail closed
+        # only when the script exists and is broken.
+        return
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         return
