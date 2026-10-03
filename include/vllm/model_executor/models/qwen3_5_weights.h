@@ -179,12 +179,20 @@ struct OwnedTensor {
   // `residency_policy().release_host_weights_after_upload`
   // (platforms/interface.h; BACKEND-PLATFORM item 2). Logically const: the
   // tensor's VALUE is unchanged, only the now-dead host mirror is freed. This
-  // mirrors the existing mutable lazy-device-upload residency design (d_dev/
-  // d_packed above are populated on a const weight). swap-with-empty (not
+  // mirrors the existing mutable lazy-device-upload residency design (d_dev
+  // above is populated on a const weight). swap-with-empty (not
   // clear()) guarantees the std::vector capacity is actually deallocated. After
   // release View()/bytes must not be read; shape/dtype metadata is retained and
   // Empty() remains false so device-resident dispatch continues to see it.
   void ReleaseHost() const;
+
+  // True when the host view is an adopted alias of this tensor's own device
+  // allocation (host-addressable devices: AdoptDeviceBytesAsHost re-points
+  // `bytes` at it and the block becomes the view's keep-alive).
+  bool HostViewIsDeviceTwin() const {
+    return d_dev != nullptr && bytes.borrowed() && mmap_src == nullptr &&
+           bytes.data() == static_cast<const uint8_t*>(d_dev.get());
+  }
 
   // Lazily-populated device-resident copies (CUDA forward only; null on host or
   // before first use). Uploaded ONCE and reused across every forward step so the
@@ -677,6 +685,16 @@ struct Nvfp4Weight {
   int64_t k = 0;        // in_features (K % 16 == 0)
   bool Empty() const { return packed.Empty(); }
 
+  // Drop this weight's device resident. `packed.d_dev`/`scale.d_dev` are the
+  // only owners, so the resets free; an adopted host view (see
+  // HostViewIsDeviceTwin) must go first because it holds the same block alive.
+  void ReleaseResident() const {
+    if (packed.HostViewIsDeviceTwin()) packed.ReleaseHost();
+    if (scale.HostViewIsDeviceTwin()) scale.ReleaseHost();
+    packed.d_dev.reset();
+    scale.d_dev.reset();
+  }
+
   // Block-scale FORMAT. Default = NVFP4: group_size 16, fp8-e4m3 `scale`, a
   // per-tensor `scale2` global. is_mxfp4 selects compressed-tensors MXFP4
   // (`mxfp4-pack-quantized`): group_size 32, E8M0 (UE8M0) `scale` [N, K/32], NO
@@ -702,13 +720,11 @@ struct Nvfp4Weight {
   // True when the activation-quant globals were loaded (27B true-W4A4 path).
   bool IsTrueW4A4() const { return alpha > 0.0F; }
 
-  // Lazily-populated device-resident copies (CUDA forward only; null on host or
-  // before first use). The shared_ptr deleter frees through the vt Backend.
-  mutable std::shared_ptr<void> d_packed;
-  mutable std::shared_ptr<void> d_scale;
+  // Device residency lives on `packed.d_dev`/`scale.d_dev` (the generic raw-twin
+  // slot): one owner per allocation, no second Nvfp4Weight handle.
   // Lazily-populated SWIZZLED weight block scale for the cutlass sm120a fp4 GEMM
   // path (VT_NVFP4_CUTLASS): [round_up(n,128), round_up(k/16,4)] in the cutlass
-  // atom layout, computed once from d_scale via vt::SwizzleBlockscale.
+  // `scale.d_dev` (the generic raw-twin slot) via vt::SwizzleBlockscale.
   mutable std::shared_ptr<void> d_scale_sw;
   // vLLM/FlashInfer-compatible model-owned f32 alpha for the true-W4A4 CUTLASS
   // path. Uploaded once from the persistent `alpha` member; the diagnostic host

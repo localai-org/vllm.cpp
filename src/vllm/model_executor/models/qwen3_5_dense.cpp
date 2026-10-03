@@ -13,7 +13,11 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
+
+#include "vllm/model_executor/models/interfaces.h"  // #607 L3 kVisionTowerStageName
 
 #include "vllm/model_executor/models/qwen3_5.h"         // ForwardLogits
 #include "vllm/model_executor/models/qwen3_5_common.h"  // kQwen3_5Info, helpers
@@ -45,6 +49,12 @@ class Qwen3_5DenseLoadedModel final : public LoadedModel {
       : LoadedModel(registration), weights_(&weights) {}
 
   const Qwen3_5DenseWeights& weights() const { return *weights_; }
+  // #607 L3: non-empty only when the load deliberately left `model.visual.*`
+  // unread because every modality the tower serves was at limit 0.
+  std::vector<std::string> skipped_towers() const override {
+    if (!weights_->vision_skipped) return {};
+    return {std::string(kVisionTowerStageName)};
+  }
   bool uses_nvfp4_w4a4() const override {
     return !weights_->layers.empty() &&
            weights_->layers.front().mlp.gate_proj_fp4.IsTrueW4A4();
@@ -118,7 +128,8 @@ std::unique_ptr<LoadedModel> LoadQwen3_5DenseModel(
   }
   return std::make_unique<Qwen3_5DenseLoadedModel>(
       registration,
-      LoadQwen3_5Dense(*source.safetensors, config, source.load_queue));
+      LoadQwen3_5Dense(*source.safetensors, config, source.load_queue,
+                       source.multimodal));
 }
 
 void PrepareQwen3_5Dense(LoadedModel& model, const HfConfig& config,

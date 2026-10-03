@@ -54,6 +54,11 @@ Registered in
 | POST | `/detokenize` | Detokenize token ids back to text |
 | GET | `/server_info` | Server info (`vllm_config`, `vllm_env`, `system_env`) |
 | POST | `/reset_prefix_cache` | Reset the prefix cache; returns `{"success": bool}` |
+| POST | `/v1/ner` | Extract named entities. Requires an NER callback |
+| POST | `/v1/systemone` | Answer typed questions. Requires an NER, decision, or request-level decision callback |
+| POST | `/v1/systemone/permute` | Repeat a choice question with reordered options. Requires an NER or per-question decision callback |
+| POST | `/v1/systemone/separate` | Answer each question in a separate call. Requires an NER or per-question decision callback |
+| POST | `/v1/score` | Score candidate options. Requires a scoring callback |
 | POST | `/v1/embeddings` | Embeddings. Registered **only** when an embedder is attached, so a text server answers 404 at the route table |
 | POST | `/v1/audio/transcriptions` | Speech to text (multipart: audio as `file`, `response_format` as a form field). Registered **only** when a transcriber is attached |
 | POST | `/v1/videos` | Start a video generation job, returns `{id, status}` (MiniMax-H3) |
@@ -61,6 +66,14 @@ Registered in
 | GET | `/v1/videos/{id}` | Job status |
 | GET | `/v1/videos/{id}/content` | The finished MP4 (`video/mp4`) |
 | POST | `/v1/audio/speech` | Text (or lyrics + a music description) to audio; responds with `audio/wav` bytes. Registered **only** when a synthesizer is attached (`--speech-model`) |
+
+The server registers decision routes according to the loaded architecture.
+Nimble, CLM, and Tev1 use request-level callbacks, so their `/permute` and
+`/separate` routes are absent and return HTTP 404. Tev1 requires
+`architectures: ["Tev1Model"]` in `config.json` and keeps the chat routes.
+See [System 1 requests](../USAGE.md#system-1-decisions-with-v1systemone),
+[the decision and scoring C API](c-api.md#decisions-and-option-scoring), and the
+[Tev1 recipe](../models/tev1.md).
 
 `/v1/audio/speech` is registered only when you start the server with
 `--speech-model`. Without that flag, the route returns 404. MiniMax-Music3
@@ -117,30 +130,39 @@ A chat template can refuse the request itself, through an unknown message role
 or a kwarg value the template rejects. That answers **HTTP 400**, not 500, on
 both `/v1/chat/completions` and `/tokenize`.
 
-`prompt_logprobs` is accepted on `/v1/completions` and `/v1/chat/completions`
-and the engine computes it, every prompt position is scored against the token
-that followed it, accumulated across chunked prefill, but the **response body
-does not carry it yet**: emitting it needs the OpenAI `echo` wiring, which is
-not done. Until then it is reachable through the library
-(`RequestOutput.prompt_logprobs`), not over HTTP. `logprobs`/`top_logprobs` on
-GENERATED tokens are emitted normally.
-
-That computation is gated on the **CPU** backend only. A step that owes prompt
-logits takes the full-logits route, and on that route the sampler is handed a
-host-resident logits buffer carrying the accelerator's device label, sound on
-unified memory, and **not yet verified on CUDA at all, discrete or otherwise**.
-Treat `prompt_logprobs` on a GPU build as unverified until that gate runs; the
-mechanism and the exact owed invocation are in
-[`.agents/specs/prompt-logprobs.md`](../../.agents/specs/prompt-logprobs.md)
-(risk 4 and the `PENDING` CUDA smoke gate). Requests that do NOT set it are
-unaffected on every backend, the route is only taken for a step where some
-request asked.
-
 The four `/v1/videos` routes are registered **only** when the server was started
 with `--video-dit`; without it they are absent (404) and the server is identical
 to one built without video support. Use the
 [MiniMax-H3 recipe](../models/minimax-h3.md) for the combined video and audio
 workflow.
+
+## Prompt log probabilities
+
+For non-streaming requests, both completion endpoints return `prompt_logprobs`:
+
+| Endpoint | Response field |
+|---|---|
+| `/v1/completions` | `choices[i].prompt_logprobs` on every choice |
+| `/v1/chat/completions` | Top-level `prompt_logprobs` |
+
+Set `prompt_logprobs` to a positive integer for that many top alternatives plus
+the actual prompt token. Use `0` for the actual token alone, or `-1` for the
+full vocabulary. Counts above the model's vocabulary size are refused.
+
+The response array follows prompt-token order. The first entry is `null`
+because the first token has no predecessor. Later entries map token IDs to
+objects with `logprob`, `rank`, and `decoded_token`. Without requested prompt
+log probabilities, the response field is `null`.
+
+With `stream: true`, positive values and `-1` return HTTP 400. The validator
+accepts `0` with streaming, but streaming responses do not carry this payload.
+Other negative values return HTTP 400. The separate `echo` behavior, which
+prepends prompt text and its token log probabilities to generated output,
+remains unavailable.
+
+The recorded computation and HTTP tests use CPU fixtures. GPU correctness
+remains unverified. See the [prompt-logprobs specification](../../.agents/specs/prompt-logprobs.md)
+for the pending accelerator gate.
 
 ## `max_tokens`: what a non-positive value means
 
@@ -158,20 +180,30 @@ ceiling.
 
 ## Which token ids stop a generation
 
-Stop ids come from two files in the checkpoint, not one. `config.json`'s
-`eos_token_id` supplies the **primary** eos id, and the sibling
-`generation_config.json` supplies **secondary** stop ids that are usually a
-superset of it. Gemma-4-26B is the clearest case:
+The engine resolves the primary end-of-sequence (EOS) token in this order:
 
-```
+1. The top-level `eos_token_id` in `config.json`, using the first integer when
+   the value is a list.
+2. The tokenizer's EOS ID, if available.
+3. `eos_token` from `tokenizer_config.json`, only if it encodes to exactly one token.
+
+The last fallback accepts a string or an object with a `content` string. It
+does not replace an EOS ID resolved earlier. This lets checkpoints such as
+[Tev1](../models/tev1.md#chat-completions) stop on their tokenizer's turn-ending token.
+
+Additional EOS IDs come from `config.json` and the sibling
+`generation_config.json`. For example, Gemma-4-26B uses:
+
+```text
 config.json             eos_token_id: [1, 106]
 generation_config.json  eos_token_id: [1, 106, 50]
 ```
 
-Both are read, mirroring vLLM's default `--generation-config auto`. The
-secondary ids are merged into the request's `stop_token_ids`, so a chat model
-stops on its turn-level token rather than running to the length cap. A missing
-or malformed `generation_config.json` is a silent no-op.
+The engine merges secondary IDs into the request's `stop_token_ids`. When
+`generation_config.json` is absent, model-config EOS IDs supply the fallback.
+The top-level value wins over a nested text-config value. The nested value
+applies only when the top-level value is absent or `null`.
+A present but malformed `generation_config.json` supplies no additional IDs.
 
 `ignore_eos: true` suppresses **all** of them, primary and secondary alike, and
 generation then runs to the token budget. The ids still count toward

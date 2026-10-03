@@ -127,6 +127,20 @@ def _project_header_closure(root: Path, sources: set[str],
     return closure
 
 
+def _is_fetch_content_source(relative: str) -> bool:
+    """True for a source under a FetchContent populate directory.
+
+    `_deps/` is where CMake Materializes third-party dependencies; a build
+    directory configured INSIDE the source tree (the Windows release build's
+    `build-pr-windows-vulkan/`) therefore places vendored code such as the
+    parakeet_cpp ggml under the root, and the codemodel walk used to carry it
+    into the scan. Those files are not this project's; the portability
+    contract audits OUR sources reaching Windows (see
+    ISSUE-LOCAL-01M3Z28HG59E1W8DYC2JJ9EVDD).
+    """
+    return "_deps" in Path(relative).parts
+
+
 def _load_codemodel_sources(root: Path, build_dir: Path) -> set[str]:
     replies = build_dir / ".cmake/api/v1/reply"
     indexes = sorted(replies.glob("index-*.json"))
@@ -192,6 +206,7 @@ def _load_codemodel_sources(root: Path, build_dir: Path) -> set[str]:
             if dependency.get("id") in targets
         )
     sources -= windows_excluded_sources(root)
+    sources = {s for s in sources if not _is_fetch_content_source(s)}
     return _project_header_closure(root, sources, include_roots)
 
 
@@ -201,6 +216,7 @@ def shipped_server_sources(root: Path, build_dir: Path | None,
         data = json.loads(source_manifest.read_text(encoding="utf-8"))
         sources = {str(item) for item in data.get("sources", [])}
         sources -= windows_excluded_sources(root)
+        sources = {s for s in sources if not _is_fetch_content_source(s)}
         return _project_header_closure(root, sources, {root, root / "include", root / "src"})
     if build_dir is not None:
         return _load_codemodel_sources(root, build_dir.resolve())

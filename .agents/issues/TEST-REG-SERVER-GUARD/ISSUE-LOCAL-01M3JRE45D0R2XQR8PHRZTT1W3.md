@@ -1,0 +1,35 @@
+ID: ISSUE-LOCAL-01M3JRE45D0R2XQR8PHRZTT1W3
+Title: check-test-registration reports three false verdicts on a Windows host: a parakeet.cpp configure fetch, the MSVC .pdb artifact, and a separator that blinds the server guard to 5 of 6 gated units
+Row: TEST-REG-SERVER-GUARD
+State: CLOSED
+Kind: bug
+GitHub: -
+Mirror: PENDING
+Availability: FULL
+Created: 2026-09-27
+Updated: 2026-10-02
+Closed: 2026-10-02
+
+## Problem
+
+On main, scripts/check-test-registration.py exits 1 on a CPU-only Windows host, and its mutation suite fails 13 of 74 cases, with three independent false claims about the SAME required target, test_device_selection. (1) NETWORK FETCH. check_tree configures with CUDA, HIP, Vulkan, Metal, MLX, Triton, SERVER and EXAMPLES all OFF but leaves VLLM_CPP_WITH_DIARIZATION at its default ON, and that option runs FetchContent_Declare plus FetchContent_MakeAvailable for https://github.com/mudler/parakeet.cpp.git at CONFIGURE time (CMakeLists.txt:1595-1603). The other two FetchContent sites are already off in this lane (cutlass behind the CUDA option at CMakeLists.txt:577, boringssl OFF by default at CMakeLists.txt:2740), so parakeet_cpp is the only default-ON network dependency a CPU-only configure still carries. Where the fetch cannot complete, cmake exits 1 and the gate answers 'missing required test target test_device_selection in configured codemodel' about a target that is configured. Observed verbatim here: CMake Error at parakeet_cpp-subbuild/.../parakeet_cpp-populate-gitclone.cmake:66 (message) Failed to checkout tag: main, then error MSB8066, then 'Configuring incomplete, errors occurred'. The same failed configure also yields 'CMake configure failed while proving CTest label selection'. (2) DEBUG-SYMBOL ARTIFACT. Adding only -DVLLM_CPP_WITH_DIARIZATION=OFF makes cmake exit 0, and the File API then reports test_device_selection as type EXECUTABLE with TWO artifacts: tests/Release/test_device_selection.exe and tests/Release/test_device_selection.pdb. _target_artifact (scripts/check-test-registration.py:235-244) requires exactly one artifact path and returns None otherwise, so the gate reports 'required test target test_device_selection has no single configured executable artifact' about a target that has one. .agents/specs/one-surface-abi.md:236-237 already promises this works for single- and multi-config generators; on MSVC the promise did not hold. (3) SEPARATOR. _include_spelling (:576-582) stripped the include/, src/ and tests/ prefixes with str.startswith, and str(Path) renders a relative path with backslashes on Windows, so no prefix ever matched. Every caller built its key or its include/ candidate from a str(), and the measured consequence is that _gated_declaring_headers resolved 1 of the 6 guarded target_sources sources in this tree on Windows against 6 of 6 under the POSIX spelling, and 0 in the suite's own fixtures. server_guard_errors, the check #1883 landed to keep a -DVLLM_CPP_SERVER=OFF build from failing at ld, was therefore blind to 5 of the 6 gated translation units on a Windows host, and answered 'this guard would pass vacuously' on every fixture. That is the same str(path.relative_to(root)) shape fixed for check-cuda-op-arch-gate in #3336, which named this function as the one remaining site that compares against a literal. All three messages name the tree rather than the host that could not answer, which is the shape of defect this gate exists to catch asserted about the gate itself.
+
+## Resolution
+
+Fixed in row/TEST-REG-HOST-PORTABILITY. _DEBUG_SYMBOL_SUFFIXES sets aside the debug-symbol artifact and _target_artifact still refuses anything but exactly one EXECUTABLE artifact; _include_spelling normalizes the separator before matching a prefix, which restores 6 of 6 gated declaring headers on Windows; NETWORK_FETCH_OPTIONS names the three FetchContent guards in the tree and CPU_ONLY_CONFIGURE_ARGS forces all three off, so the gate's configure reaches no network. Ten cases in a new HostPortabilityTests class, 5 FAIL plus 2 ERROR against the unmodified checker and 10 of 10 after, with four controls that pass on both sides. Gate rc=0; suite 84 cases, the one remaining failure being the pre-existing Ninja Multi-Config case that needs a Developer Command Prompt, red on main before this change for the same host reason.
+
+## Executed verification, 2026-10-02 (Linux x86_64, cmake 3.31.10, ninja)
+
+Requested by the mudler-agent review (focused checker + mutation, blocked
+upstream by host ENOSPC).
+
+- `python3 scripts/check-test-registration.py`: rc=0, full OK line -- the
+  CPU-only configure completes with no network fetch (all three
+  NETWORK_FETCH_OPTIONS forced off), required targets resolve in the
+  codemodel, and the pinned `-L gpu` selection reads 2 tests.
+- `python3 tests/scripts/test_check_test_registration.py`: 84/84 OK.
+- Red side executed: `HostPortabilityTests` rebound to the PRE-PR checker
+  (`HEAD^` revision) gives 5 FAIL + 2 ERROR -- the same count the PR
+  description measured -- and 10/10 against this branch. The controls pass
+  on both sides, so nothing was widened.
+

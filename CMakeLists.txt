@@ -55,6 +55,18 @@ else()
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 endif()
 
+# Release archives must not embed the absolute build directory. FetchContent
+# dependencies (parakeet.cpp's vendored ggml) live under CMAKE_BINARY_DIR/_deps,
+# so their __FILE__/assert strings carry that absolute path, and the
+# deterministic-archive validator (scripts/validate-release-archive.py
+# --forbid-path) correctly rejects such artifacts. Rewrite the prefix instead of
+# weakening the validator.
+if(NOT MSVC)
+  add_compile_options(
+    "-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=."
+    "-ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.")
+endif()
+
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
 option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # The OpenAI HTTP server (M3.1 Task 4) is gated so the core build stays lean when

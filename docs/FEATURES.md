@@ -136,6 +136,17 @@ version they were measured against. Tracked by #2794 (goldens predate the pin),
 | Safetensors direct load, no conversion | ✅ at ANY tensor byte offset: the format aligns nothing, so no loader forms a typed pointer into the mapping. Last three fixed by #772; a checker is still owed on #627 | ✅ | ✅ | ☐ |
 | Weights uploaded straight from the file mapping (no host copy first) | ◐ verbatim tensors only (37.8% of 27B BF16); arbitrary-offset reads are defined, including Laguna graph staging. Merged/transposed and merged FP4 weights still copy | ✅ | ✅ | ✅ mmap |
 
+### Ternary kernels
+
+Vulkan includes TQ1_0 and TQ2_0 kernels for matrix multiplication, grouped expert
+matrix multiplication, and fused MoE gate/up/SwiGLU. These kernels compute directly
+on compressed weight blocks. CPU decoders and dot-product implementations also exist.
+TQ1_0 tests check shader metadata and CPU decoding, not GPU numerical correctness.
+
+The GGUF reader still rejects TQ1_0 and TQ2_0 tensors, so these kernels do not
+establish model support. See [loading limits](USAGE.md#quantized-checkpoints-which-weight-forms-load)
+and the [kernel implementation](../src/vt/vulkan/vulkan_ops.cpp).
+
 ## Model coverage
 
 The supported set is exactly what the C++ registry registers: every
@@ -298,7 +309,7 @@ on the committed fixture); reranking/classify models are not yet registered.
 | Speech / audio GENERATION (TTS, vLLM-Omni lane) | ◐ IndexTTS-2.5: vllm_synthesize renders TEXT to AUDIO on real weights, and the reference clip CONDITIONS it -- CAMPPlus speaker vector into the talker's row 0 and the S2Mel style; two clips give different audio (rms 0.0064 vs rms 0.0956), same clip twice is bit-identical. STRUCTURE only: emotion conditioning is excluded and vLLM-Omni is unpinned, so nothing here is a correctness claim (#634, #633) | ✅ (vllm-omni: MOSS-TTS, Qwen3-TTS, Higgs Audio v3, Voxtral TTS, IndexTTS-2.5) | not assessed | not assessed |
 | MUSIC generation (MiniMax-Music3) | ✓ every stage gated; an HTTP request observed e2e over a REAL SOCKET against a MUSIC-ONLY server (#852, #672, [spec](../.agents/specs/minimax-music3.md) §10); adjacent caption italics match upstream (#1083) | ☐ absent from the pin, from vLLM `main` and from `vllm-omni` | ◐ SGLang-Omni serves the NATIVE layout; its 32 kHz resample and batching are OWED | ☐ |
 | Multimodal over the OpenAI server | ◐ Qwen3-VL images and dots3-note images/audio reach the model. CPU tests use synthetic weights; real-checkpoint token parity remains unverified. PNG/JPEG and video input are unavailable. See [model limits and formats](guides/multimodal-input.md). | ✅ | ✅ | ◐ |
-| Per-modality input LIMITS (`--limit-mm-per-prompt`, `--language-model-only`) | ✅ limits and refusals. Qwen3-VL, MuseGlimmer, and `clip` projector loaders skip tower loading when every modality it serves has limit 0. The dots3-note loader still loads its supported vision and audio towers at zero limits. Byte saving measured on **Qwen3-VL-4B-Instruct only**: 0.770 GiB of host RSS at load, `--device cpu`, threshold MET on both pairs, 2026-08-28 (#607). Not a general or a VRAM claim. An earlier 2026-08-24 run read 1.542 GiB, about half of which was our own bf16→f32 widening (#1359); its Qwen3-VL half landed and the rerun measured the 0.499x fall, which is correct rather than a regression. `muse-glimmer-30b` is still unmeasured ([benchmark](benchmarks/memory.md)) | ✅ | ☐ | ☐ |
+| Per-modality input LIMITS (`--limit-mm-per-prompt`, `--language-model-only`) | ✅ limits and refusals. Qwen3-VL, MuseGlimmer, the Qwen3.5 dense loader, and `clip` projector loaders skip tower loading when every modality it serves has limit 0. The dots3-note loader still loads its supported vision and audio towers at zero limits. Byte saving measured on **Qwen3-VL-4B-Instruct**: 0.770 GiB of host RSS at load, `--device cpu`, threshold MET on both pairs, 2026-08-28 (#607), and on **Qwen3.6-27B dense** (`--language-model-only`, `VT_LOAD_STATS`, same binary both arms, 2026-09-27): `host_copy` **7.621 -> 6.763 GiB** at load, the 333-tensor bf16 tower, with the server reporting `vision_tower` in its NOT-loaded line. Not a general or a VRAM claim. An earlier 2026-08-24 run read 1.542 GiB, about half of which was our own bf16→f32 widening (#1359); its Qwen3-VL half landed and the rerun measured the 0.499x fall, which is correct rather than a regression. `muse-glimmer-30b` is still unmeasured ([benchmark](benchmarks/memory.md)) | ✅ | ☐ | ☐ |
 
 The HTTP support above is tested through the serving stack, including the
 scheduler and model forward. It does not inherit the token gates of the

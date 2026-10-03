@@ -180,7 +180,11 @@ class OracleDenominatorFlagsTest(unittest.TestCase):
         files = sorted({r["file"] for r in payload})
         self.assertEqual(
             files,
-            ["scripts/dgx-online-serving.sh", "tools/bench/run_serve_low.py"],
+            [
+                "scripts/dgx-online-serving.sh",
+                "scripts/gen-clm-goldens.py",
+                "tools/bench/run_serve_low.py",
+            ],
             payload,
         )
         # Both arms of the canonical driver, plus the low-batch harness. A drop
