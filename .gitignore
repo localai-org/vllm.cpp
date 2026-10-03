@@ -44,4 +44,3 @@ generated/
 # (`651994a03`) re-added all three from another worktree. The ignore has to be
 # tracked to hold. Write a PR body OUTSIDE the repository.
 .prbody/
-build2/

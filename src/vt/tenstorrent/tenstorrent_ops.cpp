@@ -104,56 +104,6 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
 // [rows, d] tile rather than relying on ttnn's own broadcast rules — keeps
 // this kernel's behavior pinned to the CPU reference rather than to
 // whatever ttnn::add happens to support today.
-// tt-27b-region-capture: the broadcast `b` upload must be warmable. The eager
-// pass uploads the replicated [rows, d] tensor once and caches it keyed by the
-// host pointer, the geometry, and a hash of `b`'s d values, so the capture
-// pass finds it resident (a changed host value hashes differently and is
-// re-uploaded in the next eager pass — a capture-scope miss is a warm hole and
-// is refused by name). Before this cache the upload ran unconditionally in
-// BOTH passes: every captured broadcast Add inlined a rows*d*4 B payload into
-// the trace (the inline-capture-scope-upload class the
-// tt-trace-record-audit-20260928 audit pinned at ~3 MB per command).
-ttnn::Tensor BroadcastOperandDevice(const Tensor& b, uint32_t rows, uint32_t d,
-                                    MeshDevice& device) {
-  struct Entry {
-    uint32_t rows, d;
-    uint64_t hash;
-    ttnn::Tensor dev;
-  };
-  static std::unordered_map<const void*, Entry> cache;
-  static std::mutex mutex;
-  uint64_t h = 1469598103934665603ull;
-  for (uint32_t i = 0; i < d; ++i) {
-    float v = LoadElemF32(b, i);
-    uint32_t bits;
-    std::memcpy(&bits, &v, sizeof(bits));
-    h = (h ^ bits) * 1099511628211ull;
-  }
-  if (tt_capture_active()) {
-    std::lock_guard<std::mutex> g(mutex);
-    auto it = cache.find(b.data);
-    if (it != cache.end() && it->second.rows == rows && it->second.d == d &&
-        it->second.hash == h)
-      return it->second.dev;
-    VT_CHECK(false,
-             "tenstorrent: AddKernel broadcast replicated-tensor upload "
-             "refused inside an open trace capture — no resident copy for "
-             "this operand at TraceBeginCapture; warm the add in the eager "
-             "pass (tt-27b-region-capture)");
-  }
-  std::vector<float> replicated(static_cast<size_t>(rows) * d);
-  for (uint32_t r = 0; r < rows; ++r)
-    for (uint32_t c = 0; c < d; ++c)
-      replicated[static_cast<size_t>(r) * d + c] = LoadElemF32(b, c);
-  ttnn::Tensor dev =
-      ttnn::Tensor::from_vector<float>(replicated, TileSpecOf(rows, d), &device);
-  {
-    std::lock_guard<std::mutex> g(mutex);
-    cache[b.data] = Entry{rows, d, h, dev};
-  }
-  return dev;
-}
-
 void AddKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   TT_OP_TRACE("Add");
   VT_CHECK(a.rank == 2 && out.rank == 2, "tenstorrent kAdd: `a`/`out` must be rank-2 in W0");
@@ -175,9 +125,13 @@ void AddKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   ttnn::Tensor dev_b;
   if (bcast) {
     EnsureHost(b);
+    std::vector<float> replicated(static_cast<size_t>(rows) * d);
+    for (uint32_t r = 0; r < rows; ++r)
+      for (uint32_t c = 0; c < d; ++c)
+        replicated[static_cast<size_t>(r) * d + c] = LoadElemF32(b, c);
     if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
-      std::fprintf(stderr, "[TT-UP] AddKernel broadcast operand served under capture\n");
-    dev_b = BroadcastOperandDevice(b, rows, d, device);
+      std::fprintf(stderr, "[TT-UP] AddKernel from_vector WRITE during capture\n");
+    dev_b = ttnn::Tensor::from_vector<float>(replicated, TileSpecOf(rows, d), &device);
   } else {
     dev_b = EnsureDevice2D(b, device);
   }

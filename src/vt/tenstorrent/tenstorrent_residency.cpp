@@ -328,22 +328,9 @@ ttnn::Tensor UploadRows(const float* data, uint32_t rows, uint32_t cols, MeshDev
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
     std::fprintf(stderr, "[TT-UP] UploadRows ptr=%p rows=%u cols=%u\n",
                  static_cast<const void*>(data), rows, cols);
-  // tt-27b-region-capture: an H2D write issued while a trace capture is open
-  // is recorded INLINE into the trace buffer — the 27B whole-graph
-  // 3,153,969,152 B demand was ~1,037 such payloads, not tt-metal record
-  // overhead (docs/bench-evidence/tt-trace-record-audit-20260928.md). The
-  // eager pass warms every upload; an upload that still fires under capture is
-  // a warm hole and is refused by name.
-  if (tt_capture_active()) {
-    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
-      std::fprintf(stderr, "[TT-UP] UploadRows from_vector WRITE during capture\n");
-    VT_CHECK(false,
-             "tenstorrent: UploadRows f32 H2D upload refused inside an open "
-             "trace capture — the payload would be recorded inline into the "
-             "trace; warm the tensor in the eager pass before "
-             "TraceBeginCapture (tt-27b-region-capture)");
-  }
   std::vector<float> host(data, data + static_cast<size_t>(rows) * cols);
+  if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
+    std::fprintf(stderr, "[TT-UP] UploadRows from_vector WRITE during capture\n");
   return ttnn::Tensor::from_vector<float>(host, TileSpecOf(rows, cols), &device);
 }
 
@@ -423,15 +410,6 @@ ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
     std::fprintf(stderr, "[TT-UP] UploadRowsBf16 from_span WRITE during capture ptr=%p rows=%u cols=%u\n",
                  (const void*)t.data, rows, cols);
-  // tt-27b-region-capture: same refusal as UploadRows — every arm below
-  // (from_span, persistent enqueue_write, allocating arm) is an H2D write that
-  // a capture would record inline.
-  if (tt_capture_active())
-    VT_CHECK(false,
-             "tenstorrent: UploadRowsBf16 bf16 H2D upload refused inside an "
-             "open trace capture — the payload would be recorded inline into "
-             "the trace; warm the tensor in the eager pass before "
-             "TraceBeginCapture (tt-27b-region-capture)");
   const size_t n = static_cast<size_t>(rows) * static_cast<size_t>(cols);
   // The bytes at t.Ptr are the window's own bf16 bits (bfloat16 is a 2-byte
   // class wrapping the same uint16 pattern).
@@ -729,15 +707,10 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
         const auto ls = s->device->logical_shape();
         if (ls.rank() == 2 && ls[0] == rows && ls[1] == cols)
           return *s->device;
-        // ONE chain in BOTH passes (W4 doctrine; ISSUE-LOCAL-01M3JXEFQKSZP2
-        // 3PP2HWY9G0VQ). The tt_capture_active() arm this replaced ran a bare
-        // ttnn::reshape on the TILED shadow, a program the eager pass never
-        // warmed (its row-major reshape is a free view), so the first decode
-        // capture on a rank-3-committed slot (CommitDeviceLogical2D, e.g. the
-        // 27B attention output) created ReshapeViewTiledProgramFactory's
-        // program mid-capture and died on its to_device write. The chain
-        // below is warmed by the eager pass at this exact spec, so under
-        // capture it is a program-cache hit with no writes.
+        if (tt_capture_active()) {
+          s->device = CaptureSafeReshape(*s->device, ttnn::Shape({rows, cols}));
+          return *s->device;
+        }
         ttnn::Tensor reshaped = ttnn::to_layout(
             ttnn::reshape(ttnn::to_layout(*s->device, ttnn::Layout::ROW_MAJOR),
                           ttnn::Shape({rows, cols})),
@@ -749,11 +722,6 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
           static_cast<uint64_t>(s->dev_rows) * static_cast<uint64_t>(s->dev_cols);
       const uint64_t want = static_cast<uint64_t>(rows) * static_cast<uint64_t>(cols);
       if (have == want) {
-        if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
-          std::fprintf(stderr,
-                       "[TT-RESHAPE] arm726 rows=%u cols=%u dev=%ux%u cap=%d\n",
-                       rows, cols, s->dev_rows, s->dev_cols,
-                       (int)tt_capture_active());
         if (tt_capture_active()) {
           ttnn::Tensor reshaped =
               CaptureSafeReshape(*s->device, ttnn::Shape({rows, cols}));
@@ -887,26 +855,6 @@ bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols) {
   return s != nullptr && s->device_current && s->device.has_value() &&
          s->dev_rows == rows && s->dev_cols == cols;
 }
-
-// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ test surfaces (external linkage, the
-// DeviceShadowExact pattern — the test TU stays free of ttnn headers).
-// CommitRank3DeviceLogicalForTest reproduces the slot state a decode op
-// leaves after CommitDeviceLogical2D on a rank-3 device result: the shadow's
-// logical shape stays [b, h, d] while the slot records the flat 2D geometry
-// [b*h, d]. The next EnsureDevice2D at [b*h, d] takes the exact-rows/cols arm
-// whose logical shape mismatches — the arm that must run ONE chain in both
-// passes. EnsureDevice2DForTest is that call.
-void CommitRank3DeviceLogicalForTest(Tensor& out, uint32_t b, uint32_t h, uint32_t d) {
-  VT_CHECK(out.IsContiguous(), "CommitRank3DeviceLogicalForTest expects contiguous out");
-  VT_CHECK(out.Numel() == static_cast<int64_t>(b) * h * d, "numel mismatch");
-  MeshDevice& device = SharedMeshDevice();
-  ttnn::Tensor dev = EnsureDevice2D(out, device);
-  ttnn::Tensor r3 = ttnn::reshape(dev, ttnn::Shape({b, h, d}));
-  CommitDeviceLogical2D(out, std::move(r3), b * h, d);
-}
-
-void EnsureDevice2DForTest(Tensor& t) { (void)EnsureDevice2D(t, SharedMeshDevice()); }
-
 
 // to host (the residency win). Host is marked stale until EnsureHost.
 // Device tensor is stored as logical [rows, cols] TILE (may differ from out's
@@ -1363,21 +1311,40 @@ bool MemsetDeviceIfCapture(void* p, int value, size_t bytes) {
     // bf16-only, the same polarity as the W7 reservation arm: the geometry
     // is derived from the registered byte size, which is dtype-unambiguous
     // only for 2-byte elements.
-    // PASS-UNIFIED (site 2 of this issue): the install below
-    // used to be gated on capture, with eager priming the zero and returning
-    // false (host memset + MarkHostWritten). That left the slot in a
-    // different state per pass: eager ended with no device shadow (the
-    // consumer's stage defined its geometry), capture ended with a [1, cols]
-    // bf16 shadow. The 27B bench then hit the same-numel arm of
-    // EnsureDevice2D mid-capture with a reshape spec the eager pass never ran
-    // ([1,10240] -> [2,5120], the residual kRmsNorm consumes) —
-    // ReshapeViewTiledProgramFactory created its program mid-trace and died
-    // on its to_device write. W4 doctrine: warm in eager what capture
-    // replays — one install in BOTH passes, so the eager consumer runs the
-    // same-numel reshape and the capture replays it as a program-cache hit.
-    // The dtype guess is the one the capture lane already made; zeros are
-    // zeros in every dtype, and the eager lane additionally memsets the host
-    // bytes so the host contract (Memset leaves zeros at p) still holds.
+    // CAPTURE-ONLY: an eager fresh-slot zero keeps the host fallback. The
+    // byte size does not name a dtype (the f32 KV masters share these pool
+    // blocks), so serving one eagerly would install a wrongly-typed shadow;
+    // inside the capture the write is banned and the buffer is scratch whose
+    // every consumer reads on device, which is what makes the guess safe.
+    // The capture-time zero still finds its tensor: the cold step's
+    // EnsureDevice2D restage primed the zero at this exact spec
+    // (ZeroCachePrime) and the copy program is warm from the eager copy
+    // lane — ZeroCacheGet refuses a capture-time miss by design.
+    if (!tt_capture_active()) {
+      // Prime the zero-cache AND warm the copy program for this spec during
+      // eager warmup: the capture-time lane runs ttnn::copy(zero_src, *fresh)
+      // whose CopyDeviceOperation hash is shape-specific, so a copy never
+      // executed during warmup is not in the program cache and trace capture
+      // fatals on the missing binary. Also prime ZeroCacheGet for the
+      // [1, cols] bf16 TILE spec — a fresh-slot memset whose geometry never
+      // staged (the 27B bench: a 20480-B res.Zero → [1,10240] bf16 TILE)
+      // would miss mid-capture.
+      if (bytes > 0 && (bytes % 2) == 0) {
+        uint32_t cols = static_cast<uint32_t>(bytes / 2);
+        MeshDevice& md = SharedMeshDevice();
+        md.enable_program_cache();
+        auto shape = ttnn::Shape({1u, cols});
+        ZeroCachePrime(shape, ttnn::DataType::BFLOAT16,
+                       ttnn::Layout::TILE, md);
+        ttnn::Tensor zero_src = ZeroCacheGet(
+            shape, ttnn::DataType::BFLOAT16, ttnn::Layout::TILE, md);
+        ttnn::Tensor tmp = ttnn::empty(shape, ttnn::DataType::BFLOAT16,
+                                       ttnn::Layout::TILE, &md,
+                                       ttnn::MemoryConfig{});
+        ttnn::copy(zero_src, tmp);
+      }
+      return false;
+    }
     MeshDevice& device_fresh = SharedMeshDevice();
     device_fresh.enable_program_cache();
     uint32_t cols = 0;
@@ -1402,77 +1369,38 @@ bool MemsetDeviceIfCapture(void* p, int value, size_t bytes) {
         fresh = *s->persistent;
       }
     }
-    bool capture = tt_capture_active();
-    // EAGER retention bound: installing a persistent {1, cols} shadow for
-    // EVERY fresh-slot memset eagerly retained multi-MB buffers at weights
-    // load (the 27B warmup memsets 3-8 MB slots) and OOMed DRAM — the device
-    // runs within ~70 MB of full, and a retained 120 KB class × 48 slots ate
-    // the margin a 268 MB ttnn::where needed. Inside the capture the install
-    // is the point (the write is banned, the buffer is scratch); eagerly it
-    // only needs to WARM what capture replays, so keep the install to the
-    // captured residual/scratch class (the 27B site-2 buffer is 20480 B) and
-    // let larger slots keep the pre-fix host fallback.
-    bool scratch_scale = bytes <= (size_t{1} << 16);
-    if (capture || scratch_scale) {
-      if (!fresh.has_value()) {
-        fresh = ttnn::empty(ttnn::Shape({1u, cols}), ttnn::DataType::BFLOAT16,
-                            ttnn::Layout::TILE, &device_fresh,
-                            ttnn::MemoryConfig{});
-        std::lock_guard<std::mutex> g(SlotMutex());
-        if (BufferSlot* s = FindSlot(p)) {
-          // W5 semantics: the allocation becomes the slot's persistent
-          // buffer, so the next zero reuses the same device address.
-          s->persistent = fresh;
-          s->persist_rows = 1;
-          s->persist_cols = cols;
-        }
+    if (!fresh.has_value()) {
+      fresh = ttnn::empty(ttnn::Shape({1u, cols}), ttnn::DataType::BFLOAT16,
+                          ttnn::Layout::TILE, &device_fresh,
+                          ttnn::MemoryConfig{});
+      std::lock_guard<std::mutex> g(SlotMutex());
+      if (BufferSlot* s = FindSlot(p)) {
+        // W5 semantics: the allocation becomes the slot's persistent buffer,
+        // so the next zero reuses the same device address.
+        s->persistent = fresh;
+        s->persist_rows = 1;
+        s->persist_cols = cols;
       }
-      ttnn::Tensor zero_src = ZeroCacheGet(*fresh, device_fresh);
-      if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
-        std::fprintf(stderr,
-                     "[TT-TRACE] device zero-fill (fresh slot %p cols=%u cap=%d)\n",
-                     p, cols, (int)capture);
-      ttnn::Tensor z = ttnn::copy(zero_src, *fresh);
-      (void)z;
-      {
-        std::lock_guard<std::mutex> g(SlotMutex());
-        BufferSlot* s = FindSlot(p);
-        if (s == nullptr) return false;
-        s->device = *fresh;
-        s->dev_rows = 1;
-        s->dev_cols = cols;
-        s->device_current = true;
-        s->host_current = false;
-        s->conv_transposed = false;
-        s->device_reserved = false;  // real zeros installed — reservation spent
-      }
-      if (!capture) {
-        // Eager host contract: Memset leaves zeros at p for direct host
-        // readers, and host_current=true records that honestly (the capture
-        // lane keeps host_current=false — inside the trace nothing reads the
-        // host, and the device lane is the truth).
-        std::memset(p, 0, bytes);
-        std::lock_guard<std::mutex> g(SlotMutex());
-        if (BufferSlot* s = FindSlot(p)) s->host_current = true;
-      }
-      return true;
     }
-    // Large eager fresh-slot memset: prime the zero-cache spec and warm the
-    // copy program with a throwaway buffer (no retention), then keep the
-    // host fallback exactly as before this issue's fix.
-    if (bytes > 0 && (bytes % 2) == 0) {
-      auto shape = ttnn::Shape({1u, cols});
-      ZeroCachePrime(shape, ttnn::DataType::BFLOAT16, ttnn::Layout::TILE,
-                     device_fresh);
-      ttnn::Tensor zero_src = ZeroCacheGet(shape, ttnn::DataType::BFLOAT16,
-                                           ttnn::Layout::TILE, device_fresh);
-      ttnn::Tensor tmp = ttnn::empty(shape, ttnn::DataType::BFLOAT16,
-                                     ttnn::Layout::TILE, &device_fresh,
-                                     ttnn::MemoryConfig{});
-      ttnn::copy(zero_src, tmp);
+    ttnn::Tensor zero_src = ZeroCacheGet(*fresh, device_fresh);
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+      std::fprintf(stderr, "[TT-TRACE] device zero-fill (fresh slot %p cols=%u)\n",
+                   p, cols);
+    ttnn::Tensor z = ttnn::copy(zero_src, *fresh);
+    (void)z;
+    {
+      std::lock_guard<std::mutex> g(SlotMutex());
+      BufferSlot* s = FindSlot(p);
+      if (s == nullptr) return false;
+      s->device = *fresh;
+      s->dev_rows = 1;
+      s->dev_cols = cols;
+      s->device_current = true;
+      s->host_current = false;
+      s->conv_transposed = false;
+      s->device_reserved = false;  // real zeros installed — reservation spent
     }
-    std::memset(p, 0, bytes);
-    return false;
+    return true;
   }
   MeshDevice& device = SharedMeshDevice();
   const ttnn::Tensor& shadow = *dev;

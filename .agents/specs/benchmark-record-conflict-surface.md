@@ -296,8 +296,7 @@ measured:
   directory deeper re-bases both forms, so all 201 break either way, and the
   migration must therefore either rewrite 201
   links — which violates the byte-for-byte preservation this archive exists to
-  provide — or extend `strip_code_spans()`/`link_bases()` in
-`scripts/check-agent-record.py:1094-1184`,
+  provide — or extend `link_bases()` in `scripts/check-agent-record.py:1078-1107`,
   which today already carries a special second base for this exact file and
   documents at length (#460) why that is weaker than followability.
 

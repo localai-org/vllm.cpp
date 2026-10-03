@@ -12,7 +12,7 @@ the agent-facing parity inventory with upstream file references see
 n/a means the feature does not apply to that engine's design.
 
 Reference versions: vLLM <!--pin:label-->0.3.0.dev267<!--/pin--> (<!--pin:commit-->`a7c23ac96d`<!--/pin-->, the parity pin since
-2026-09-26), SGLang v0.5.15, llama.cpp `b10451`, MLX-LM as of 2026-07. Rows
+2026-09-22, [#3320](https://github.com/mudler/vllm.cpp/pull/3320)), SGLang v0.5.15, llama.cpp `b10451`, MLX-LM as of 2026-07. Rows
 describing what vLLM has were read at the PRIOR pin `555967922` unless they say
 otherwise; the 290-commit-range PORT-NOW queue for the advance is classified and
 unworked (#2611). Competitor columns describe what those projects ship, and
@@ -41,14 +41,17 @@ can ask `git merge-base --is-ancestor` rather than assume the result survived.
 The `GlmMoeDsaForCausalLM` ROCm arm is the worked example: the run was real at
 `9f3e6e223`, and #2511 later withdrew the premise it depended on.
 
-*Results.* Every "vs vLLM" figure on this page was captured at the **prior**
-parity pin `555967922` and **has not been re-validated** at the
+*Results.* Every "vs vLLM" figure on this page was captured at parity pin
+`555967922`, two advances back, and **has not been re-validated** at the
 current pin <!--pin:commit-->`a7c23ac96d`<!--/pin-->, which advanced on
-2026-09-26. `.agents/oracles/vllm.md` states in its own words that the pin
-advance "does NOT say any gate in this tree has been run against it", and
-`.agents/NOW.md` records "**NO gate has run at it**". The rows below name
-`vLLM 0.25.0` where that is the version they were measured against. Tracked
-by #2794 (goldens predate the pin) and #2817 (the advance).
+2026-09-22 from `e126687a9a` ([#3320](https://github.com/mudler/vllm.cpp/pull/3320)). `.agents/oracles/vllm.md` states in its own words
+that the pin advance "does NOT say any gate in this tree has been run against
+it", and `.agents/NOW.md` records "**NO gate has run at it**" -- true of the
+current pin, and true of the whole of §"What this pin establishes" in that file,
+which is measured at `e126687a9a`. One token gate DID run and pass, at that
+prior pin, on 2026-09-04. The rows below name `vLLM 0.25.0` where that is the
+version they were measured against. Tracked by #2794 (goldens predate the pin),
+#2817 (the 2026-09-03 advance) and [#3320](https://github.com/mudler/vllm.cpp/pull/3320) (the 2026-09-22 one).
 
 ## At a glance
 

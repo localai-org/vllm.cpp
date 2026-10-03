@@ -310,17 +310,9 @@ void WarmPagedKvShadow(void* k_cache_data, void* v_cache_data,
                       int64_t num_blocks, int64_t block_size,
                       int64_t num_kv_heads, int64_t head_size,
                       int64_t used_blocks);
-// TEST-ONLY (the DeviceShadowExact pattern): read the paged-KV DEVICE shadow
-// for this cache buffer back to host (row-major [nb, bs, nkv, d] floats), so
-// a focused case can verify what the captured RAC replay wrote without going
-// through the stale host master.
-bool ReadPagedKvShadowForTest(const void* k_cache_data, float* dst, int64_t n);
 #else
 inline void WarmPagedKvShadow(void*, void*, int64_t, int64_t, int64_t, int64_t,
                               int64_t) {}
-inline bool ReadPagedKvShadowForTest(const void*, float*, int64_t) {
-  return false;
-}
 #endif
 
 // GDN conv-state shadow serveability (decode side): true when the transposed

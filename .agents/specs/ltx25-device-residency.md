@@ -307,7 +307,7 @@ specific.** No checker in this tree reads a bare `path.cpp:123` written in prose
 targets only, and validates a `#L<n>` fragment against the target's line count —
 so a dangling link and an out-of-range `#L999999` are both caught, and a bare
 `ltx2_video.cpp:99999` in a sentence is not read at all. `check_spec`
-(`scripts/check-agent-record.py:1857`) takes a `ClaimRow`, so its
+(`scripts/check-agent-record.py:1169`) takes a `ClaimRow`, so its
 structured-section requirement reaches only a spec linked from a matrix row, and
 this row has none (§*Decisions taken here*, "No matrix row, and no claim file").
 Every `file:line` below and in §*Our baseline* is therefore checked by a person
@@ -1420,9 +1420,9 @@ the same case on the same box reported 0.080 s and 0.476 s.
 ### No claim file, and the checker says why
 
 A `CLAIM-LTX25-RESIDENCY-W0.md` was written and then removed.
-`scripts/check-agent-record.py:1975` refuses an active claim whose `Row IDs`
+`scripts/check-agent-record.py:1712-1714` refuses an active claim whose `Row IDs`
 cell holds no ID its `ID_RE` recognises, and that pattern is built from the same
-fixed prefix list (`:903-906`) that keeps this campaign out of every matrix —
+fixed prefix list (`:327-338`) that keeps this campaign out of every matrix —
 `LTX25-` is not in it. So a claim file for this stage is a record no checker can
 validate, sitting beside a row no matrix carries. The stage's ownership,
 evidence and exclusions are recorded here and in the pull-request body instead,

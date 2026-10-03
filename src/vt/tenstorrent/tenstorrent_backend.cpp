@@ -26,7 +26,6 @@
 //     reference tier stays gated off for this device — no free correctness
 //     net for an unregistered op.
 #include "vt/backend.h"
-#include "vt/breakable_graph.h"
 #include "vt/tenstorrent/tenstorrent_device.h"
 
 #include <cstdlib>
@@ -130,11 +129,6 @@ struct Registrar {
     // static init (unspecified TU order rules out trusting another TU's
     // initializer to have probed already).
     if (!DeviceAvailable()) return;
-    // tt-27b-region-capture: install the trace-staging byte probe so every
-    // capture segment records what it contributed (`BreakableGraph::
-    // region_bytes()`). The 50 MiB per-region budget is asserted by the driver
-    // that captures regions, against these numbers.
-    vt::SetGraphRegionBytesProbe(&LastTraceBytesForTest);
     static TenstorrentBackend backend;
     RegisterBackend(DeviceType::kTENSTORRENT, &backend);
   }

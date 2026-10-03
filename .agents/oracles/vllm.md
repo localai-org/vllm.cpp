@@ -18,19 +18,42 @@ upstream = https://github.com/vllm-project/vllm
 scope = every behavior vLLM implements — defaults, modes, errors, edge cases, and both correctness and speed gates
 pin = a7c23ac96d7806e7c7e7d862eadbce5a33529b94
 pin_label = 0.3.0.dev267
-pinned_on = 2026-09-26
-gateable = yes
-evidence = .agents/sync/2026-09-22-a7c23ac96d.md
+pinned_on = 2026-09-22
+gateable = no
+evidence = #3346
 ```
 
 ## What this pin establishes, and what it does NOT
 
-**`gateable = yes` above says the oracle builds and runs. It does NOT say any
-gate in this tree has been run against it.** Those are different statements and
+**`gateable = no` above says the oracle has NOT been built and run at this pin.
+It does NOT say any gate in this tree has been run against it.** Those are
+different statements and
 this section keeps them apart, because the pin advanced
 ([#2817](https://github.com/mudler/vllm.cpp/issues/2817)) on a developer ruling
 that put step 6 after step 7, so the advance carries obligations it has not
 discharged.
+
+**EVERY MEASUREMENT IN THIS SECTION IS AT `e126687a9a`, THE PRIOR PIN, AND NONE
+OF IT WAS RE-MEASURED AT `a7c23ac96d`.** The pin moved a second time on
+2026-09-22 ([#3320](https://github.com/mudler/vllm.cpp/pull/3320), `4f11dfc10`),
+to unblock `MODEL-JEV`, and 1187 commits separate the two revisions, 232 of
+them touching ported subtrees. The sync report for that advance
+([`../sync/2026-09-22-a7c23ac96d.md`](../sync/2026-09-22-a7c23ac96d.md)) records
+two gates and **both are this tree's own C++** -- `test_scheduler` 48/48 and the
+`vllm` library build -- not the oracle, and the one PORT-NOW commit in the range
+(`c64b15cde5`, the scheduler) was ported from source reading rather than from a
+capture. **`gateable` is therefore `no`, naming [#3346](https://github.com/mudler/vllm.cpp/issues/3346)
+as the issue that owes the build-and-run.** It used to read `yes` here, carried
+over from the pin that did earn it, which made the structured field assert a
+measurement that does not exist at this revision; `AGENTS.md` §"Pin vLLM" requires
+`no` until the oracle demonstrably builds and runs a model, and every other
+ungateable oracle in `.agents/oracles/` already says so. Note that
+`scripts/check-oracle-pins.py:314-327` accepts a `yes` whose `evidence` path
+merely EXISTS in the tree, so pointing that field at a sync report left the
+checker reading `yes` on an unmeasured pin; the prose caveat could not enforce
+what the field claimed. **Read every `this pin`, `this
+revision` and `this one` below as `e126687a9a`**, and read the section as a record
+of the prior pin that the current one has not inherited.
 
 ### Established, on two boards
 
@@ -156,30 +179,37 @@ measurement and its explicit non-claims are in
 [`../sync/2026-09-03-e126687-runhalf.md`](../sync/2026-09-03-e126687-runhalf.md)
 §6 and §7.
 
-### The prior pin, for anyone reading a number taken under it
+### The two pins before it, for anyone reading a number taken under one
 
 `5559679229bc961848b121ccdeaa8fa5d79bec98`, `0.26.0.dev0`, pinned 2026-07-26,
 FlashInfer `0.6.15.post1`, CUTLASS DSL `4.6.0`, transformers `5.14.1`. Every
 binding ratio published in `docs/benchmarks/` was measured against it. That
-advance re-captured goldens on its own oracle and recorded zero real drift; this
-one has re-captured ONE of five, which is the difference §"NOT established"
-item 2 is about.
+advance re-captured goldens on its own oracle and recorded zero real drift; the
+advance to `e126687a9a` re-captured ONE of five, which is the difference
+§"NOT established" item 2 is about; and the advance to `a7c23ac96d` re-captured
+NONE of them, because nothing was captured against it. `e126687a9a828d513c01a07cd69f025f27d63280`,
+`0.28.1rc1.dev132`, pinned 2026-09-03, is the pin between the two, and the whole
+of §"What this pin establishes" above is measured there.
 
 ## Device-scoped gateability
 
-`gateable = yes` above is a property of the oracle, not a promise about every
+**A row below is a DEVICE measurement and outranks the file-level
+`gateable = no` for that device.** `gateable` in the block above is a
+whole-oracle disposition, not a promise about every
 board. Where a device has been MEASURED to build and run a gate model, it is
 recorded here with the evidence; absence from this table means unmeasured, never
 unsupported. One row per measurement, appended by the change that made it.
 
-**AT THE CURRENT PIN THIS TABLE NOW HAS EXACTLY ONE ROW, and its narrowness is
-the honest reading of it.** The `dgx:gpu0` row is the 2026-09-04 token gate: a
-source build at `e126687a9a` served `facebook/opt-125m` and reproduced the
-committed golden byte-for-byte. That answers "does a gate model run at
-`e126687a9a`" on one device with one model, and it answers nothing about the
-production checkpoints the binding rows use. **This paragraph used to say the
-table was empty and that nothing in this file answered that question; the capture
-falsified it.**
+**AT THE CURRENT PIN THIS TABLE HAS NO ROWS AT ALL, and the `dgx:gpu0` row below
+is at the PRIOR pin.** The `dgx:gpu0` row is the 2026-09-04 token gate: a source
+build at `e126687a9a` served `facebook/opt-125m` and reproduced the committed
+golden byte-for-byte. That answers "does a gate model run at `e126687a9a`" on one
+device with one model, and it answers nothing about the production checkpoints the
+binding rows use, nothing about `thor:gpu0`, and **nothing at all about
+`a7c23ac96d`, which no board in this tree has built.** **This paragraph said the
+table was empty, and then that it held exactly one row AT THE CURRENT PIN; the
+first was falsified by the 2026-09-04 capture and the second by the 2026-09-22
+advance, which added a pin to the authority and no measurement to this table.**
 
 The two `strix:gpu0` rows were measured at the PRIOR pin `5559679229`: the first
 row's evidence file records `SETUPTOOLS_SCM_PRETEND_VERSION=0.26.0.dev0+g5559679229`
@@ -215,9 +245,9 @@ its golden was captured under.
 
 | device | arch | pin measured at | measured | builds | runs a gate model | evidence |
 |---|---|---|---|---|---|---|
-| `dgx:gpu0` | GB10, `sm_121a` (CUDA 13.0, driver 580.173.02) | **`e126687a9a`, the CURRENT pin** | 2026-09-04 | yes — from source, `PORCELAIN_LINES=0`, wheel `vllm-0.28.1rc1.dev132+ge126687a9-…-linux_aarch64.whl` | yes — `facebook/opt-125m` bf16, 6 prompts x 16 greedy tokens, `--runs 5`: `IDS mismatched_positions 0 of 96`, `IDS_BYTE_EQUAL True`, `TOKENGATE_VERDICT PASS`. The narrowest gate model in the tree; says nothing about the production checkpoints | [`opt125m-token-gate-e126687-dgx-20260904.md`](../../docs/bench-evidence/opt125m-token-gate-e126687-dgx-20260904.md) |
-| `strix:gpu0` | `gfx1151` (RDNA 3.5, Radeon 8060S, ROCm 7.2.4) | **`5559679229`, the PRIOR pin** | 2026-09-03 | yes | yes — Qwen3.8-27B Q4_K_M GGUF, 6 prompts x 48 greedy tokens, reproducible | [`oracle-vllm-gfx1151-20260903.md`](../../docs/bench-evidence/oracle-vllm-gfx1151-20260903.md) |
-| `strix:gpu0` | `gfx1151` (RDNA 3.5, Radeon 8060S, ROCm 7.2.4) | **`5559679229`, the PRIOR pin** | 2026-09-03 | yes | yes — and SCORED a gate: `prompt_logprobs` teacher-forcing over 6 x 48 steps, both configurations, negative control discriminating at 21.24 nats | [`q4km-neartie-vllm-oracle-20260903.md`](../../docs/bench-evidence/q4km-neartie-vllm-oracle-20260903.md) |
+| `dgx:gpu0` | GB10, `sm_121a` (CUDA 13.0, driver 580.173.02) | **`e126687a9a`, the prior pin** | 2026-09-04 | yes — from source, `PORCELAIN_LINES=0`, wheel `vllm-0.28.1rc1.dev132+ge126687a9-…-linux_aarch64.whl` | yes — `facebook/opt-125m` bf16, 6 prompts x 16 greedy tokens, `--runs 5`: `IDS mismatched_positions 0 of 96`, `IDS_BYTE_EQUAL True`, `TOKENGATE_VERDICT PASS`. The narrowest gate model in the tree; says nothing about the production checkpoints | [`opt125m-token-gate-e126687-dgx-20260904.md`](../../docs/bench-evidence/opt125m-token-gate-e126687-dgx-20260904.md) |
+| `strix:gpu0` | `gfx1151` (RDNA 3.5, Radeon 8060S, ROCm 7.2.4) | **`5559679229`, two pins back** | 2026-09-03 | yes | yes — Qwen3.8-27B Q4_K_M GGUF, 6 prompts x 48 greedy tokens, reproducible | [`oracle-vllm-gfx1151-20260903.md`](../../docs/bench-evidence/oracle-vllm-gfx1151-20260903.md) |
+| `strix:gpu0` | `gfx1151` (RDNA 3.5, Radeon 8060S, ROCm 7.2.4) | **`5559679229`, two pins back** | 2026-09-03 | yes | yes — and SCORED a gate: `prompt_logprobs` teacher-forcing over 6 x 48 steps, both configurations, negative control discriminating at 21.24 nats | [`q4km-neartie-vllm-oracle-20260903.md`](../../docs/bench-evidence/q4km-neartie-vllm-oracle-20260903.md) |
 
 **A residual this table exists to hold, and does not yet close.** Every checker
 reads the `gateable` field, not the prose above it, and no field names the device
@@ -233,8 +263,10 @@ read 2026-09-12). The residual is therefore narrower and still open: the gap is
 closed for ONE board and ONE gate model, `facebook/opt-125m` at six prompts and
 sixteen tokens. It is not closed for `thor:gpu0`, for `strix:gpu0`, or for any
 production checkpoint at this pin, and no field records that limit. Whoever adds
-the next row at `e126687a9a` narrows it further; nobody closes it by reading the
-field.
+the next row at `a7c23ac96d` narrows it further, and until one exists the
+`gateable` in the block above is `no` for want of a build-and-run at this pin; a
+device row does not lift that, it only ever narrows where a `no` is allowed to
+apply.
 
 **gfx1151 needs five packages a bare ROCm image does not carry**, and each of
 their absences presents as a device failure rather than as a provisioning gap:

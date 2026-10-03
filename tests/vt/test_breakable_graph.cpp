@@ -1225,7 +1225,7 @@ TEST_CASE("BreakableGraph: an outstanding fork is joined BEFORE the segment clos
     vt::ResetGraphBreakStats();
     BreakableGraph g;
     {
-      GraphCaptureScope scope(b, q, g, vt::GraphCaptureMode::kPiecewise);
+      GraphCaptureScope scope(b, q, g, GraphCaptureMode::kPiecewise);
       REQUIRE(scope.active());
       // The model forks and tells the scope, exactly as `laguna.cpp` does.
       vt::GraphNoteFork(aux, done);
@@ -1261,7 +1261,7 @@ TEST_CASE("BreakableGraph: an outstanding fork is joined BEFORE the segment clos
     vt::ResetGraphBreakStats();
     BreakableGraph g;
     {
-      GraphCaptureScope scope(b, q, g, vt::GraphCaptureMode::kPiecewise);
+      GraphCaptureScope scope(b, q, g, GraphCaptureMode::kPiecewise);
       REQUIRE(scope.active());
       vt::GraphNoteFork(aux, done);
       CHECK(scope.outstanding_forks() == 1);
@@ -1362,64 +1362,4 @@ TEST_CASE("BreakableGraph: an outstanding fork is joined BEFORE the segment clos
     CHECK(s.forks_tracked == 1);
     CHECK(s.forks_auto_joined == 0);
   }
-}
-
-// ─── tt-27b-region-capture ──────────────────────────────────────────────────
-// The whole-graph fit predicate and the per-region trace-staging census.
-// Host-side: the predicate is pure and the census runs on the recording
-// backend through an injected probe — the same mechanism the Tenstorrent
-// registrar installs `LastTraceBytesForTest` through. The device-side
-// handoff gate (replay-vs-eager byte-exactness across a region boundary on
-// the real trace backend) lives in tests/vt/test_tenstorrent_backend.cpp.
-TEST_CASE("tt-27b-region-capture: WholeGraphTraceFits declines only on a measured over-budget estimate") {
-  // No measurement is never evidence of no fit: zeroed fields answer TRUE so
-  // a backend with no census cannot flip a served arm by silence.
-  CHECK(vt::WholeGraphTraceFits(vt::WholeGraphFitEstimate{}));
-  CHECK(vt::WholeGraphTraceFits({0, 3'187'104, 298'568'896}));
-  CHECK(vt::WholeGraphTraceFits({1'037, 0, 0}));
-  // The recorded 27B census: 1,037 commands x 3.04 MB/command = ~3.15 GB
-  // against 298,568,896 B free — the decline the row exists for.
-  CHECK_FALSE(vt::WholeGraphTraceFits(
-      {1'037, 3'187'104, 298'568'896}));
-  // The same command stream that fits a 4 GiB headroom.
-  CHECK(vt::WholeGraphTraceFits({1'037, 3'187'104, 4'000'000'000}));
-}
-
-TEST_CASE("tt-27b-region-capture: every segment records its trace-staging bytes") {
-  RequireCaptureLane();
-  RecordingCaptureBackend b;
-  vt::Queue q = b.CreateQueue();
-  vt::ResetGraphBreakStats();
-  // Fake the trace-staging byte level the way tt-metal's
-  // get_trace_buffers_size advances across segments: a monotone counter in a
-  // function static, because a GraphRegionBytesProbe is a plain function
-  // pointer and cannot capture.
-  vt::SetGraphRegionBytesProbe([]() -> int64_t {
-    static int64_t n = 0;
-    return ++n * 1'000;
-  });
-
-  BreakableGraph g;
-  // One slot PER break point — the aliasing refusal refuses a shared
-  // destination within one capture (lifetime rule 1).
-  BreakSlot<vt::Tensor> dst0, dst2;
-  int32_t feed = 7;
-  {
-    GraphCaptureScope scope(b, q, g, vt::GraphCaptureMode::kPiecewise);
-    GraphBreak([&] { return MakeBuf(b, {feed, feed, feed, feed}).t; }, dst0);
-    vt::GraphBreak();
-    GraphBreak([&] { return MakeBuf(b, {feed, feed, feed, feed}).t; }, dst2);
-  }
-  const std::vector<int64_t>& rb = g.region_bytes();
-  // THREE breaks -> FOUR segments (the scope's destructor files the final one
-  // after the last break; break_count() + 1 == segment_count()).
-  REQUIRE(rb.size() == 4);
-  for (int64_t bytes : rb) {
-    const bool in_budget = bytes > 0 && bytes <= 50 * 1024 * 1024;
-    CHECK_MESSAGE(in_budget, "region census entry out of range: " << bytes);
-  }
-  // Reset() clears the census with the graph it described.
-  g.Reset();
-  CHECK(g.region_bytes().empty());
-  vt::SetGraphRegionBytesProbe(nullptr);
 }

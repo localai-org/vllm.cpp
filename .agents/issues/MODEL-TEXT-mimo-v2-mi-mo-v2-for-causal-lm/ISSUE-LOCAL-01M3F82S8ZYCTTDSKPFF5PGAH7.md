@@ -1,7 +1,7 @@
 ID: ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7
 Title: Port MiMoV2ForCausalLM (text-only LLM arm)
 Row: MODEL-TEXT-mimo-v2-mi-mo-v2-for-causal-lm
-State: OPEN
+State: PARTIAL
 Kind: MODEL-TEXT
 GitHub: -
 Mirror: PENDING
