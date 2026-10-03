@@ -117,7 +117,7 @@ Three consequences for anyone sizing work here:
    at 73.9 GiB `VmHWM`; the host side is now 31 GiB total. Run a CPU comparison
    on `thor` or `dgx`, or on-box against an oracle instead.
 
-### `garlic-clove` — Intel Arc Pro B60
+### The Intel test host — Intel Arc Pro B60
 
 **It is NOT in the fleet table above, and it is not a fleet device.** Do not
 read its absence as unavailability: it is reachable, and it is the only Intel
@@ -132,12 +132,12 @@ devices` actually reports it.
 
 | | |
 |---|---|
-| Host | `garlic-clove`, Tailscale name, `100.67.232.8`, Linux, account `yoav` (lowercase) |
+| Role | Vulkan test host with ReBAR enabled, Linux |
 | GPU | **Intel Arc Pro B60 Graphics (BMG G21)**, `8086:e211`, ASUS subsys `1849:6023`, `xe` kernel driver |
 | Vulkan | device API **1.4.354**, conformance 1.4.0.0, Mesa **26.2.3** (kisak PPA), LLVM 21.1.8; `VK_KHR_cooperative_matrix` = true, `VK_KHR_shader_bfloat16`, `VK_KHR_shader_integer_dot_product` |
 | Device type | **`PHYSICAL_DEVICE_TYPE_DISCRETE_GPU`** |
 | Memory | 20.91 GiB `DEVICE_LOCAL` heap + 23.44 GiB host heap; `memoryTypes[3]`/`[6]` = `DEVICE_LOCAL \| HOST_VISIBLE \| HOST_COHERENT` (0x0007) via ReBAR |
-| Host | Ubuntu 24.04.4 LTS, kernel 7.0.0-34, i7-10700 8c/16t, 31 GiB RAM, 465 GiB NVMe (159 GiB free) |
+| OS and CPU | Ubuntu 24.04 LTS, 8-core/16-thread desktop CPU, 31 GiB RAM |
 | Toolchain | cmake 3.28.3, gcc 13.3.0, ninja 1.11.1, git, py3.12. **No `icpx`, no `sycl-ls`, no `/dev/accel/*`.** |
 | Assets | **no model weights** — `~/.cache/huggingface` is 3.5 MB; only vocab-only GGUFs under `~/llama-maple/models` |
 | Checkout | `~/vllm.cpp`, was on `row/BACKEND-VULKAN-TQ1_0-finish` with `VLLM_CPP_VULKAN=ON`, `BUILD EXIT 0`; that work appears to have landed on `main` as #2248, so the branch needs a fetch/prune, not a merge |
@@ -2390,11 +2390,11 @@ inner 4096, state 128; context 262144.
   Enumeration and the clean-tree rule:
   [`specs/oracle-llamacpp-repin-stock.md`](specs/oracle-llamacpp-repin-stock.md).
 
-- **An Intel GPU now exists on this estate: `garlic-clove`, an Intel Arc Pro B60.**
+- **An Intel GPU now exists on this estate: the Intel test host, an Intel Arc Pro B60.**
   This line used to read "**No Intel GPU exists on any box here**, so
   `BACKEND-XPU` end-to-end work is HW-BLOCKED", and that was true when written
   but is FALSE as of 2026-09-27. The board is the hardware `VK-I` was scoped
-  against; see [garlic-clove](#garlic-clove--intel-arc-pro-b60) below. **`BACKEND-XPU`
+  against; see [the Intel test host](#the-intel-test-host--intel-arc-pro-b60) below. **`BACKEND-XPU`
   nonetheless stays `SPIKE`/HW-blocked for a DIFFERENT and still-true reason: the
   SYCL toolchain is absent, not the GPU.** Measured on the box 2026-09-27 — no
   `icpx`, no `sycl-ls`, and no `/dev/accel/*` nodes, so there is no Level Zero

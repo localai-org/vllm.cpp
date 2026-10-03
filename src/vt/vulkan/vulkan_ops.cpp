@@ -2133,15 +2133,16 @@ void AttnQkNormRopeGateKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& gate
 // host kernel.
 //
 // WHY `DeviceMemoryIsHostAddressable()` IS TRUE HERE, AND WHY IT IS NOT FREE.
-// It is NOT because the board is integrated. MEASURED on `garlic-clove`
+// It is NOT because the board is integrated. MEASURED on the Intel test host
 // (Intel Arc Pro B60, `8086:e211`, `xe` driver) 2026-09-27 with `vulkaninfo`:
 // the device reports `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU` with two heaps —
 // 20.91 GiB `DEVICE_LOCAL` and 23.44 GiB host — so "integrated" was the wrong
 // reason and this comment used to say so. The property holds anyway, and by a
 // different mechanism: Resizable BAR maps VRAM into the host address space, so
 // `memoryTypes[3]` and `memoryTypes[6]` expose `DEVICE_LOCAL | HOST_VISIBLE |
-// HOST_COHERENT` (propertyFlags 0x0007), which is the type `vulkan_context.cpp:873`
-// prefers. So the allocation IS ordinary host memory the GPU also reads.
+// HOST_COHERENT` (propertyFlags 0x0007), which is the type
+// `vulkan_context.cpp:872` prefers. So the allocation IS ordinary host memory
+// the GPU also reads.
 //
 // THIS IS A PROPERTY OF ReBAR, NOT OF ARCS, AND IT IS A PERFORMANCE
 // PROPERTY, NOT A CORRECTNESS ONE. `VulkanContext` (vulkan_context.cpp:872-875)

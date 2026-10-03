@@ -44,7 +44,7 @@ exactly that rather than "we beat llama.cpp". The claim that would matter to a
 user — Vulkan winning where CUDA/ROCm/Metal do not exist — is `VK-I`, and it is
 hardware-blocked until an RDNA or Arc board is acquired (user decision 2026-08-06:
 GB10 first, acquire later). **The Arc half of that acquisition HAPPENED: see
-§4 and §6.2 for the board (`garlic-clove`, Intel Arc Pro B60) and for the
+§4 and §6.2 for the board (the Intel test host, Intel Arc Pro B60) and for the
 measurement that answers `VK-I`'s staging-path half without code. The RDNA arm
 is still unacquired, and the gate re-run — the half that actually matters —
 is still owed.**
@@ -252,7 +252,7 @@ our own CUDA paged kernel**, recorded as a partial-from-scratch entry in
 |---|---|---|
 | **GB10 on `dgx.casa`** | YES — `NVIDIA GB10`, `INTEGRATED_GPU`, Vulkan API 1.4.312, vendor `0x10de`, 249 device extensions incl. **`VK_KHR_cooperative_matrix` v2** and **`VK_NV_cooperative_matrix2`**, `VK_KHR_shader_float16_int8`, `VK_KHR_{8,16}bit_storage`, `VK_KHR_shader_integer_dot_product`, `VK_KHR_timeline_semaphore`, `VK_EXT_memory_budget`, `VK_KHR_buffer_device_address`. One 89.72 GiB `DEVICE_LOCAL` heap with a `DEVICE_LOCAL|HOST_VISIBLE` type — unified | **PRIMARY. Correctness oracle box AND the optimization target** (user decision 2026-08-06). Both llama.cpp coopmat tiers are reachable |
 | **`llvmpipe` (dev box)** | YES — Vulkan 1.4.318, CPU, `mesa-vulkan-drivers` | GPU-free CI correctness. **Never a speed venue** |
-| **Intel Arc Pro B60 on `garlic-clove`** | **YES — acquired, measured 2026-09-27.** `Intel(R) Arc(tm) Pro B60 Graphics (BMG G21)`, `8086:e211`, ASUS subsys `1849:6023`, `xe` driver, `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU`, device API **1.4.354** (conformance 1.4.0.0), Mesa 26.2.3 / LLVM 21.1.8, `VK_KHR_cooperative_matrix` = true. Heaps 20.91 GiB `DEVICE_LOCAL` + 23.44 GiB host. **NOT an `rc` fleet device** — file mutex, not a lease | `VK-I`, PARTIALLY ANSWERED — see §6.2. The "acquire later" half of the 2026-08-06 decision is DONE |
+| **Intel Arc Pro B60 on the Intel test host** | **YES — acquired, measured 2026-09-27.** `Intel(R) Arc(tm) Pro B60 Graphics (BMG G21)`, `8086:e211`, ASUS subsys `1849:6023`, `xe` driver, `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU`, device API **1.4.354** (conformance 1.4.0.0), Mesa 26.2.3 / LLVM 21.1.8, `VK_KHR_cooperative_matrix` = true. Heaps 20.91 GiB `DEVICE_LOCAL` + 23.44 GiB host. **NOT an `rc` fleet device** — file mutex, not a lease | `VK-I`, PARTIALLY ANSWERED — see §6.2. The "acquire later" half of the 2026-08-06 decision is DONE |
 | ~~**AMD RDNA**~~ | **NO — still none on any box** | `VK-I`'s RDNA arm. A discrete AMD board would need ReBAR for the same reason, and is still unacquired |
 
 **Premise update — the 2026-07-22 toolchain constraint is STALE.** That spec
@@ -336,12 +336,12 @@ the umbrella, not a substitute for them.
 
 `VK-I` was the one sub-project blocked purely on acquisition, and §4 recorded
 the decision as **"GB10 first, acquire later"** (2026-08-06). The board is now
-on the estate: **`garlic-clove`, an Intel Arc Pro B60.** Its deliverable splits,
+on the estate: **the Intel test host, an Intel Arc Pro B60.** Its deliverable splits,
 and the split is not the one the row was written against.
 
 **THE STAGING-PATH HALF IS ANSWERED BY HARDWARE, NOT BY CODE, AND NO CODE
 SHOULD BE WRITTEN FOR IT.** The deliverable was "the staging path for
-**non-host-visible** memory". MEASURED on `garlic-clove` 2026-09-27 with
+**non-host-visible** memory". MEASURED on the Intel test host 2026-09-27 with
 `vulkaninfo`: the device is `PHYSICAL_DEVICE_TYPE_DISCRETE_GPU` with two heaps
 (20.91 GiB `DEVICE_LOCAL`, 23.44 GiB host), **but** `memoryTypes[3]` and
 `memoryTypes[6]` expose `DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT`
@@ -386,7 +386,7 @@ where Vulkan actually matters" is now reachable and remains the entire value of
 `VK-I`. §0's framing is why: on GB10 *"llama.cpp's own CUDA backend will beat
 both of us there. Vulkan on an NVIDIA part is nobody's fastest path; it is the
 portability path."* Every Vulkan speed number in this spec is therefore either
-llvmpipe (a software rasteriser) or the wrong chip. `garlic-clove` is the first
+llvmpipe (a software rasteriser) or the wrong chip. The Intel test host is the first
 venue where **Vulkan is the only accelerator path on the box**, so a Vulkan win
 here is a win a user would actually feel. Concretely still owed, unchanged:
 the 27B prefill/decode re-run and its reference-tier count (named in §6.0b as
