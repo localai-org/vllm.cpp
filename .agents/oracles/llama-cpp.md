@@ -164,9 +164,23 @@ id = llama-cpp
 role = secondary
 upstream = https://github.com/ggml-org/llama.cpp
 scope = CPU and GGUF k-quant speed and memory floors, quant-matched against the same weights
-pin = 10bf611e533d81f739128304991c5e133c6aebd8
-pin_label = b10451
-pinned_on = 2026-08-16
+pin = 11fe02151f79c41d0d4af7da708755d73b9c0da6
+pin_label = llama.cpp main, 2026-10-04
+pinned_on = 2026-10-03
 gateable = yes
-evidence = docs/bench-evidence/oracle-llamacpp-b10451-gateable-20260822.md
+evidence = docs/bench-evidence/oracle-llamacpp-11fe0215-gateable-20261003.md
 ```
+
+**Prior pin: `10bf611e533d81f739128304991c5e133c6aebd8` (`b10451`),
+pinned 2026-08-16, gateable evidence
+[oracle-llamacpp-b10451-gateable-20260822.md](../../docs/bench-evidence/oracle-llamacpp-b10451-gateable-20260822.md).**
+Every gate recorded against `b10451` stays attributed to it. The pin advanced
+on 2026-10-03 because `b10451` REFUSES the unsloth `Qwen3.8-27B-Q4_K_M.gguf`
+artifact (`missing tensor 'blk.64.ssm_conv1d.weight'`; the artifact's `blk.64`
+MTP block carries no SSM tensors and the `qwen35.nextn_predict_layers` KV
+override is inert at the pin), which left the TT-KEEPQUANT-INT8DOT flip band
+gate without a denominator
+([tt-int8dot-flip-live-gates-20261003.md](../../docs/bench-evidence/tt-int8dot-flip-live-gates-20261003.md)).
+`11fe0215` LOADS and generates on the same artifact (MTP export gap fixed
+upstream). 27B Q4_K_M band-gate denominators from 2026-10-03 on are
+`11fe0215`, not `b10451`.
