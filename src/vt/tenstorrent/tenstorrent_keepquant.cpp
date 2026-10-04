@@ -2422,20 +2422,40 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
                                     static_cast<uint32_t>(K)}),
                ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR),
         &device);
-  } else {
-    VT_CHECK(!tt_capture_active(),
-             "tenstorrent kMatmulBTQuant int8-dot: bf16 activation staging "
-             "during trace capture — stage the bf16 master eagerly first");
-    EnsureHost(a);
-    dev_a = ttnn::Tensor::from_span(
-        ttsl::Span<const bfloat16>(
-            a.Ptr<bfloat16>(),
-            static_cast<size_t>(M) * static_cast<size_t>(K)),
-        SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(M),
+   } else {
+     VT_CHECK(!tt_capture_active(),
+              "tenstorrent kMatmulBTQuant int8-dot: bf16 activation staging "
+              "during trace capture — stage the bf16 master eagerly first");
+     EnsureHost(a);
+     dev_a = ttnn::Tensor::from_span(
+         ttsl::Span<const bfloat16>(
+             a.Ptr<bfloat16>(),
+             static_cast<size_t>(M) * static_cast<size_t>(K)),
+         SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(M),
                                      static_cast<uint32_t>(K)}),
-               ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR),
-        &device);
-  }
+                ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR),
+         &device);
+   }
+   // W4b-FLIP follow-up: the eager host staging PERSISTS as the slot's device
+   // shadow — the words-shadow discipline applied to the activation. Before
+   // this, the eager from_span result was discarded with the call, so the
+   // capture pass re-reached this branch and refused (the F32/BF16-out 50 MiB
+   // capture legs fatalled here at HEAD~1 too; the old default's skip on the
+   // F32-out leg hid it). from_span COPIES the host bytes at the master's own
+   // dtype in ROW_MAJOR, so the shadow is byte-identical to the master and
+   // every later host write still drops it through the tracked paths.
+   if (!tt_capture_active()) {
+     std::lock_guard<std::mutex> g(SlotMutex());
+     if (BufferSlot* s = FindSlot(a.data)) {
+       s->device = dev_a;
+       s->dev_rows = static_cast<uint32_t>(M);
+       s->dev_cols = static_cast<uint32_t>(K);
+       s->device_current = true;
+       s->host_current = false;
+       s->conv_transposed = false;
+       s->device_reserved = false;
+     }
+   }
   }
 
   // The out pages must be 16-B multiples: Blackhole moves DRAM writes in

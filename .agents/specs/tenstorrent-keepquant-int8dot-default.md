@@ -159,10 +159,44 @@ Owed, tracked on the owning issue
 - No device leg is owed for the flip itself: the band evidence is this
   branch's own commits (`docs/bench-evidence/tt-int8dot-band-16p-20261004.md`).
 
+## Post-flip suite repair (2026-10-04, `row/int8dot-default-flip`)
+
+The first post-flip clean-device suite run recorded 34 failing cases (103
+cases, 69 passed, 8249/8252 assertions). Case-by-case disposition:
+
+- **33 of 34 were environmental or cascade, not flip regressions.**
+  - The recorded run launched with CWD = `build/`; the keep-quant kernel
+    loader resolves `./src/vt/tenstorrent/kernels` relative to CWD, so 33
+    cases threw `TT_THROW: Compiler include directory ... not found` at their
+    first device compile. Re-run from the worktree root: all of those pass.
+  - From the worktree root, 17 further cases failed only IN-SUITE and passed
+    isolated (`-tc`): the root cause below throws mid-capture without an
+    `EndCapture`, leaking `tt_capture_active()`, and every later capture-based
+    case's eager warm then refuses (word-shadow miss during trace capture,
+    UploadRowsBf16 refused inside a trace, nested TraceBeginCapture).
+- **2 real breaks (filed as `ISSUE-LOCAL-01M44802A39JWBFBAYM49ES235`):** the
+  int8-dot 50 MiB trace-capture legs (F32-out and BF16-out dispatch) fatalled
+  on "activation staging during trace capture". Pre-existing at the pre-flip
+  HEAD — the F32-out leg skipped under the old default-off lever, so the flip
+  exposed it on the default configuration. Root cause: the kernel's eager host
+  staging (`from_span`) discarded its tensor, so the capture pass re-staged
+  and refused. Fix: the eager staging persists as the slot's device shadow
+  (the words-shadow discipline applied to the activation);
+  `src/vt/tenstorrent/tenstorrent_keepquant.cpp` `MatmulBTQuantInt8DotKernel`.
+  Both legs green isolated after the fix.
+- **1 owed flake:** `batched decode RAC is capture-safe (num_slots=2)`
+  (test_tenstorrent_backend.cpp:2261 class) — the pre-recorded owed RAC flake,
+  not touched here.
+
+No golden was re-pinned and no assertion weakened: no case contract moved
+arms, and no token-stream golden was invalidated by the flip in this suite
+(the flip's accuracy evidence stays the band gate).
+
 ## Now
 
 State: FLIPPED (2026-10-04). Default ON; gates 2 and 4 and the 64-prompt
-width are owed (the width blocked on the slot-churn fatal).
+width are owed (the width blocked on the slot-churn fatal). The post-flip
+TT suite repair landed in the same row (see above).
 
 Band evidence backing the flip: the pin advance `b10451` → `11fe0215`
 ([`.agents/oracles/llama-cpp.md`](../../.agents/oracles/llama-cpp.md), evidence
