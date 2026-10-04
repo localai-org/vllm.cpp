@@ -1290,7 +1290,15 @@ jobs:
         # claim is the thing being tested and nothing else is.
         run: |
           set -euo pipefail
-          ./build-vulkan/tests/test_platform | tee platform-gate.log
+          # -s and 2>&1 mirror the metal lane's invocation below: doctest prints
+          # the platform's MESSAGE() line through its logging path, which older
+          # doctest releases emit only on failure or under --success, and a
+          # stream this invocation does not capture never reaches the log the
+          # grep reads. Without the full capture the gate greps a
+          # platform-gate.log written by a different output surface than the
+          # one that printed the message, and the step fails with "pattern not
+          # found" on a message the job demonstrably produced.
+          ./build-vulkan/tests/test_platform --no-colors=1 -s 2>&1 | tee platform-gate.log
           grep -q 'platform vulkan get_device_capability()' platform-gate.log
           grep -q 'Status: SUCCESS!' platform-gate.log
       - name: The Vulkan suite MEASURED a device rather than skipping past one
@@ -2011,7 +2019,7 @@ jobs:
         # kCPU only, and the executable still prints `Status: SUCCESS!` with rc 0.
         run: |
           set -euo pipefail
-          ./build-metal/tests/test_platform --no-colors=1 2>&1 | tee platform-gate.log
+          ./build-metal/tests/test_platform --no-colors=1 -s 2>&1 | tee platform-gate.log
           grep -q 'platform metal get_device_capability()' platform-gate.log
           grep -q 'Status: SUCCESS!' platform-gate.log
   baseline-summary:
