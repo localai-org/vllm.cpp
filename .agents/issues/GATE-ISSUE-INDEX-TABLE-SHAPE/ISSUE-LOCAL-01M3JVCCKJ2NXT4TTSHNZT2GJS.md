@@ -17,3 +17,18 @@ canonical_rows() reads claimable row IDs out of .agents/*-matrix.md first column
 ## Resolution
 
 Fixed in row/ORPHAN-MODEL-ROWS. Three rows declared in .agents/model-matrix.md: MODEL-GLINER25-DECIDE in the MODEL-TOKCLS table as its own spec directs, and MODEL-DSV41-EXL3 plus MODEL-DSV41-GGUF-Q1_0 beside MODEL-SPEC-deepseek-v4-1-dspark-v41-draft-model, the same spec's own sibling row. Each carries the state its evidence supports rather than the one the header implied: BLOCKED for the two checkpoint campaigns, matching that sibling, and SPIKE for GLiNER2.5-Decide, whose code, registered suite and C ABI path are in tree. The architecture-support checklist gains one line per row with the mark its state allows, and the rollup moves SPIKE 10 to 11, BLOCKED 5 to 7 and Total 384 to 387 in the same commit, which is what the file's own same-commit rule requires; check-model-checklist.py went rc=1 to rc=0 and caught the drift in between. Two spec corrections ship with it: gliner2.5-decide.md ## Now said Implementation not started and is corrected to SPIKE with the code anchors that contradict it, and deepseek-v4-1-flash.md's Matrices line assigned the two campaigns to kernel-matrix.md, which is wrong and is corrected to model-matrix.md with the two rows that decide it named. Measured: invalid canonical records 12 to 9, the residue being exactly the nine _intake frozen-archive comparisons that #3333 fixes, and in a worktree carrying both changes agent-issue-index.py --check returns rc=0.
+
+## Executed verification, 2026-10-04 (merged head 90c1c7e3a)
+
+- `check-agent-record.py`: `agent record OK: ENGINE=179 MODEL=387
+  QUANT=87 KERNEL=60 BACKEND=90 ANCHOR-ROT=0`.
+- `agent-issue-index.py --refresh` then `--check`:
+  `OK: .agents/issue-index.generated.md matches canonical issue files`
+  (1330 records, 323 open).
+- `tests/scripts/test_agent_record.py`: 106/106 OK (39.1s).
+- Mutation: delete the `MODEL-GLINER25-DECIDE` row from
+  `.agents/model-matrix.md` and the gate reddens by name --
+  `ERROR: active claim CLAIM-MODEL-GLINER25-DECIDE references unknown
+  row MODEL-GLINER25-DECIDE` -- then restores green on revert. The
+  declared row is what makes the claim and its records canonical.
+
