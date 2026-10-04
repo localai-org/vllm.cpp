@@ -645,10 +645,10 @@ TEST_CASE("adopt: the windowed-release flag still governs the direct-upload rele
 // (`dense_nvfp4_gemm.h` and the private one in `qwen3_5.cpp`):
 //
 //   1. `load_stats::AddDeviceUpload(nb)`   — account the move;
-//   2. `w.packed.d_dev = w.d_packed`       — PUBLISH the allocation on the
-//      OwnedTensor, which is the only reason `AdoptDeviceBytesAsHost` can act
-//      on it at all (that function keys on `d_dev` and returns immediately when
-//      it is null);
+//   2. `w.packed.d_dev = <owner>`          — publish the allocation on the
+//      OwnedTensor, which is BOTH the only reason `AdoptDeviceBytesAsHost` can
+//      act on it (that function keys on `d_dev`) and the ONE owner of those
+//      bytes: an Nvfp4Weight has no second device handle to forget to release;
 //   3. `AdoptDeviceBytesAsHost(d.b, w.packed)` — the post-upload residency step
 //      every other qualifying weight already got.
 //
@@ -738,8 +738,8 @@ TEST_CASE("fp4 resident: ResidentNvfp4 COUNTS its upload, publishes d_dev, and a
     vllm::Nvfp4Weight w = BorrowedFp4Weight(dims, mp, ms);
     REQUIRE(w.packed.bytes.size() == dims.packed_bytes);
     REQUIRE(w.scale.bytes.size() == dims.scale_bytes);
-    REQUIRE(w.d_packed == nullptr);
-    REQUIRE(w.d_scale == nullptr);
+    REQUIRE(w.packed.d_dev == nullptr);
+    REQUIRE(w.scale.d_dev == nullptr);
 
     const vllm::load_stats::Counters before = vllm::load_stats::Snapshot();
     vllm::dense_attn::Dev d{b, q};
@@ -758,17 +758,15 @@ TEST_CASE("fp4 resident: ResidentNvfp4 COUNTS its upload, publishes d_dev, and a
     // (2) PUBLICATION. The allocation is on the OwnedTensor, not only on the
     // Nvfp4Weight's own handle. Without this the adoption below cannot happen
     // at all: AdoptDeviceBytesAsHost returns immediately on a null `d_dev`.
-    REQUIRE(w.d_packed != nullptr);
-    REQUIRE(w.d_scale != nullptr);
-    CHECK(w.packed.d_dev.get() == w.d_packed.get());
-    CHECK(w.scale.d_dev.get() == w.d_scale.get());
+    REQUIRE(w.packed.d_dev != nullptr);
+    REQUIRE(w.scale.d_dev != nullptr);
 
     // (3) ADOPTION. The host view IS the device allocation, and the weight is no
     // longer a direct-upload borrow.
     CHECK(w.packed.bytes.borrowed());
     CHECK(w.scale.bytes.borrowed());
-    CHECK(static_cast<const void*>(w.packed.bytes.data()) == w.d_packed.get());
-    CHECK(static_cast<const void*>(w.scale.bytes.data()) == w.d_scale.get());
+    CHECK(static_cast<const void*>(w.packed.bytes.data()) == w.packed.d_dev.get());
+    CHECK(static_cast<const void*>(w.scale.bytes.data()) == w.scale.d_dev.get());
     CHECK(w.packed.mmap_src == nullptr);
     CHECK(w.scale.mmap_src == nullptr);
     CHECK(w.packed.mmap_src_bytes == 0u);
@@ -792,13 +790,51 @@ TEST_CASE("fp4 resident: ResidentNvfp4 COUNTS its upload, publishes d_dev, and a
     CHECK(ms.byte_at_drop == 0);
 
     // (5) The returned device views are the uploaded buffers.
-    CHECK(dev.packed.data == w.d_packed.get());
-    CHECK(dev.scale.data == w.d_scale.get());
+    CHECK(dev.packed.data == w.packed.d_dev.get());
+    CHECK(dev.scale.data == w.scale.d_dev.get());
   }
 
-  // ONE control block per buffer, despite the two handles (`d_packed` and
-  // `packed.d_dev`, plus the adopted `bytes` keep-alive aliasing it): the device
-  // memory is freed exactly once, through the vt Backend.
+  // ONE control block per buffer: `packed.d_dev` is the ONE owner and the
+  // adopted `bytes` view aliases the same block, so the device memory is freed
+  // exactly once, through the vt Backend.
+  CHECK(b.frees == 2);
+}
+
+// THE LEAK THE SINGLE OWNER REPAIRS. After a Marlin repack the fp4 originals are
+// dead weight, and the repack builders are their only owner. Pre-fix, the
+// release they performed dropped only the type-specific `d_packed`/`d_scale`
+// pair, and `packed.d_dev` was a SECOND handle on the same control block, so the
+// block survived every repack for the process lifetime -- once per repacked
+// weight and once per expert per projection on an MoE model. That silently
+// undid the repack's whole point (`dense_nvfp4_gemm.h`: "then FREE the fp4
+// originals"), on exactly the 24 GiB cards the NVFP4 arms are served from.
+// The invariant below is the one the leak violated: a release through the
+// weight's own resident state must actually free BOTH buffers.
+TEST_CASE("fp4 resident: releasing the resident frees both device buffers") {
+  ForcedResidencyArm arm;
+  ScopedEnvVar adopt_default("VT_ADOPT_DEVICE_BYTES", "1");
+  // A discrete (non-host-addressable) device: no adoption, so before the fix
+  // `packed.d_dev` and the type-specific handle were two references to one
+  // block. This is the arm every consumer Blackwell card takes.
+  FakeBackend b(/*host_addressable=*/false);
+  vt::Queue q = b.CreateQueue();
+  const Fp4Dims dims = MakeFp4Dims();
+
+  ObservableMapping mp;
+  ObservableMapping ms;
+  vllm::Nvfp4Weight w = BorrowedFp4Weight(dims, mp, ms);
+  vllm::dense_attn::Dev d{b, q};
+  const vllm::dense_nvfp4::Nvfp4Dev dev = vllm::dense_nvfp4::ResidentNvfp4(d, w);
+  REQUIRE(dev.packed.data != nullptr);
+  REQUIRE(dev.scale.data != nullptr);
+  CHECK(b.frees == 0);
+
+  // The one release a repack builder performs once the repack has landed. RED
+  // before the single-owner change: the builders reset the type-specific pair
+  // and the surviving `packed.d_dev`/`scale.d_dev` alias kept both blocks, so
+  // this read 0 rather than 2.
+  w.ReleaseResident();
+
   CHECK(b.frees == 2);
 }
 
@@ -866,15 +902,14 @@ TEST_CASE("fp4 resident: a host-addressable device adopts an OWNED fp4 mirror to
 
   CHECK(after.device_upload_bytes - before.device_upload_bytes ==
         dims.packed_bytes + dims.scale_bytes);
-  REQUIRE(w.d_packed != nullptr);
-  CHECK(w.packed.d_dev.get() == w.d_packed.get());
-  CHECK(w.scale.d_dev.get() == w.d_scale.get());
+  REQUIRE(w.packed.d_dev != nullptr);
+  CHECK(w.scale.d_dev != nullptr);
 
   // Adopted: ONE copy, and it is the device one.
   CHECK(w.packed.bytes.borrowed());
   CHECK(w.scale.bytes.borrowed());
-  CHECK(static_cast<const void*>(w.packed.bytes.data()) == w.d_packed.get());
-  CHECK(static_cast<const void*>(w.scale.bytes.data()) == w.d_scale.get());
+  CHECK(static_cast<const void*>(w.packed.bytes.data()) == w.packed.d_dev.get());
+  CHECK(static_cast<const void*>(w.scale.bytes.data()) == w.scale.d_dev.get());
   CHECK(w.packed.bytes.size() == dims.packed_bytes);
   CHECK(w.scale.bytes.size() == dims.scale_bytes);
   CHECK_FALSE(w.packed.host_released);

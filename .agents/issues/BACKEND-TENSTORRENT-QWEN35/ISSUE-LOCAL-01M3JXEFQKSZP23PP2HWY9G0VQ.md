@@ -12,7 +12,7 @@ Closed: -
 
 ## Problem
 
-At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KEEPQUANT_INT8DOT=0 and =1) crashes in Qwen3_5DenseDecodeGraph::Step during trace capture: TT_FATAL 'Writes are not supported during trace capture' (tt-metal fd_mesh_command_queue.cpp:826). Chain: EnsureDevice2D -> CaptureSafeReshape -> ttnn::reshape (tiled) -> ReshapeViewTiledProgramFactory::create_program_artifacts -> ttnn::to_device host write mid-capture. Logs: /tmp/int8dot-leg0.log, /tmp/int8dot-leg1.log (2026-09-28). Suspects: the capture-warmup redesign #3321 or the GDN state-binding fix #3327 changed the capture shape; or the pinned tt-metal (9161e8fdb27+4) tiled-reshape path now materializes at artifact creation. The 27B serve arm has not run since those landed; the 9B did. The 92/92 suite does not cover this shape.
+At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KEEPQUANT_INT8DOT=0 and =1) crashes in Qwen3_5DenseDecodeGraph::Step during trace capture: TT_FATAL 'Writes are not supported during trace capture' (tt-metal fd_mesh_command_queue.cpp:826). Chain: EnsureDevice2D -> CaptureSafeReshape -> ttnn::reshape (tiled) -> ReshapeViewTiledProgramFactory::create_program_artifacts -> ttnn::to_device host write mid-capture. Logs: <logs-dir>/int8dot-leg0.log, <logs-dir>/int8dot-leg1.log (2026-09-28). Suspects: the capture-warmup redesign #3321 or the GDN state-binding fix #3327 changed the capture shape; or the pinned tt-metal (9161e8fdb27+4) tiled-reshape path now materializes at artifact creation. The 27B serve arm has not run since those landed; the 9B did. The 92/92 suite does not cover this shape.
 
 ## Resolution
 
@@ -32,11 +32,11 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   fatals at fd_mesh_command_queue.cpp:826. Fix: run ONE chain in both
   passes (the W4 doctrine), deleting the capture-active branch. Red:
   new doctest `EnsureDevice2D rank-3 reshape is capture-safe` reproduces the
-  exact TT_FATAL on the old branch (/tmp/red-focused.log) and passes with the
-  fix (/tmp/green-focused.log). Suite: 93/93 (/tmp/green-suite.log). 27B
-  serve leg: /tmp/leg-27b-green.log.
+  exact TT_FATAL on the old branch (<logs-dir>/red-focused.log) and passes with the
+  fix (<logs-dir>/green-focused.log). Suite: 93/93 (<logs-dir>/green-suite.log). 27B
+  serve leg: <logs-dir>/leg-27b-green.log.
 - 2026-09-28 UPDATE: the 27B serve leg still fatals after the arm fix — a
-  SECOND, distinct divergence. With VT_TT_TRACE_DEBUG=1 (/tmp/leg-27b-diag.log)
+  SECOND, distinct divergence. With VT_TT_TRACE_DEBUG=1 (<logs-dir>/leg-27b-diag.log)
   the capture pass hits EnsureDevice2D's same-numel arm with spec
   {1,10240} -> {2,5120}, a reshape the eager pass never ran (its arm726 specs
   were {96,128}->{2,6144} and {3072,128}->{64,6144}); the reshape_tiled program
@@ -66,13 +66,13 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   host-fallback priming. RED: doctest `fresh-slot Memset installs the same
   shadow in both passes` reproduces the exact bench fatal on the old code
   (`arm726 rows=2 cols=5120 dev=1x10240 cap=1` -> TT_FATAL at
-  fd_mesh_command_queue.cpp:826, /tmp/red-site2.log); GREEN with the fix
-  (arm726 cap=0 warms, cap=1 cache-hit, /tmp/green-site2.log). SUITE 94/94
-  (/tmp/suite-final2.log). The case also exposed a suite-hygiene bug, fixed
+  fd_mesh_command_queue.cpp:826, <logs-dir>/red-site2.log); GREEN with the fix
+  (arm726 cap=0 warms, cap=1 cache-hit, <logs-dir>/green-site2.log). SUITE 94/94
+  (<logs-dir>/suite-final2.log). The case also exposed a suite-hygiene bug, fixed
   here: the `kRopeNeox (small)` case leaked `VT_TT_HOST_FREE_DECODE=0` into
   every later case; it now restores the ambient value.
-- 2026-09-28 DEVICE GATE (27B leg, /tmp/leg-27b-final3.log, c1:
-  /tmp/leg-27b-c1.log): BENCH_EXIT=1 — the site-2 fatal is gone (capture
+- 2026-09-28 DEVICE GATE (27B leg, <logs-dir>/leg-27b-final3.log, c1:
+  <logs-dir>/leg-27b-c1.log): BENCH_EXIT=1 — the site-2 fatal is gone (capture
   passes the `{1,10240}->{2,5120}` reshape), but two FURTHER blockers, both
   previously masked because the leg died at site 2 first, now surface in
   order: (1) at --concurrency 2, `TryReshapeAndCacheDeviceDecode`
@@ -119,17 +119,17 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   not preserve per-input padding into its output storage.
   RED: new doctest `kTENSTORRENT batched decode RAC is capture-safe
   (num_slots=2)` reproduces the exact leg fatal with the decline restored
-  (/tmp/red-multislot.log, TT_FATAL fd_mesh_command_queue.cpp:873); GREEN
+  (<logs-dir>/red-multislot.log, TT_FATAL fd_mesh_command_queue.cpp:873); GREEN
   with the fix: capture + replay complete and BOTH users' KV verified
   token-exact (128/128 K, 128/128 V) in the paged-KV device shadow via the
-  new ReadPagedKvShadowForTest hook (/tmp/green-multislot.log). The leg also
+  new ReadPagedKvShadowForTest hook (<logs-dir>/green-multislot.log). The leg also
   needed no residency change — the fix is confined to tenstorrent_paged.cpp.
 - 2026-09-28 BLOCKER B ANALYSIS — 27B whole-graph decode trace does not fit;
   recommendation is REGION-SCOPED capture. The numbers: (1) DEMAND: the
   captured decode graph records 1,037 tt-metal op entries (the step-decompose
   legE in-capture census, identical across all four captures —
   docs/bench-evidence/tt-27b-step-decompose-20260926.md) and end_trace_capture
-  asks for one 3,153,969,152 B DRAM buffer (/tmp/leg-27b-c1.log) — 3.04 MB
+  asks for one 3,153,969,152 B DRAM buffer (<logs-dir>/leg-27b-c1.log) — 3.04 MB
   PER RECORDED COMMAND. The MeshTrace buffer is the replay staging DRAM for
   the whole recorded command stream; at 1,037 commands the per-command region
   (launch descriptors, CB/semaphore state, runtime-arg and buffer-descriptor
@@ -158,7 +158,7 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   per-command trace cost, which no vllm.cpp-side discipline can shrink. Do
   not attempt this inside this issue — it is a fresh row (trace-budget,
   region segmentation, per-region state binding) with its own spec.
-- 2026-09-28 DEVICE GATE (c2 leg, /tmp/leg-27b-c2b.log = monitor
+- 2026-09-28 DEVICE GATE (c2 leg, <logs-dir>/leg-27b-c2b.log = monitor
   bench-c2b): BENCH_EXIT=1 — BLOCKER A's fatal is GONE (the leg no longer
   dies at RAC; it served thousands of decode steps across ~16 minutes) but
   fails FURTHER DOWN at the NEXT site of the same class:
@@ -187,14 +187,14 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   case stays green).
 - 2026-09-28 Blocks A and B status: A = the decline is REMOVED and the
   batched RAC device path serves (warm in eager, replay in capture —
-  /tmp/red-multislot.log reproduces the old fatal, /tmp/green-multislot.log
+  <logs-dir>/red-multislot.log reproduces the old fatal, <logs-dir>/green-multislot.log
   the green case); the serve leg now reaches the PA site above. B = the
   trace-budget analysis above stands (region-scoped recommended). Issue
   stays OPEN for the PA multi-slot site, the batched-lane residual, and the
   27B decode-trace DRAM fit.
 - 2026-09-28 (worktree row/tt-27b-capture-write) PA MULTI-SLOT SITE FIXED —
   the same doctrine as Blocker A, third site of the class. ROOT CAUSE
-  (diagnosed live, /tmp/leg-27b-diag.log = monitor bench-c2-diag, the leg
+  (diagnosed live, <logs-dir>/leg-27b-diag.log = monitor bench-c2-diag, the leg
   re-run with VT_TT_TRACE_DEBUG=1): the final traces before the fatal are
   "PA q_from_device FAILED: tenstorrent PA: batched (B>1) Q 4D materializa-
   tion is not capture-safe; the host Q path must serve this step" ->
@@ -213,23 +213,23 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   tenstorrent_paged.cpp, no capture-active branch).
   RED: new doctest `kTENSTORRENT batched decode PagedAttention is capture-
   safe (num_reqs=2)` (mirror of the RAC case) fails on HEAD for the right
-  reason (/tmp/red-pa.log): the capture pass takes the decline (trace in
-  /tmp/red-pa2.log shows the exact q_from_device FAILED chain) and the
+  reason (<logs-dir>/red-pa.log): the capture pass takes the decline (trace in
+  <logs-dir>/red-pa2.log shows the exact q_from_device FAILED chain) and the
   captured+replayed output mismatches the device-path reference 2048/2048 —
   the test stages generation-B K/V through RAC into the DEVICE paged-KV
   shadow before the capture, so only a device-served PA can reproduce it.
-  GREEN: /tmp/green-pa.log — capture pass serves (q_from_device OK cap=1),
+  GREEN: <logs-dir>/green-pa.log — capture pass serves (q_from_device OK cap=1),
   replay-vs-eagerB 0/2048 mismatched elems, both users nonzero.
   EN ROUTE BUG (own issue ISSUE-LOCAL-01M3KM4R2KQN5WXTM57W8BD849): the new
   case exposed that the batched RacIdxCache lane lacks the C=1 lane's
   page-table width-change guard — fixed in the same change (evidence in that
   issue). The RAC residual flake is NOT this: it still reproduces in the
   full suite and stays owed.
-  SUITE: 95/96 (/tmp/suite-pa3.log) — every pre-existing case green, the PA
+  SUITE: 95/96 (<logs-dir>/suite-pa3.log) — every pre-existing case green, the PA
   case green in-suite (0/2048), the only failure the recorded RAC residual
   (126/128 K/V, user-1 second head).
   DEVICE GATE: see the next dated entry (bench-c2c).
-- 2026-09-28 DEVICE GATE (c2 leg, /tmp/leg-27b-c2c.log = monitor bench-c2c,
+- 2026-09-28 DEVICE GATE (c2 leg, <logs-dir>/leg-27b-c2c.log = monitor bench-c2c,
   post-fix HEAD): BENCH_EXIT=1, but the PA multi-slot site is GONE — the leg
   served ~12+ minutes of batched decode through SIX successful boundary
   re-captures (11:24:06, 11:26:40, 11:29:13, 11:31:46, 11:34:15, 11:36:40)
@@ -311,7 +311,7 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
 - 2026-09-29 (pin advanced to upstream-live 98134127a7b, pin head 6449cf13f7b,
   logging build dir build_logging): the logger discriminator CLOSED the open
   next step, and it flips the locus to OURS. On the new pin the focused leg
-  reads region 0 = 2,048 B; region 1 = 2,965,504 B (/tmp/tregion-newpin.log,
+  reads region 0 = 2,048 B; region 1 = 2,965,504 B (<logs-dir>/tregion-newpin.log,
   1/1 case, 1,032/1,032 assertions) — the record barely moved, so upstream's
   576+ commits did not touch the per-core record path (create_trace_node /
   issue_queue_reserve unchanged in dispatch.cpp). The capture window is
@@ -358,7 +358,7 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   tables): every variant records 1,024 B/launch — the packed relay collapses
   all of them, so non-identical per-core config pages are not the 2.82 MB.
   The region-handoff doctest on HEAD (now gated at 64 KiB, RED measured
-  2,965,504 B, /tmp/region-red.log) showed the default dispatch there is the
+  2,965,504 B, <logs-dir>/region-red.log) showed the default dispatch there is the
   W4a GROUPED arm: the region is ceil(N/8)=8 chunks x (~85 eltwise decode
   programs from DecodeKeepQuantWordsF32 Q6_K + ~8 matmul-chain programs) ≈
   680 programs x the 4-17 KB per-program floor = 2.97 MB. NEXT LEVER (one
@@ -372,7 +372,111 @@ At main 8b5435bb0, the Qwen3.8-27B-Q4_K_M served arm (2x128/32 c2, both VT_TT_KE
   97 passed, 2 failed — the owed 2261 flake (126 == 128) and the new
   intentional red gate (11527, 2,965,504 > 65,536); 527,817/527,819
   assertions; all keepquant bit-exact capture-x2 cases green
-  (/tmp/suite-final.log, teardown segfault after the run is pre-existing).
+  (<logs-dir>/suite-final.log, teardown segfault after the run is pre-existing).
   27B money legs NOT run: no fix landed this leg, so c1 would reproduce the
   recorded 2,925,109,248 B / BENCH_EXIT=1 outcome; the legs stay blocked
   behind the decode-fusion lever.
+- 2026-09-30 (worktree row/tt-decode-fusion, commit 1d84f00a6, TT-DECODE-FUSION):
+  the NEXT LEVER above LANDED and was measured. The ~85-program Q6_K
+  eltwise decode chain is now ONE full-grid custom kernel per chunk launch
+  (kKeepQuantDecodeFusedKernelSrc + DecodeKeepQuantWordsFusedQ6K,
+  tenstorrent_keepquant.cpp; int8dot house style: one SetCommonRuntimeArgs
+  vector, uniform self-cycled CBs, in-kernel row0/rowc, warm-first cache;
+  the chain stays as the named VT_TT_KEEPQUANT_FUSED=0 fallback). The 64 KiB
+  arbiter is GREEN: region 1 reads 32,768 B (was 2,965,504 B RED),
+  <logs-dir>/kq-focused.log. Bit-exactness: fused vs chain byte-identity through
+  the grouped P=1 decode op on idle-core and partial-last-core tails with
+  planted zero-d/zero-scale blocks, 7/7 assertions (<logs-dir>/kqf-bitexact.log).
+  Full TT suite: 99/100 cases, 527,825/527,826 assertions, the only failure
+  the owed 2261 flake (<logs-dir>/kqf-suite.log). Evidence:
+  docs/bench-evidence/tt-decode-fusion-20260930.md. 27B c1 INT8DOT=0
+  (<logs-dir>/kqf-c1-int8dot0.log): BENCH_EXIT=1 — the whole-graph trace still
+  does not fit (populate_mesh_buffer overlap fatal, buffer address
+  4,015,745,024, allocation high-water 4,228,372,992); no TPOT. The decode
+  region record fell ~90x at the vehicle shape, but the whole-graph demand
+  (matmul chain ~8 programs/chunk + the rest of the graph) still exceeds
+  free DRAM. NEXT LEVER (one step): the matmul-chain fuse, then re-measure
+  the whole-graph bound; the fit wall keeps standing until that lands.
+  INT8DOT=1 c1 and c2 queued behind the device lock. Issue stays OPEN.
+
+- 2026-09-30 (row/tt-matmul-record-audit @ 913392513): the matmul-class
+  attribution landed. Standalone repro `docs/bench-evidence/
+  tt-matmul-record-attribution-20260930.md` on pin 6449cf13f7b: stock
+  ttnn::matmul at 27B shapes ([64,5120]x[5120,5120] bf16, full 110-core
+  grid) records 8,484 B/launch (small shape 3,510; down-proj 4,242;
+  empty-trace floor 1,024). Control: the old inline-H2D attribution is
+  FALSIFIED on this pin — a from_vector issued inside a capture FATALS at
+  fd_mesh_command_queue.cpp:830 ("Writes are not supported during trace
+  capture") and aborts, <logs-dir>/mmrepro-run3.log. Verdict OURS: the ~8
+  MB/launch the ~357 non-eltwise launches need cannot come from tt-metal's
+  matmul record path; fix locus is our MatmulBT/attention program
+  construction in src/vt/tenstorrent/ — next leg discriminates per-core
+  config-page packing failure vs prefetch-ring overflow vs captured
+  device-side movement on one post-fusion-pin MatmulBT region. No upstream
+  defect to file. Issue stays OPEN; whole-graph fit wall keeps standing.
+
+- 2026-10-01 (row/tt-matmul-class-split, worktree <worktree>):
+  the class split LANDED and the last unexplained class is attributed. New
+  focused doctest `VT_TT_MMCLASS` (tests/vt/test_tenstorrent_backend.cpp):
+  one warmed MatmulBT capture at [64,5120]x[5120,5120] closes at **147,456 B**
+  (stock ttnn::matmul same shape: 10,240 B); launches=8 is linear at
+  ~143,945 B/launch; N=17408 gate/up records 540,672 B/launch. Logging-build
+  dispatch census (<logs-dir>/mmsplit/logging1.full.log): the launch enqueues **20
+  tt-metal programs**, whose Command Sequence Summary TOTALs sum to 147,264 B
+  — the region close minus the 192 B header floor, i.e. FULLY attributed.
+  Candidates (a) non-identical pages (packed MCAST relay works),
+  (b) prefetch-ring overflow (15,872 B max one-shot fetch vs 1,024 KB fit),
+  (c) captured D2D (guards held) all REFUTED. Dominant class: (d) many
+  programs per launch, each at tt-metal's KB floor. Wave-2 fix: fuse the
+  chain to 1-2 full-grid kernels (kKeepQuantDecodeFusedKernelSrc style),
+  locus tenstorrent_keepquant.cpp:1279 + MatmulBT dispatch in
+  tenstorrent_ops.cpp; expected 147,456 -> ~8-16 KB/launch (~10-18x).
+  Evidence: docs/bench-evidence/tt-matmul-class-split-20261001.md. Issue
+  stays OPEN; c1/c2 re-measure legs stay blocked behind the wave-2 fuse.
+
+- 2026-10-02 (row/tt-matmul-fusion, worktree <worktree>):
+  the wave-2 whole-decode fuse LANDED on the safe route the class-split
+  verdict names. The E=1 dense arm now serves Q6_K shapes whose whole
+  decoded f32 plane fits the chunk budget through ONE fused-kernel decode
+  launch + ONE stock matmul + a TILE-domain partial tail (~6 tt-metal
+  programs per launch, was ~20); the exact-f32 decode arm, over-budget
+  planes, and every unserved encoding fall to the proven chunk chain by
+  name, and VT_TT_KEEPQUANT_MM_CHAIN=1 forces the chain (the named kill
+  switch). MEASURED: the captured [64,5120]x[5120,5120] launch records
+  **23,552 B** where the chain recorded 147,456 B (red-first: the new
+  gate read 147,456 B on HEAD — byte-exact the class-split number — and
+  failed the <= 32,768 B gate; green after). Bit-exactness: the
+  fused-vs-chain memcmp golden is byte-identical on four shapes (prefill
+  partial/idle tails, single-chunk prefill, exact-f32 P=1 both forms,
+  zero d/scale blocks mixed in). Evidence:
+  docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. Issue stays
+  OPEN pending the 27B c1/c2 re-measure legs this wave unblocks.
+
+- 2026-10-02, second entry (row/tt-matmul-fusion): the 27B re-measure
+  legs RAN on the wave-2 tree. c1 INT8DOT=1 **BENCH_EXIT=0 with a full
+  TPOT table — the first 27B serve on the live capture arm** (TPOT mean
+  6,758.97 ms, TTFT 821,024 ms); c2 INT8DOT=1 BENCH_EXIT=0 (TPOT
+  25,684.37 ms, TTFT 1,218,612 ms — the two streams serialize on the one
+  replay queue). Both INT8DOT=0 legs still die on the whole-graph fit
+  wall (mesh_trace.cpp:126) — attributed to the checkpoint's Q4_K ffn/attn
+  weights, which the wave-2 Q6_K fuse does not serve: the P=1 dense arm
+  runs the per-chunk chain there. OWED NEXT: the Q4_K arm of the fused
+  whole-decode dispatch (each encoding through its golden before its
+  default flips, per the standing rule). Evidence:
+  docs/bench-evidence/tt-matmul-fusion-wave2-20261002.md. Issue stays
+  OPEN; the fit wall keeps standing on the Q4_K arm only.
+
+- 2026-10-02 (row/tt-q4k-fusion, worktree <worktree>,
+  HEAD 17a42d831): the wave-3 Q4_K arm's money legs RAN — the fit wall
+  is GONE. All four legs BENCH_EXIT=0 with full TPOT tables: c1
+  INT8DOT=0 **31,345.59 ms** TPOT (THE GOAL — the first INT8DOT=0 27B
+  serve; wave 2 died here on `mesh_trace.cpp:126`, DRAM high-water
+  4,211,219,712 B), c2 INT8DOT=0 31,573.54 ms, c1 INT8DOT=1 6,680.05 ms
+  (wave-2 6,758.97, −1.2%, no regression), c2 INT8DOT=1 25,434.18 ms
+  (wave-2 25,684.37, −1.0%, no regression). The checkpoint's
+  quantization serving coverage is COMPLETE: both arms, both
+  concavities. The INT8DOT=0 f32-out arm runs ~4.7x the INT8DOT=1 TPOT
+  (twice the decode-plane bytes) — honest first numbers, TPOT levers
+  stay individually traceable. Evidence:
+  docs/bench-evidence/tt-q4k-fusion-20261001.md. Logs
+  <logs-dir>/leg-c{1,2}-i{0,1}.log.

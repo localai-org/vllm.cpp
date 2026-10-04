@@ -317,38 +317,35 @@ struct Nvfp4Dev {
 };
 
 inline Nvfp4Dev ResidentNvfp4(Dev d, const Nvfp4Weight& w) {
-  if (!w.d_packed) {
+  if (!w.packed.d_dev) {
     const size_t pb = w.packed.bytes.size();
     void* p = d.b.Alloc(pb);
     // ENG-LOAD-DIRECT-UPLOAD (issue #150). `LoadCtNvfp4W4A16`/`LoadCtMxfp4W4A16`
     // /`LoadCtNvfp4Raw` BORROW `packed` and `scale` from the safetensors mmap,
     // so this is the one host->device move of those bytes and it must be
     // accounted and followed by the same post-upload residency step every other
-    // qualifying weight gets. Publishing the allocation on the OwnedTensor is
-    // what lets `AdoptDeviceBytesAsHost` run at all (it keys on `d_dev`); the
-    // two handles share one control block, so the buffer is still freed exactly
-    // once, through the vt Backend.
+    // qualifying weight gets. Publishing on `d_dev` is what lets
+    // `AdoptDeviceBytesAsHost` run (it keys on that slot), and it is the only
+    // owner (Nvfp4Weight::ReleaseResident).
     vllm::load_stats::AddDeviceUpload(pb);
     d.b.Copy(d.q, p, w.packed.bytes.data(), pb);
     Backend* bk = &d.b;
-    w.d_packed = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
-    w.packed.d_dev = w.d_packed;
+    w.packed.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
     AdoptDeviceBytesAsHost(d.b, w.packed);
   }
-  if (!w.d_scale) {
+  if (!w.scale.d_dev) {
     const size_t sb = w.scale.bytes.size();
     void* p = d.b.Alloc(sb);
     vllm::load_stats::AddDeviceUpload(sb);
     d.b.Copy(d.q, p, w.scale.bytes.data(), sb);
     Backend* bk = &d.b;
-    w.d_scale = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
-    w.scale.d_dev = w.d_scale;
+    w.scale.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
     AdoptDeviceBytesAsHost(d.b, w.scale);
   }
   Nvfp4Dev r;
-  r.packed = MakeTensor(w.d_packed.get(), DType::kI8, d.q.device, {w.n, w.k / 2});
+  r.packed = MakeTensor(w.packed.d_dev.get(), DType::kI8, d.q.device, {w.n, w.k / 2});
   // Scale grid is [N, K/group_size]: K/16 for NVFP4, K/32 for MXFP4.
-  r.scale = MakeTensor(w.d_scale.get(), DType::kI8, d.q.device, {w.n, w.k / w.group_size});
+  r.scale = MakeTensor(w.scale.d_dev.get(), DType::kI8, d.q.device, {w.n, w.k / w.group_size});
   return r;
 }
 
@@ -445,8 +442,7 @@ inline void BuildMarlinDenseResident(Dev d, const Nvfp4Weight& w,
     d.b.Copy(d.q, mr.g, &g, sizeof(float));
   }
   d.b.Synchronize(d.q);  // repack done -> safe to free the fp4 originals
-  w.d_packed.reset();
-  w.d_scale.reset();
+  w.ReleaseResident();
   mr.ready = true;
 }
 
@@ -664,10 +660,8 @@ inline void BuildMarlinDensePairResident(Dev d, const Nvfp4Weight& gw,
   d.b.Synchronize(d.q);  // repack done -> safe to free staging + fp4 originals
   d.b.Free(tmp_w);
   d.b.Free(tmp_s);
-  gw.d_packed.reset();
-  gw.d_scale.reset();
-  uw.d_packed.reset();
-  uw.d_scale.reset();
+  gw.ReleaseResident();
+  uw.ReleaseResident();
   mr.ready = true;
 }
 

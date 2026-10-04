@@ -139,6 +139,14 @@ class DriftModelTests(unittest.TestCase):
         # tree's live case.
         scanned = mod.scan_registrations(mod.MODELS_DIR, mod.INCLUDE_DIR)
         self.assertEqual(scanned["deepseek_v4"].classification, "DEVICE")
+        # CROSS-TU DELEGATION (the hole this closes): mimo_v2's registry TU DECLARES
+        # ForwardMiMoV2Device but DEFINES it in mimo_v2.cpp, where all three lm_head
+        # arms return the shared WrapDeviceLogits. The registry-local one-level hop
+        # resolves only the declaration, matched NEITHER seam, and the model landed
+        # in the silently-exempt NONE bucket. The scanner now follows a free function
+        # the hook calls to the sibling models/*.cpp that defines it.
+        self.assertEqual(scanned["mimo_v2"].classification, "DEVICE")
+
         # ARCH-ONE-SURFACE ROW 6: a registry TU declaring `.is_pooling_model =
         # true` is a NON-GENERATIVE registration — a hidden-state producer for
         # the PoolingRunner, classified POOLING explicitly (deleting the
@@ -171,6 +179,42 @@ class DriftModelTests(unittest.TestCase):
             "}\n"
         )
         self.assertEqual(mod.classify_with_helpers(body, host_text), "HOST")
+
+    def test_hook_cross_tu_hop_resolves_and_not_launders(self) -> None:
+        # Mutation on synthetic text: the cross-TU hop must lift a hook whose only
+        # local match is a forward DECLARATION to DEVICE via the sibling TU, and
+        # must NOT launder a host-producing sibling definition into DEVICE.
+        decl = "ForwardLogits ForwardMine(const Input& in);\n"
+        hook = "{ return ForwardMine(input); }"
+        self.assertEqual(mod.classify_body(hook), "NONE")
+        device_files = {
+            "registry.cpp": decl,
+            "model.cpp": (
+                "ForwardLogits ForwardMine(const Input& in) {\n"
+                "  return WrapDeviceLogits(d, n, v);\n"
+                "}\n"
+            ),
+        }
+        self.assertEqual(
+            mod.classify_hook(hook, decl, device_files, {"ForwardMine": "model.cpp"}),
+            "DEVICE",
+        )
+        host_files = {
+            "registry.cpp": decl,
+            "model.cpp": (
+                "ForwardLogits ForwardMine(const Input& in) {\n"
+                "  return HostLogits(std::move(flat), v);\n"
+                "}\n"
+            ),
+        }
+        self.assertEqual(
+            mod.classify_hook(hook, decl, host_files, {"ForwardMine": "model.cpp"}),
+            "HOST",
+        )
+        # A name with no definition anywhere stays NONE (an error state).
+        self.assertEqual(
+            mod.classify_hook(hook, decl, {"registry.cpp": decl}, {}), "NONE"
+        )
 
     def test_refuse_stub_is_skipped_on_tree(self) -> None:
         # kimi_k3's ForwardDevice is VT_CHECK(false); it must be REFUSE, not HOST.

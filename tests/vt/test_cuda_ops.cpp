@@ -14,6 +14,7 @@
 
 #include "vt/backend.h"
 #include "vt/ops.h"
+#include "vt/op_provider.h"
 
 namespace {
 
@@ -751,4 +752,114 @@ TEST_CASE("CUDA greedy_rejection_sample matches CPU bit-exactly at gate vocab (2
   // The k=0 row emits exactly the target argmax of its single logit row.
   CHECK(cpu_sampled[2 * static_cast<size_t>(width)] ==
         row_argmax[static_cast<size_t>(cu_num_logits[2])]);
+}
+
+// ── PermuteVHeads (T25) ──────────────────────────────────────────────────────
+//
+// The op had CPU and ROCm kernels and NO test anywhere, and the GPU arm the GDN
+// column-permuted keep-quant path needs (`out_proj_tiled`, `qwen3_5.cpp`
+// `GdnOutProjMatmul`) was missing on CUDA. This is the op's first coverage on any
+// backend. The expected permutation is written out HERE from the specification
+// rather than taken from either kernel, so the CPU arm is checked against the
+// mapping and not against itself:
+//
+//   out[row, (r*num_k + k)*dv + h] = in[row, (k*rpk + r)*dv + h]
+//
+// The comparison is bit-exact on both arms: a gather re-indexes values, so an
+// equality test has no reduction-order excuse and a tolerance would hide exactly
+// the defect (a wrong index). On the pre-change tree the CUDA half refuses by
+// name — `vt::GetOp(kPermuteVHeads, kCUDA)` throws for an unregistered op — so
+// this case is RED there and GREEN after the kernel lands.
+namespace {
+
+// First index where `got` differs from `want`, or -1. Reported on failure so the
+// message names the ELEMENT a wrong index mapping displaced, not just that the
+// two vectors differ.
+int64_t FirstMismatch(const std::vector<uint16_t>& got,
+                      const std::vector<uint16_t>& want) {
+  for (size_t i = 0; i < got.size() && i < want.size(); ++i) {
+    if (got[i] != want[i]) return static_cast<int64_t>(i);
+  }
+  return got.size() == want.size() ? -1 : static_cast<int64_t>(got.size());
+}
+
+void CheckSameAs(const std::vector<uint16_t>& got,
+                 const std::vector<uint16_t>& want, const char* arm) {
+  const int64_t bad = FirstMismatch(got, want);
+  CAPTURE(arm);
+  CAPTURE(bad);
+  CHECK(bad == -1);
+}
+
+}  // namespace
+
+TEST_CASE("PermuteVHeads: CUDA reproduces the CPU gather bit-exactly") {
+  const int64_t T = 3;
+  const int64_t num_k = 2;
+  const int64_t rpk = 3;
+  const int64_t dv = 4;
+  const int64_t value_dim = num_k * rpk * dv;  // 24
+  const int64_t n = T * value_dim;
+
+  // Distinct bf16-exact values, so a wrong index is visible in the VALUE and not
+  // only in a bit count.
+  std::vector<uint16_t> in(static_cast<size_t>(n));
+  for (int64_t i = 0; i < n; ++i) {
+    in[static_cast<size_t>(i)] = vt::F32ToBF16(static_cast<float>(i) + 0.5F);
+  }
+  std::vector<uint16_t> want(static_cast<size_t>(n), 0);
+  for (int64_t row = 0; row < T; ++row) {
+    for (int64_t t = 0; t < num_k * rpk; ++t) {
+      const int64_t r = t / num_k;
+      const int64_t k = t % num_k;
+      const int64_t g = k * rpk + r;
+      for (int64_t h = 0; h < dv; ++h) {
+        want[static_cast<size_t>(row * value_dim + t * dv + h)] =
+            in[static_cast<size_t>(row * value_dim + g * dv + h)];
+      }
+    }
+  }
+
+  // CPU.
+  std::vector<uint16_t> cpu_out(static_cast<size_t>(n), 0);
+  Tensor tin = MakeTensor(const_cast<uint16_t*>(in.data()), DType::kBF16, Cpu(),
+                          {T, value_dim});
+  Tensor tout = MakeTensor(cpu_out.data(), DType::kBF16, Cpu(), {T, value_dim});
+  Queue cq{Cpu(), nullptr};
+  vt::PermuteVHeads(cq, tout, tin, T, num_k, rpk, dv);
+  CheckSameAs(cpu_out, want, "cpu");
+
+  if (!HasCuda()) {
+    MESSAGE("no CUDA backend registered; the CPU arm above is the whole gate");
+    return;
+  }
+
+  Backend& gpu = vt::GetBackend(DeviceType::kCUDA);
+  QueueGuard gq(gpu);
+
+  // "THE CUDA ARM RAN" IS NOT IMPLIED BY THE VALUES. A missing CUDA kernel falls
+  // through to the lazy CPU reference tier on a host-addressable device and
+  // produces the SAME rows — measured: with this op's `RegisterOp` deleted, the
+  // comparison below still passes. These probes are what make the arm observable,
+  // and they are the reason a reviewer's deletion mutation bites.
+  CHECK(vt::OpRegistered(vt::OpId::kPermuteVHeads, vt::DeviceType::kCUDA));
+  vt::EnableOpProviderCallStats(true);
+  const unsigned long long ref_before = vt::GetReferenceTierHits();
+
+  DeviceTensor din(gpu, gq.q, DType::kBF16, {T, value_dim}, in.data());
+  DeviceTensor dout(gpu, gq.q, DType::kBF16, {T, value_dim});
+  vt::PermuteVHeads(gq.q, dout.tensor(), din.tensor(), T, num_k, rpk, dv);
+  std::vector<uint16_t> gpu_out(static_cast<size_t>(n), 0);
+  dout.Download(gq.q, gpu_out.data());
+
+  const vt::OpProviderStats stats =
+      vt::GetOpProviderStats(vt::OpId::kPermuteVHeads, vt::DeviceType::kCUDA);
+  CHECK(stats.last_selected != nullptr);
+  const bool selected_native =
+      stats.last_selected != nullptr &&
+      std::strcmp(stats.last_selected, vt::kReferenceProviderName) != 0;
+  CHECK(selected_native);
+  CHECK(vt::GetReferenceTierHits() == ref_before);
+
+  CheckSameAs(gpu_out, want, "cuda");
 }

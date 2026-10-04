@@ -647,12 +647,9 @@ void BuildLagunaMoeMarlinResident(vllm::dense_nvfp4::Dev d, const LagunaMoeWeigh
   // GEMV/CPU paths that read these bytes can never run in this process.
   for (int e = 0; e < E; ++e) {
     const size_t se = static_cast<size_t>(e);
-    moe.experts_gate_fp4[se].d_packed.reset();
-    moe.experts_gate_fp4[se].d_scale.reset();
-    moe.experts_up_fp4[se].d_packed.reset();
-    moe.experts_up_fp4[se].d_scale.reset();
-    moe.experts_down_fp4[se].d_packed.reset();
-    moe.experts_down_fp4[se].d_scale.reset();
+    moe.experts_gate_fp4[se].ReleaseResident();
+    moe.experts_up_fp4[se].ReleaseResident();
+    moe.experts_down_fp4[se].ReleaseResident();
     moe.experts_gate_fp4[se].packed.ReleaseHost();
     moe.experts_gate_fp4[se].scale.ReleaseHost();
     moe.experts_up_fp4[se].packed.ReleaseHost();

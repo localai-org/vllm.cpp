@@ -21,7 +21,11 @@ from a transcription of it:
             the reference Engine with Qwen/Qwen3-8B @
             b968826d9c46dd6066d109eabc6255188de91218 run by transformers in
             bfloat16 (last token of the post-norm hidden state, L2-normalized:
-            what `vllm serve --runner pooling` returns). This part is copied
+            what `vllm serve --runner pooling` returns).
+            ORACLE-DENOMINATOR-EXEMPT: no vLLM launch exists in this generator
+            (the reference run is transformers, and the CLM architecture has no
+            multimodal_config, so --language-model-only decides nothing). This
+            part is copied
             from a JSON file that run is written to (--real-json), because
             the 8B forward is not something a golden generator should repeat.
 

@@ -124,6 +124,9 @@ cmake -S . -B build-vulkan -DVLLM_CPP_VULKAN=ON
 cmake --build build-vulkan -j
 ```
 
+This build includes the [ternary kernels](FEATURES.md#ternary-kernels).
+The GGUF reader does not yet load TQ1_0 or TQ2_0 tensors.
+
 ## Tenstorrent build (Blackhole)
 
 The Tenstorrent backend is opt-in and requires local TT-Metalium and TT-NN

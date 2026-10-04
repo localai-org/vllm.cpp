@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "vllm/config/multimodal.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // PagedKvCache, GdnStateCache + v1 attention metadata
 #include <functional>
 
@@ -178,6 +179,10 @@ struct Qwen3_5DenseWeights {
   // builder expresses it (`Qwen3_5DenseVisionConfig`); valid iff `has_visual`.
   multimodal::Qwen3VLVisionConfig visual_cfg;
   bool has_visual = false;
+  // #607 L3, the TOWER SKIP: `model.visual.*` was present and deliberately left
+  // unread because every modality the tower serves was at limit 0. Distinct
+  // from a text-only checkpoint, where this and `has_visual` are both false.
+  bool vision_skipped = false;
 };
 
 // True iff the projection named `name` is a W4A4-quantized Linear in the 27B
@@ -331,13 +336,17 @@ Qwen3_5DenseLayerWeights LoadQwen3_5DenseLayer(
     const std::string& backbone_prefix = std::string(kQwen3_5VlBackbonePrefix));
 
 // Full dense-model load across the given shards. Uses config.num_hidden_layers
-// and config.layer_types. Text path only — the vision tower (model.visual.*)
-// and image/video merger are DEFERRED (notes §0.1). The checkpoint's MTP
-// head is intentionally loaded on demand by LoadQwen3_5MTP when speculative
-// decoding is enabled; it is not part of the always-resident target weights.
+// and config.layer_types. A checkpoint that carries `model.visual.*` loads the
+// tower through `LoadQwen3_5DenseVision`; `mm_config` is the engine's modality
+// limits, and when every modality the tower serves is at limit 0 the tower is
+// left unread and `vision_skipped` is set instead. A null `mm_config` (every
+// non-engine caller) loads the tower as before. The checkpoint's MTP head is
+// intentionally loaded on demand by LoadQwen3_5MTP when speculative decoding
+// is enabled; it is not part of the always-resident target weights.
 Qwen3_5DenseWeights LoadQwen3_5Dense(const std::vector<SafetensorsFile>& shards,
                                      const HfConfig& config,
-                                     vt::Queue* load_queue = nullptr);
+                                     vt::Queue* load_queue = nullptr,
+                                     const MultiModalConfig* mm_config = nullptr);
 
 // Host-lifetime helpers for ordinary dense CUDA models. The release function
 // drops only tensors whose authoritative raw/F32 device representation exists;

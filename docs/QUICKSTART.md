@@ -1,23 +1,18 @@
 # Quickstart
 
-Run one model, from one command, without building the tree and without already
-holding a checkpoint. This page is the first thing to try.
-[`docs/USAGE.md`](USAGE.md) and [`docs/reference/`](reference/README.md) are the
-full reference. When this page and a reference page disagree, the reference is
-correct and this page is stale.
+Run a model without building the project. Use a local checkpoint or let the
+server download one from Hugging Face. See the [usage guide](USAGE.md) and
+[reference](reference/README.md) for more options.
 
-`--model` takes four shapes. A directory, a `.gguf` file, `org/repo` for a
-Hugging Face snapshot, and `org/repo:TAG` for one GGUF file out of a repository.
-The last two fetch what your cache lacks.
+`--model` accepts a directory, a `.gguf` file, `org/repo` for a Hugging Face
+snapshot, or `org/repo:TAG` for one GGUF file. The repository forms download
+files that your cache lacks.
 
-> **What on this page is not yet runnable.** The `main-<lane>` container tags are
-> published and resolve today. `:latest` does not exist yet, because no release
-> has been cut from the container lanes. `--model org/repo` does not fetch from
-> the real Hub yet, so a container line has to mount a checkpoint you already
-> hold. Release `v0.0.2` predates `--model org/repo`, so the archive you can
-> download today cannot run these lines either. Every such line is marked
-> `PENDING` with the issue that owes it. Nothing here is presented as verified
-> when it is not.
+> **Container and release availability.** Use the published `main-<lane>`
+> container tags. `:latest` does not exist yet because no release includes the
+> container lanes. Release `v0.0.2` predates `--model org/repo`, so its archives
+> cannot download a checkpoint by repository ID. The release-archive recipe
+> remains marked `PENDING(#1281)`.
 
 ## Run a model with Docker
 
@@ -45,12 +40,9 @@ curl http://localhost:8000/v1/completions \
 
 Any OpenAI client works. Point its `base_url` at `http://localhost:8000/v1`.
 
-Once `--model org/repo` reaches the Hub, the same line takes a repository
-identifier and needs no download step:
+To let the server download the checkpoint, pass its Hugging Face repository ID:
 
 ```sh
-# PENDING(#1511): a relative HTTP Location header is read as a URL, so this form
-# fetches nothing from the real Hub today.
 docker run --rm -p 8000:8000 \
   -v "$HOME/.cache/huggingface:/cache" \
   ghcr.io/mudler/vllm.cpp:main-cpu \
@@ -85,36 +77,23 @@ list of published archives are in [`docs/RELEASES.md`](RELEASES.md).
 
 ## Models that have been run
 
-**A row enters this table only after somebody ran it end to end.** The image was
-pulled, the model was fetched, and the server returned tokens. The row then
-records the date and the host it ran on. This page carries no row that was
-reasoned about rather than run, and it carries no row marked as expected to
-work.
-
-The table holds one executed row. It is short because the bar is a run, not a
-judgement about any model, and one thing still limits it:
-
-- [#1511](https://github.com/mudler/vllm.cpp/issues/1511): a relative HTTP
-  `Location` header is read as a URL, so `--model org/repo` fetches nothing from
-  the real Hub today, so an executed row mounts a checkpoint the host already
-  holds rather than naming a repository.
+This table records a completed container run. It covers the mounted-checkpoint
+recipe above; the repository-ID recipe has no recorded container run here.
 
 | Model | Lane image | `--model` line | Memory needed | Date run | Host |
 |---|---|---|---|---|---|
 | `Qwen/Qwen3-0.6B` | `ghcr.io/mudler/vllm.cpp:main-cpu` @ `sha256:7f88301e` | `--model /models/qwen3-0.6b` | 1.5 GiB on disk | 22 August 2026 | `mudler-ubuntu-box`, x86_64, Docker 29.1.2 |
 
-That row is the mount form above. The image was pulled, the checkpoint was
-fetched with `hf download`, and `/v1/completions` returned
+For this run, the host pulled the image and fetched the checkpoint with
+`hf download`. The `/v1/completions` endpoint returned
 `" Paris. The capital of Italy is Rome. The capital of Spain is Madrid."` for
-`"The capital of France is"` at 16 tokens. It does not establish the
-`--model org/repo` form, which [#1511](https://github.com/mudler/vllm.cpp/issues/1511)
-still blocks, and it is not a GPU-lane row.
+`"The capital of France is"` at 16 tokens. This result covers only the CPU lane
+and the mounted checkpoint.
 
 ## Caches, tokens, and hosts with no network
 
-These three cases are documented once, in
-[`docs/guides/hugging-face-access.md`](guides/hugging-face-access.md), and that
-guide is the correct answer whenever it disagrees with this summary.
+See the [Hugging Face access guide](guides/hugging-face-access.md) for cache
+layout, authentication, and offline behavior.
 
 - **Reusing a cache.** A cache that Python `huggingface_hub` already populated
   is read rather than downloaded again, because the layout is the same one. Give

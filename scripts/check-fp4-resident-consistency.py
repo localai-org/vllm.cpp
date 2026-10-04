@@ -10,9 +10,14 @@ ENG-LOAD-DIRECT-UPLOAD therefore gave every fp4 upload three statements per buff
   1. `load_stats::AddDeviceUpload(nb)`         — account the move. These bytes are
      counted NOWHERE else: they were borrowed on the way in, so the host-copy
      counter never saw them.
-  2. `w.<buf>.d_dev = w.d_<handle>`            — PUBLISH the allocation on the
-     OwnedTensor. `AdoptDeviceBytesAsHost` keys on `d_dev` and returns immediately
-     when it is null, so without this the next statement is a silent no-op.
+  2. `w.<buf>.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); })`
+     — PUBLISH the allocation on the OwnedTensor. `AdoptDeviceBytesAsHost` keys on
+     `d_dev` and returns immediately when it is null, so without this the next
+     statement is a silent no-op. `d_dev` is ALSO the one owner of those bytes:
+     the type-specific `Nvfp4Weight::d_<handle>` fields this used to publish
+     alongside are gone, because a second owning handle is what leaked a full
+     packed+scale device copy per repacked weight (the repack builders reset only
+     one of the two). The release clause below pins that.
   3. `AdoptDeviceBytesAsHost(d.b, w.<buf>)`    — the post-upload residency step:
      release the consumed source pages, and on a host-addressable device (GB10
      unified memory under Vulkan) adopt the device allocation as the host view so
@@ -44,8 +49,10 @@ below is scoped to one block, and each clause is bound to that block's buffer:
                    block to `w.<buf>.bytes.size()` (so `AddDeviceUpload(0)`, or the
                    other buffer's byte count, is not a pass);
   (b) COPIED     — the upload reads `w.<buf>.bytes.data()` (not the other buffer's);
-  (c) PUBLISHED  — `w.<buf>.d_dev = <expr mentioning w.d_<buf>>` (so `= nullptr` and
-                   a foreign handle are not a pass);
+  (c) PUBLISHED  — `w.<buf>.d_dev = <device-allocation expr>`: a `std::shared_ptr`
+                   construction whose deleter returns the block through the vt
+                   Backend (`...Free(...)`). `= nullptr`, `= {}`, and a bare
+                   `= <object>.<other>.d_dev` (which owns nothing) are not a pass;
   (d) ADOPTED    — `AdoptDeviceBytesAsHost(..., w.<buf>)` on THIS function's weight
                    parameter (so adopting another object's buffer is not a pass);
   (e) ORDERED    — (c) precedes (d), which is what makes (d) more than a no-op;
@@ -56,6 +63,17 @@ below is scoped to one block, and each clause is bound to that block's buffer:
                    to pass; the opposite motion — HOISTING the adopt above the
                    `Copy` — lifts it above (c) as well and was already caught by
                    (e), so only the sink shape shows what (f) adds.
+
+  (g) RELEASED   — `Nvfp4Weight::ReleaseResident()` resets `packed.d_dev` AND
+                   `scale.d_dev`, and where it drops an adopted host twin for a
+                   buffer that drop precedes that buffer's reset. THIS IS THE
+                   CLAUSE THE LEAK VIOLATED: the repack builders reset only the
+                   type-specific handle, so the surviving `d_dev` alias kept the
+                   block for the process lifetime. It is checked in
+                   include/vllm/model_executor/models/qwen3_5_weights.h, the one
+                   definition both upload copies release through, because the
+                   release is not inside the upload function the clauses above
+                   scope to.
 
 TEXT THE COMPILER NEVER SEES IS NOT A PASS. Every clause runs against
 `checker_text.normalize_source`, which blanks `//` and `/* */` comments, `#if 0` /
@@ -68,9 +86,10 @@ than a literal false are NOT evaluated: a region under `#ifdef VT_CUTLASS_NVFP4`
 a real build configuration, not a disguised deletion.
 
 WHAT THIS GATE DOES *NOT* DO, stated plainly so the record does not imply more. It is
-a STRUCTURAL check over text: it proves the six statements are present in code the
-compiler keeps, bound to the right buffer of the right object, and that the adoption
-follows both the copy and the publication. It cannot prove they are CORRECT at run
+a STRUCTURAL check over text: it proves the per-buffer statements and the single
+release are present in code the compiler keeps, bound to the right buffer of the right
+object, and that the adoption follows both the copy and the publication. It cannot
+prove they are CORRECT at run
 time — that the pointer published is the one that was uploaded, that the byte count
 matches the allocation, or that the copy transferred the right bytes. Nor does it
 model the preprocessor: a statement moved under a build-configuration `#ifdef` is
@@ -109,6 +128,13 @@ SOURCES = (
     Path("src/vllm/model_executor/models/qwen3_5.cpp"),
 )
 
+# The ONE release of an Nvfp4Weight's device resident. Both upload copies above are
+# released through it, so a release that forgets a buffer leaks from BOTH.
+RELEASE_SOURCE = Path("include/vllm/model_executor/models/qwen3_5_weights.h")
+
+# The one release function both upload copies are released through.
+RELEASE_FUNCTION = "ReleaseResident"
+
 # The buffers an Nvfp4Weight uploads. Each needs the full step, in its OWN block.
 BUFFERS = ("packed", "scale")
 
@@ -134,13 +160,28 @@ _DEF = re.compile(
 _NULLISH = ("nullptr", "NULL", "{}", "0")
 
 
-def _device_handle(buffer: str) -> str:
-    """`packed` -> `d_packed`: the Nvfp4Weight's own handle for that buffer."""
-    return "d_" + buffer
-
-
 def _line_no(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
+
+
+def _statement_end(text: str, start: int) -> int:
+    """Index of the `;` that ends the statement beginning at `start`, tracking
+    bracket depth so a semicolon INSIDE a lambda body does not truncate it.
+
+    The published right-hand side is now `std::shared_ptr<void>(p, [bk](void* q)
+    { bk->Free(q); })`, whose inner brace holds a `;`. A flat `[^;]+;` capture —
+    what this checker used while the rhs was a bare member name — stops there and
+    sees no deleter, so the check would have failed on the real, correct shape."""
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == ";" and depth == 0:
+            return i
+    return -1
 
 
 def function_bodies(text: str) -> list[tuple[int, str, str]]:
@@ -163,16 +204,19 @@ def checked_bodies(text: str) -> list[tuple[int, str, str]]:
 
 
 def buffer_block(body: str, recv: str, buffer: str) -> str | None:
-    """The `if (!<recv>.d_<buffer>) { ... }` upload block for ONE buffer, or None.
+    """The `if (!<recv>.<buffer>.d_dev) { ... }` upload block for ONE buffer, or
+    None.
 
     This is the scope every clause is checked in. Checking the whole body instead
-    was the original bug: a single surviving statement served both buffers."""
+    was the original bug: a single surviving statement served both buffers. The
+    guard is the single-owner slot rather than the deleted `d_<buffer>` handle:
+    the upload is skipped exactly when the device resident already exists."""
     guard = re.compile(
         r"if\s*\(\s*!\s*"
         + re.escape(recv)
         + r"\s*\.\s*"
-        + re.escape(_device_handle(buffer))
-        + r"\s*\)\s*\{"
+        + re.escape(buffer)
+        + r"\s*\.\s*d_dev\s*\)\s*\{"
     )
     m = guard.search(body)
     if m is None:
@@ -211,19 +255,28 @@ def _copied(block: str, recv: str, buffer: str) -> int | None:
 
 
 def _published(block: str, recv: str, buffer: str) -> int | None:
-    """Offset of `<recv>.<buffer>.d_dev = <expr naming <recv>.d_<buffer>>`, or None."""
+    """Offset of `<recv>.<buffer>.d_dev = <device allocation>`, or None.
+
+    The published value must OWN the block: a `std::shared_ptr` construction whose
+    deleter returns it through the vt Backend. A bare `= nullptr`, `= {}` or an
+    alias of some other object's `d_dev` publishes no owner, so
+    `AdoptDeviceBytesAsHost` either returns immediately or the block outlives the
+    weight with nobody to free it."""
     for m in re.finditer(
         re.escape(recv)
         + r"\s*\.\s*"
         + re.escape(buffer)
-        + r"\s*\.\s*d_dev\s*=\s*(?P<rhs>[^;]+);",
+        + r"\s*\.\s*d_dev\s*=\s*",
         block,
     ):
-        rhs = m.group("rhs").strip()
+        end = _statement_end(block, m.end())
+        if end < 0:
+            continue
+        rhs = block[m.end() : end].strip()
         if rhs in _NULLISH:
             continue
-        if re.search(
-            re.escape(recv) + r"\s*\.\s*" + re.escape(_device_handle(buffer)) + r"\b", rhs
+        if re.search(r"\bshared_ptr\s*<\s*void\s*>\s*\(", rhs) and re.search(
+            r"\bFree\s*\(", rhs
         ):
             return m.start()
     return None
@@ -250,7 +303,7 @@ def body_violations(body: str, recv: str = "w") -> list[str]:
         block = buffer_block(body, recv, buffer)
         if block is None:
             problems.append(
-                f"no `if (!{recv}.{_device_handle(buffer)})` upload block for `{buffer}`. "
+                f"no `if (!{recv}.{buffer}.d_dev)` upload block for `{buffer}`. "
                 f"Each buffer's post-upload step is checked inside its OWN block, "
                 f"because body-wide matching lets one buffer's statements satisfy the "
                 f"other's. If this copy was deliberately restructured, update "
@@ -276,9 +329,10 @@ def body_violations(body: str, recv: str = "w") -> list[str]:
         pub = _published(block, recv, buffer)
         if pub is None:
             problems.append(
-                f"`{buffer}` does not PUBLISH its device allocation on the OwnedTensor "
-                f"(`{recv}.{buffer}.d_dev = {recv}.{_device_handle(buffer)}`); "
-                f"AdoptDeviceBytesAsHost keys on `d_dev` and would return immediately"
+                f"`{buffer}` does not PUBLISH a backend-owned device allocation on "
+                f"`{recv}.{buffer}.d_dev` (a std::shared_ptr whose deleter returns "
+                f"the block through the vt Backend); AdoptDeviceBytesAsHost keys "
+                f"on `d_dev` and would return immediately"
             )
         adopt = _adopted(block, recv, buffer)
         if adopt is None:
@@ -322,6 +376,64 @@ def file_violations(text: str, label: str) -> list[str]:
     ]
 
 
+_RELEASE_DEF = re.compile(
+    r"\bvoid\s+" + re.escape(RELEASE_FUNCTION) + r"\s*\(\s*\)\s*const\s*\{"
+)
+
+
+def release_body(text: str) -> tuple[int, str] | None:
+    """The `ReleaseResident() const` body as (line_no, normalized body), or None."""
+    norm = normalize_source(text)
+    m = _RELEASE_DEF.search(norm)
+    if m is None:
+        return None
+    end = _match_braces(norm, m.end())
+    return _line_no(text, m.start()), norm[m.end() : end - 1]
+
+
+def release_violations(text: str, label: str) -> list[str]:
+    """Every way `ReleaseResident` leaves a device resident un-owned, and the one
+    ordering that makes the release a no-op on a host-addressable device."""
+    found = release_body(text)
+    if found is None:
+        return [
+            f"{label}: no `void {RELEASE_FUNCTION}() const` definition. It is the ONE "
+            f"release of an Nvfp4Weight's device resident (both upload copies above "
+            f"use it); if it was deliberately renamed or moved, update RELEASE_SOURCE "
+            f"in scripts/check-fp4-resident-consistency.py in the same change."
+        ]
+    line_no, body = found
+    problems: list[str] = []
+    for buffer in BUFFERS:
+        reset = re.search(
+            r"\b" + re.escape(buffer) + r"\s*\.\s*d_dev\s*\.\s*reset\s*\(\s*\)", body
+        )
+        if reset is None:
+            problems.append(
+                f"`{buffer}.d_dev` is never reset: after a Marlin repack dropped the "
+                f"fp4 originals, this block stays owned for the process lifetime — "
+                f"one leaked packed+scale device copy per repacked weight and per "
+                f"expert. ReleaseResident must reset BOTH buffers"
+            )
+            continue
+        twin = re.search(r"\b" + re.escape(buffer) + r"\s*\.\s*ReleaseHost\s*\(\s*\)", body)
+        if twin is None:
+            problems.append(
+                f"`{buffer}`'s adopted host twin is never dropped: on a "
+                f"host-addressable device that view holds the same block alive, so "
+                f"the reset below frees nothing and the release leaks exactly as it "
+                f"did when the type-specific handle was the only one reset"
+            )
+        elif twin.start() > reset.start():
+            problems.append(
+                f"`{buffer}`'s adopted host twin is dropped AFTER its `d_dev` "
+                f"reset: the view holds the block alive on a host-addressable "
+                f"device, so the reset frees nothing and the later drop touches a "
+                f"view whose owner is gone"
+            )
+    return [f"{label}:{line_no}: {p}" for p in problems]
+
+
 def main() -> int:
     violations: list[str] = []
     checked = 0
@@ -334,21 +446,32 @@ def main() -> int:
         checked += len(checked_bodies(text))
         violations.extend(file_violations(text, str(rel)))
 
+    rel = str(RELEASE_SOURCE)
+    path = ROOT / RELEASE_SOURCE
+    if not path.exists():
+        print(f"ERROR: {rel} not found", file=sys.stderr)
+        return 1
+    violations.extend(
+        release_violations(path.read_text(encoding="utf-8", errors="ignore"), rel)
+    )
+
     if violations:
         print(
-            "ERROR: an fp4 resident upload drops part of the ENG-LOAD-DIRECT-UPLOAD "
-            "post-upload step (issue #150):",
+            "ERROR: an fp4 resident upload or its single release drops part of the "
+            "ENG-LOAD-DIRECT-UPLOAD post-upload step (issue #150):",
             file=sys.stderr,
         )
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         print(
-            "Every ResidentNvfp4 must COUNT its upload, COPY from that buffer, PUBLISH "
-            "the allocation on the OwnedTensor, and then run AdoptDeviceBytesAsHost — "
-            "for BOTH `packed` and `scale`, each inside its own `if (!w.d_<buf>)` "
-            "block. The shared copy is pinned at run time by "
-            "tests/vllm/test_load_direct_upload.cpp; this gate exists because the "
-            "qwen3_5.cpp duplicate sits in an anonymous namespace no test can reach.",
+            "Every ResidentNvfp4 must COUNT its upload, COPY from that buffer, "
+            "PUBLISH the allocation on the OwnedTensor, and then run "
+            "AdoptDeviceBytesAsHost — for BOTH `packed` and `scale`, each inside its "
+            "own `if (!w.<buf>.d_dev)` block — and `ReleaseResident()` must reset BOTH "
+            "`d_dev` slots, dropping an adopted twin view first. The shared copy is "
+            "pinned at run time by tests/vllm/test_load_direct_upload.cpp; this gate "
+            "exists because the qwen3_5.cpp duplicate sits in an anonymous namespace "
+            "no test can reach.",
             file=sys.stderr,
         )
         return 1
@@ -356,7 +479,7 @@ def main() -> int:
     print(
         f"OK: {checked} ResidentNvfp4 definition(s) across {len(SOURCES)} file(s) count "
         f"the upload, copy, publish d_dev, and adopt — per buffer, for both packed and "
-        f"scale."
+        f"scale — and ReleaseResident() resets both d_dev slots."
     )
     return 0
 
