@@ -11,6 +11,7 @@
 // of the same row.
 
 #include "vllm/model_executor/models/kolibri1.h"
+#include "vllm/model_executor/models/kolibri1_forward.h"
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits, ModelForwardInput
@@ -265,16 +266,13 @@ void PrepareKolibri1ForCausalLM(LoadedModel& model, const HfConfig& config,
 
 ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
                                          const ModelForwardInput& input) {
-  (void)model;
-  (void)input;
-  // W1 ships no forward. Refuse by name rather than run a wrong graph: the
-  // CPU hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add
-  // MoE) is a later wave of this row.
-  throw std::runtime_error(
-      "Kolibri1ForCausalLM: the CPU forward pass is not implemented yet. "
-      "Row MODEL-TEXT-kolibri-1, spec .agents/specs/kolibri-1-cpu.md — the "
-      "config parse, KV-cache spec, and FP8-block weight loader (W1) have "
-      "landed; the hybrid forward is the row's next wave.");
+  auto& m = ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM");
+  // W2: the CPU hybrid forward (RNoPE, qk-norm, sandwich norms,
+  // sigmoid-logit-add MoE) lives in kolibri1_forward.cpp.
+  return ForwardKolibri1Forward(input.token_ids, input.positions,
+                                input.attn_meta, input.attn_kv, m.weights(),
+                                input.multi_kv, input.queue,
+                                input.logits_indices);
 }
 
 // ---- ModelInfo / ModelFactory ----
