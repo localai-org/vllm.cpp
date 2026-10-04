@@ -135,3 +135,25 @@ stop … keep the lever opt-in"; here the band cannot even be measured), the
 default stays OFF. The 4.5x default-path lever remains real and opt-in;
 what is owed is a working oracle denominator for this artifact, the
 sibling gate and the opt-out identity on the live arm.
+
+## Now
+
+State: GATE-1 PASSED (2026-10-04), flip recommended, not yet landed.
+
+The llama.cpp pin advanced `b10451` → `11fe0215`
+([`.agents/oracles/llama-cpp.md`](../../.agents/oracles/llama-cpp.md), evidence
+[oracle-llamacpp-11fe0215-gateable-20261003.md](../../docs/bench-evidence/oracle-llamacpp-11fe0215-gateable-20261003.md)):
+the new pin loads the unsloth 27B Q4_K_M artifact `b10451` refuses, so gate
+1's denominator exists. The band ran on the live arm, 16 prompts at c1
+(the 64-prompt c2 plan died on the GDN state-slot churn engine-fatal,
+`ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`; 16 is the documented minimum):
+**both arms 16/16 in-band** — `=1` max 97.2, `=0` max 144.1 mnats; every
+arm-pair divergence is a single-position near-tie the band prices. Full
+evidence:
+[tt-int8dot-band-16p-20261004.md](../../docs/bench-evidence/tt-int8dot-band-16p-20261004.md).
+TPOT 4.69x at c1 reproduces the lever.
+
+Remaining before the flip lands: the 64-prompt width (blocked on the
+slot-churn bug), gate 2 (siblings on the live arm), and the gate-4 `=0`
+opt-out identity on the live arm. The flip itself is a separate authorized
+change.
