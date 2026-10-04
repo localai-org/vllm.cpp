@@ -130,6 +130,11 @@ vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
 vllm_cpp_add_test(test_kolibri1 vllm/models/test_kolibri1.cpp)
 # kolibri1_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 target_include_directories(test_kolibri1 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 W2 gate: the CPU forward against the in-test scalar
+# reference (the kolibri1.py transcription), the ragged batch, the
+# logits_indices gather, and the full-depth 50-layer structural run.
+vllm_cpp_add_test(test_kolibri1_w2 vllm/models/test_kolibri1_w2.cpp)
+target_include_directories(test_kolibri1_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
 target_include_directories(test_mimov2_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)
