@@ -30,3 +30,23 @@ The policy is therefore `* text=auto eol=lf` with two byte-preserving pins. docs
 ## Resolution
 
 -
+
+## Executed verification, 2026-10-04 (merged head ac0e7e7e9, real core.autocrlf=true clones)
+
+- Branch clone with `core.autocrlf=true`: **0** files carry `\r` outside the
+  pinned directories. Upstream/main @ 1db19f7fd under the identical clone:
+  **6599** outside, 1257 inside what would be the pinned dirs.
+- `check-deepseek-v4-vision-manifests.py` on the upstream CRLF checkout:
+  FAILS -- `config_sha256 is '6cd841bd...', derived '01a44dec...'`. On the
+  branch checkout: `ok`, fixtures byte-exact.
+- `agent-issue-index.py --refresh` passes on the branch (1330 records).
+  Honest note: it now also passes upstream -- 0b93e3ba0-era CR tolerance
+  (`removesuffix(b"\r")` in `_archive_evidence_matches_source`) narrowed
+  this gate's exposure; the manifest-sha and renormalize-on-commit surfaces
+  remain uncovered upstream.
+- Pin is load-bearing (`git check-attr`): governed paths resolve
+  `text=auto eol=lf`; `docs/bench-evidence/limb3-strict-gate-20260904/
+  gen-eager.log` resolves `text=unset` with the pin and `text=auto`
+  without it -- its 22 progress-bar `\r` bytes would be stripped on the
+  next commit without the pin.
+
