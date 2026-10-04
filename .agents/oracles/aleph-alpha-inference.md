@@ -11,12 +11,14 @@ serves, the answer it produces is vLLM's answer for Kolibri.
 
 ```oracle-pin
 id = aleph-alpha-inference
-role = primary-for-kolibri1
+role = secondary
 upstream = https://github.com/Aleph-Alpha/aleph-alpha-inference
 scope = the kolibri1 (Kolibri1ForCausalLM) architecture only: 50-layer hybrid sliding/full attention (4:1, window 513), MoE 384 experts x 6 active + shared expert, hidden 2560, vocab 128000, 262k (extendable 1M) context, English-German; includes the kolibri1 reasoning/tool-call parsers and the chat template
 pin = 049a6a7bd240
+pin_label = PyPI v1.0.0 (049a6a7bd240)
 pinned_on = 2026-10-03
 gateable = no
+evidence = #3396
 ```
 
 ## Gateability
