@@ -124,6 +124,12 @@ vllm_cpp_add_test(test_model_registry vllm/models/test_model_registry.cpp)
 # MODEL-TEXT-mimo-v2 W1 gate (ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
 # config parses, KV-cache spec builds, model is discoverable.
 vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
+# MODEL-TEXT-kolibri-1 W1 gate: config parse + registry + KV-cache spec +
+# FP8-block loader on a synthetic checkpoint + the REAL-index manifest
+# (kolibri1_manifest.inc, captured by scripts/gen-kolibri1-manifest.py).
+vllm_cpp_add_test(test_kolibri1 vllm/models/test_kolibri1.cpp)
+# kolibri1_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
+target_include_directories(test_kolibri1 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
 target_include_directories(test_mimov2_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)

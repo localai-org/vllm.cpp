@@ -851,6 +851,12 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/mimo_v2_registry.cpp
   src/vllm/model_executor/models/mimo_v2_weights.cpp
   src/vllm/model_executor/models/mimo_v2.cpp
+  # Kolibri-1 (MODEL-TEXT-kolibri-1) is a NEW architecture TU pair following
+  # the mimo_v2 seam: registry + weights. W1 only: config descent, the
+  # two-group KV-cache spec, and the FP8-block weight loader; the CPU
+  # forward refuses by name until its wave.
+  src/vllm/model_executor/models/kolibri1_registry.cpp
+  src/vllm/model_executor/models/kolibri1_weights.cpp
   src/vllm/model_executor/models/qwen4_exp_ple.cpp
   src/vllm/model_executor/models/qwen4_exp.cpp
   src/vllm/model_executor/models/qwen4_exp_weights.cpp
