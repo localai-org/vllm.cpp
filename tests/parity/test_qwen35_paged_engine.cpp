@@ -566,9 +566,10 @@ void RunGate(const std::string& golden_subdir, const char* label,
 // byte-identity mechanism at vehicle scale) and REQUIREs the byte-identical
 // token stream, reporting the device trace demand per run.
 //
-// Opt-in by design: the lever is default OFF (the default-config flip is a
-// recorded NEEDS_DECISION), so without VT_TT_KEEPQUANT_INT8DOT this gate
-// skips loudly and the default vehicle battery above stays the W4a invariant.
+// Opt-out only: the lever is the default ON since the flip
+// (tenstorrent-keepquant-int8dot-default), so this gate runs on the default
+// configuration; an explicit VT_TT_KEEPQUANT_INT8DOT=0 opts out to the W4a
+// grouped arm and this gate skips loudly.
 constexpr int32_t kLaneBandMnats = 500;  // the row's ratified starting band
 
 void RunLaneGate(const std::string& golden_subdir, const char* label,
@@ -835,16 +836,16 @@ TEST_CASE("qwen3.8-27B GGUF Q4_K_M paged-engine greedy near-tie gate (Tenstorren
           /*keep_quant=*/true);
 }
 
-// KEEPQUANT W4c (issue #3079): the int8-dot lane's e2e battery — lever
-// opt-in, llama.cpp-b10451-denominated, red-first on the missing pair.
+// KEEPQUANT W4c (issue #3079): the int8-dot lane's e2e battery. The default
+// flipped ON (tenstorrent-keepquant-int8dot-default), so unset runs it; an
+// explicit `=0` opt-out keeps the W4a default-config vehicle battery.
 TEST_CASE("qwen3.5-0.8B GGUF Q4_K_M int8-dot lane e2e battery (Tenstorrent, lever opt-in)") {
   const char* lever = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
-  if (lever == nullptr || lever[0] == '\0' || std::string_view(lever) == "0") {
-    MESSAGE("SKIPPED: set VT_TT_KEEPQUANT_INT8DOT=1 — the int8-dot lane is "
-            "default OFF (the default-config flip is a recorded "
-            "NEEDS_DECISION); the default vehicle battery stays the W4a "
-            "16/16 invariant and this battery runs only as the documented "
-            "opt-in configuration");
+  if (lever != nullptr && lever[0] != '\0' && std::string_view(lever) == "0") {
+    MESSAGE("SKIPPED: VT_TT_KEEPQUANT_INT8DOT=0 opts out to the W4a grouped "
+            "arm — the int8-dot lane is the default since the flip "
+            "(tenstorrent-keepquant-int8dot-default); this battery runs on "
+            "the default configuration or with =1");
     return;
   }
   const char* gguf = std::getenv("VLLM_CPP_QWEN35_Q4KM_GGUF");

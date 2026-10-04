@@ -933,14 +933,21 @@ void MatmulBTQuantKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b
   // vt::cpu::BlockVecDot by the red-first sweep. One captured launch replaces
   // the per-chunk E=1 chain (the capture-demand gate this row owes).
   //
-  // LANDING DECISION: the lever lands OP-LEVEL and DEFAULT OFF — the e2e
-  // anchor band (<= 500 mnat, spec ## W4b) fails on the quantized domain's
-  // one non-tie flip (vehicle p5 tok7, 1125 mnats; determinism-proven by
-  // byte-identical capture dumps x2), so the production vehicle keeps the W4a
-  // path this wave. With VT_TT_KEEPQUANT_INT8DOT unset or "0" the f32-out
-  // dense arm falls through to the W4a E=1 grouped arm below, which served
-  // exactly these calls before W4b; the env opts the lever in, the op suite
-  // opts in explicitly, and e2e reach is owed (row spec ## Owed + follow-up).
+  // LANDING DECISION (W4b-FLIP, spec tenstorrent-keepquant-int8dot-default):
+  // the lever is OP-LEVEL and DEFAULT ON. The original default-off rationale
+  // (the e2e anchor band failing at 1125 mnats against the llama.cpp b10451
+  // INCREMENTAL greedy) is invalidated: that denominator disagrees with the
+  // pin's own batch decode at identical causal positions. Re-adjudicated
+  // against the batch decode at the advanced pin 11fe0215 on the live 27B
+  // arm, both arms are in-band (16/16 prompts; `=1` max 97.2, `=0` max
+  // 144.1 mnats vs the 500 band) and the lever cuts TPOT 4.69x
+  // (docs/bench-evidence/tt-int8dot-band-16p-20261004.md). With
+  // VT_TT_KEEPQUANT_INT8DOT unset or empty the f32-out dense arm serves the
+  // int8-dot kernel; `=0` falls through to the W4a E=1 grouped arm below,
+  // which served exactly these calls before W4b — the same-binary opt-out
+  // (the rollback). Owed: the 64-prompt band width (blocked on the GDN
+  // state-slot churn engine-fatal, ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W),
+  // gate 2 siblings, and the gate-4 `=0` opt-out identity on the live arm.
   //
   // A BF16-OUT call keeps the W4a E=1 grouped arm: the int8-dot kernel
   // computes f32 cells only, and committing its f32 dev_out into a bf16
@@ -990,9 +997,15 @@ void MatmulBTQuantKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b
     MatmulBTQuantInt8DotKernel(q, out, a, b);
     return;
   }
-  if (const char* int8dot_env = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
-      int8dot_env != nullptr && int8dot_env[0] != '\0' &&
-      std::strcmp(int8dot_env, "0") != 0) {
+  // W4b-FLIP: the int8-dot arm is the DEFAULT for the remaining encodings.
+  // Unset or empty keeps it on; "0" opts back out to the W4a grouped
+  // f32-exact arm below (the same-binary rollback). Any other non-empty
+  // value is on, matching the original parse's "anything but 0" discipline.
+  const char* const int8dot_env = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
+  const bool int8dot_optout = int8dot_env != nullptr &&
+                              int8dot_env[0] != '\0' &&
+                              std::strcmp(int8dot_env, "0") == 0;
+  if (!int8dot_optout) {
     MatmulBTQuantInt8DotKernel(q, out, a, b);
     return;
   }

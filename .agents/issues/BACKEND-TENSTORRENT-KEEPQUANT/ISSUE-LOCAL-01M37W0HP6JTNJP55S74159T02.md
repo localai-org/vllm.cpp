@@ -41,3 +41,15 @@ The W4b lever stayed default-off (#3031) because its e2e lane failed the 500-mna
   (`ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`). VERDICT: gate 1 PASSES, the
   flip is RECOMMENDED as its own authorized change; this issue stays OPEN
   for the remaining gates (siblings, `=0` opt-out identity, flip lands).
+- 2026-10-04, later still (`row/int8dot-default-flip`): the operator
+  AUTHORIZED the flip on the gate-1 band evidence (gate 1 PASSED at the
+  advanced pin `11fe0215`; the spec's stop conditions addressed gates that
+  could not execute, and gate 1 now executes). The dispatch default in
+  `src/vt/tenstorrent/tenstorrent_keepquant.cpp` is FLIPPED: unset/empty =
+  INT8DOT on, `=0` = the W4a grouped dequant opt-out. Docs updated
+  (`docs/ENVIRONMENT.md`, `docs/BUILD.md`); spec `## Now` marks FLIPPED.
+  Still OWED and tracked: the 64-prompt band width (BLOCKED on
+  `ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`, the multi-wave GDN state-slot
+  churn engine-fatal), spec gate 2 (sibling keep-quant models on the live
+  arm), and spec gate 4's `=0` opt-out identity on the live arm. Issue stays
+  OPEN for those gates.

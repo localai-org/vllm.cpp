@@ -6525,15 +6525,16 @@ TEST_CASE("kTENSTORRENT kMatmulBTQuant Q4_K via vt::MatmulBT matches the decode-
 // takes today.
 TEST_CASE("kTENSTORRENT kMatmulBTQuant matches the CPU integer vec_dot bit-exactly across the registered set (int8-dot sweep)") {
   // W4b landing decision: the lever is OP-LEVEL and DEFAULT OFF. On default
-  // this f32-out dispatch serves the W4a grouped arm (BF16 domain), and this
-  // test's oracle is the CPU integer vec_dot that arm does not compute — so
-  // skip loudly instead of redding on the wrong arm; run under
-  // VT_TT_KEEPQUANT_INT8DOT=1.
+  // this f32-out dispatch serves the W4a grouped arm (BF16 domain) when
+  // explicitly opted out (`=0`), and this test's oracle is the CPU integer
+  // vec_dot that arm does not compute — so skip loudly instead of redding on
+  // the wrong arm; run under VT_TT_KEEPQUANT_INT8DOT=1 or unset (the default
+  // since the flip), anything but an explicit `=0`.
   if (const char* lever = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
-      lever == nullptr || lever[0] == '\0' || std::strcmp(lever, "0") == 0) {
-    MESSAGE("SKIPPED: set VT_TT_KEEPQUANT_INT8DOT=1 — this sweep asserts the "
-            "int8-dot lever (bit-exact vs the CPU integer vec_dot); the "
-            "default dispatch is the W4a grouped arm");
+      lever != nullptr && lever[0] != '\0' && std::strcmp(lever, "0") == 0) {
+    MESSAGE("SKIPPED: VT_TT_KEEPQUANT_INT8DOT=0 opts out to the W4a grouped "
+            "arm — this sweep asserts the int8-dot lever (bit-exact vs the "
+            "CPU integer vec_dot); unset (the default) or =1 selects it");
     return;
   }
   ::setenv("VT_TT_KEEPQUANT_INT8DOT", "1", 1);  // canonical opt-in; the dispatch reads the env live per call
@@ -9745,14 +9746,15 @@ TEST_CASE("kTENSTORRENT E=1 grouped keep-quant capture survives the 50 MiB trace
 // class), and the trace region fit.
 TEST_CASE("kTENSTORRENT E=1 int8-dot keep-quant capture survives the 50 MiB trace region (F32-out dispatch)") {
   // W4b landing decision: the lever is OP-LEVEL and DEFAULT OFF. On default
-  // this f32-out dispatch serves the W4a grouped arm, so a capture run here
-  // would capture the wrong arm and prove nothing about the lever — skip
-  // loudly; run under VT_TT_KEEPQUANT_INT8DOT=1.
+  // this f32-out dispatch serves the W4a grouped arm when explicitly opted
+  // out (`=0`), so a capture run here would capture the wrong arm and prove
+  // nothing about the lever — skip loudly; run under VT_TT_KEEPQUANT_INT8DOT=1
+  // (the default since the flip) or anything but an explicit `=0`.
   if (const char* lever = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
-      lever == nullptr || lever[0] == '\0' || std::strcmp(lever, "0") == 0) {
-    MESSAGE("SKIPPED: set VT_TT_KEEPQUANT_INT8DOT=1 — this capture asserts the "
-            "int8-dot lever through the F32-out dispatch; the default "
-            "dispatch is the W4a grouped arm");
+      lever != nullptr && lever[0] != '\0' && std::strcmp(lever, "0") == 0) {
+    MESSAGE("SKIPPED: VT_TT_KEEPQUANT_INT8DOT=0 opts out to the W4a grouped "
+            "arm — this capture asserts the int8-dot lever through the "
+            "F32-out dispatch; unset (the default) or =1 selects int8-dot");
     return;
   }
   ::setenv("VT_TT_KEEPQUANT_INT8DOT", "1", 1);  // canonical opt-in; the dispatch reads the env live per call
@@ -9916,12 +9918,14 @@ TEST_CASE("keepquant int8-dot: in-kernel row0/rowc derivation equals the per-cor
 // test is its red-first lock (RED on the pre-cast tree: the replay output
 // word-halves against the eager reference).
 TEST_CASE("kTENSTORRENT E=1 int8-dot keep-quant capture survives the 50 MiB trace region (BF16-out dispatch)") {
-  // Same lever gate as the F32-out sibling: on default the bf16-out
-  // dispatch serves the W4a grouped arm and this test would prove nothing.
+  // Same lever gate as the F32-out sibling: with an explicit `=0` opt-out
+  // the bf16-out dispatch serves the W4a grouped arm and this test would
+  // prove nothing. Unset (the default since the flip) or =1 selects int8-dot.
   if (const char* lever = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
-      lever == nullptr || lever[0] == '\0' || std::strcmp(lever, "0") == 0) {
-    MESSAGE("SKIPPED: set VT_TT_KEEPQUANT_INT8DOT=1 — this capture asserts the "
-            "int8-dot lever through the BF16-out dispatch");
+      lever != nullptr && lever[0] != '\0' && std::strcmp(lever, "0") == 0) {
+    MESSAGE("SKIPPED: VT_TT_KEEPQUANT_INT8DOT=0 opts out to the W4a grouped "
+            "arm — this capture asserts the int8-dot lever through the "
+            "BF16-out dispatch");
     return;
   }
   ::setenv("VT_TT_KEEPQUANT_INT8DOT", "1", 1);
@@ -10166,7 +10170,7 @@ TEST_CASE("kTENSTORRENT keep-quant dense matmul packed-vs-int8dot microbench (op
           // is included and identical for both arms.
           auto time_arm = [&](Tensor& o_t, void* mem_o, bool lever_on) -> double {
             if (lever_on) ::setenv("VT_TT_KEEPQUANT_INT8DOT", "1", 1);
-            else ::unsetenv("VT_TT_KEEPQUANT_INT8DOT");
+            else ::setenv("VT_TT_KEEPQUANT_INT8DOT", "0", 1);
             for (int i = 0; i < kWarm; ++i) vt::MatmulBT(q, o_t, a_t, b_t);
             uint32_t probe = 0;
             backend.Copy(q, &probe, mem_o, sizeof(probe));  // drain the warmup
@@ -10905,15 +10909,17 @@ TEST_CASE("kTENSTORRENT keep-quant decode planes return to the allocator (#3042)
   REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuant, vt::DeviceType::kTENSTORRENT));
 
   // The reclaim path this wave adds runs in EAGER mode only; the int8-dot
-  // env would route the f32-out dense arm away from the chunk decode, and
-  // the alloc trace would spam stderr behind the numbers under test.
+  // arm would route the f32-out dense arm away from the chunk decode, and
+  // the alloc trace would spam stderr behind the numbers under test. The
+  // default flipped to ON (tenstorrent-keepquant-int8dot-default), so the
+  // chunk decode is reached with the explicit `=0` opt-out, not unset.
   const char* const trace_prev = std::getenv("VT_TT_ALLOC_TRACE");
   const bool trace_had = trace_prev != nullptr;
   const std::string trace_saved = trace_had ? std::string(trace_prev) : std::string();
   const char* const int8dot_prev = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
   const bool int8dot_had = int8dot_prev != nullptr;
   const std::string int8dot_saved = int8dot_had ? std::string(int8dot_prev) : std::string();
-  ::unsetenv("VT_TT_KEEPQUANT_INT8DOT");
+  ::setenv("VT_TT_KEEPQUANT_INT8DOT", "0", 1);
   ::unsetenv("VT_TT_ALLOC_TRACE");
 
   Backend& backend = *vt::TryGetBackend(DeviceType::kTENSTORRENT);
@@ -11054,15 +11060,17 @@ TEST_CASE("kTENSTORRENT single-chunk keep-quant decode keeps the word shadow res
   REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuant, vt::DeviceType::kTENSTORRENT));
 
   // The guard under test lives in the W4a chunk decode, which the f32-out
-  // dense arm reaches only with the int8-dot env unset; the alloc trace
-  // would spam stderr behind the numbers under test.
+  // dense arm reaches only with the int8-dot arm opted OUT (`=0`); since the
+  // default flipped ON (tenstorrent-keepquant-int8dot-default), unset no
+  // longer selects the chunk decode. The alloc trace would spam stderr
+  // behind the numbers under test.
   const char* const trace_prev = std::getenv("VT_TT_ALLOC_TRACE");
   const bool trace_had = trace_prev != nullptr;
   const std::string trace_saved = trace_had ? std::string(trace_prev) : std::string();
   const char* const int8dot_prev = std::getenv("VT_TT_KEEPQUANT_INT8DOT");
   const bool int8dot_had = int8dot_prev != nullptr;
   const std::string int8dot_saved = int8dot_had ? std::string(int8dot_prev) : std::string();
-  ::unsetenv("VT_TT_KEEPQUANT_INT8DOT");
+  ::setenv("VT_TT_KEEPQUANT_INT8DOT", "0", 1);
   ::unsetenv("VT_TT_ALLOC_TRACE");
 
   Backend& backend = *vt::TryGetBackend(DeviceType::kTENSTORRENT);

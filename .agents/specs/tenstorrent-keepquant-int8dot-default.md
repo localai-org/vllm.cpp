@@ -136,11 +136,35 @@ default stays OFF. The 4.5x default-path lever remains real and opt-in;
 what is owed is a working oracle denominator for this artifact, the
 sibling gate and the opt-out identity on the live arm.
 
+## Flip landed (2026-10-04, `row/int8dot-default-flip`)
+
+The operator authorized the flip on the gate-1 band evidence above. The
+dispatch default in `src/vt/tenstorrent/tenstorrent_keepquant.cpp` is
+**FLIPPED to ON**: unset or empty keeps the int8-dot arm; `=0` opts out to
+the W4a grouped f32-exact arm (same parsing discipline as before — only the
+exact string `0` opts out, everything else is on). Doc surfaces updated in
+the same change: `docs/ENVIRONMENT.md` (new `VT_TT_KEEPQUANT_INT8DOT` row,
+default `1`), `docs/BUILD.md` (the opt-in smoke-run text and the example
+command line now read as default-on / `=0` opt-out).
+
+Owed, tracked on the owning issue
+(`ISSUE-LOCAL-01M37W0HP6JTNJP55S74159T02`):
+
+- The 64-prompt band width — BLOCKED on
+  `ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W` (the multi-wave GDN state-slot
+  churn engine-fatal kills c2 legs); 16 prompts is the documented minimum
+  the band gate accepts.
+- Gate 2: sibling keep-quant models on the live arm.
+- Gate 4: the `=0` opt-out identity on the live arm.
+- No device leg is owed for the flip itself: the band evidence is this
+  branch's own commits (`docs/bench-evidence/tt-int8dot-band-16p-20261004.md`).
+
 ## Now
 
-State: GATE-1 PASSED (2026-10-04), flip recommended, not yet landed.
+State: FLIPPED (2026-10-04). Default ON; gates 2 and 4 and the 64-prompt
+width are owed (the width blocked on the slot-churn fatal).
 
-The llama.cpp pin advanced `b10451` → `11fe0215`
+Band evidence backing the flip: the pin advance `b10451` → `11fe0215`
 ([`.agents/oracles/llama-cpp.md`](../../.agents/oracles/llama-cpp.md), evidence
 [oracle-llamacpp-11fe0215-gateable-20261003.md](../../docs/bench-evidence/oracle-llamacpp-11fe0215-gateable-20261003.md)):
 the new pin loads the unsloth 27B Q4_K_M artifact `b10451` refuses, so gate
@@ -152,8 +176,3 @@ arm-pair divergence is a single-position near-tie the band prices. Full
 evidence:
 [tt-int8dot-band-16p-20261004.md](../../docs/bench-evidence/tt-int8dot-band-16p-20261004.md).
 TPOT 4.69x at c1 reproduces the lever.
-
-Remaining before the flip lands: the 64-prompt width (blocked on the
-slot-churn bug), gate 2 (siblings on the live arm), and the gate-4 `=0`
-opt-out identity on the live arm. The flip itself is a separate authorized
-change.

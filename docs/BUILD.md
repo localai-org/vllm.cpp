@@ -151,14 +151,15 @@ against this engine's capture-disabled path. It does not compare reference engin
 
 Qwen3.8-27B and Qwen3.5-0.8B Q4_K_M completed two prompts each on a Blackhole
 P150. These runs use the opt-in int8-dot path, which computes from compressed
-weights. Set `VT_TT_KEEPQUANT_INT8DOT=1` to select it. An unset, empty, or `0`
-value leaves that path disabled.
+weights. The int8-dot path is the DEFAULT; it computes from compressed
+weights. Set `VT_TT_KEEPQUANT_INT8DOT=0` to opt out to the legacy grouped
+dequant path. Unset or empty keeps the int8-dot default on.
 
 After configuring the TT-Metal runtime environment, run this smoke workload
 with a local checkpoint:
 
 ```sh
-VT_TT_KEEPQUANT_INT8DOT=1 build-tenstorrent/examples/vllm-bench \
+build-tenstorrent/examples/vllm-bench \
   --model /path/to/Qwen3.8-27B-Q4_K_M.gguf \
   --num-prompts 2 --input-len 128 --output-len 32 --concurrency 2 \
   --num-blocks 64 --max-num-batched-tokens 64 --seed 0
