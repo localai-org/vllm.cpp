@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-23
-Updated: 2026-09-23
+Updated: 2026-10-04
 Closed: -
 
 ## Problem
@@ -17,3 +17,16 @@ The W4b lever stayed default-off (#3031) because its e2e lane failed the 500-mna
 ## Resolution
 
 -
+
+- 2026-10-04 (`row/int8dot-default-flip`): gates re-run on the LIVE 27B arm
+  after wave 3 (evidence `docs/bench-evidence/tt-int8dot-flip-live-gates-20261003.md`,
+  spec section "Live-arm re-run"). c1 arms token-IDENTICAL (64/64 ids) and
+  the c1 A/B reads 4.50x (31,277 vs 6,957 ms TPOT); the c2 arm-pair
+  divergence is within-arm run-to-run nondeterminism (a c2 `=0` re-run
+  reproduced the `=1` stream byte-for-byte), not a lever effect. The flip
+  stays blocked: the pinned llama.cpp b10451 REFUSES the unsloth Q4_K_M
+  artifact (`missing tensor 'blk.64.ssm_conv1d.weight'`; nextn KV override
+  inert), so the 500-mnat teacher-forced band of spec gate 1 has no
+  denominator for this checkpoint; sibling gate and `=0` opt-out identity
+  are re-owed on the live arm. VERDICT: DONT-FLIP, lever stays opt-in,
+  issue stays OPEN pending a working oracle denominator for this artifact.
