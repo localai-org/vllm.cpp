@@ -749,6 +749,9 @@ them.
   into a direct load, which UBSan flags. The fix adds
   `__attribute__((no_sanitize("alignment")))` to the function.
 
+- `ISSUE-LOCAL-01M41PGNENY6EDHWVE75EEECJA` — the `pr-size` evidence lanes
+  and the PowerShell AST stage of `check-windows-portability.py`.
+
 
 ## Outcome
 

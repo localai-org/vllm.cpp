@@ -506,12 +506,13 @@ RUNNABLE_BASELINE = frozenset({
     # section already named commands that can fail. Re-pinned in the same change
     # that moved the row, as the checker requires.
     "MODEL-TEXT-deepseek-v2-glm-moe-dsa-for-causal-lm",
-    # MODEL-DSV4-DSA-COMPOSE joined the runnable population when its spec
-    # landed (#2286): the row is scoping-only, but its `## Gates` section
-    # names commands that can fail, and this ratchet counts a row by what its
-    # Gates section can RUN rather than by whether code exists yet. Re-pinned
-    # in the same change that added the row, as the checker requires.
-    "MODEL-DSV4-DSA-COMPOSE",
+    # 2026-10-03: -MODEL-DSV4-DSA-COMPOSE leaves the runnable population.
+    # The row is no longer a gated matrix row anywhere: its record moved to
+    # .agents/completed/issue-index.md after the DeepSeek-V4 DSA composition
+    # work landed through the MODEL-MM-deepseek-v4 vision row (W3 wired the
+    # cr==4 arm end to end, d4d7e9573), superseding the scoping-only row the
+    # entry was pinned for (#2286). Removal re-pins the baseline in its own
+    # change, naming the row and the reason, as the ratchet requires.
     "ENG-POOL-BEST-FIT",
     "ENG-UPSTREAM-LTX2-PIN",
     "SERVE-REQUEST-LENGTH-GUARD",
@@ -587,6 +588,11 @@ RUNNABLE_BASELINE = frozenset({
     # suite, CPU gate, and agent-preflight.sh; the row's own sweep/e2e gates
     # are owed (spec-first).
     "BACKEND-TENSTORRENT-QWEN35",
+    # 2026-10-03: +MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2. GROWTH,
+    # re-pinned in the change that exposed it. The row became runnable at
+    # ae07db609, when its gate gained a command that can genuinely fail:
+    # scripts/mm/nano_nemotron_vl_ref.py.
+    "MODEL-MM-nano-nemotron-vl-nemotron-h-nano-vl-v2",
 })
 
 

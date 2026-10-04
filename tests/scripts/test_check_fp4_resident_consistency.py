@@ -53,30 +53,44 @@ checked_bodies = mod.checked_bodies
 # exactly one thing in it.
 GOOD = """
 Nvfp4Dev ResidentNvfp4(Dev d, const Nvfp4Weight& w) {
-  if (!w.d_packed) {
+  if (!w.packed.d_dev) {
     const size_t pb = w.packed.bytes.size();
     void* p = d.b.Alloc(pb);
     vllm::load_stats::AddDeviceUpload(pb);
     d.b.Copy(d.q, p, w.packed.bytes.data(), pb);
     Backend* bk = &d.b;
-    w.d_packed = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
-    w.packed.d_dev = w.d_packed;
+    w.packed.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
     AdoptDeviceBytesAsHost(d.b, w.packed);
   }
-  if (!w.d_scale) {
+  if (!w.scale.d_dev) {
     const size_t sb = w.scale.bytes.size();
     void* p = d.b.Alloc(sb);
     vllm::load_stats::AddDeviceUpload(sb);
     d.b.Copy(d.q, p, w.scale.bytes.data(), sb);
     Backend* bk = &d.b;
-    w.d_scale = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
-    w.scale.d_dev = w.d_scale;
+    w.scale.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
     AdoptDeviceBytesAsHost(d.b, w.scale);
   }
   Nvfp4Dev r;
   return r;
 }
 """
+
+# The ONE release both upload copies above are released through. A miniature of
+# `Nvfp4Weight::ReleaseResident`: the two `d_dev` resets are the ownership, the two
+# guarded `ReleaseHost()` drops are the adopted host twin that holds the same block
+# alive on a host-addressable device and therefore has to go FIRST.
+GOOD_RELEASE = """
+void ReleaseResident() const {
+  if (packed.HostViewIsDeviceTwin()) packed.ReleaseHost();
+  if (scale.HostViewIsDeviceTwin()) scale.ReleaseHost();
+  packed.d_dev.reset();
+  scale.d_dev.reset();
+}
+"""
+
+PACKED_PUBLISH = "    w.packed.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });\n"
+SCALE_PUBLISH = "    w.scale.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });\n"
 
 
 def body_of(text: str) -> str:
@@ -156,10 +170,10 @@ class BufferBlockTests(unittest.TestCase):
     def test_a_missing_upload_block_is_a_violation(self) -> None:
         # A restructure the checker cannot scope must go RED and say so, never pass
         # by silently falling back to body-wide matching.
-        text = mutate("if (!w.d_scale) {", "if (true) {")
+        text = mutate("if (!w.scale.d_dev) {", "if (true) {")
         problems = body_violations(body_of(text))
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("no `if (!w.d_scale)` upload block", problems[0])
+        self.assertIn("no `if (!w.scale.d_dev)` upload block", problems[0])
 
 
 class InvariantTests(unittest.TestCase):
@@ -222,25 +236,28 @@ class InvariantTests(unittest.TestCase):
     def test_dropping_the_packed_publication_fails(self) -> None:
         # Mutation (2): `d_dev` is never published, so AdoptDeviceBytesAsHost returns
         # immediately and the adoption below it is a silent no-op.
-        text = mutate("    w.packed.d_dev = w.d_packed;\n")
+        text = mutate(PACKED_PUBLISH)
         problems = body_violations(body_of(text))
         self.assertTrue(any("`packed` does not PUBLISH" in p for p in problems), problems)
         self.assertFalse(any("`scale` does not PUBLISH" in p for p in problems), problems)
 
     def test_dropping_the_scale_publication_fails(self) -> None:
-        text = mutate("    w.scale.d_dev = w.d_scale;\n")
+        text = mutate(SCALE_PUBLISH)
         problems = body_violations(body_of(text))
         self.assertTrue(any("`scale` does not PUBLISH" in p for p in problems), problems)
 
     def test_publishing_a_null_handle_fails(self) -> None:
         # The statement is still there; it publishes nothing. AdoptDeviceBytesAsHost
         # keys on `d_dev` and returns on null, so this is the deletion in disguise.
-        text = mutate("    w.packed.d_dev = w.d_packed;\n", "    w.packed.d_dev = nullptr;\n")
+        text = mutate(PACKED_PUBLISH, "    w.packed.d_dev = nullptr;\n")
         problems = body_violations(body_of(text))
         self.assertTrue(any("`packed` does not PUBLISH" in p for p in problems), problems)
 
-    def test_publishing_the_other_buffers_handle_fails(self) -> None:
-        text = mutate("    w.scale.d_dev = w.d_scale;\n", "    w.scale.d_dev = w.d_packed;\n")
+    def test_publishing_a_bare_alias_owns_nothing_fails(self) -> None:
+        # The statement is present and non-null; it just claims some other object's
+        # device resident without owning it and without a deleter, which is the
+        # two-owner shape this row deleted, one indirection further along.
+        text = mutate(SCALE_PUBLISH, "    w.scale.d_dev = w.packed.d_dev;\n")
         problems = body_violations(body_of(text))
         self.assertTrue(any("`scale` does not PUBLISH" in p for p in problems), problems)
 
@@ -272,8 +289,8 @@ class InvariantTests(unittest.TestCase):
         # Mutation (4): the ORDERING. Publishing d_dev after the adopt call leaves the
         # adoption looking at a null handle — present, and useless.
         text = mutate(
-            "    w.packed.d_dev = w.d_packed;\n    AdoptDeviceBytesAsHost(d.b, w.packed);\n",
-            "    AdoptDeviceBytesAsHost(d.b, w.packed);\n    w.packed.d_dev = w.d_packed;\n",
+            PACKED_PUBLISH + "    AdoptDeviceBytesAsHost(d.b, w.packed);\n",
+            "    AdoptDeviceBytesAsHost(d.b, w.packed);\n" + PACKED_PUBLISH,
         )
         problems = body_violations(body_of(text))
         self.assertTrue(any("publishes `d_dev` AFTER" in p for p in problems), problems)
@@ -288,13 +305,11 @@ class InvariantTests(unittest.TestCase):
         text = mutate(
             "    d.b.Copy(d.q, p, w.packed.bytes.data(), pb);\n"
             "    Backend* bk = &d.b;\n"
-            "    w.d_packed = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });\n"
-            "    w.packed.d_dev = w.d_packed;\n"
-            "    AdoptDeviceBytesAsHost(d.b, w.packed);\n",
+            + PACKED_PUBLISH
+            + "    AdoptDeviceBytesAsHost(d.b, w.packed);\n",
             "    Backend* bk = &d.b;\n"
-            "    w.d_packed = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });\n"
-            "    w.packed.d_dev = w.d_packed;\n"
-            "    AdoptDeviceBytesAsHost(d.b, w.packed);\n"
+            + PACKED_PUBLISH
+            + "    AdoptDeviceBytesAsHost(d.b, w.packed);\n"
             "    d.b.Copy(d.q, p, w.packed.bytes.data(), pb);\n",
         )
         problems = body_violations(body_of(text))
@@ -310,8 +325,8 @@ class InvariantTests(unittest.TestCase):
         for line in (
             "    vllm::load_stats::AddDeviceUpload(pb);\n",
             "    vllm::load_stats::AddDeviceUpload(sb);\n",
-            "    w.packed.d_dev = w.d_packed;\n",
-            "    w.scale.d_dev = w.d_scale;\n",
+            PACKED_PUBLISH,
+            SCALE_PUBLISH,
             "    AdoptDeviceBytesAsHost(d.b, w.packed);\n",
             "    AdoptDeviceBytesAsHost(d.b, w.scale);\n",
         ):
@@ -374,17 +389,11 @@ class DisguisedDeletionTests(unittest.TestCase):
         self.assertFalse(any("`packed`'s host->device upload is NOT counted" in p for p in problems), problems)
 
     def test_a_commented_publication_is_not_a_pass(self) -> None:
-        text = mutate(
-            "    w.packed.d_dev = w.d_packed;\n",
-            "    // w.packed.d_dev = w.d_packed;\n",
-        )
+        text = mutate(PACKED_PUBLISH, "    // " + PACKED_PUBLISH.strip() + "\n")
         self.assertTrue(any("`packed` does not PUBLISH" in p for p in body_violations(body_of(text))))
 
     def test_an_if_0_publication_is_not_a_pass(self) -> None:
-        text = mutate(
-            "    w.scale.d_dev = w.d_scale;\n",
-            "#if 0\n    w.scale.d_dev = w.d_scale;\n#endif\n",
-        )
+        text = mutate(SCALE_PUBLISH, "#if 0\n" + SCALE_PUBLISH + "#endif\n")
         self.assertTrue(any("`scale` does not PUBLISH" in p for p in body_violations(body_of(text))))
 
     def test_a_commented_upload_copy_is_not_a_pass(self) -> None:
@@ -402,7 +411,7 @@ class DisguisedDeletionTests(unittest.TestCase):
         text = mutate(
             "    vllm::load_stats::AddDeviceUpload(pb);\n",
             "    // ENG-LOAD-DIRECT-UPLOAD (issue #150): account the move, publish\n"
-            "    // the allocation on the OwnedTensor (w.packed.d_dev = w.d_packed),\n"
+            "    // the allocation on the OwnedTensor (w.packed.d_dev = shared_ptr),\n"
             "    /* then AdoptDeviceBytesAsHost(d.b, w.packed) releases the pages. */\n"
             "    vllm::load_stats::AddDeviceUpload(pb);\n",
         )
@@ -439,6 +448,95 @@ class DisguisedDeletionTests(unittest.TestCase):
         self.assertIn("no `ResidentNvfp4", problems[0])
 
 
+class ReleaseTests(unittest.TestCase):
+    """Clause (g): the one release, and the ordering that makes it a release.
+
+    Pre-fix, the repack builders reset ONLY the type-specific handle, so the
+    surviving `d_dev` alias kept a full packed+scale device copy for the process
+    lifetime. These cases pin the clause that sees that shape and each half of its
+    repair, on a miniature and on the REAL header both upload copies release
+    through."""
+
+    def test_the_real_release_shape_passes(self) -> None:
+        self.assertEqual(mod.release_violations(GOOD_RELEASE, "mini"), [])
+
+    def test_dropping_the_packed_reset_fails(self) -> None:
+        text = mutate("  packed.d_dev.reset();\n", "", GOOD_RELEASE)
+        problems = mod.release_violations(text, "mini")
+        self.assertTrue(any("`packed.d_dev` is never reset" in p for p in problems), problems)
+        self.assertFalse(any("`scale.d_dev` is never reset" in p for p in problems), problems)
+
+    def test_dropping_the_scale_reset_fails(self) -> None:
+        text = mutate("  scale.d_dev.reset();\n", "", GOOD_RELEASE)
+        problems = mod.release_violations(text, "mini")
+        self.assertTrue(any("`scale.d_dev` is never reset" in p for p in problems), problems)
+
+    def test_dropping_the_packed_twin_drop_fails(self) -> None:
+        text = mutate(
+            "  if (packed.HostViewIsDeviceTwin()) packed.ReleaseHost();\n", "", GOOD_RELEASE
+        )
+        problems = mod.release_violations(text, "mini")
+        self.assertTrue(any("`packed`'s adopted host twin is never dropped" in p for p in problems), problems)
+
+    def test_dropping_the_scale_twin_drop_fails(self) -> None:
+        text = mutate(
+            "  if (scale.HostViewIsDeviceTwin()) scale.ReleaseHost();\n", "", GOOD_RELEASE
+        )
+        problems = mod.release_violations(text, "mini")
+        self.assertTrue(any("`scale`'s adopted host twin is never dropped" in p for p in problems), problems)
+
+    def test_dropping_the_twin_after_the_reset_fails(self) -> None:
+        # The ordering the release depends on: the adopted view holds the block, so
+        # a `d_dev` reset first frees nothing and the drop below touches a view
+        # whose owner is gone.
+        text = mutate(
+            "  if (scale.HostViewIsDeviceTwin()) scale.ReleaseHost();\n", "", GOOD_RELEASE
+        )
+        text = mutate(
+            "  scale.d_dev.reset();\n",
+            "  scale.d_dev.reset();\n  if (scale.HostViewIsDeviceTwin()) scale.ReleaseHost();\n",
+            text,
+        )
+        problems = mod.release_violations(text, "mini")
+        self.assertTrue(any("dropped AFTER its `d_dev` reset" in p for p in problems), problems)
+
+    def test_a_missing_release_definition_is_a_violation_not_a_pass(self) -> None:
+        problems = mod.release_violations("int main() { return 0; }", "some/file.h")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("no `void ReleaseResident", problems[0])
+
+    def test_the_LIVE_release_resets_both_dev_slots(self) -> None:
+        text = (ROOT / mod.RELEASE_SOURCE).read_text(encoding="utf-8", errors="ignore")
+        self.assertIsNotNone(mod.release_body(text), "ReleaseResident() is unreachable")
+        self.assertEqual(mod.release_violations(text, str(mod.RELEASE_SOURCE)), [])
+
+    def test_LIVE_scale_reset_dropped_goes_red(self) -> None:
+        # THE LEAK, against the real header: the pre-fix builders dropped only the
+        # type-specific handle, so this is the shape a regression takes.
+        rel = mod.RELEASE_SOURCE
+        text = (ROOT / rel).read_text(encoding="utf-8", errors="ignore")
+        anchor = "    scale.d_dev.reset();\n"
+        self.assertEqual(text.count(anchor), 1, anchor)
+        problems = mod.release_violations(text.replace(anchor, "", 1), str(rel))
+        self.assertTrue(any("`scale.d_dev` is never reset" in p for p in problems), problems)
+
+    def test_LIVE_packed_reset_dropped_goes_red(self) -> None:
+        rel = mod.RELEASE_SOURCE
+        text = (ROOT / rel).read_text(encoding="utf-8", errors="ignore")
+        anchor = "    packed.d_dev.reset();\n"
+        self.assertEqual(text.count(anchor), 1, anchor)
+        problems = mod.release_violations(text.replace(anchor, "", 1), str(rel))
+        self.assertTrue(any("`packed.d_dev` is never reset" in p for p in problems), problems)
+
+    def test_LIVE_scale_twin_dropped_goes_red(self) -> None:
+        rel = mod.RELEASE_SOURCE
+        text = (ROOT / rel).read_text(encoding="utf-8", errors="ignore")
+        anchor = "    if (scale.HostViewIsDeviceTwin()) scale.ReleaseHost();\n"
+        self.assertEqual(text.count(anchor), 1, anchor)
+        problems = mod.release_violations(text.replace(anchor, "", 1), str(rel))
+        self.assertTrue(any("`scale`'s adopted host twin is never dropped" in p for p in problems), problems)
+
+
 class LiveTreeTests(unittest.TestCase):
     def test_the_checker_passes_on_the_current_tree(self) -> None:
         r = subprocess.run(
@@ -446,10 +544,11 @@ class LiveTreeTests(unittest.TestCase):
         )
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
-    def test_both_copies_are_actually_reached(self) -> None:
+    def test_both_copies_and_the_release_are_actually_reached(self) -> None:
         # The gate is worthless if SOURCES drifts off the real files: it would print
-        # OK over nothing. Assert both named files really contain a checked body,
-        # with both per-buffer upload blocks inside it.
+        # OK over nothing. Assert every named file really contains a checked body,
+        # with both per-buffer upload blocks inside it, and that the release source
+        # really defines the one release.
         for rel in mod.SOURCES:
             text = (ROOT / rel).read_text(encoding="utf-8", errors="ignore")
             bodies = checked_bodies(text)
@@ -457,6 +556,8 @@ class LiveTreeTests(unittest.TestCase):
             _, recv, body = bodies[0]
             for buffer in mod.BUFFERS:
                 self.assertIsNotNone(buffer_block(body, recv, buffer), f"{rel}:{buffer}")
+        release_text = (ROOT / mod.RELEASE_SOURCE).read_text(encoding="utf-8", errors="ignore")
+        self.assertIsNotNone(mod.release_body(release_text), str(mod.RELEASE_SOURCE))
 
     def test_disguised_deletions_of_the_LIVE_duplicate_go_red(self) -> None:
         # The findings against the REAL qwen3_5.cpp text, not the miniature. The
@@ -465,7 +566,7 @@ class LiveTreeTests(unittest.TestCase):
         rel = Path("src/vllm/model_executor/models/qwen3_5.cpp")
         text = (ROOT / rel).read_text(encoding="utf-8", errors="ignore")
         adopt = "    AdoptDeviceBytesAsHost(d.b, w.packed);\n"
-        publish = "    w.packed.d_dev = w.d_packed;\n"
+        publish = PACKED_PUBLISH
         for anchor, replacement in (
             (adopt, "    // AdoptDeviceBytesAsHost(d.b, w.packed);\n"),
             (adopt, "    /* AdoptDeviceBytesAsHost(d.b, w.packed); */\n"),
@@ -494,9 +595,8 @@ class LiveTreeTests(unittest.TestCase):
         anchor = (
             "    d.b.Copy(d.q, p, w.packed.bytes.data(), pb);\n"
             "    Backend* bk = &d.b;\n"
-            "    w.d_packed = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });\n"
-            "    w.packed.d_dev = w.d_packed;\n"
-            "    AdoptDeviceBytesAsHost(d.b, w.packed);\n"
+            + PACKED_PUBLISH
+            + "    AdoptDeviceBytesAsHost(d.b, w.packed);\n"
         )
         self.assertEqual(text.count(anchor), 1)
         lines = anchor.splitlines(keepends=True)

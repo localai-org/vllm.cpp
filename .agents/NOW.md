@@ -23,20 +23,12 @@ no per-row change needs to touch this file at all.
 Token-exact (or ratified distributional) vs pinned vLLM; ≥ throughput and ≤
 latency/memory on every axis, both gate models, reproduced 2–3x idle. See
 [verification](verification.md). Pin: vLLM <!--pin:commit-->`a7c23ac96d`<!--/pin--> (<!--pin:label-->0.3.0.dev267<!--/pin-->), advanced
-2026-09-26 from `e126687a9a` (pinned 2026-09-03, #2817) by sync `4f11dfc10`. The gate named below ran at that PRIOR pin (2026-09-04, job
-`7386f034-246a-4af5-9a04-f98aafffce54`, `dgx:gpu0`, 2h15m): the OPT candidate
-captured at the target is byte-identical to the committed bar --
-`IDS mismatched_positions 0 of 96`, `IDS_BYTE_EQUAL True`, `SELECTOR K=5 multi_valued_cells 0`, `TOKENGATE_VERDICT PASS`. The default
-FLASH_ATTN backend produced the tokens, so the FA-on-GB10 risk did not fire. Our
-arm's 96/96 carries over unchanged because the candidate's bytes are identical to
-the bar it already passed. The BENCHMARK baselines are still measured at
-`555967922` and still owe step 6 (#2818, `OPEN` at a 2026-09-12 read), **and the
-other four strict goldens -- 27B W4A4, 32B-NVFP4A16, 35B, Coder -- are still
-owed at the target.** The gate that passed is the OPT-125m one; it discharges
-nothing about those four. They were anchored on #2794, which closed `COMPLETED`
-on 2026-09-06, so the anchor is gone and not the obligation: it lives under
-`## Owed` in [the tokengate spec](specs/upstream-sync-headpin-tokengate.md#L569),
-unanchored by design, and whoever takes it files the issue then. Also at
+2026-09-26 from `e126687a9a` by sync `4f11dfc10`. The OPT-125m tokengate PASS
+(2026-09-04, `dgx:gpu0`, byte-identical 96/96) ran at the PRIOR pin and
+discharges nothing about the other four strict goldens -- 27B W4A4, 32B-NVFP4A16,
+35B, Coder -- still owed at the target: they live under `## Owed` in
+[the tokengate spec](specs/upstream-sync-headpin-tokengate.md#L569), and the
+benchmark baselines still owe step 6 at `555967922` (#2818). Also
 [oracles/vllm.md](oracles/vllm.md#L93).
 
 

@@ -265,24 +265,21 @@ class RatchetTests(unittest.TestCase):
         runnable = {r["id"] for r in gates.audit() if r["verdict"] == "runnable"}
         self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
 
-    def test_dsa_compose_is_runnable_for_a_REASON_not_just_by_membership(self):
+    def test_dsa_compose_left_the_gated_population_cleanly(self):
         # MODEL-DSV4-DSA-COMPOSE (#2286) entered the runnable population when its
-        # spec landed, and `RUNNABLE_BASELINE` was re-pinned in that same change
-        # as the ratchet above requires.
+        # scoping-only spec landed, credited for gates that could fail. The row
+        # has since departed the gated population entirely: its record moved to
+        # .agents/completed/issue-index.md after the DeepSeek-V4 DSA composition
+        # landed through the MODEL-MM-deepseek-v4 vision row (W3 wired the cr==4
+        # arm end to end, d4d7e9573), superseding the scoping-only row.
         #
-        # Membership alone is a weak pin: the assertion above would stay green if
-        # the row were runnable for a DIFFERENT reason, or if someone added it to
-        # the baseline by hand while its spec stopped carrying a runnable command
-        # (which would leave the exact-equality pin red for a confusing reason, or
-        # green against a stale entry). So pin the REASON.
-        #
-        # The row is scoping-only -- no product code yet -- and it is runnable
-        # purely because its `## Gates` section names commands that can fail. That
-        # is worth stating: a reader who finds a spec with no implementation in
-        # the runnable set should not conclude the ratchet is broken.
+        # Assert the departure on BOTH sides -- gone from the audit AND gone from
+        # the baseline -- because a row present in one and not the other is
+        # exactly what the exact pin exists to catch (RUNNABLE_BASELINE went
+        # red on main with precisely this disagreement until the re-pin).
         verdicts = {r["id"]: r["verdict"] for r in gates.audit()}
-        self.assertEqual(verdicts.get("MODEL-DSV4-DSA-COMPOSE"), "runnable")
-        self.assertIn("MODEL-DSV4-DSA-COMPOSE", gates.RUNNABLE_BASELINE)
+        self.assertIsNone(verdicts.get("MODEL-DSV4-DSA-COMPOSE"))
+        self.assertNotIn("MODEL-DSV4-DSA-COMPOSE", gates.RUNNABLE_BASELINE)
 
     def test_now_derived_left_the_gated_population_cleanly(self):
         # ENG-NOW-DERIVED (#374) shipped W1-W5 and reached DONE. Closure removes

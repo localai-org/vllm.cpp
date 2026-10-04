@@ -1449,36 +1449,34 @@ struct Nvfp4Dev {
 // every forward step, so subsequent calls reuse the resident copy — no per-op
 // weight staging. CUDA path only; the deleter frees through the vt Backend.
 Nvfp4Dev ResidentNvfp4(Dev d, const Nvfp4Weight& w) {
-  if (!w.d_packed) {
+  if (!w.packed.d_dev) {
     const size_t pb = w.packed.bytes.size();
     void* p = d.b.Alloc(pb);
     // ENG-LOAD-DIRECT-UPLOAD (issue #150): the 27B `LoadCtNvfp4Raw` weights
     // BORROW packed/scale from the safetensors mmap, so this is their one
     // host->device move. Account it and run the same post-upload residency step
     // every other qualifying weight gets, exactly as dense_nvfp4_gemm.h's
-    // shared ResidentNvfp4 does. Publishing the allocation on the OwnedTensor
-    // is what lets AdoptDeviceBytesAsHost run (it keys on `d_dev`); the two
-    // handles share one control block, so the buffer is freed exactly once.
+    // shared ResidentNvfp4 does. Publishing on `d_dev` is what lets
+    // `AdoptDeviceBytesAsHost` run (it keys on that slot), and it is the only
+    // owner (Nvfp4Weight::ReleaseResident).
     vllm::load_stats::AddDeviceUpload(pb);
     d.b.Copy(d.q, p, w.packed.bytes.data(), pb);
     Backend* bk = &d.b;
-    w.d_packed = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
-    w.packed.d_dev = w.d_packed;
+    w.packed.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
     AdoptDeviceBytesAsHost(d.b, w.packed);
   }
-  if (!w.d_scale) {
+  if (!w.scale.d_dev) {
     const size_t sb = w.scale.bytes.size();
     void* p = d.b.Alloc(sb);
     vllm::load_stats::AddDeviceUpload(sb);
     d.b.Copy(d.q, p, w.scale.bytes.data(), sb);
     Backend* bk = &d.b;
-    w.d_scale = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
-    w.scale.d_dev = w.d_scale;
+    w.scale.d_dev = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
     AdoptDeviceBytesAsHost(d.b, w.scale);
   }
   Nvfp4Dev r;
-  r.packed = MakeTensor(w.d_packed.get(), DType::kI8, d.q.device, {w.n, w.k / 2});
-  r.scale = MakeTensor(w.d_scale.get(), DType::kI8, d.q.device, {w.n, w.k / 16});
+  r.packed = MakeTensor(w.packed.d_dev.get(), DType::kI8, d.q.device, {w.n, w.k / 2});
+  r.scale = MakeTensor(w.scale.d_dev.get(), DType::kI8, d.q.device, {w.n, w.k / 16});
   return r;
 }
 
@@ -1497,7 +1495,7 @@ Tensor ResidentNvfp4ScaleSwizzled(Dev d, const Nvfp4Weight& w) {
   auto round_up = [](int64_t x, int64_t y) { return (x + y - 1) / y * y; };
   const int64_t Np = round_up(w.n, 128), Kp = round_up(w.k / 16, 4);
   if (!w.d_scale_sw) {
-    Nvfp4Dev dw = ResidentNvfp4(d, w);  // ensures d_scale (linear device copy)
+    Nvfp4Dev dw = ResidentNvfp4(d, w);  // ensures scale.d_dev (linear device copy)
     void* p = d.b.Alloc(static_cast<size_t>(Np * Kp));
     Backend* bk = &d.b;
     w.d_scale_sw = std::shared_ptr<void>(p, [bk](void* q) { bk->Free(q); });
@@ -2318,7 +2316,7 @@ Tensor ResidentDeviceAlpha(Dev d, const float* host_alpha,
 
 Tensor ResidentNvfp4Alpha(Dev d, const Nvfp4Weight& w) {
   VT_CHECK(w.IsTrueW4A4(), "qwen3_5 NVFP4 device alpha: true-W4A4 required");
-  VT_CHECK(w.d_packed && w.d_scale && w.d_scale_sw,
+  VT_CHECK(w.packed.d_dev && w.scale.d_dev && w.d_scale_sw,
            "qwen3_5 NVFP4 device alpha: incomplete weight resident state");
   return ResidentDeviceAlpha(d, &w.alpha, w.d_alpha,
                              "qwen3_5 NVFP4 device alpha: invalid scalar");
@@ -2951,8 +2949,7 @@ void BuildMarlinDenseResident(Dev d, const Nvfp4Weight& w, MarlinDenseResident& 
   const float g = vt::cuda::MarlinNvfp4ProcessGlobalScale(w.scale2, sf);
   d.b.Copy(d.q, mr.g, &g, sizeof(float));
   d.b.Synchronize(d.q);  // repack done -> safe to free the fp4 originals
-  w.d_packed.reset();
-  w.d_scale.reset();
+  w.ReleaseResident();
   mr.ready = true;
 }
 
@@ -3131,10 +3128,8 @@ void BuildMarlinDensePairResident(Dev d, const Nvfp4Weight& gw, const Nvfp4Weigh
   d.b.Synchronize(d.q);  // repack done -> safe to free staging + fp4 originals
   d.b.Free(tmp_w);
   d.b.Free(tmp_s);
-  gw.d_packed.reset();
-  gw.d_scale.reset();
-  uw.d_packed.reset();
-  uw.d_scale.reset();
+  gw.ReleaseResident();
+  uw.ReleaseResident();
   mr.ready = true;
 }
 
@@ -6889,12 +6884,9 @@ void BuildMoeMarlinResident(Dev d, const MoeBlockWeights& w, const HfConfig& cfg
       /*marlin_committed=*/MarlinMoeEnabled(), /*host_free_env=*/host_free_on);
   for (int e = 0; e < E; ++e) {
     const size_t se = static_cast<size_t>(e);
-    w.expert_gate_fp4[se].d_packed.reset();
-    w.expert_gate_fp4[se].d_scale.reset();
-    w.expert_up_fp4[se].d_packed.reset();
-    w.expert_up_fp4[se].d_scale.reset();
-    w.expert_down_fp4[se].d_packed.reset();
-    w.expert_down_fp4[se].d_scale.reset();
+    w.expert_gate_fp4[se].ReleaseResident();
+    w.expert_up_fp4[se].ReleaseResident();
+    w.expert_down_fp4[se].ReleaseResident();
     if (release_host) {
       w.expert_gate_fp4[se].packed.ReleaseHost();
       w.expert_gate_fp4[se].scale.ReleaseHost();
@@ -12131,9 +12123,6 @@ static bool RegionCaptureRequested() {
   }();
   return v;
 }
-// The GDN precedent's fit number (tenstorrent_capture.cpp:90).
-constexpr int64_t kRegionCaptureBudgetBytes = 50 * 1024 * 1024;
-
 // ─── Qwen3_5DenseDecodeGraph (27B dense decode CUDA-graph driver) ────────────
 // The 27B DENSE sibling of Qwen3_5DecodeGraph. Same cold→warm→replay state
 // machine, same padded-batch capture set (kDecodeGraphSizes), same persistent

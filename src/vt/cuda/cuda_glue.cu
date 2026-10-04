@@ -122,6 +122,38 @@ void CastF32KernelCuda(Queue& q, Tensor& out, const Tensor& in) {
   Check(cudaGetLastError(), "cast_f32 launch");
 }
 
+// T25: permute V heads from grouped (k*rpk+r) to tiled (r*num_k+k) order.
+// CPU sibling: cpu_ops.cpp PermuteVHeadsKernel.
+__global__ void PermuteVHeadsKernel(__nv_bfloat16* out,
+                                    const __nv_bfloat16* in, int64_t n,
+                                    int64_t value_dim, int64_t num_k,
+                                    int64_t rpk, int64_t dv) {
+  const int64_t step = static_cast<int64_t>(gridDim.x) * blockDim.x;
+  for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+       i < n; i += step) {
+    const int64_t row = i / value_dim;
+    const int64_t rem = i - row * value_dim;
+    const int64_t t = rem / dv;
+    const int64_t h = rem - t * dv;
+    const int64_t r = t / num_k;
+    const int64_t k = t - r * num_k;
+    const int64_t g = k * rpk + r;
+    out[i] = in[row * value_dim + g * dv + h];
+  }
+}
+
+void PermuteVHeadsKernelCuda(Queue& q, Tensor& out, const Tensor& in,
+                             int64_t T, int64_t num_k, int64_t rpk,
+                             int64_t dv) {
+  const int64_t value_dim = num_k * rpk * dv;
+  const int64_t n = T * value_dim;
+  if (n == 0) return;
+  PermuteVHeadsKernel<<<GridFor(n), kBlock, 0, AsStream(q)>>>(
+      out.Ptr<__nv_bfloat16>(), in.Ptr<__nv_bfloat16>(), n, value_dim, num_k,
+      rpk, dv);
+  Check(cudaGetLastError(), "permute_v_heads launch");
+}
+
 // mul_col_vec_f32: x[m,n] *= col[n]. x f32 OR bf16 [M,N] with row stride
 // row_stride (inner-contiguous rows), col always f32 [N]. Thread per logical
 // element (flat over M*N); recover (row,col-index) and apply the broadcast
@@ -468,6 +500,9 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<CastF16Fn>(&CastF16KernelCuda)));
     RegisterOp(OpId::kCastF32, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<CastF32Fn>(&CastF32KernelCuda)));
+    RegisterOp(OpId::kPermuteVHeads, DeviceType::kCUDA,
+               reinterpret_cast<void*>(
+                   static_cast<PermuteVHeadsFn>(&PermuteVHeadsKernelCuda)));
     RegisterOp(OpId::kMulColVecF32, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<MulColVecF32Fn>(&MulColVecF32KernelCuda)));
     RegisterOp(OpId::kAttnGateSplit, DeviceType::kCUDA,

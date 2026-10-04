@@ -1559,18 +1559,17 @@ static vllm_status ParseDiarizationJson(
     const char* json_str, vllm_diarization* out) {
   if (!json_str) return VLLM_ERR_RUNTIME;
   auto j = nlohmann::json::parse(json_str);
-  int n = 0;
-  if (j.contains("segments")) n = j["segments"].size();
+  const size_t n = j.contains("segments") ? j["segments"].size() : 0;
   auto* segs = static_cast<vllm_speaker_segment*>(
       std::malloc(n == 0 ? 1 : n * sizeof(vllm_speaker_segment)));
   if (segs == nullptr) return VLLM_ERR_RUNTIME;
-  for (int i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     segs[i].speaker = j["segments"][i].value("speaker", -1);
     segs[i].start = j["segments"][i].value("start", 0.0f);
     segs[i].end = j["segments"][i].value("end", 0.0f);
   }
   out->segments = segs;
-  out->n_segments = n;
+  out->n_segments = static_cast<int32_t>(n);
   return VLLM_OK;
 }
 #endif

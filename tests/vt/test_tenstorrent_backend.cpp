@@ -9407,6 +9407,129 @@ TEST_CASE("kTENSTORRENT kMatmulBTQuantGrouped decode (P=1) matches the CPU f32 q
                 bad, " of ", kN, " outputs (worst_rel=", worst_rel, ")");
 }
 // ---------------------------------------------------------------------------
+// TT-DECODE-FUSION: the fused single-program decode arm's bit-exactness
+// doctests. The spec's strategy: the unpack is exact integer work (identical
+// bits by construction), the arithmetic is TWO IEEE f32 multiplies in the
+// host's fixed order, and the zero-sign repair the chain performs by algebra
+// the kernel gets from IEEE multiply semantics — so the FUSED and CHAIN arms
+// must agree BIT-FOR-BIT. The vehicle is the grouped P=1 decode op: its f32
+// domain is decode -> typecast/to_layout -> broadcast-multiply -> sum, all
+// identical ops on both arms, so bit identity of the decode propagates to a
+// byte-identity of the op output. Tail classes per the spec: an IDLE-CORE
+// case (rows % rpc == 0, whole cores exit at rowc == 0) and a PARTIAL-LAST-
+// CORE case (rows % rpc != 0, the last active core reads/writes rowc rows).
+TEST_CASE("kTENSTORRENT fused keep-quant decode is bit-exact to the chain "
+          "(Q6_K: idle-core and partial-last-core tails)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuantGrouped,
+                           vt::DeviceType::kTENSTORRENT));
+
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  const vt::DType enc = vt::DType::kQ6_K;
+  const int64_t kElems = vt::BlockElems(enc);   // 256
+  const int64_t kBlockBytes = vt::BlockBytes(enc);  // 210
+  constexpr int64_t kNb = 2;                    // K = 512, a small decode row
+  const int64_t K = kNb * kElems;
+
+  // A packed generator with the sign-algebra edge classes IN: negative and
+  // POSITIVE d, zero-d blocks (product zero through d), and zero sc bytes
+  // (product zero through the scale) — the -0 repair the chain performs by
+  // algebra and the kernel gets from IEEE semantics must agree on exactly
+  // these, bit for bit.
+  auto make_packed = [&](int64_t rows, uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::vector<uint8_t> packed(static_cast<size_t>(rows) * kNb * kBlockBytes);
+    for (size_t b = 0; b < packed.size() / static_cast<size_t>(kBlockBytes);
+         ++b) {
+      uint8_t* p = packed.data() + b * kBlockBytes;
+      const bool zero_d = (b % 17) == 0;      // d = +0: zero product
+      const bool neg_d = (b % 3) == 0;
+      float dv = 0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f;
+      if (neg_d) dv = -dv;
+      if (zero_d) dv = 0.0f;
+      const uint16_t d_bits = vt::F32ToF16(dv);
+      for (int i = 0; i < 192; ++i)
+        p[i] = static_cast<uint8_t>(rng() & 0xFF);
+      if ((b % 13) == 0) p[192 + (b % 16)] = 0;  // a zero scale byte
+      for (int i = 192; i < 208; ++i)
+        if (p[i] == 0) p[i] = 1;  // keep only the planted zero scale
+      std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+    }
+    return packed;
+  };
+
+  // One decode of the op, with the fused arm forced on or off. The env var
+  // is set around the call and RESTORED — the fallback arm is a per-process
+  // gate, and later cases must not inherit it.
+  auto run_decode = [&](const std::vector<uint8_t>& packed, int64_t rows,
+                        bool fused) {
+    const char* want = fused ? "1" : "0";
+    ::setenv("VT_TT_KEEPQUANT_FUSED", want, 1);
+    std::vector<float> a_bf(K);
+    for (int64_t c = 0; c < K; ++c) a_bf[c] = -3.0f + 6.0f * (c % 97) / 97.0f;
+    std::vector<uint16_t> a_b16(a_bf.size());
+    for (size_t i = 0; i < a_bf.size(); ++i)
+      a_b16[i] = vt::F32ToBF16(a_bf[i]);
+    std::vector<int32_t> ids(1, 0);
+
+    void* mem_a = backend.Alloc(a_b16.size() * sizeof(uint16_t));
+    void* mem_w = backend.Alloc(packed.size());
+    void* mem_o = backend.Alloc(rows * sizeof(float));
+    void* mem_i = backend.Alloc(ids.size() * sizeof(int32_t));
+    backend.Copy(q, mem_a, a_b16.data(), a_b16.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_w, packed.data(), packed.size());
+    backend.Copy(q, mem_i, ids.data(), ids.size() * sizeof(int32_t));
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {1, K});
+    Tensor w_t = Tensor::Contiguous(mem_w, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {rows, K});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {1, rows});
+    Tensor i_t = Tensor::Contiguous(mem_i, vt::DType::kI32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0},
+                                    {1});
+    vt::MatmulBTQuantGrouped(q, o_t, a_t, w_t, i_t);
+    std::vector<float> out(static_cast<size_t>(rows), 0.0f);
+    backend.Copy(q, out.data(), mem_o, out.size() * sizeof(float));
+    backend.Free(mem_a);
+    backend.Free(mem_w);
+    backend.Free(mem_o);
+    backend.Free(mem_i);
+    ::unsetenv("VT_TT_KEEPQUANT_FUSED");
+    return out;
+  };
+
+  // rows=8: rpc=1, grid_cores-8 fully IDLE cores; rows=251: rpc=2 on a
+  // >=126-core grid, the last active core carries ONE row (the partial
+  // tail); rows=250: the idle-tail shape at rpc=2.
+  for (const int64_t rows : {int64_t{8}, int64_t{250}, int64_t{251}}) {
+    const std::vector<uint8_t> packed = make_packed(rows, 20260929u + rows);
+    CAPTURE(rows);
+    const std::vector<float> fused = run_decode(packed, rows, true);
+    const std::vector<float> chain = run_decode(packed, rows, false);
+    REQUIRE(fused.size() == chain.size());
+    int64_t bad = 0;
+    for (size_t i = 0; i < fused.size(); ++i) {
+      if (std::memcmp(&fused[i], &chain[i], sizeof(float)) != 0) {
+        if (bad < 4)
+          MESSAGE("rows=", rows, " diff n=", i, " fused=", fused[i],
+                  " chain=", chain[i]);
+        ++bad;
+      }
+    }
+    CHECK_MESSAGE(bad == 0, "fused vs chain: ", bad, " of ", fused.size(),
+                  " outputs differ at the BIT level on rows=", rows);
+  }
+}
+// ---------------------------------------------------------------------------
 // KEEPQUANT W4a wave-3a (#3030): the E=1 (dense) grouped arm becomes
 // capture-compatible and memory-bounded. Three legs:
 //   1. THE TRACE-BOUND CASE (red-first, the wave-1b falsification class):
@@ -11620,4 +11743,325 @@ TEST_CASE("kTENSTORRENT capture-scope upload refuses and the warmed capture reco
                 << " B — an upload (or its payload) rode inside the capture scope");
 
   backend.Free(mem);
+}
+
+// ─── tt-matmul-class-split: the focused MatmulBT region-record repro ────────
+// Diagnostic harness for the last unexplained trace-record class (issue
+// ISSUE-LOCAL-01M3JXEFQKSZP23PP2HWY9G0VQ). A warmed MatmulBT chain is
+// captured into ONE region; the region close (LastTraceBytes probe) is the
+// recorded-stream size attributable to OUR MatmulBT program. Shape and launch
+// count are env-driven so the delta bisect can regress bytes against one
+// factor at a time (grid rows, K, N, launches). No gate: this case reports.
+TEST_CASE("kTENSTORRENT matmul region record class split (VT_TT_MMCLASS=1)") {
+  if (std::getenv("VT_TT_MMCLASS") == nullptr) {
+    MESSAGE("SKIPPED: set VT_TT_MMCLASS=1");
+    return;
+  }
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  const int64_t kM = std::atoll(std::getenv("VT_TT_MMCLASS_ROWS") ? std::getenv("VT_TT_MMCLASS_ROWS") : "64");
+  const int64_t kK = std::atoll(std::getenv("VT_TT_MMCLASS_K") ? std::getenv("VT_TT_MMCLASS_K") : "5120");
+  const int64_t kN = std::atoll(std::getenv("VT_TT_MMCLASS_N") ? std::getenv("VT_TT_MMCLASS_N") : "5120");
+  // (the launch count is fixed at 1 for the wave-2 gate; the env-driven
+  // delta-bisect grid rows/K/N remain).
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  REQUIRE(backend.SupportsGraphCapture());
+  Queue q = backend.CreateQueue();
+
+  // One gated leg per encoding: pack a random weight, warm the DEFAULT arm
+  // eagerly, capture ONE MatmulBT launch, and return the region close. The
+  // region probe reads the device's LIVE trace-buffer total, so a region
+  // that opens while an earlier graph's trace is still resident closes with
+  // a polluted delta — each leg Synchronizes the queue after its replay to
+  // retire its trace before the next leg opens, and the FIRST leg stays the
+  // only fully clean one.
+  auto run_leg = [&](vt::DType enc, int64_t lK, int64_t lN, const char* tag) {
+    const int64_t bb = vt::BlockBytes(enc);
+    const int64_t be = vt::BlockElems(enc);
+    const int64_t kNb = lK / be;
+    std::mt19937 rng(20261001u);
+    std::vector<uint16_t> a_bf(static_cast<size_t>(kM) * lK);
+    for (auto& v : a_bf) v = vt::F32ToBF16(0.25f * static_cast<float>(rng() % 5));
+    std::vector<uint8_t> w_packed(static_cast<size_t>(lN) * kNb * bb);
+    for (size_t blk = 0; blk < w_packed.size() / static_cast<size_t>(bb); ++blk) {
+      uint8_t* p = w_packed.data() + blk * bb;
+      if (enc == vt::DType::kQ6_K) {
+        for (int i = 0; i < 208; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+        const uint16_t d_bits = vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+        std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+      } else {  // kQ4_K: d|dmin @0, scales[12] @4, qs[128] @16
+        const uint16_t d_bits = vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+        const uint16_t dmin_bits = vt::F32ToF16(0.01f * static_cast<float>(rng() % 8));
+        std::memcpy(p, &d_bits, sizeof(d_bits));
+        std::memcpy(p + 2, &dmin_bits, sizeof(dmin_bits));
+        for (int i = 4; i < 16; ++i) p[i] = static_cast<uint8_t>(0x30 + (rng() % 4));
+        for (int i = 16; i < 144; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+      }
+    }
+
+    void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+    void* mem_w = backend.Alloc(w_packed.size());
+    void* mem_o = backend.Alloc(static_cast<size_t>(kM) * lN * sizeof(float));
+    backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_w, w_packed.data(), w_packed.size());
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, lK});
+    Tensor w_t = Tensor::Contiguous(mem_w, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {lN, lK});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kM, lN});
+
+    auto capture_one_launch = [&](const char* t2) {
+      vt::MatmulBT(q, o_t, a_t, w_t);  // the eager warm pass for this arm
+      vt::BreakableGraph graph;
+      {
+        vt::GraphCaptureScope scope(backend, q, graph, vt::GraphCaptureMode::kPiecewise);
+        vt::MatmulBT(q, o_t, a_t, w_t);
+      }
+      REQUIRE(graph.captured());
+      graph.Replay(q);
+      const std::vector<int64_t>& r = graph.region_bytes();
+      REQUIRE(!r.empty());
+      std::string t(t2);
+      MESSAGE("MMCLASS ", t, " shape [", kM, ",", lK, "]x[", lK, ",", lN,
+              "] launches=1 region_close=", r.back(), " B");
+      return r.back();
+    };
+
+    const int64_t fused_bytes = capture_one_launch(tag);
+    backend.Synchronize(q);  // retire this leg's trace before the next opens
+    backend.Free(mem_a);
+    backend.Free(mem_w);
+    backend.Free(mem_o);
+    return fused_bytes;
+  };
+
+  // -- TT-DECODE-FUSION wave 3: the 27B Q4_K ffn gate/up — THE NEW GATE --
+  // This leg runs FIRST: the region probe reads the device's LIVE
+  // trace-buffer total, so the first region in the process is the only
+  // clean one, and the wave-3 gate needs its real bytes. K=5120 (hidden),
+  // N=17408 (FFN). The whole-decode fused arm needs the chunk-plane budget
+  // to admit N*K*4 = 356,515,840 B, so this leg widens
+  // VT_TT_KEEPQUANT_CHUNK_BYTES the way the 27B gate recipe does. Red-first:
+  // before the wave-3 kernel this falls to the per-chunk chain and closes
+  // its region far over the 32,768 B gate.
+  setenv("VT_TT_KEEPQUANT_CHUNK_BYTES", "1073741824", 1);
+  const int64_t q4_bytes = run_leg(vt::DType::kQ4_K, 5120, 17408, "q4k-27b-ffn");
+  unsetenv("VT_TT_KEEPQUANT_CHUNK_BYTES");
+  MESSAGE("MMCLASS q4k-27b-ffn gate: ", q4_bytes, " B");
+  CHECK_MESSAGE(q4_bytes <= 32768,
+                "the fused Q4_K MatmulBT launch recorded " << q4_bytes
+                << " B over the 32,768 B gate — Q4_K still rides the "
+                << "per-chunk decode chain");
+
+  // -- the wave-2 fused whole-decode arm (the default) — the gate --
+  // SECOND region: the probe's delta against the still-resident wave-3
+  // trace can read negative (a retired trace nets against the open), so
+  // this leg's number is informational — the wave-2 verdict's clean 23,552 B
+  // at this exact shape stands in
+  // docs/bench-evidence/tt-matmul-class-split-20261001.md. The CHECK stays
+  // the wave-2 sentence: a Q6_K launch that regressed onto the per-chunk
+  // chain records megabytes, not bytes.
+  const int64_t fused_bytes = run_leg(vt::DType::kQ6_K, kK, kN, "q6k-hidden");
+  CHECK_MESSAGE(fused_bytes <= 32768,
+                "the fused MatmulBT launch recorded " << fused_bytes
+                << " B over the 32,768 B gate (the per-chunk chain's "
+                << "147,456 B baseline) — the launch still enqueues a "
+                << "multi-program chain");
+
+  // -- the reported chain baseline leg (VT_TT_KEEPQUANT_MM_CHAIN=1) --
+  setenv("VT_TT_KEEPQUANT_MM_CHAIN", "1", 1);
+  const int64_t chain_bytes = run_leg(vt::DType::kQ6_K, kK, kN, "chain");
+  unsetenv("VT_TT_KEEPQUANT_MM_CHAIN");
+  MESSAGE("MMCLASS chain baseline (informational, probe-polluted by the "
+          "fused legs' resident traces): ", chain_bytes, " B");
+}
+
+// ─── tt-matmul-fusion wave 2: fused-vs-chain bit-exactness golden ───────────
+// The whole-decode fused arm must be BIT-IDENTICAL to the chunk chain it
+// replaces: the decode is the same fused kernel on the same word rows (the
+// whole-extent window the chain's sl_alias case names), chunking splits
+// OUTPUT columns only, and the TILE-domain f32 typecast is the same element
+// op the chain's ROW_MAJOR round-trip runs. This case runs the SAME launch
+// on both arms (VT_TT_KEEPQUANT_MM_CHAIN selects the chain) and memcmp's
+// the f32 outputs, on shapes that force the fused kernel's partial-last-core
+// and idle-core tails (rows deliberately not a grid multiple) and zero
+// d/scale blocks, in both the P>1 prefill arm and the P=1 exact-f32 decode
+// arm (the fused TILE tail is prefill-only; the exact arm keeps the chain's
+// permuted tail in both arms).
+TEST_CASE("kTENSTORRENT wave-2 fused MatmulBT launch is bit-exact to the chunk chain") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  const int64_t kQ6Elems = vt::BlockElems(vt::DType::kQ6_K);   // 256
+  const int64_t kQ6Bytes = vt::BlockBytes(vt::DType::kQ6_K);   // 210
+  auto run_shape = [&](int64_t P, int64_t N, int64_t K, std::mt19937& rng) {
+    const int64_t nb = K / kQ6Elems;
+    std::vector<uint16_t> a_b(static_cast<size_t>(P) * K);
+    for (auto& v : a_b) v = vt::F32ToBF16(0.25f * static_cast<float>(rng() % 5));
+    std::vector<uint8_t> w(static_cast<size_t>(N) * nb * kQ6Bytes);
+    for (size_t blk = 0; blk < w.size() / static_cast<size_t>(kQ6Bytes); ++blk) {
+      uint8_t* p = w.data() + blk * kQ6Bytes;
+      const bool zero_blk = (blk % 37) == 5;  // zero d AND zero scales
+      if (zero_blk) {
+        std::memset(p, 0, static_cast<size_t>(kQ6Bytes));
+      } else {
+        for (int i = 0; i < 208; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+        const uint16_t d_bits =
+            vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+        std::memcpy(p + 208, &d_bits, sizeof(d_bits));
+      }
+    }
+    void* ma = backend.Alloc(a_b.size() * sizeof(uint16_t));
+    void* mw = backend.Alloc(w.size());
+    void* mo = backend.Alloc(static_cast<size_t>(P) * N * sizeof(float));
+    backend.Copy(q, ma, a_b.data(), a_b.size() * sizeof(uint16_t));
+    backend.Copy(q, mw, w.data(), w.size());
+    Tensor a_t = Tensor::Contiguous(ma, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {P, K});
+    Tensor w_t = Tensor::Contiguous(mw, vt::DType::kQ6_K,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {N, K});
+    Tensor o_t = Tensor::Contiguous(mo, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {P, N});
+    std::vector<float> got(static_cast<size_t>(P) * N);
+
+    // 1. the fused arm (the default)
+    vt::MatmulBT(q, o_t, a_t, w_t);
+    std::memcpy(got.data(), o_t.data, got.size() * sizeof(float));
+
+    // 2. the chunk chain (the named kill switch)
+    setenv("VT_TT_KEEPQUANT_MM_CHAIN", "1", 1);
+    vt::MatmulBT(q, o_t, a_t, w_t);
+    unsetenv("VT_TT_KEEPQUANT_MM_CHAIN");
+
+    const int bad = std::memcmp(got.data(), o_t.data, got.size() * sizeof(float));
+    CHECK_MESSAGE(bad == 0,
+                  "fused-vs-chain bit mismatch at P=" << P << " N=" << N
+                  << " K=" << K);
+    if (bad != 0) {
+      size_t first = 0;
+      const float* g = got.data();
+      const float* c = static_cast<const float*>(o_t.data);
+      while (first < got.size() && g[first] == c[first]) ++first;
+      MESSAGE("first mismatch at ", first, ": fused=", g[first],
+              " chain=", c[first]);
+    }
+    backend.Free(ma);
+    backend.Free(mw);
+    backend.Free(mo);
+  };
+
+  std::mt19937 rng(20261002u);
+  // Prefill arm, partial-last-core + idle-core tails (333 % grid != 0).
+  run_shape(64, 333, 5120, rng);
+  // Prefill arm, single core coverage + broadcast activation.
+  run_shape(1, 64, 5120, rng);
+  // Exact-f32 decode arm (P=1), tails again.
+  run_shape(1, 333, 5120, rng);
+  // Exact-f32 decode arm, single chunk.
+  run_shape(1, 130, 2560, rng);
+}
+
+// ─── tt-matmul-fusion wave 3: fused-vs-chain bit-exactness golden (Q4_K) ────
+// The Q4_K member of the whole-decode fused family must be BIT-IDENTICAL to
+// the chunk chain it replaces, for the same reasons the wave-2 Q6_K golden
+// names: the decode is the same fused kernel on the same word rows (the
+// whole-extent window the chain's sl_alias case names), chunking splits
+// OUTPUT columns only, and the TILE-domain f32 typecast is the same element
+// op the chain's ROW_MAJOR round-trip runs. The Q4_K staged block is the
+// 144-B GGML block (d/dmin f16 at word 0, scales[12], qs[128]) padded to 48
+// words, and the kernel's value is fl(fl(d*sc)*q) - fl(dmin*mm) with
+// volatile-pinned intermediates — exactly the chain's host nibble-loop
+// order. This case runs the SAME MatmulBT launch on both arms
+// (VT_TT_KEEPQUANT_MM_CHAIN selects the chain) and memcmp's the f32
+// outputs, on shapes that force the fused kernel's partial-last-core and
+// idle-core tails (333 output rows, not a grid multiple), single-chunk
+// coverage, a super-block-boundary shape (N % 32 != 0), and zero d/dmin/
+// scale blocks, in both the P>1 prefill arm and the P=1 exact-f32 decode
+// arm.
+TEST_CASE("kTENSTORRENT wave-3 fused Q4_K decode launch is bit-exact to the chain") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  const int64_t kQ4Elems = vt::BlockElems(vt::DType::kQ4_K);   // 256
+  const int64_t kQ4Bytes = vt::BlockBytes(vt::DType::kQ4_K);   // 144
+  auto run_shape = [&](int64_t P, int64_t N, int64_t K, std::mt19937& rng) {
+    const int64_t nb = K / kQ4Elems;
+    std::vector<uint16_t> a_b(static_cast<size_t>(P) * K);
+    for (auto& v : a_b) v = vt::F32ToBF16(0.25f * static_cast<float>(rng() % 5));
+    std::vector<uint8_t> w(static_cast<size_t>(N) * nb * kQ4Bytes);
+    for (size_t blk = 0; blk < w.size() / static_cast<size_t>(kQ4Bytes); ++blk) {
+      uint8_t* p = w.data() + blk * kQ4Bytes;
+      const bool zero_blk = (blk % 37) == 5;  // zero d, dmin AND scales
+      if (zero_blk) {
+        std::memset(p, 0, static_cast<size_t>(kQ4Bytes));
+      } else {
+        for (int i = 4; i < 144; ++i) p[i] = static_cast<uint8_t>(rng() & 0xFF);
+        const uint16_t d_bits =
+            vt::F32ToF16(0.05f + 0.3f * static_cast<float>(rng() % 32) / 32.0f);
+        const uint16_t dmin_bits =
+            vt::F32ToF16(0.01f + 0.1f * static_cast<float>(rng() % 16) / 16.0f);
+        std::memcpy(p, &d_bits, sizeof(d_bits));
+        std::memcpy(p + 2, &dmin_bits, sizeof(dmin_bits));
+      }
+    }
+    void* ma = backend.Alloc(a_b.size() * sizeof(uint16_t));
+    void* mw = backend.Alloc(w.size());
+    void* mo = backend.Alloc(static_cast<size_t>(P) * N * sizeof(float));
+    backend.Copy(q, ma, a_b.data(), a_b.size() * sizeof(uint16_t));
+    backend.Copy(q, mw, w.data(), w.size());
+    Tensor a_t = Tensor::Contiguous(ma, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {P, K});
+    Tensor w_t = Tensor::Contiguous(mw, vt::DType::kQ4_K,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {N, K});
+    Tensor o_t = Tensor::Contiguous(mo, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {P, N});
+    std::vector<float> got(static_cast<size_t>(P) * N);
+
+    // 1. the fused arm (the default)
+    vt::MatmulBT(q, o_t, a_t, w_t);
+    std::memcpy(got.data(), o_t.data, got.size() * sizeof(float));
+
+    // 2. the chunk chain (the named kill switch)
+    setenv("VT_TT_KEEPQUANT_MM_CHAIN", "1", 1);
+    vt::MatmulBT(q, o_t, a_t, w_t);
+    unsetenv("VT_TT_KEEPQUANT_MM_CHAIN");
+
+    const int bad = std::memcmp(got.data(), o_t.data, got.size() * sizeof(float));
+    CHECK_MESSAGE(bad == 0,
+                  "fused-vs-chain bit mismatch at P=" << P << " N=" << N
+                  << " K=" << K);
+    if (bad != 0) {
+      size_t first = 0;
+      const float* g = got.data();
+      const float* c = static_cast<const float*>(o_t.data);
+      while (first < got.size() && g[first] == c[first]) ++first;
+      MESSAGE("first mismatch at ", first, ": fused=", g[first],
+              " chain=", c[first]);
+    }
+    backend.Free(ma);
+    backend.Free(mw);
+    backend.Free(mo);
+  };
+
+  std::mt19937 rng(20261003u);
+  // Prefill arm, partial-last-core + idle-core tails (333 % grid != 0,
+  // 333 % 32 != 0 so this is also the super-block-boundary shape).
+  run_shape(64, 333, 5120, rng);
+  // Prefill arm, single chunk.
+  run_shape(32, 64, 2560, rng);
+  // Exact-f32 decode arm (P=1), tails + super-block boundary again.
+  run_shape(1, 333, 5120, rng);
+  // Exact-f32 decode arm, single chunk.
+  run_shape(1, 130, 2560, rng);
 }
