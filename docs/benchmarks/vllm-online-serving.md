@@ -12,10 +12,14 @@ The first series free of both, at the pin, graphed, and at a pinned clock is in
 [the benchmark record](../../.agents/benchmark-record.md).
 
 **THE PIN MOVED UNDER THESE ROWS, AND THEY HAVE NOT BEEN RE-MEASURED.** The
-parity pin advanced to <!--pin:commit-->`a7c23ac96d`<!--/pin--> on 2026-09-26
+parity pin advanced to <!--pin:commit-->`a7c23ac96d`<!--/pin--> on 2026-09-22
+([#3320](https://github.com/mudler/vllm.cpp/pull/3320)), from `e126687a9a`, which it reached on 2026-09-03
 ([#2817](https://github.com/mudler/vllm.cpp/issues/2817)). Every row below that
-says "at the pin" was measured against the PREVIOUS pin `555967922`, with
-FlashInfer `0.6.15.post1`. FlashInfer moves to `0.6.18` at the new pin and is on
+says "at the pin" was measured against a pin TWO advances back, `555967922`, with
+FlashInfer `0.6.15.post1`. **FlashInfer is `0.6.18` on the oracle this tree has
+actually built and on every pin since, and the step is STILL NOT discharged** --
+the `parity-pin` block reads `0.6.15.post1` and the `0.6.18` leg is REFUSED by
+`online_gate.py`, so no row here has a `0.6.18` denominator. It is on
 the executed path of these numbers on both sides — it is the NVFP4 GEMM under the
 denominator and the CUTLASS source tree our own arm compiles against. **Four rows
 here owe a re-measurement**: the 27B NVFP4 `nvidia` and 35B-A3B NVFP4 rows, the
