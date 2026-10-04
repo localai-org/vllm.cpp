@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M44802A39JWBFBAYM49ES235
 Title: int8-dot keep-quant capture: eager host activation staging did not persist as the slot device shadow
 Row: BACKEND-TENSTORRENT-KEEPQUANT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-04
 Updated: 2026-10-04
-Closed: -
+Closed: 2026-10-04
 
 ## Problem
 
@@ -16,4 +16,4 @@ MatmulBTQuantInt8DotKernel's eager host staging (ttnn::Tensor::from_span over th
 
 ## Resolution
 
--
+FIXED (2026-10-04, commit 13b51cd54, row/int8dot-default-flip): MatmulBTQuantInt8DotKernel's eager host staging persists as the slot's device shadow (the words-shadow discipline applied to the activation). Evidence 2026-10-04: both 50 MiB int8-dot capture legs green isolated; full TT suite 102/103, the only failure the pre-recorded owed RAC 2261 flake (/tmp/flip-suite3.log). The tt_capture_active() leak on a mid-capture throw is unreachable for these legs after the fix and is noted as robustness debt in the row spec.
