@@ -162,6 +162,23 @@ forward gate.
 - **R5 — `head_dtype: float32`** is unresolved against oracle defaults;
   name it beside any f32 buffer and reconcile at gate time.
 
+- **R6 — the spec's weight-name inventory was wrong (2026-10-03, found by
+  the W1 manifest capture against the real index).** The real layout is
+  `mlp.experts.N.{gate,up,down}_proj...`, `mlp.shared_experts.{gate,up,
+  down}_proj...`, `mlp.gate.weight`, and the router bias OUTSIDE mlp at
+  `moe.router.expert_bias` — NOT `mlp.moe.*` / `mlp.moe.router.*` as
+  recorded above. The `weight_scale_inv` grids are **F32** on disk, not
+  BF16; the router bias is **BF16**, not F32 (the loader widens both per
+  upstream's converting-copy semantics). The enumeration consumes the real
+  names and `tests/vllm/models/kolibri1_manifest.inc` pins them against
+  the shard headers.
+- **R7 — the tokenizer engine refuses the Kolibri-1 tokenizer.json.** Its
+  Qwen3Moe-style pre-tokenizer split regex uses a `(?i:...)` group form the
+  engine's recognized set does not cover, so `Tokenizer::FromHfJson`
+  throws "unrecognized pre-tokenizer split regex" (asserted by name in the
+  W1 gate test). Extending the recognized set is owed before any encode
+  path; nothing silently mis-tokenizes in the meantime.
+
 ## Tests
 
 - Hermetic: small synthetic safetensors in the exact kolibri1 layout
@@ -202,6 +219,19 @@ and the plugin `file:line` anchors above in the row evidence directory.
 - The row is DONE when gates 1-4 pass and the records land; performance
   gates are out of scope.
 
+## Now
+
+W1 landed (2026-10-03, branch `row/kolibri-cpu`): config parse +
+validation, registry + GGUF refusal by name, the two-group KV-cache spec
+(10 full / 40 sliding, head_dim 128, window 513), the FP8-block weight
+loader over the 32-shard index, the enumeration/accounting pair, the
+committed real-index manifest, and the gate test
+(`tests/vllm/models/test_kolibri1.cpp`, 27 cases / 186 assertions green;
+RED-first evidence: the test TU fails to compile against a tree without
+`kolibri1.h`). The CPU forward refuses by name until its wave. Next: the
+CPU hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add
+router) and the tokenizer engine gap below.
+
 ## Git integration
 
 ONE pull request (developer's standing choice for this row).
@@ -215,3 +245,10 @@ ONE pull request (developer's standing choice for this row).
 - GGUF arms (k-quants), CUDA arm, Tenstorrent arm — later rows.
 - Reasoning parser / tool parser serving integration (plugin registers
   `kolibri1` reasoning + Hermes tool parsers).
+- Tokenizer engine: extend the recognized pre-tokenizer split-regex set to
+  cover the Kolibri-1 `(?i:...)` form (R7), then gate the no-BOS encode
+  contract (`add_bos_token: false`, eos 127906, pad 127901) on a real
+  load.
+- The CPU forward wave also owns the R1 disposition record: packed
+  fp8-block + f32 scale is what the loader stores today; dequant-at-load
+  vs a CPU fp8-block GEMM arm is decided when the forward consumes it.
