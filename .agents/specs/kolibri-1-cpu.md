@@ -221,16 +221,24 @@ and the plugin `file:line` anchors above in the row evidence directory.
 
 ## Now
 
-W1 landed (2026-10-03, branch `row/kolibri-cpu`): config parse +
-validation, registry + GGUF refusal by name, the two-group KV-cache spec
-(10 full / 40 sliding, head_dim 128, window 513), the FP8-block weight
-loader over the 32-shard index, the enumeration/accounting pair, the
-committed real-index manifest, and the gate test
-(`tests/vllm/models/test_kolibri1.cpp`, 27 cases / 186 assertions green;
-RED-first evidence: the test TU fails to compile against a tree without
-`kolibri1.h`). The CPU forward refuses by name until its wave. Next: the
-CPU hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add
-router) and the tokenizer engine gap below.
+W2 landed (2026-10-03, branch `row/kolibri-cpu`): the CPU hybrid forward
+(`kolibri1_forward.cpp`) — sandwich norms with the residual accumulating the
+POST-NORMED attention output (kolibri1.py:248-250), per-head qk-norm before
+RoPE (:107-118), RNoPE on the 10 full-attention layers (:81-83), the 513
+window on the sliding layers via `AttentionWindow{W-1, 0}`, the
+sigmoid-logit-add router (fp32 logits, top-6 on logits + bias, weights =
+sigmoid of the UNBIASED logits, no renormalisation, :126-142), the ungated
+shared expert (:146-188), and the untied lm_head. The R1 disposition is
+recorded in the forward header: DEQUANT-AT-LOAD (each fp8-block weight is
+dequanted to bf16 per use against the f32 scale grid); a CPU fp8-block GEMM
+arm stays owed. Gate: `tests/vllm/models/test_kolibri1_w2.cpp` — 6 cases /
+1757 assertions green: the forward matches an in-test scalar transcription of
+kolibri1.py (max abs logits gap 0.014 on the tiny 2-layer model, bf16
+rounding only), a single-token prefill, a ragged two-sequence batch vs
+per-sequence runs, the logits_indices gather, the full-depth 50-layer real
+geometry run (hermetic weights), and the GPU-queue refusal by name. W1 stays
+green (27/186). Next: the tokenizer engine gap (R7), then the token-exact
+gate against the reference on the real checkpoint (R4).
 
 ## Git integration
 
