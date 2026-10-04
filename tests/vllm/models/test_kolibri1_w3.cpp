@@ -286,10 +286,18 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
     gp.logits_sum = p.at("final_logits").at("logits_sum").get<double>();
     gp.abs_sum = p.at("final_logits").at("abs_sum").get<double>();
 
-    // Greedy decode, one full prefill per step (identical math to incremental
-    // decoding; the goldens do the same).
+    // Greedy replay of OUR chain, one full prefill per step (identical math
+    // to incremental decoding; the goldens do the same). The FIRST
+    // divergence adjudicates: while the two chains follow the same context,
+    // a flip whose candidates are within the band is a near-tie (bf16
+    // rounding noise reorders a knife-edge ranking); once a chain diverges,
+    // the LATER positions compare different contexts and are meaningless —
+    // the fingerprint step below therefore teacher-forces the GOLDEN chain.
     std::vector<int32_t> ids = gp.input_ids;
-    for (int32_t step = 0; step < 32; ++step) {
+    bool diverged = false;
+    double diverge_gap = 0.0;
+    int32_t diverge_step = -1;
+    for (int32_t step = 0; step < 32 && !diverged; ++step) {
       const Logits row = PrefillLastRow(w, config, ids);
       REQUIRE(row.size() == 128000u);
       const int32_t got = static_cast<int32_t>(
@@ -300,23 +308,42 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
         ++argmax_matches;
       } else {
         ++flips;
-        // Near-tie adjudication: the golden top-2 gap at this step is not
-        // recorded (only the final step is fingerprinted), so a flip is a
-        // FAIL unless the flipped logits are within the band of each other.
         const float top1 = row[static_cast<size_t>(want)];
         float second = -std::numeric_limits<float>::infinity();
         for (float v : row)
           if (v > second) second = v;
-        MESSAGE("flip at prompt '" << gp.prompt << "' step " << step << ": got "
-                                   << got << " want " << want << " (band gap "
-                                   << second - top1 << ")");
-        if (second - top1 <= kLogitBand) ++near_ties;
+        diverge_gap = second - top1;
+        diverge_step = step;
+        diverged = true;  // stop: later steps compare different contexts
+        if (diverge_gap <= kLogitBand) {
+          ++near_ties;
+        } else {
+          MESSAGE("HARD flip at prompt '" << gp.prompt << "' step " << step
+                                          << ": got " << got << " want " << want
+                                          << " (gap " << diverge_gap
+                                          << " > band " << kLogitBand << ")");
+        }
       }
       ids.push_back(got);
     }
+    if (diverged)
+      MESSAGE("chain diverged at step " << diverge_step << " with gap "
+                                        << diverge_gap << " (band "
+                                        << kLogitBand << ") — adjudicated as "
+                                        << (diverge_gap <= kLogitBand
+                                                ? "NEAR-TIE"
+                                                : "HARD MISMATCH"));
 
-    // Final-step fingerprint comparison.
-    const Logits row = PrefillLastRow(w, config, ids);
+    // Final-step fingerprint: TEACHER-FORCE the golden chain (input ids +
+    // golden generated ids). Fixed ids on both sides — the honest comparison
+    // of forward outputs, unaffected by any chain divergence above.
+    // The golden fingerprint's context is the forward that PREDICTED the
+    // 32nd token: input + generated[0..30] (NOT the full 32-token chain —
+    // that would be one position later).
+    std::vector<int32_t> golden_chain = gp.input_ids;
+    golden_chain.insert(golden_chain.end(), gp.generated_ids.begin(),
+                        gp.generated_ids.end() - 1);
+    const Logits row = PrefillLastRow(w, config, golden_chain);
     double sum = 0.0, abs_sum = 0.0;
     for (float v : row) {
       sum += v;
