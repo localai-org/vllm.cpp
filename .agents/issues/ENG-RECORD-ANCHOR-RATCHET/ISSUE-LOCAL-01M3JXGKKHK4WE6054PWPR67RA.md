@@ -27,3 +27,20 @@ baseline file exists upstream. On the merged tree the checker's
 remaining ERRORs are the shared issue-reference debt identical on
 upstream/main, not this row's. This record is what the pull request
 still adds.
+
+## Executed verification, 2026-10-04 (merged head 36746f7ca)
+
+- `check-agent-record.py`: `agent record OK: ENGINE=179 MODEL=384
+  QUANT=87 KERNEL=60 BACKEND=90 ANCHOR-ROT=0`.
+- `check-agent-record.py --report`: `ok=1018, stale=0, broken=0 ->
+  rot 0` against the `total: 0` baseline.
+- `tests/scripts/test_agent_record.py`: 106/106 OK (38.1s).
+- Mutation: rename the symbol on
+  `src/vllm/v1/core/kv_cache_utils.cpp:640` (cited by row
+  KV-PREFIX-MATCH-UNIT) -> gate fails with
+  `ERROR: RECORD ANCHOR REGRESSION in bucket 'stale': 1 > baseline 0`
+  and `--report` names the offender:
+  `STALE  KV-PREFIX-MATCH-UNIT -> src/vllm/v1/core/kv_cache_utils.cpp:640
+  expected \`resolve_kv_cache_block_sizes\``. Restore -> green.
+  The ratchet is wired and measures.
+
