@@ -752,6 +752,10 @@ them.
 - `ISSUE-LOCAL-01M41PGNENY6EDHWVE75EEECJA` — the `pr-size` evidence lanes
   and the PowerShell AST stage of `check-windows-portability.py`.
 
+- `ISSUE-LOCAL-01M433BAC470XAV8VYFF8KJ1WD` — the vulkan platform-gate log
+  capture and the `EVIDENCE_REQUIRED_TOOLS` pwsh declaration that the pr-size
+  install alone could not reach.
+
 
 ## Outcome
 

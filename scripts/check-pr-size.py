@@ -850,7 +850,18 @@ def deleted_paths(base: str, head: str, *, repo: Path = ROOT) -> set[str]:
 
 
 EVIDENCE_REQUIRED_TOOLS = {
-    "tests.scripts.test_check_windows_portability": ("cmake", "ninja"),
+    # pwsh: `check-windows-portability.py` executes `pwsh` for its PowerShell
+    # AST stage (scripts/check-windows-portability.py:2028) and skips the stage
+    # when `shutil.which("pwsh")` misses. The evidence lane's sanitized PATH is
+    # `os.defpath` (`/bin:/usr/bin`) plus the private tools directory
+    # (`_sanitized_env` below), so the pr-size job's tarball install at
+    # `/usr/local/bin/pwsh` (.github/workflows/ci.yml) is INVISIBLE to both
+    # lanes until it is declared here: a changed test whose red runs through
+    # the AST stage then stays green at BASE and the gate rejects the evidence
+    # with "BASE checker stayed green". Declaring it puts the same pwsh in
+    # HEAD's and BASE's PATH, which is the toolchain symmetry ci.yml installs
+    # pwsh for.
+    "tests.scripts.test_check_windows_portability": ("cmake", "ninja", "pwsh"),
     # #1892: this module CONFIGURES CMake in nearly every case and uses the
     # `Ninja Multi-Config` generator in one of them. Without the declaration it
     # ran with an empty private tools directory and died with
