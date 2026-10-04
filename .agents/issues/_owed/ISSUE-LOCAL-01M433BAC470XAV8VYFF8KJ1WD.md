@@ -16,4 +16,15 @@ Two CI-infra residuals on top of the pwsh install (3b812f596, eb815c226). (1) bu
 
 ## Resolution
 
--
+RESOLVED-BY-FALSIFICATION 2026-10-04, superseded by
+ISSUE-LOCAL-01M43M9EEXZTM1S9KX25VSWSN5. The complete build-test-vulkan job log
+(run 37202846607, job 111440498907) shows the platform-gate capture step now
+SUCCEEDS: the doctest case runs, all three greps' targets appear in
+vulkan-platform-case.log, and the case summary is green. The job fails at the
+LATER platform-case grep step: `.github/workflows/ci.yml:1314` greps the BRE
+'CHECK( prio[0] == "FLASH_ATTN" ) is correct', where '[0]' is a bracket
+expression matching the lone character '0' and can never match the literal
+'prio[0]' doctest prints. The pr-size residual likewise moved: pwsh installs
+and both evidence lanes run; the remaining red is check-pr-size.py's own
+whole-tree classification sweep over 17 tracked paths. Both are repaired under
+the superseding issue. The pwsh half of this record stands.
