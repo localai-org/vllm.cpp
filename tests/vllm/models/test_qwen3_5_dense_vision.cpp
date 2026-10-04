@@ -541,6 +541,46 @@ TEST_CASE("qwen3_5_dense_loader_text_only_checkpoint_stays_text_only") {
   std::remove(p.c_str());
 }
 
+TEST_CASE("qwen3_5_dense_loader_leaves_the_tower_unread_at_zero_limits") {
+  // #607 L3: the engine's modality limits reach the dense loader. The same
+  // incomplete-tower shard the row's red test uses fails BY NAME on the tower
+  // with no limits, and must fail on the BACKBONE (never `model.visual.`) when
+  // every modality the tower serves is at limit 0 — which is what proves the
+  // tensors were not read.
+  const std::string p = TmpDir() + "/vllmcpp_dense_loader_skiptower.safetensors";
+  WriteShard(p, {"model.embed_tokens.weight", "model.norm.weight",
+                 "model.visual.blocks.0.attn.proj.bias"});
+  std::vector<SafetensorsFile> shards;
+  shards.push_back(SafetensorsFile::Open(p));
+  REQUIRE(vllm::HasQwen3_5DenseVisionTower(shards));
+
+  const HfConfig c = MakeConfig();
+  auto load_with = [&](const vllm::MultiModalConfig* mm) {
+    std::string msg;
+    try {
+      (void)vllm::LoadQwen3_5Dense(shards, c, nullptr, mm);
+    } catch (const std::exception& e) {
+      msg = e.what();
+    }
+    return msg;
+  };
+
+  // Baseline: no limits, so the tower is reached and refused by name.
+  CHECK(load_with(nullptr).find("model.visual.") != std::string::npos);
+
+  // `--language-model-only`, as the serve flag sets it.
+  vllm::MultiModalConfig lmo;
+  lmo.language_model_only = true;
+  CHECK(load_with(&lmo).find("model.visual.") == std::string::npos);
+
+  // The other route to zero, which upstream treats identically.
+  vllm::MultiModalConfig zero;
+  zero.limit_per_prompt = {{"image", 0}, {"video", 0}};
+  CHECK(load_with(&zero).find("model.visual.") == std::string::npos);
+
+  std::remove(p.c_str());
+}
+
 // ── FORWARD: the tower output is actually CONSUMED, at the right rows ────────
 
 TEST_CASE("qwen3_5_dense_vl_image_forward_is_the_text_forward_over_the_tower_row") {

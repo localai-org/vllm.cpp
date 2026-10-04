@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-24
-Updated: 2026-09-24
+Updated: 2026-09-30
 Closed: -
 
 ## Problem
@@ -25,3 +25,5 @@ The APEX-I-Nano 27B decode path OOMs on tt-metal at bank_manager.cpp:495 (~268 M
 ## Resolution
 
 -
+
+UPDATE 2026-09-30 (engine-side re-check on the NEW pin vllm-cpp-pin/20260923-adv @ 6449cf13f7b, eager arm VT_TT_DECODE_CAPTURE=0, 27B Q4_K_M, 8 prompts in 32, c=4, VT_TT_ALLOC_TRACE ledger): the 948 MiB/request staircase is REFUTED on this pin. Settled per-forward free DRAM (block/0/pre boundary) is EXACTLY flat at 301,930,048 B/bank for 26 consecutive forwards across wave 1 and 300,485,696 B/bank for 23 consecutive forwards across wave 2; the per-new-request step is ~2.9 MiB/request, not 948 MiB. No bank_manager OOM, no request died; both request joins fully observed (the 9000 s wrapper timeout cut only the final decode steps of requests 7/8). One of the ~576 commits between the old pin and this one drained the deferred-reader retention. Evidence: docs/bench-evidence/tt-retention-newpin-20260930.md. Upstream reply on tt-metal#57970 held pending this result; nothing posted.

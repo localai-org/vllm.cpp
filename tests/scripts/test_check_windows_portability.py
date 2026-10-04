@@ -847,6 +847,8 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
             with self.subTest(backend=backend):
                 root = Path(self.tempdir.name) / windows_root
                 script = root / "scripts" / "build-windows-release.ps1"
+                script.parent.mkdir(parents=True, exist_ok=True)
+                script.write_text("", encoding="utf-8")
                 calls: list[tuple[list[str], dict[str, object]]] = []
 
                 def fake_run(
@@ -900,6 +902,40 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
                     str(root),
                 )
                 self.assertFalse(contract_kwargs.get("shell", False))
+
+    def test_powershell_ast_audit_is_scoped_to_real_roots(self) -> None:
+        # CI: test_fetch_content_deps_sources_are_out_of_scan_scope ran the
+        # checker on a synthetic root without the fixture manifest, so the
+        # native AST audit parsed the synthetic stub release script and
+        # errored "missing active configure in PowerShell AST" on every
+        # pwsh lane. The stub exercises the source contract; only a real
+        # run -- one without --test-source-manifest -- owns the AST and
+        # fake-tool execution contract.
+        root = self.make_tree()
+
+        with mock.patch.object(checker.shutil, "which", return_value="pwsh"), \
+                mock.patch.object(checker, "subprocess") as fake_subprocess, \
+                mock.patch.object(checker, "_validate_powershell_ast") as audit:
+            fake_subprocess.run.return_value = subprocess.CompletedProcess(
+                [], 0, "", ""
+            )
+            checker.check(root, source_manifest=root / "m")
+
+        self.assertFalse(audit.called)
+
+        with mock.patch.object(checker.shutil, "which", return_value="pwsh"), \
+                mock.patch.object(checker, "subprocess") as fake_subprocess, \
+                mock.patch.object(checker, "_validate_powershell_ast") as audit:
+            fake_subprocess.run.return_value = subprocess.CompletedProcess(
+                [], 0, "", ""
+            )
+            checker.check(root)
+
+        self.assertTrue(audit.called)
+        self.assertEqual(
+            audit.call_args[0][0],
+            root / "scripts/build-windows-release.ps1",
+        )
 
     def test_rejects_missing_winsock_support(self) -> None:
         self.assert_rejected(
@@ -2256,6 +2292,62 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("required implementation is not reachable",
                       result.stdout + result.stderr)
+
+    def test_fetch_content_deps_sources_are_out_of_scan_scope(self) -> None:
+        # CI run 37034253522: the Windows release build configures into
+        # build-pr-windows-vulkan/ INSIDE the source tree, so the codemodel
+        # carries the vendored ggml of the FetchContent parakeet_cpp
+        # dependency (build-pr-windows-vulkan/_deps/parakeet_cpp-src/...),
+        # and the POSIX rule flagged amx.cpp:12, mmq.cpp:18, ggml-cpu.c:2542
+        # and ggml.c:85-88. That code is third-party; the checker's contract
+        # is THIS project's sources reaching Windows-incompatible POSIX.
+        # The Linux self-configure uses a build dir OUTSIDE the root, so the
+        # same sources silently dropped out there and hid the asymmetry.
+        root = self.make_tree()
+        vendored = (root /
+                    "build-pr-windows-vulkan/_deps/parakeet_cpp-src/"
+                    "third_party/ggml/src/ggml-cpu/amx/amx.cpp")
+        vendored.parent.mkdir(parents=True, exist_ok=True)
+        vendored.write_text(
+            "#include <unistd.h>\nvoid leaked_posix() { fork(); }\n",
+            encoding="utf-8",
+        )
+        cmake_contract = textwrap.dedent(SAFE_FILES["CMakeLists.txt"])
+        (root / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.20)\n"
+            "project(portability LANGUAGES CXX)\n" + cmake_contract +
+            "\nadd_library(runtime STATIC\n"
+            "  src/vllm/platform/process.cpp\n"
+            "  src/vllm/platform/console_shutdown.cpp\n"
+            "  src/vllm/v1/kv_offload/lmcache/remote_client.cpp\n"
+            "  src/vllm/v1/kv_offload/fs_io.cpp)\n"
+            "target_include_directories(runtime PRIVATE src include)\n"
+            "add_executable(server src/vllm/entrypoints/openai/server_main.cpp)\n"
+            "target_link_libraries(server PRIVATE runtime)\n"
+            "add_library(parakeet STATIC\n"
+            "  build-pr-windows-vulkan/_deps/parakeet_cpp-src/third_party/"
+            "ggml/src/ggml-cpu/amx/amx.cpp)\n"
+            "target_link_libraries(server PRIVATE parakeet)\n",
+            encoding="utf-8",
+        )
+        build = root / "build-pr-windows-vulkan"
+        query = build / ".cmake/api/v1/query"
+        query.mkdir(parents=True)
+        (query / "codemodel-v2").touch()
+        configured = subprocess.run(
+            ["cmake", "-S", str(root), "-B", str(build), "-G", "Ninja"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(configured.returncode, 0,
+                         configured.stdout + configured.stderr)
+        result = subprocess.run(
+            [sys.executable, str(CHECKER), "--root", str(root),
+             "--build-dir", str(build),
+             "--test-source-manifest", str(self.source_manifest)],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("unguarded POSIX", result.stdout + result.stderr)
 
     def test_representative_real_source_mutations_fail(self) -> None:
         console = (REPO / "src/vllm/platform/console_shutdown.cpp").read_text(

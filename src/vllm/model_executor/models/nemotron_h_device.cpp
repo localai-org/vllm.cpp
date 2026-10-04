@@ -1019,7 +1019,7 @@ DBuf DeviceLmHeadD(Dev d, const NemotronHHostWeights& host,
   // value-based gate: that arm computes the SAME logits, while re-uploading
   // 198.18 MB — the whole [131072, 2688] packed operand plus its group scales —
   // on EVERY call, because `LmHeadNvfp4View` hands out a stack temporary and
-  // `ResidentNvfp4` caches on `w.d_packed`, a member of the weight it was given.
+  // `ResidentNvfp4` caches on `w.packed.d_dev`, a member of the weight it was given.
   //
   // The predicate and not the seam's `fallback_gemms` counter, deliberately.
   // `MutableW4A16Stats()` is a plain non-atomic static shared by every consumer

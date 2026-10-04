@@ -60,6 +60,31 @@ The campaign can resume measurement only after the runner prerequisites are
 available in the documented/configured staging scope. It must then rerun correctness
 before timing rather than reusing this blocker as benchmark evidence.
 
+## Measurement tools
+
+The [endpoint harness guide](../../benchmarks/manifests/qwen38_tensorfold/README.md)
+includes a request example, required tokenizer identity, and the evidence contract.
+The harness measures an already-running OpenAI-compatible endpoint. For the
+`vllm-cpp` adapter, `--draft off` records the declared policy but does not
+reconfigure speculative decoding on the running server.
+
+Current TensorFold/vllm.cpp comparisons report `PROFILE_COMPARISON`: they prove
+neither token parity nor a cross-engine ratio. Matched prompt-token fingerprints
+are separate from reply-text token evidence. TensorFold's generated token IDs
+cannot be compared with vllm.cpp's retokenized reply text. Check the output
+JSON's `refusal_reason` and sample evidence. A zero exit status alone does not
+prove a valid measurement.
+
+For serial capture, start with the
+[TensorFold environment template](../../benchmarks/manifests/qwen38_tensorfold/tensorfold.env.example)
+and [vllm.cpp environment template](../../benchmarks/manifests/qwen38_tensorfold/vllm_cpp.env.example).
+They list the source revisions, artifact hashes, launch commands, and server
+lifecycle commands required by the
+[capture runner](../../tools/bench/run_qwen38_tensorfold_gap.sh).
+Fill copies outside the repository with measured local values. The runner
+requires an active `dgx:gpu0` lease. These templates do not resolve the missing
+artifacts or establish a successful capture.
+
 ## Evidence and validation
 
 Versioned evidence:

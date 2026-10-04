@@ -243,6 +243,12 @@ a silent fallback cannot post a plausible number:
   [ENVIRONMENT.md](ENVIRONMENT.md) for what each knob does and what it measured.
 
 ### Quantized checkpoints: which weight forms load
+
+**TQ1_0 and TQ2_0 GGUF files cannot load yet.** The
+[GGUF reader](../src/vllm/model_executor/model_loader/gguf_reader.cpp) rejects their
+tensor types as unknown, including in Vulkan builds. The
+[ternary kernels](FEATURES.md#ternary-kernels) do not remove this loader limitation.
+
 ### How long a load takes, and how to see where it goes
 
 `VT_LOAD_STATS=1` prints one line per load phase with its wall time, plus the
@@ -696,24 +702,9 @@ Registered in
 | GET | `/v1/videos/{id}` | Job status |
 | GET | `/v1/videos/{id}/content` | The finished MP4 (`video/mp4`) |
 
-`prompt_logprobs` is accepted on `/v1/completions` and `/v1/chat/completions`
-and the engine computes it — every prompt position is scored against the token
-that followed it, accumulated across chunked prefill — but the **response body
-does not carry it yet**: emitting it needs the OpenAI `echo` wiring, which is
-not done. Until then it is reachable through the library
-(`RequestOutput.prompt_logprobs`), not over HTTP. `logprobs`/`top_logprobs` on
-GENERATED tokens are emitted normally.
-
-That computation is gated on the **CPU** backend only. A step that owes prompt
-logits takes the full-logits route, and on that route the sampler is handed a
-host-resident logits buffer carrying the accelerator's device label — sound on
-unified memory, and **not yet verified on CUDA at all, discrete or otherwise**.
-Treat `prompt_logprobs` on a GPU build as unverified until that gate runs; the
-mechanism and the exact owed invocation are in
-[`.agents/specs/prompt-logprobs.md`](../.agents/specs/prompt-logprobs.md)
-(risk 4 and the `PENDING` CUDA smoke gate). Requests that do NOT set it are
-unaffected on every backend — the route is only taken for a step where some
-request asked.
+Both completion endpoints return prompt log probabilities in non-streaming
+responses. See [Prompt log probabilities](reference/server.md#prompt-log-probabilities)
+for request values, response fields, streaming restrictions, and verification limits.
 
 The four `/v1/videos` routes are registered **only** when the server was started
 with `--video-dit`; without it they are absent (404) and the server is identical
@@ -736,35 +727,10 @@ ceiling.
 
 ### Which token ids stop a generation
 
-Stop ids come from two files in the checkpoint, not one. `config.json`'s
-`eos_token_id` supplies the **primary** eos id, and the sibling
-`generation_config.json` supplies **secondary** stop ids that are usually a
-superset of it. Gemma-4-26B is the clearest case:
-
-```
-config.json             eos_token_id: [1, 106]
-generation_config.json  eos_token_id: [1, 106, 50]
-```
-
-Both are read, mirroring vLLM's default `--generation-config auto`. The
-secondary ids are merged into the request's `stop_token_ids`, so a chat model
-stops on its turn-level token rather than running to the length cap. A missing
-or malformed `generation_config.json` is a silent no-op.
-
-When neither `config.json` nor the `tokenizer.json` post-processor names an
-eos, the engine takes the tokenizer's own `eos_token` from the sibling
-`tokenizer_config.json` as the primary eos id, which is vLLM's primary source.
-When no `generation_config.json` exists, it also adds the text config's
-`eos_token_id` as a secondary id, as vLLM's `from_model_config` fallback does.
-Tev1 is such a checkpoint: it stops on `<|im_end|>` without a
-`stop_token_ids` field. A checkpoint that already names its eos keeps it; the
-engine does not yet move the primary id to the tokenizer's for every model, as
-vLLM does ([spec](../.agents/specs/tev1-eos-fallback.md)).
-
-`ignore_eos: true` suppresses **all** of them, primary and secondary alike, and
-generation then runs to the token budget. The ids still count toward
-`min_tokens` masking either way, so `min_tokens` cannot be satisfied by emitting
-a stop token early.
+The engine resolves a primary end-of-sequence (EOS) ID and merges secondary
+EOS IDs into `stop_token_ids`. `ignore_eos: true` suppresses both primary and
+secondary EOS IDs. See the [server reference's EOS rules](reference/server.md#which-token-ids-stop-a-generation)
+for config precedence, tokenizer fallback, and `min_tokens` masking.
 
 ### Server flags
 
@@ -826,10 +792,11 @@ API surface, auth, and metrics.
 
 ## System 1 decisions with `/v1/systemone`
 
-A decision model answers typed questions about a `state` without generating
-text. The server registers `POST /v1/systemone` when the model directory
-resolves to a decision architecture, and `vllm_decide` takes the same body
-through the C ABI ([C API reference](reference/c-api.md#decisions-and-option-scoring)).
+A decision model answers typed questions about a `state`. Depending on the
+model, it scores options directly or generates an answer token.
+The server registers `POST /v1/systemone` when the model directory resolves
+to a decision architecture. The `vllm_decide` C API accepts the same body.
+See the [C API reference](reference/c-api.md#decisions-and-option-scoring).
 
 ```sh
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
@@ -1402,3 +1369,30 @@ waiting on the engine (long prefill / TTFT). Interval is `VT_SERVER_SSE_PING_S`
 (default 15s; `0` disables). Comment frames are not `data:` events and do not
 carry tokens. Token streaming still uses a timed wait on the request collector
 so deltas are not collapsed by a poll loop.
+
+## Diagnosing a CPU/CUDA divergence (Qwen4-EXP LayerFp)
+
+When the CPU and CUDA arms of a Qwen4-EXP decode disagree on tokens, arm the
+fingerprint tap with `VT_Q4EXP_LAYER_FP=9` on both arms and diff the server
+logs:
+
+```sh
+python3 scripts/q4exp-layerfp-diff.py A-CPU/server.log B-CUDA/server.log --top 50
+```
+
+The differ reports `rel(sumabs)` per tap. `rel(sumabs)` is a DIFFERENCE OF
+NORMS, not a norm of differences: its zero means "equal L1 norm", not "equal",
+and a zero-mean perturbation cancels in it at `O(sqrt(n))`. At the tap's real
+size (`n = 12800`), over the 400 seeds of the `MetricSpread` control in
+`tests/scripts/test_q4exp_layerfp_diff.py`, the under-report is MEDIAN 75x-140x
+with a p05..p95 of 34..1500. Hold the true divergence fixed: two readings differ by
+a median **2.1x** and by **24x** at p95. A ratio between two `rel(sumabs)`
+numbers is worth what that says and no more: NO CHANGE AT ALL produces a ratio at
+least as large as 16.7x or 19.9x in 7% and 6% of draws. Those two ratios sit at
+6% and 7% of the metric. No change at all produces a ratio at least as large as
+1.80x, 2.02x, 2.34x and 3.15x in 59%, 52%, 45% and 33% of draws, and 3.15x sits
+at the **67th** percentile — it is the LEAST ordinary of the four, and still an
+ordinary reading. So read any single `rel(sumabs)` ratio as an order of
+magnitude, and confirm a real divergence with `head_dmax` or the sign-sensitive
+`rel_proj` column. Worked example and evidence:
+[`docs/bench-evidence/qwen4exp-layerfp-2999-20260923.md`](bench-evidence/qwen4exp-layerfp-2999-20260923.md).

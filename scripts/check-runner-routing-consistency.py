@@ -271,6 +271,49 @@ def classify_with_helpers(body: str | None, defining_text: str) -> str:
     return "NONE"
 
 
+def classify_hook(
+    body: str | None,
+    text: str,
+    file_text: dict[str, str],
+    free_fn_file: dict[str, str],
+) -> str:
+    """Classify a registry hook's body with the file-local one-level hop AND one
+    cross-TU hop: a free function the hook CALLS that is only DECLARED in the
+    registry TU but DEFINED in a sibling models/*.cpp is resolved there (the same
+    one-level semantics, one file further).
+
+    mimo_v2 is the case: `mimo_v2_registry.cpp` declares `ForwardMiMoV2Device` and
+    defines the hook in the additive registry TU, while the definition lives in
+    `mimo_v2.cpp` and returns the shared `WrapDeviceLogits` (the dots3_note
+    pattern). Without the cross-TU hop the declaration matches neither seam, the
+    model lands in the silently-exempt NONE bucket, and the gate stays green while
+    exempting a registered model. `free_fn_file` already maps every free-function
+    DEFINITION to its file, so the resolution is exact, not guessed: a name with
+    no definition anywhere still classifies NONE, and a cross-TU helper that does
+    not return `ForwardLogits` is skipped by `extract_fn_body` like any other.
+
+    The hop only RESOLVES an unclassified hook (NONE). A hook that already
+    classifies HOST or REFUSE keeps that verdict: qwen3_vl's registered forward
+    carries a direct `HostLogits` off-gather path next to a device last-logits
+    helper, and a cross-TU DEVICE hit must not launder that drift — the direct
+    seam is authoritative over anything the delegation resolves to."""
+    got = classify_with_helpers(body, text)
+    if got != "NONE" or body is None:
+        return got
+    ranked: set[str] = set()
+    for called in _FREE_CALL.findall(strip_comments(body)):
+        f = free_fn_file.get(called)
+        if f is None or f not in file_text:
+            continue
+        other_body = extract_fn_body(file_text[f], called)
+        if other_body is not None:
+            ranked.add(classify_with_helpers(other_body, file_text[f]))
+    for level in ("DEVICE", "HOST", "REFUSE"):
+        if level in ranked:
+            return level
+    return "NONE"
+
+
 def count_f32_resid_decls(text: str) -> int:
     """Number of private f32 residual/activation-stream declarations in a decode TU."""
     return len(_F32_RESID_DECL.findall(strip_comments(text)))
@@ -380,7 +423,10 @@ def scan_registrations(
 
     alias = build_alias_map(cpp_files + header_files)
     fd_bodies = collect_forwarddevice_bodies(cpp_files)
-    # free-function definition -> file (for resolving the hook's decode body file)
+    # free-function definition -> file (for resolving the hook's decode body file).
+    # DEFINITIONS only: a registry TU's forward DECLARATION (mimo_v2_registry.cpp's
+    # `ForwardLogits ForwardMiMoV2Device(...);`) matches the same regex but must not
+    # claim the name, or the cross-TU hop would resolve to a file with no body.
     free_fn_file: dict[str, str] = {}
     file_text: dict[str, str] = {}
     for p in cpp_files:
@@ -388,7 +434,8 @@ def scan_registrations(
         for m in re.finditer(
             r"\b(?:std::vector<[^;{}]+>|ForwardLogits)\s+([A-Za-z_]\w*)\s*\(", file_text[p.name]
         ):
-            free_fn_file.setdefault(m.group(1), p.name)
+            if extract_fn_body(file_text[p.name], m.group(1)) is not None:
+                free_fn_file.setdefault(m.group(1), p.name)
 
     for p in cpp_files:
         text = file_text[p.name]
@@ -419,7 +466,7 @@ def scan_registrations(
         # gate; the bf16-activation invariant still applies to its body.
         if _IS_POOLING.search(strip_comments(text)):
             classification = "POOLING"
-        elif classify_with_helpers(body, text) == "DEVICE":
+        elif classify_hook(body, text, file_text, free_fn_file) == "DEVICE":
             classification, device_source = "DEVICE", fn
         for cls in delegated_classes:
             impl = fd_bodies.get(cls)
