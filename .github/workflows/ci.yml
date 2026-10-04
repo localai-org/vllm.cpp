@@ -1311,10 +1311,16 @@ jobs:
             -tc="Vulkan platform is registered and reports unified/no-pool residency" -s \
             | tee vulkan-platform-case.log
           grep -q 'CHECK_FALSE( p.get_device_capability().present() ) is correct' vulkan-platform-case.log
-          # `[0]` in a BRE is a bracket expression matching the lone character
-          # `0`, so this pattern can never match the literal `prio[0]` in the
-          # doctest output. Escape it (run 37202846607, job build-test-vulkan).
-          grep -q 'CHECK( prio\[0\] == "FLASH_ATTN" ) is correct' vulkan-platform-case.log
+          # -qF, not -q: WITHOUT a flag grep reads this as a BASIC REGULAR
+          # EXPRESSION, where `[0]` is a character class meaning "the character
+          # 0", so the pattern asks for `prio0` and can never match the literal
+          # `prio[0]` doctest prints. That is not theoretical: run 37160385766 on
+          # main failed this step with all thirteen assertions reporting
+          # `is correct!` and `test cases: 1 | 1 passed`, because the SUITE
+          # passed and the GREP could not succeed. A pin that cannot match is a
+          # lane that is red forever and proves nothing. Fixed strings for every
+          # pin whose text contains a bracket.
+          grep -qF 'CHECK( prio[0] == "FLASH_ATTN" ) is correct' vulkan-platform-case.log
           grep -qE 'test cases: *1 \| *1 passed' vulkan-platform-case.log
   device-leakage:
     # The DSR RATCHET (work row `S1` of .agents/specs/accelerator-seam-audit.md).
