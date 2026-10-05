@@ -16,4 +16,4 @@ Several gates red on pristine origin/main redden every PR: (1) test_gpu_lock_one
 
 ## Resolution
 
--
+2026-10-03: repaired on row/main-preflight-strata. (1) coordination.md GPU scheduling rewritten to the lease + GPU_LOCK default truth (30f408c38); (2) cohere2-moe matrix row cites its landed commits 651ac08ee/9f619494e/1d36ebc8d and the landing record names the full row ID, so audit-live-rows --check reads LANDED (e925cd859); (3) test_rocprof_attach_preflight skips the x86-only pinned controller off x86_64 with the reason recorded (73cbc78b2); (4) role-undeclared: gate works as designed — the session declares a role, no checker change; (5) tools suites: the three Strix lease/glibc-2.39-bound classes skip off the Strix host (4eb332210); (6) kolibri1_forward fusion drift allowlisted as known-drift pending FusedChain migration (e6d20d8dd); check-oracle-pins was already green. Full agent-preflight.sh exit 0 on the branch.
