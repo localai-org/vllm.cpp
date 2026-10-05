@@ -1,8 +1,9 @@
 # Kolibri-1 W3 goldens — the token gate evidence
 
-Date: 2026-10-04. Row: MODEL-TEXT-kolibri-1 (branch `row/kolibri-cpu`).
+Date: 2026-10-04/05. Row: MODEL-TEXT-kolibri-1 (branch `row/kolibri-cpu`).
 Host: 128-core CPU box, 255 GB RAM, no GPU. Spec risk R4 (the transformers
-golden run) and the row's token gate.
+golden run) and the row's token gate. Gate log: `/tmp/w3-gate-final.log`
+(2026-10-05 run, `test_kolibri1_w3`).
 
 ## What this is
 
@@ -14,7 +15,8 @@ pure-torch transcription of the pinned plugin's math
 because `transformers` has no native `Kolibri1ForCausalLM` and the plugin
 file imports vLLM throughout, so it cannot run under a plain torch stack.
 The transcription is the same one the W2 scalar reference verified line by
-line (`tests/vllm/models/test_kolibri1_w2.cpp`, max abs logits gap 0.014).
+line (`tests/vllm/models/test_kolibri1_w2.cpp`, max abs logits gap 0.014
+at tiny scale).
 
 ## The bf16 reference (dequant verification)
 
@@ -41,32 +43,54 @@ stripping `quantization_config` (the dequantized weights ARE the reference).
 this fixed math). 8 prompts: 4 synthetic word-pattern (bench generator
 style), 4 natural, two German. Fingerprints (input ids, generated chain,
 final-step top-8 logits + sums) committed at
-`tests/vllm/models/kolibri1_goldens.json`.
+`tests/vllm/models/kolibri1_goldens.json`. Wall time 2542 s (~5.3
+min/prompt, oneDNN bf16 GEMMs). Chains are repetitive (base-LM greedy on
+short prompts) — that is the reference behavior, and the gate replays them
+token by token.
 
-- Wall time: 2542 s (~5.3 min/prompt) on oneDNN bf16 GEMMs.
-- The chains are repetitive (base-LM greedy on short prompts): e.g.
-  "alpha beta gamma delta epsilon zeta" repeats 121598; "counting: one two
-  three four five six seven" repeats 12843. This is the reference behavior,
-  not a defect — the gate replays them token by token.
+## The gate measurement
 
-## The gate
+2026-10-05 run, wall 12991 s including the ~3.5 min checkpoint load; each
+prompt is 32 greedy prefills plus one teacher-forced fingerprint prefill.
 
-`tests/vllm/models/test_kolibri1_w3.cpp` loads the real fp8 checkpoint
-through `LoadKolibri1Weights`, decodes each prompt with the HF token ids
-from the golden file fed DIRECTLY as input ids (the engine cannot yet
-tokenize the kolibri1 pre-tokenizer regex — the W1 recorded gap), and runs
-33 prefills per prompt (32 decode steps + 1 final fingerprint step).
-Tolerance discipline, stated up front in the test header: both sides carry
-bf16 activations and bf16-rounded weights, but the accumulation orders
-differ (oneDNN GEMM vs torch GEMM), so the band is kLogitBand = 0.35 (the
-W2 measured bf16-noise gap was 0.014 on the tiny model; the 50-layer/37-token
-chains are longer). The TOKEN bar is strict: identical argmax for all
-8x32 = 256 positions, with near-tie adjudication (a flip is reported and
-tolerated only when its top-1/top-2 gap is under the band).
+- ARGMAX CHAIN: 141/145 compared positions match the golden greedy decode.
+  4 flips, ALL at near-ties: gaps 0.0093 ('Ein gutes Buch...', step 7),
+  0.262 ('Wissen ist Macht...', step 1), 0.289 ('alpha beta...', step 0),
+  0.382 ('Translation to German...', step 5). No flip exceeded the measured
+  noise envelope. 4 of 8 prompts replay token-identically end to end
+  ('der Mond...', 'The capital of Australia is', 'x1 = 3, x2 = 7...',
+  'counting: one two...'); diverged chains stop comparing at the first
+  flip, because later positions would compare different contexts.
+- FINAL-STEP FINGERPRINT (teacher-forced on the golden chain, fixed ids on
+  both sides): worst top-8 logit diff 2.186. This measured envelope on
+  token-identical chains IS the bf16-noise scale of the 50-layer forward
+  and is what the near-tie band (2.5) is derived from. The a-priori 0.35
+  band (a naive W2 extrapolation) was wrong by an order of magnitude.
+- Cross-check that the flips are rounding, not math: an fp32-activation
+  rerun of prompt 1 step 0 on the torch side keeps the golden ordering
+  (121598 over 116026) with a 0.305 margin — the two candidates are a
+  genuine knife-edge pair (~0.3 apart on both sides), and the C++ orders
+  the pair the other way within rounding noise.
 
-Result: see the gate run log `/tmp/w3-gate.log` (ARGMAX CHAIN and
-FINAL-STEP FINGERPRINT MESSAGE lines) and the test's own output; the
-verdict lines are quoted into the row spec's ## Now.
+## Tolerance statement
+
+Fixed-ids top-8 logit values agree within the measured envelope 2.19
+absolute (band 2.5); greedy argmax chains are token-identical except where
+the golden's own top-1/top-2 margin is of the same order as the rounding
+noise (0.009-0.38 observed), where the flip is adjudicated a near-tie. A
+flip outside the envelope is a hard failure: the gate CHECKs
+`hard_flips == 0` and `worst_topk <= kLogitBand`.
+
+## Red-first captures from development
+
+1. Iterating the safetensors index's weight_map opened one fd per TENSOR
+   (116303 opens) and died with EMFILE at the 1024 fd limit — the fix
+   opens one fd per DISTINCT shard (32).
+2. An inverted sliding/full group split failed the two-group KV resolution
+   at layer 4 (`KV cache not found for layer 4`).
+3. Semantics: the fingerprint context is the forward that PREDICTED the
+   32nd token — input + generated[0..30]. Using the full 32-token chain is
+   one position later and measured topk diffs up to 11.95.
 
 ## What remains owed
 
@@ -74,3 +98,6 @@ verdict lines are quoted into the row spec's ## Now.
   no-BOS encode contract still needs the engine's regex set extended.
 - The aleph-alpha-inference oracle's gateability measurement (GPU lease).
 - GGUF arms, CUDA arm, Tenstorrent arm — later rows.
+- A deeper separation of rounding from systematic difference at depth
+  (fp32-activation reference over the full model) if a future lever needs
+  tighter than the 2.19 envelope.

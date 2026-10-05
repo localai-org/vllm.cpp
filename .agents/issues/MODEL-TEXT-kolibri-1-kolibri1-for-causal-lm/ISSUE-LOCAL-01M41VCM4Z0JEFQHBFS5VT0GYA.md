@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-03
-Updated: 2026-10-03
+Updated: 2026-10-05
 Closed: -
 
 ## Problem
@@ -16,4 +16,16 @@ The model registry has no kolibri1 support. Aleph-Alpha/Kolibri-1 (Kolibri1ForCa
 
 ## Resolution
 
--
+- 2026-10-03 (W1): config parse, registry, KV-cache spec, fp8-block loader
+  land on row/kolibri-cpu.
+- 2026-10-03 (W2): the CPU hybrid forward lands, gated against an in-test
+  scalar transcription of the plugin's math (max abs logits gap 0.014).
+- 2026-10-05 (W3): the row's token gate runs against the REAL checkpoint —
+  bf16 reference dequantized (spot-check 1.05e-4 vs direct fp8->f32 decode,
+  docs/bench-evidence/kolibri1-goldens-20261004.md), golden run over 8
+  prompts (greedy, 32 tokens, fingerprints committed at
+  tests/vllm/models/kolibri1_goldens.json), and the gate replays them:
+  141/145 argmax positions match, 4 flips all near-ties inside the
+  measured 2.19 bf16 envelope, no hard flips. Still OPEN: the tokenizer
+  engine gap (R7 — the gate feeds HF ids directly), the oracle gateability
+  measurement (GPU), and the quantized/backend arms.
