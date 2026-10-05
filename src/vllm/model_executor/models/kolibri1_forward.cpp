@@ -400,8 +400,13 @@ ForwardLogits ForwardKolibri1Forward(
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
     Tensor dhn_t = dhn.t();
     Tensor res_t = res.t();
-    vt::RmsNorm(d.q, dhn_t, hidden, w_in,
-                vt::RmsNormArgs{eps, false}, &res_t);
+    if (dense_attn::FusedChainAdoptEnabled()) {
+      vt::FusedChain(d.q, dhn_t, hidden, w_in, &res_t,
+                     vt::kFusedAddRmsNormStd, eps);
+    } else {
+      vt::RmsNorm(d.q, dhn_t, hidden, w_in,
+                  vt::RmsNormArgs{eps, false}, &res_t);
+    }
 
     // Attention -> post_attn_norm (no residual).
     DBuf attn = AttentionBlock(d, lw.attn, p, lw.is_sliding, dhn.t(),
@@ -416,8 +421,13 @@ ForwardLogits ForwardKolibri1Forward(
     Tensor w_pal = ResidentWeight(d, lw.post_attention_layernorm, {h});
     Tensor dh2_t = dh2.t();
     res_t = res.t();
-    vt::RmsNorm(d.q, dh2_t, attn_n.t(), w_pal, vt::RmsNormArgs{eps, false},
-                &res_t);
+    if (dense_attn::FusedChainAdoptEnabled()) {
+      vt::FusedChain(d.q, dh2_t, attn_n.t(), w_pal, &res_t,
+                     vt::kFusedAddRmsNormStd, eps);
+    } else {
+      vt::RmsNorm(d.q, dh2_t, attn_n.t(), w_pal, vt::RmsNormArgs{eps, false},
+                  &res_t);
+    }
 
     // MoE on EVERY layer -> post_ffn_norm (no residual).
     DBuf moe = MoeBlock(d, lw.moe, p, dh2.t(), t);
@@ -437,7 +447,13 @@ ForwardLogits ForwardKolibri1Forward(
   Tensor w_fn = ResidentWeight(d, weights.final_norm, {h});
   Tensor dnorm_t = dnorm.t();
   Tensor res_t = res.t();
-  vt::RmsNorm(d.q, dnorm_t, hidden, w_fn, vt::RmsNormArgs{eps, false}, &res_t);
+  if (dense_attn::FusedChainAdoptEnabled()) {
+    vt::FusedChain(d.q, dnorm_t, hidden, w_fn, &res_t,
+                   vt::kFusedAddRmsNormStd, eps);
+  } else {
+    vt::RmsNorm(d.q, dnorm_t, hidden, w_fn, vt::RmsNormArgs{eps, false},
+                &res_t);
+  }
 
   // logits_indices gather, then the UNTIED lm_head.
   const bool do_gather = !logits_indices.empty() &&
