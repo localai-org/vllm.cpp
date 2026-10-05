@@ -96,11 +96,12 @@ device-idleness probe, shared-host rules, and any service-quiescence procedure.
 Do not use an infrastructure-specific lock or manage a service merely because a
 historical entry names it.
 
-On Ettore's DGX profile, `${GPU_LOCK}` is `flock /tmp/gpu` and the detailed
-shared-host procedure lives at
-`/home/mudler/_git/skills/sharing-a-gpu-with-flock/SKILL.md`. That flock is an
-inter-agent mutex because the LocalAI worker is normally stopped. Other
-developers use their selected policy. A sole GPU owner may run correctness work
+Fleet devices (`dgx:gpu0`, `thor:gpu0`, `orin:gpu0`) are claimed with the
+resource-controller lease (`rc run` / `rc hold`); the lease is the required path
+to them, and `ssh` plus a file mutex never reaches one. On a GPU that is not a
+fleet device, take the file mutex `${GPU_LOCK:-$HOME/gpu.lock}` — one truth,
+where the variable resolves it. Where both apply, the mutex runs inside the
+lease and never instead of one. A sole GPU owner may run correctness work
 lock-free after verifying the GPU is idle when preferences permit it;
 benchmark/A-B validity still requires an uncontended GPU either way.
 
