@@ -24,7 +24,26 @@ UPSTREAM = Path(__file__).parent / "fixtures/rocprof_attach_upstream"
 PATCH = ROOT / "tools/bench/strix_four_engine/patches/rocprof-controller-preflight.patch"
 CLI = ROOT / "tools/bench/strix_four_engine/rocprof_attach_preflight.py"
 
+# CI-context exemption, recorded: the pinned rocm-systems controller
+# (97f5574fe2fdc7bef44fb01545347912ee9f1779) is x86-only ptrace code --
+# PTRACE_GETREGS/PTRACE_SETREGS and struct user_regs_struct with rax/rsp/rip
+# do not exist on aarch64 (the kernel uses user_pt_regs via PTRACE_GETREGSET,
+# with reg names x0..x30/sp/pc). The upstream pin has no aarch64 attachment
+# implementation to mirror, so on a non-x86_64 host the setUpClass compile
+# cannot succeed and there is nothing this suite could measure. The suite
+# SKIPS there with this reason instead of erroring the whole class; it still
+# runs for real on the x86_64 lanes.
+import platform
 
+CONTROLLER_IS_X86_64_ONLY = platform.machine() in ("x86_64", "amd64")
+
+
+@unittest.skipUnless(
+    CONTROLLER_IS_X86_64_ONLY,
+    "the pinned rocm-systems attachment controller is x86-only ptrace code; "
+    "no aarch64 implementation exists upstream to mirror, so the fixture "
+    "cannot compile or measure anything on this architecture",
+)
 class ControllerPreflight(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
