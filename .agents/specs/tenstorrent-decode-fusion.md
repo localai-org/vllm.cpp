@@ -308,6 +308,16 @@ together on `row/tt-decode-fusion`, continuing the developer's recorded
 policy).
 
 ## Now
+2026-10-06 (row/gdn-slot-churn, commit 76aef007c): the captured decode
+graph's GDN state-slot bindings moved under driver control — a wave
+re-admission that changes the non-spec state-index content now resets the
+graph and re-captures on an eager boundary step (the #2469 lane), closing
+ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W (the :558 capture fatal and the
+stale-binding replay churn behind the c2 INT8DOT flip-flop). Multi-wave
+money leg BENCH_EXIT=0 twice; evidence
+docs/bench-evidence/tt-gdn-slot-churn-27b-20261006.md. Owed found in flow:
+the B<S padded decode arm (CausalConv1dUpdateKernel reshape volume fatal).
+
 
 2026-10-02 (row/tt-q4k-fusion, commit 17a42d831): WAVE 3 LANDED — the
 Q4_K arm of the fused whole-decode dispatch, with the scale-index
