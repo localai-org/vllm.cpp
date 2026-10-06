@@ -1067,3 +1067,116 @@ TEST_CASE("qwen3.5-9B dense captured arm SERVES replays byte-identical to eager 
                       {{220, 16, 220, 16}},
                       /*oracle_ties=*/{{{0, 3}, {16, 17}}});
 }
+
+// TT-GDN-SLOT-CHURN (ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W): the decode
+// graph's GDN state-slot bindings are baked at trace-capture time (the
+// content-keyed one-hot/scatter ids of GdnSsmIdxEntry / GdnConvIdxEntry,
+// tenstorrent_gdn.cpp:558/:1629). Continuous admission — a request retiring
+// while others decode, or a queued wave re-admitting onto freed slots —
+// changes the batch's state-index CONTENT at a constant padded size S, where
+// every earlier single-wave gate leg kept it frozen. On HEAD that is the
+// engine-fatal at :558 when a capture lands after a membership change, and
+// the replays between membership changes gather the stale capture-time slots
+// (the c2 run-to-run nondeterminism). This gate drives exactly that load on
+// the 0.8B keep-quant vehicle: six requests with STAGGERED output lengths in
+// two overlapping waves, so the decode batch's membership churns at a
+// constant S while the captured arm is live. GREEN requires: every request
+// finishes, and two independent engine runs over the identical load produce
+// byte-identical streams (the determinism the churn artifacts broke).
+// Checkpoint-gated: absent VLLM_CPP_QWEN35_Q4KM_GGUF -> loud SKIP.
+namespace {
+
+struct MultiWaveRun {
+  bool all_finished = false;
+  std::vector<std::vector<int32_t>> streams;
+};
+
+MultiWaveRun RunMultiWaveChurn(const char* gguf) {
+  MultiWaveRun run;
+  // max_num_seqs=4 keeps the decode batch AT the capture size S=4 for every
+  // step with a non-empty queue: the queued wave backfills a retiring slot on
+  // the same step, which is exactly the re-admission path the single-wave
+  // legs never ran. (The B < S padded arm is a separate owed item; this gate
+  // never claims it.)
+  vllm::entrypoints::EngineParams params;
+  params.max_num_seqs = 4;
+  std::unique_ptr<vllm::entrypoints::LoadedEngine> le =
+      vllm::entrypoints::LoadedEngine::FromModelDir(std::string(gguf), params);
+  // Wave 1: four short decodes with STAGGERED output lengths, so the
+  // batch's membership changes on several consecutive steps.
+  std::vector<vllm::v1::AsyncRequest> live =
+      le->async_engine().add_request_wave({{"mw0", Prompts()[0], Greedy(2)},
+                                           {"mw1", Prompts()[1], Greedy(3)},
+                                           {"mw2", Prompts()[2], Greedy(4)},
+                                           {"mw3", Prompts()[3], Greedy(5)}});
+  // Wave 2: queued IMMEDIATELY behind it, so every wave-1 retirement is
+  // backfilled from this wave — the slot set at S=4 churns while the
+  // captured decode graph is live.
+  std::vector<vllm::v1::AsyncRequest> late =
+      le->async_engine().add_request_wave({{"mw4", Prompts()[4], Greedy(20)},
+                                           {"mw5", Prompts()[5], Greedy(20)},
+                                           {"mw6", Prompts()[6], Greedy(20)},
+                                           {"mw7", Prompts()[7], Greedy(20)}});
+  // get_output returns STREAMING chunks; drain to the terminal output the
+  // same loop AsyncLLM::generate uses.
+  auto drain = [&](const vllm::v1::AsyncRequest& req) {
+    vllm::RequestOutput out{};
+    std::vector<int32_t> ids;
+    bool finished = false;
+    for (;;) {
+      std::optional<vllm::RequestOutput> ready =
+          le->async_engine().get_output_nowait(req);
+      out = ready.has_value() ? std::move(*ready)
+                              : le->async_engine().get_output(req);
+      if (!out.outputs.empty())
+        for (const auto& o : out.outputs)
+          ids.insert(ids.end(), o.token_ids.begin(), o.token_ids.end());
+      if (out.finished) { finished = true; break; }
+    }
+    return std::pair<bool, std::vector<int32_t>>{finished, std::move(ids)};
+  };
+  run.all_finished = true;
+  size_t idx = 0;
+  for (const auto& req : live) {
+    auto [fin, ids] = drain(req);
+    if (!fin) run.all_finished = false;
+    MESSAGE("live[" << idx << "] finished=" << fin << " tokens=" << ids.size());
+    ++idx;
+    run.streams.push_back(std::move(ids));
+  }
+  idx = 0;
+  for (const auto& req : late) {
+    auto [fin, ids] = drain(req);
+    if (!fin) run.all_finished = false;
+    MESSAGE("late[" << idx << "] finished=" << fin << " tokens=" << ids.size());
+    ++idx;
+    run.streams.push_back(std::move(ids));
+  }
+  return run;
+}
+
+}  // namespace
+
+TEST_CASE("qwen3.5-0.8B GGUF multi-wave GDN slot-churn re-admission serves deterministically (Tenstorrent, checkpoint-gated)") {
+  const char* gguf = std::getenv("VLLM_CPP_QWEN35_Q4KM_GGUF");
+  if (gguf == nullptr || gguf[0] == '\0') {
+    SkipGate("qwen35-gguf-q4km-multivave",
+             "VLLM_CPP_QWEN35_Q4KM_GGUF is absent — set it to the local "
+             "Qwen3.5-0.8B-Q4_K_M.gguf to run the multi-wave slot-churn gate");
+  }
+  const MultiWaveRun first = RunMultiWaveChurn(gguf);
+  REQUIRE(first.all_finished);
+  REQUIRE(first.streams.size() == 6);
+  for (size_t i = 0; i < first.streams.size(); ++i)
+    REQUIRE_MESSAGE(!first.streams[i].empty(),
+                    "wave request " << i << " produced no tokens");
+  // Determinism: a second identical load must reproduce the first run's
+  // streams byte-for-byte. The stale-binding replays made this flaky (the
+  // c2 INT8DOT A/B legs' run-to-run flip).
+  const MultiWaveRun second = RunMultiWaveChurn(gguf);
+  REQUIRE(second.all_finished);
+  for (size_t i = 0; i < first.streams.size(); ++i) {
+    REQUIRE_MESSAGE(second.streams[i] == first.streams[i],
+                    "run-to-run stream mismatch on request " << i);
+  }
+}
