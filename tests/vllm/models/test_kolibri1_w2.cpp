@@ -48,6 +48,8 @@
 #include "vt/unaligned.h"
 #include "vt/ops.h"
 
+#include "vt/cpu/cpu_threadpool.h"  // Threadpool::SwapForTesting (the ONE pool)
+
 #include <functional>
 
 namespace {
@@ -976,6 +978,50 @@ TEST_CASE("kolibri1 W2: full-depth 50-layer config runs end to end") {
   // Determinism: a fresh topology, same tokens, byte-identical logits.
   const Run again = RunForward(w, config, {tokens});
   CHECK(again.logits == run.logits);
+}
+
+
+// Threading smoke gate (CPU-profile row, kolibri1-cpu-profile-20261004): the
+// threaded fp8-block dequant partitions OUTPUT rows only (host_parallel.h),
+// and the pooled GEMMs partition output chunks only, so ANY pool size must
+// produce byte-identical logits. Asserted against the 1-thread pool — the de
+// facto serial reference — on the full-depth hermetic fixture.
+TEST_CASE("kolibri1 W2: threaded pool is bit-identical to the serial pool") {
+  Shape big;
+  big.hidden = 2560;
+  big.vocab = 64;
+  big.heads = 48;
+  big.kv_heads = 4;
+  big.head_dim = 128;
+  big.layers = 50;
+  big.experts = 8;
+  big.topk = 2;
+  big.inter = 64;
+  big.window = 513;
+  std::vector<std::string> ltypes;
+  for (int64_t l = 0; l < 50; ++l)
+    ltypes.push_back(l % 5 == 4 ? "full_attention" : "sliding_attention");
+  const HfConfig config = MakeConfig(big, ltypes);
+  Lcg rng(0xDEADBEEFCAFEF00DULL);
+  TempCheckpoint ckpt(BuildFixture(rng, big));
+  Kolibri1Weights w = LoadWeights(ckpt, config);
+  const std::vector<int32_t> tokens{7, 31, 0, 55, 12};
+
+  vt::cpu::Threadpool serial_pool(1);
+  vt::cpu::Threadpool* prev = vt::cpu::Threadpool::SwapForTesting(&serial_pool);
+  const Run serial = RunForward(w, config, {tokens});
+  vt::cpu::Threadpool::SwapForTesting(prev);
+
+  vt::cpu::Threadpool threaded_pool(8);
+  prev = vt::cpu::Threadpool::SwapForTesting(&threaded_pool);
+  const Run threaded = RunForward(w, config, {tokens});
+  vt::cpu::Threadpool::SwapForTesting(prev);
+
+  REQUIRE(serial.logits.size() == threaded.logits.size());
+  for (size_t i = 0; i < serial.logits.size(); ++i)
+    REQUIRE_MESSAGE(serial.logits[i] == threaded.logits[i],
+                    "pool size changed the logits at flat " << i << ": serial "
+                        << serial.logits[i] << " threaded " << threaded.logits[i]);
 }
 
 // W2 guard: the forward refuses a GPU queue by name — the row's scope is the
