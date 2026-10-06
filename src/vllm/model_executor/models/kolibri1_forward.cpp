@@ -43,7 +43,7 @@
 #include "vllm/model_executor/models/dense_attn_block.h"  // StepInputs, KvSlice
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
 #include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
-#include "vt/fp8_kv.h"                                     // F8E4M3ToF32
+#include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
 #include "vt/ops.h"
 
@@ -131,14 +131,12 @@ DBuf DequantFp8Block(Dev d, const Fp8BlockWeight& w) {
   // decode step), all serial before this.
   host_parallel::ForOutputRows(
       w.n, w.k, [&](int64_t n0, int64_t n1) {
-        for (int64_t n = n0; n < n1; ++n) {
-          const int64_t sr = n / w.block_n;
-          for (int64_t k = 0; k < w.k; ++k) {
-            const float v = vt::F8E4M3ToF32(src[n * w.k + k]) *
-                            sc[sr * scale_cols + k / w.block_k];
-            dst[n * w.k + k] = vt::F32ToBF16(v);
-          }
-        }
+        // The NEON decode (aarch64) / scalar fallback body lives in
+        // kolibri1_fp8_dequant.h, bit-identical to this file's previous
+        // scalar loop elementwise (the bitwise doctest pins all 256 e4m3
+        // bytes x the scale grid).
+        kolibri1_fp8::DequantRowsBf16(src, sc, scale_cols, n0, n1, w.k,
+                                      w.block_n, w.block_k, dst);
       });
   return out;
 }

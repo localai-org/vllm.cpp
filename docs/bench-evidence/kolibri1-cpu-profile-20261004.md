@@ -113,3 +113,54 @@ NEON was not reached in this session and stays owed on the row).
   same 4 near-tie adjudications as the landed gate (identical to serial).
 - W1 `test_kolibri1`: 27/27 cases, 186/186 assertions.
 - `scripts/check-agent-record.py`: exit 0.
+
+## Phase 3 — bit-exact NEON fp8 decode (landed 2026-10-06, same worktree,
+branch `row/kolibri-perf-rebase`, HEAD 432b98b54 + this change)
+
+The kernel is `src/vllm/model_executor/models/kolibri1_fp8_dequant.h`: the
+scalar `vt::F8E4M3ToF32 x scale_inv` composition is rewritten as an exact
+closed form on the f32 bit pattern (`(e+120)<<23 | m<<20` for normals,
+`cvt(m)*2^-9` for subnormals, `+qNaN` with the sign suppressed for
+0x7F/0xFF) and vectorized 16 bytes per `vld1q_u8` step, then the f32 lanes
+are multiplied by the (block-constant) scale and stored bf16 with a
+bit-identical port of `vt::F32ToBF16` (round-to-nearest-even incl. the
+carry into the exponent, NaN truncate-to-quiet). Chunks never cross a
+`block_k` boundary, so the scale is one `vdupq_n_f32` per chunk. The
+non-aarch64 build keeps the scalar loop (the x86 CI path compiles it with
+`-U__aarch64__` checked).
+
+Bitwise identity is gated exhaustively, not sampled:
+`tests/vllm/models/test_kolibri1_dequant.cpp` compares raw uint16 bf16
+patterns — ALL 256 e4m3fn bytes x 6 scales (1.0, 2^-14 subnormal-range,
+3.0e34, -1.5, 0.0, 2^-9) through the full row driver; a ragged-block run
+(5x45, block 2x16, odd-K tail) against the scalar reference; and pool-style
+partial row partitions. A deliberate sign-bit mutation of the kernel turns
+the suite red (mutation check), restored to green byte-for-byte.
+
+Same-host A/B, both binaries built from this tree (scalar = stash of this
+change), `VLLM_CPP_CPU_THREADS=8`, `VT_KOLIBRI1_PROFILE=1`, the full W3
+gate, `/usr/bin/time -v`:
+
+| axis | scalar (HEAD) | NEON | multiple |
+|---|---|---|---|
+| `dequant_fp8_block` at 150 forwards | 1714.31 s | 248.28 s | **6.91x** |
+| `total_forward` at 150 forwards | 1972.85 s | 513.43 s | 3.84x |
+| whole-gate wall | 33:59.36 | 9:05.61 | 3.74x |
+
+The conversion-bound reading was right: one NEON multiply-add-free
+shuffle-free pass removes ~1466 s of 150-forward wall; the dequant stage
+falls from 87% of `total_forward` to 48%, and `linear_gemm` (222.6 s) is
+now the co-dominant stage — the next lever is a bounded dequant cache (the
+re-dequant-per-call disposition), not more decode micro-optimization.
+
+## Gates (post-NEON)
+
+- `test_kolibri1_dequant`: 3/3 cases, 8/8 assertions (bitwise, exhaustive
+  over the e4m3fn byte domain).
+- W3 `test_kolibri1_w3` (NEON build): 900/900 assertions, argmax chain
+  141/145 with the SAME 4 near-tie flips and the SAME fingerprints as the
+  scalar binary (worst topk logit diff 2.18646 both sides) — the NEON path
+  moved no bit that reaches the gate.
+- W2 `test_kolibri1_w2`: 7/7 cases, 1608/1608 assertions. W1
+  `test_kolibri1`: 27/27 cases, 186/186 assertions.
+- `scripts/check-agent-record.py`: exit 0.

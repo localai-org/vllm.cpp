@@ -130,6 +130,12 @@ vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
 vllm_cpp_add_test(test_kolibri1 vllm/models/test_kolibri1.cpp)
 # kolibri1_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 target_include_directories(test_kolibri1 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 perf row (Phase 3 NEON): the fp8-block dequant kernel
+# (kolibri1_fp8_dequant.h) is BIT-IDENTICAL to the scalar reference over all
+# 256 e4m3fn values x the scale grid, on chunks, ragged blocks, and pool row
+# partitions.
+vllm_cpp_add_test(test_kolibri1_dequant vllm/models/test_kolibri1_dequant.cpp)
+target_include_directories(test_kolibri1_dequant PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1 W2 gate: the CPU forward against the in-test scalar
 # reference (the kolibri1.py transcription), the ragged batch, the
 # logits_indices gather, and the full-depth 50-layer structural run.
