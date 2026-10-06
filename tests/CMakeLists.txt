@@ -142,6 +142,15 @@ vllm_cpp_add_test(test_kolibri1_w3 vllm/models/test_kolibri1_w3.cpp)
 target_include_directories(test_kolibri1_w3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# MODEL-TEXT-kolibri-1-tenstorrent wave-A gate (spec
+# .agents/specs/kolibri-tt.md): the TT staging plan over the landed
+# kolibri1 loader — device-FREE policy, so the test compiles like any
+# model test but is registered only in a Tenstorrent build, beside
+# test_tenstorrent_backend.
+if(VLLM_CPP_TENSTORRENT)
+  vllm_cpp_add_test(test_kolibri1_tt vllm/models/test_kolibri1_tt.cpp)
+  target_include_directories(test_kolibri1_tt PRIVATE ${CMAKE_SOURCE_DIR}/src)
+endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
 target_include_directories(test_mimov2_w2 PRIVATE ${CMAKE_SOURCE_DIR}/src)

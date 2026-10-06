@@ -854,6 +854,9 @@ add_library(vllm STATIC
   # Kolibri-1 (MODEL-TEXT-kolibri-1) is a NEW architecture TU pair following
   # the mimo_v2 seam: registry + weights + CPU forward. W2 adds the CPU
   # hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add MoE).
+  # kolibri1_tt.cpp is the MODEL-TEXT-kolibri-1-tenstorrent wave-A staging
+  # plan (device-free; spec .agents/specs/kolibri-tt.md).
+  src/vllm/model_executor/models/kolibri1_tt.cpp
   src/vllm/model_executor/models/kolibri1_registry.cpp
   src/vllm/model_executor/models/kolibri1_weights.cpp
   src/vllm/model_executor/models/kolibri1_forward.cpp
