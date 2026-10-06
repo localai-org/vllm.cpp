@@ -152,11 +152,114 @@ and the test outputs. Device measurements are NOT wave-A evidence.
 - The manifest numbers drift from the real index → regenerate the manifest
   from the pinned checkpoint first (separate commit), never hand-edit.
 
+## Single-P150 expert streaming — design (developer-directed 2026-10-06)
+
+The full model cannot reside on one P150 (§ the 384-expert staging memory
+math: 70.33 GiB routed experts against 32 GiB). The directed capacity
+feature is expert streaming: resident non-expert components, stream routed
+experts per token keyed on router output.
+
+Decisions recorded with the developer (2026-10-06):
+
+- **Backing tier: host RAM first, NVMe as a pluggable leaf.** The P150 is a
+  discrete card, so the host-RAM tier is meaningful (PCIe 25–60 GB/s), unlike
+  the GB10 unified-memory case the parent spike
+  (`expert-streaming.md` §3) had to reject. Decode streams
+  50 layers × 6 experts × 3.93 MiB ≈ **1.18 GiB/token**; at 25–60 GB/s the
+  raw stream bound is **20–47 ms/token**. The NVMe tier (~5 GB/s,
+  ~236 ms/token) is the backing-store leaf, not the first target.
+- **Device hot set: yes.** A hotness-decayed-LFU cache (the
+  `ENG-EXPERT-STREAM` mechanism) sized inside the device budget. Budget:
+  32 GiB − ~3.3 GiB resident (attention 1.625, embed+head 1.221, router
+  0.094, shared expert 0.188, norms ~0.002, GiB) − KV cache − hot set.
+- **Concurrency refusal is inherited.** At conc≥32 the per-step touched
+  fraction of 384 experts approaches 1 and per-step I/O approaches
+  (1−f) × 70 GiB regardless of reordering (`expert-streaming.md` verdict).
+  The streaming mode must refuse or warn by name at high concurrency, never
+  silently degrade.
+
+Platform mapping:
+
+- The **mechanism** (bank loader, hotness cache, pread pool,
+  logical-expert→slot remap) is platform-neutral and is reused, not
+  rewritten.
+- The **device destination is TT-native**: a fixed-capacity pool of
+  FP8_E4M3 expert slot buffers staged per the wave-A dtype decision
+  (`packed` bytes verbatim, row-major; scale grids f32 host-side). The
+  landed `DeviceExpertSlotStore` (`expert-stream-device-slots.md`) is
+  CUDA-Marlin-shaped and lands unreached; it is a pattern reference, not a
+  dependency.
+- **Trace capture cannot cover the MoE region**: FP8_E4M3 does not
+  serialize to flatbuffer (§ FP8 constraints) and streamed slot content
+  changes per token. The graph reset-on-content-change mechanism landed for
+  GDN state churn (issue
+  `ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`, #3404) is the direct precedent:
+  expert-slot swaps join the same reset lane, and the resident
+  (attention/norm/router/shared) region stays capturable.
+
+Wave shape for this design (each wave owns its spec section before device
+work):
+
+- **B1 (host-side, device-free)**: streaming staging planner — host-tier
+  byte budget, resident-fraction accounting, per-token miss bound with the
+  hot set, concurrency refusal. Gates stay CPU-only like wave A.
+
+### B1 scope (committed before implementation)
+
+`Kolibri1TTStagingPlan` grows a streaming mode beside the existing
+full-residency plans. Device-free; every gate stays CPU-only.
+
+In:
+
+- `Kolibri1TTStreamingPlan` (same TU pair, `kolibri1_tt.h/.cpp`): inputs
+  are the device budget (default 32 GiB), the host-tier byte budget, the
+  hot-set byte budget, and the concurrency operating point.
+- Resident accounting: non-expert components (§ byte math: attention
+  1.625 GiB, shared expert 0.188 GiB, router 0.094 GiB, norms ~2 MiB,
+  embed + untied head 1.221 GiB) always resident; the planner refuses by
+  name if they alone exceed the device budget.
+- Hot-set sizing: the planner takes the hot-set budget as an expert count
+  derived from the device residual (device budget − resident − KV reserve);
+  each hot expert costs 3,933,120 B (fp8 + scales, § byte math).
+- Host-tier accounting: all 384 × 50 experts must fit the host budget
+  (70.33 GiB fp8 + scale grids); the planner refuses by name with the
+  deficit when it does not. The NVMe tier is a named-but-unimplemented
+  leaf: a plan that cannot fit RAM refuses with a message that names the
+  NVMe leaf as owed, and never silently spills.
+- Per-token miss bound: decode streams at most
+  `layers × topk × per-expert bytes` = 1.18 GiB/token; the plan records the
+  bound and the RAM-tier bandwidth envelope (25–60 GB/s ⇒ 20–47 ms/token)
+  as derived numbers, not measurements.
+- Concurrency refusal: at a concurrency whose expected touched-expert
+  fraction per layer exceeds a declared threshold, the plan refuses (or
+  warns, when the caller asks for best-effort) naming the
+  (1−f) × 70.33 GiB per-step I/O consequence — the
+  `expert-streaming.md` high-concurrency verdict mirrored.
+
+Out (owed to B2/B3): any device allocation, the slot store, routing
+readback, the NVMe filler, overlap. B1 is host-side policy only.
+
+Tests (red-first, `tests/vllm/models/test_kolibri1_tt.cpp`): resident
+accounting against the § byte-math table; hot-set derivation from the
+device residual; host-budget refusal naming the deficit; the NVMe leaf
+naming; the per-token stream bound 50 × 6 × 3,933,120 B; the concurrency
+refusal at a touched fraction above threshold and the best-effort warning
+below refusal. `test_kolibri1` (CPU) stays green.
+
+Gates: the wave-A gate list unchanged (CPU-only build skips the TU; TT
+build compiles it; record battery green).
+
+- **B2**: TT device forward for resident components + streaming MoE
+  dispatch through the TT slot store.
+- **B3**: overlap (fetch layer *i*'s experts while layer *i−1* computes),
+  hot-set seeding, measured TPOT vs the resident-deficit refusal of wave A.
+
 ## Now
 
 `ACTIVE` — wave A (registration/config-reuse, staging plan, loader wiring,
 manifest) in review; the device forward is the next wave and owns its own
-spec section before any P150 work.
+spec section before any P150 work. The single-P150 expert streaming design
+above is recorded; B1 owes its spec section before implementation.
 
 ## Git integration
 
@@ -169,6 +272,9 @@ One pull request for wave A (spec + implementation together), branched from
   qk-norm, sandwich norms, sigmoid-logit-add MoE dispatch with 6-of-384
   routing on device, sampling.
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
+- Single-P150 expert streaming: B1 planner spec + implementation (design
+  section above), then B2/B3. The NVMe backing tier is a pluggable leaf
+  behind the RAM tier.
 - Tile-layout consumption of the staged FP8_E4M3 operands (tilize inside the
   compute kernels; FP8 is RM-only at tensor creation).
 - Trace/warmup design that tolerates the FP8 flatbuffer serialization gap.
