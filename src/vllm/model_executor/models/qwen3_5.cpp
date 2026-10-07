@@ -6030,7 +6030,10 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
       /*num_reqs=*/meta.num_reqs,
       /*uniform_spec_query_len=*/meta.uniform_spec_query_len,
       /*causal=*/meta.causal,
-      /*kv_cache_bf16=*/kv.dtype == DType::kBF16,
+      // An fp8 store is served through a bf16 dense scratch (the prefill
+      // dequant), so it presents bf16 too — that is what admits the FA-2
+      // prefill lane. The decode lanes keep their own admission.
+      /*kv_cache_bf16=*/dense_attn::KvCachePresentsBf16(kv),
       /*kv_block_multiple_16=*/kv.block_size % 16 == 0,
       /*preamble_with_cos_sin=*/FuseAttnPreambleOn(fp4) && sdi.has_attn_cos_sin,
       /*fa2_platform=*/fa2_platform,
@@ -6111,7 +6114,7 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   Tensor vw = v3;
   DBuf kbf(d, DType::kBF16, {T, Hkv, Dh});
   DBuf vbf(d, DType::kBF16, {T, Hkv, Dh});
-  if (kv.dtype == DType::kBF16 || dense_attn::IsFp8KvCache(kv)) {
+  if (dense_attn::KvCachePresentsBf16(kv)) {
     // K may already be bf16 (an FA2 preamble emits bf16 k directly —
     // the RN round of the same f32 value this CastBf16 would produce); only
     // down-cast when the preamble/fallback produced f32 K.
