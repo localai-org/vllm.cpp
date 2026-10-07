@@ -254,6 +254,94 @@ build compiles it; record battery green).
 - **B3**: overlap (fetch layer *i*'s experts while layer *i−1* computes),
   hot-set seeding, measured TPOT vs the resident-deficit refusal of wave A.
 
+### B2 scope (committed before implementation)
+
+B2 owns two things: the **TT device forward for the resident components**
+and the **TT-native expert slot store** that the streaming dispatch
+fills. The device forward is device-bound work; the slot-store policy and
+the dispatch plan are device-free and split off first, because the B1
+lesson holds — host-side policy gates on CPU, and only the kernels need
+the card.
+
+**Device forward (B2 device-bound arm, resident components only).** The
+TT forward runs what wave B1 proved resident (§ byte-math table):
+
+- Attention: the hybrid geometry as staged — 40 sliding-window layers at
+  window 513 and 10 full-attention layers with full RNoPE (no rope tables
+  on the full group; § wave-A design). Per-head q/k RMS norms
+  (`q_norm`/`k_norm`, bf16 `[head_dim]` per head) applied inside the
+  attention path.
+- Sandwich norms: the four per-layer norms the CPU row landed
+  (`input_layernorm`, `post_attn_norm`, `post_attention_layernorm`,
+  `post_ffn_norm`), staged bf16.
+- MoE dispatch: the router runs resident (bf16 `[384,2560]` gate, f32
+  `e_score_correction_bias`), sigmoid scoring with the bias added to the
+  logits (sigmoid-logit-add), top-6-of-384 selection. Routed-expert
+  compute consumes slots from the slot store below; the shared expert is
+  resident and computed directly.
+- Sampling: on-device sampling through the landed decode seam
+  (`ModelRegistry::Forward`, `dense_attn::AttnBlock`) where the TT
+  backend already provides it.
+
+The device forward NEVER references a routed expert that is not resident
+in a slot. A miss is a fetch (B3 overlaps it), never a host fallback.
+
+**TT-native expert slot store (device tier of the streaming design).**
+A fixed-capacity pool of FP8_E4M3 slot buffers on device, staged per the
+wave-A dtype decision: `Fp8BlockWeight::packed` bytes verbatim,
+row-major (FP8 is RM-only at tensor creation,
+`ttnn/core/tensor/py_to_tt_tensor.cpp:58-59`); the f32 scale grids stay
+host-side beside the slot table and stage with the slot when the compute
+kernel needs them (§ FP8 constraints — no `extract_shard`, no
+flatbuffer serialization for FP8). Each slot holds one expert, one
+layer: 3,933,120 B (fp8 + scale grids, § byte math). Capacity comes from
+the streaming plan's `hot_experts` (device residual / expert bytes), not
+from a second accounting. A logical-expert→slot remap table
+(host-side) translates router output ids to slot indices. Slot eviction
+is a hotness-decayed-LFU policy hook (the `ENG-EXPERT-STREAM` mechanism);
+B2 defines the policy interface and the refusal, not the replacement
+heuristic tuning.
+
+Slot swaps join the **graph reset-on-content-change lane** — the GDN
+slot-churn fix (`qwen3_5.cpp` TT-GDN-SLOT-CHURN,
+ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W, #3404) is the direct precedent:
+captured graphs bind slot buffer content, so a slot whose logical expert
+changed must flip a reset predicate; an identical re-selection must not.
+The predicate is the slot-table fingerprint (slot → logical-expert
+mapping, layer-scoped), not the bytes of the weights.
+
+**Split into device-free sub-waves:**
+
+- **B2a (device-free, CPU-only gates, this wave):**
+  - `Kolibri1TTExpertSlotPolicy`: capacity = the streaming plan's hot
+    expert count; the slot table (logical expert id → slot, per layer);
+    LRU/hotness eviction hooks (policy only — no device allocation, no
+    ttnn includes); a refuse-by-name when the declared hot set exceeds
+    the device residual budget.
+  - The MoE dispatch plan: given a router output (6-of-384 ids per
+    layer), produce the per-layer slot-fetch list, the resident/missed
+    split, and the per-token stream byte bound (misses × 3,933,120 B)
+    consistent with the B1 `per_token_stream_bytes` ceiling.
+  - The reset-lane predicate: a slot-table fingerprint whose change
+    flips graph-reset exactly like the GDN churn fix; an identical
+    re-selection leaves it stable.
+  - Tests gate B2a: `tests/vllm/models/test_kolibri1_tt.cpp` cases for
+    the slot policy (capacity from the streaming plan, refusal naming
+    the deficit, eviction hook bookkeeping), the dispatch plan
+    (fetch list, resident/missed split, byte bound), and the reset
+    predicate (change flips, identical re-selection does not).
+    `test_kolibri1` (CPU) stays green. Red-first in the manifest-driven
+    style of the existing file.
+- **B2b (device-bound, needs the P150 card, own spec addendum before any
+  device work):** the actual TT kernels — attention SWA 513 + full
+  RNoPE, per-head qk-norm, sandwich norms, the sigmoid-logit-add MoE
+  dispatch consuming slots, sampling. Gates: device gates under the GPU
+  lease, plus the parity trace against the pinned oracle. No B2b code
+  lands before that addendum is committed.
+
+Out (owed to B2b/B3): any device allocation or kernel, slot fetch
+executors, overlap, hot-set seeding. B2a touches no device.
+
 ## Now
 
 `ACTIVE` — wave A (registration/config-reuse, staging plan, loader wiring,
