@@ -360,7 +360,7 @@ window (§ Gates).
 - **B2b-i — dense-resident device forward, no streaming.** The resident
   non-expert set (§ byte-math table: attention 1.587 GiB, embed + untied
   head 1.221 GiB, router 0.094 GiB, shared expert 0.188 GiB, norms ~2 MiB;
-  ≈ 3.3 GiB) runs entirely on device with the routed-expert tier absent:
+  ≈ 3.09 GiB) runs entirely on device with the routed-expert tier absent:
   - Attention: the hybrid geometry as staged — 40 sliding-window layers at
     window 513 and 10 full-attention layers with full RNoPE (no rope tables
     on the full group), two-group KV per the wave-A design; per-head q/k
