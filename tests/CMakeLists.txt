@@ -148,7 +148,6 @@ vllm_cpp_add_test(test_kolibri1_w3 vllm/models/test_kolibri1_w3.cpp)
 target_include_directories(test_kolibri1_w3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
-# SCRATCH (uncommitted) incremental production-shape bench.
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1-tenstorrent wave-A gate (spec
