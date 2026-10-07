@@ -242,6 +242,27 @@ a silent fallback cannot post a plausible number:
   reports GPU-timestamp time rather than wall clock; see
   [ENVIRONMENT.md](ENVIRONMENT.md) for what each knob does and what it measured.
 
+### Kolibri-1 CPU checkpoint
+
+The CPU loader accepts `Aleph-Alpha/Kolibri-1` FP8 block-quantized safetensors.
+The recorded checkpoint revision is `e52eb462`, with 32 shards and
+78,827,029,120 bytes of tensor data. The loader expects a directory containing
+`config.json`, `model.safetensors.index.json`, and all indexed shards.
+The repository does not record the full checkpoint revision or shard SHA256
+hashes, so the artifact pin remains incomplete.
+
+The CPU forward dequantizes FP8 weights to bf16 for each projection.
+[Golden outputs and a comparison test](bench-evidence/kolibri1-goldens-20261004.md)
+are checked in for eight prompts with 32 generated tokens each. The reference
+is a PyTorch transcription of the pinned author plugin, not an executed vLLM
+plugin. No committed result establishes that the C++ comparison passed.
+
+The comparison feeds token IDs directly. The tokenizer still rejects this
+checkpoint's pre-tokenizer expression, so text generation through the CLI or
+server is not ready. GGUF, CUDA, and Tenstorrent execution are unavailable.
+Reasoning and tool parser integration remain unverified. No throughput result
+is published for this path.
+
 ### Quantized checkpoints: which weight forms load
 
 **TQ1_0 and TQ2_0 GGUF files cannot load yet.** The

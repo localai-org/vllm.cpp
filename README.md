@@ -8,7 +8,7 @@
 
 <p align="center">
   <b>Same tokens as vLLM. Same throughput. 140x less to install.</b><br>
-  <sub>Continuous batching, paged KV, 44 registered architectures, CUDA / CPU / Metal / Vulkan. No Python anywhere.</sub>
+  <sub>Continuous batching, paged KV, registered model families, CUDA / CPU / Metal / Vulkan. No Python anywhere.</sub>
 </p>
 
 <p align="center">
@@ -36,6 +36,10 @@
 > incompatible change. If you embed us, embed through that header.
 
 ## News
+
+- **2026-10** **Kolibri-1 gains a CPU forward path.** FP8 safetensors load, and a real-checkpoint
+  golden comparison is checked in. Tokenization is blocked, and real-checkpoint parity remains unverified.
+  See [checkpoint details and limits](docs/USAGE.md#kolibri-1-cpu-checkpoint).
 
 - **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
   blocked by missing artifacts, with no speed result. See the
@@ -138,7 +142,7 @@ Where that stands today:
   ahead at all six concurrencies but only c1 outside our noise band. Also **1.18x llama.cpp's
   prefill** on the same GGUF file (denominator SUPERSEDED, see below), and **ahead of MLX-LM on
   prefill** on Apple Silicon. Most other architectures are speed-pending, and say so.
-- **Everything.** 44 registered architectures, 38 tool-parser families, structured output including
+- **Features.** [Registered model families](docs/FEATURES.md), 38 tool-parser families, structured output including
   GBNF, three speculative decoders, image, video, and audio input, music generation, external KV
   offload, Prometheus metrics, and the SGLang knobs, all in a library you can `dlopen`. Multimodal
   HTTP input has CPU tests with synthetic weights on Qwen3-VL and dots3-note. Real-checkpoint
@@ -311,7 +315,7 @@ InternLM2/3, MiniCPM and MiniCPM3, Yi, OPT, plus Qwen3-VL and Qwen3.6-27B vision
 and Voxtral (audio).
 
 <details>
-<summary><b>The full architecture matrix</b> (44 registered architectures grouped by family)</summary>
+<summary><b>The full architecture matrix</b> (registered architectures grouped by family)</summary>
 
 | Architecture | Example checkpoint | GGUF | Correctness | Speed |
 |---|---|:---:|---|---|
@@ -321,6 +325,7 @@ and Voxtral (audio).
 | Llama-3.x dense | Llama-3.2-1B | - | Token-exact (near-tie-robust) | Speed-pending |
 | Mistral dense | Mistral-7B-v0.3 | - | Token-exact | Speed-pending |
 | OPT | OPT-125m | - | Strict token-exact | Speed-pending |
+| Kolibri-1 MoE | Aleph-Alpha/Kolibri-1 (FP8, CPU) | - | Forward implemented, tokenization blocked, parity unverified | Not measured |
 | DeepSeek-V2 (MLA) | DeepSeek-V2-Lite | - | Token-exact | Speed-pending |
 | DeepSeek-V4-Flash (MLA + MHC + DSA) | DeepSeek-V4-Flash-GGUF (80.7 GB, single GB10) | keep-quant | Coherent (near-tie-robust) | Decode beats ds4 1.144x by default (byte-exact) |
 | GLM-4 dense | GLM-4-9B-0414 | - | Token-exact | Speed-pending |
@@ -358,7 +363,7 @@ sampler, no logits); upstream is `vllm-project/vllm-omni`. Five conditioning mod
 Compressed-tensors NVFP4A16 (W4A16) dense weights also load and compute natively
 (RedHatAI/Qwen3-32B-NVFP4A16). Long-context RoPE (YaRN, Llama-3, LongRoPE, dynamic-NTK) and
 sliding-window attention are gated feature-positive. The authoritative per-architecture list, bound
-to the C++ registry (all 44 registered architectures with their tested checkpoint and gate, plus the
+to the C++ registry (all registered model families with their tested checkpoint and gate, plus the
 standalone audio/diffusion lanes and the inventoried-but-blocked archs), is in
 [docs/FEATURES.md](docs/FEATURES.md); family-by-family lifecycle detail, including what is
 hardware-blocked and why, is linked from [Project status](#project-status).
