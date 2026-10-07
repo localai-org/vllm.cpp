@@ -18,11 +18,19 @@ memory compete; end-to-end wall-clock on a cold page cache is unusable there,
 and steady-state per-step timing or `nsys` GPU-busy is the anchor. The
 2026-08-06 #77-slip tree-revert changed no benchmark content or number.
 
-**Oracle pin.** vLLM <!--pin:label-->0.3.0.dev267<!--/pin--> (<!--pin:commit-->`a7c23ac96d`<!--/pin-->) since 2026-09-26, with
-FlashInfer `0.6.18` and CUTLASS DSL `4.6.2`.
+**Oracle pin.** vLLM <!--pin:label-->0.3.0.dev267<!--/pin--> (<!--pin:commit-->`a7c23ac96d`<!--/pin-->) since 2026-09-22 ([#3320](https://github.com/mudler/vllm.cpp/pull/3320)),
+and **no oracle has been built at it.** FlashInfer `0.6.18` and CUTLASS DSL
+`4.6.2` are the versions the `e126687a9a` oracle was INSTALLED with
+([`sync/2026-09-02-e126687.md`](../../.agents/sync/2026-09-02-e126687.md) §5.2)
+and the ones step 6 owes, not anything measured at the current pin: the
+`parity-pin` block still reads `flashinfer_version = 0.6.15.post1` and
+`tools/bench/online_gate.py` refuses a leg that does not match it
+([`sync/2026-09-03-e126687-step6.md`](../../.agents/sync/2026-09-03-e126687-step6.md),
+`REFUSED_AT_FLASHINFER`), so no published ratio on these pages ever ran against a
+`0.6.18` oracle ([#2818](https://github.com/mudler/vllm.cpp/issues/2818)).
 
-**EVERY BINDING RATIO ON THESE PAGES WAS MEASURED AGAINST THE PREVIOUS PIN**,
-vLLM 0.26.0.dev0 (`55596792`) plus transformers 5.14.1, built from source for
+**EVERY BINDING RATIO ON THESE PAGES WAS MEASURED AGAINST A PIN TWO ADVANCES
+BACK**, vLLM 0.26.0.dev0 (`55596792`) plus transformers 5.14.1, built from source for
 sm_121a, the running oracle reporting `0.23.1rc1.dev1511+g555967922` with
 FlashInfer `0.6.15.post1`, selected by explicit path and asserted per leg. The
 pin advanced before those baselines were re-measured, by a developer ruling that
@@ -31,10 +39,15 @@ committed harness refuses to run at any revision but the pinned one. **The
 re-measurement is owed against the new pin
 ([#2818](https://github.com/mudler/vllm.cpp/issues/2818)), it covers five rows
 across `vllm-online-serving` and `speculative-decoding`, and a red there requires
-reverting the pin rather than re-arguing the rows.** No gate of any kind has yet
-run at the new pin: the declared token-exact gate is owed by
-[#2794](https://github.com/mudler/vllm.cpp/issues/2794) and every committed
-golden predates the advance. Speed figures labelled 0.25.0 ran the ROLLBACK the
+reverting the pin rather than re-arguing the rows.** No gate of any kind has
+run at the current pin, and the sentence this one replaced was itself stale: it
+claimed nothing had run "at the new pin" while the declared token-exact gate
+owed by [#2794](https://github.com/mudler/vllm.cpp/issues/2794) HAD run and
+PASSED, at `e126687a9a`, on 2026-09-04, `TOKENGATE_VERDICT PASS`, and #2794
+closed `COMPLETED` on 2026-09-06. What that capture closed is ONE of five
+goldens; the other four -- 27B W4A4, 32B-NVFP4A16, 35B, Coder -- are still owed
+and are no longer anchored on an issue (`.agents/oracles/vllm.md` §"NOT
+established" item 2). Speed figures labelled 0.25.0 ran the ROLLBACK the
 harness enforced until 2026-08-12 and are SUPERSEDED, never binding (#520).
 Correctness re-validated bit-identical across the advance, zero golden drift.
 The llama.cpp oracle is stock `b10451` since 2026-08-16, `gateable = no` until
