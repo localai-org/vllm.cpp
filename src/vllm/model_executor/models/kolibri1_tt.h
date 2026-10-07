@@ -26,6 +26,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -168,5 +169,124 @@ struct Kolibri1TTStreamingPlan {
 Kolibri1TTStreamingPlan PlanKolibri1TTStreaming(
     const Kolibri1TTStreamingShape& shape,
     const Kolibri1TTStreamingOptions& options = {});
+
+// ---- Wave B2a: the TT-native expert slot store policy, the MoE dispatch
+// plan, and the graph-reset lane (device-free; spec §"B2 scope") ----
+//
+// The device tier of the streaming design: a fixed-capacity pool of
+// FP8_E4M3 expert slot buffers (packed bytes verbatim, row-major; scale
+// grids f32 host-side). This is the POLICY half only — slot tables,
+// eviction, dispatch, and the reset predicate. No allocation, no ttnn:
+// the device buffers themselves are B2b.
+
+struct Kolibri1TTSlotPolicyOptions {
+  int64_t layers = 50;
+  int64_t experts = 384;
+  // One slot = one expert, one layer (fp8 + f32 scale grids, § byte math).
+  int64_t expert_bytes = 3933120;
+  // The streaming plan's device residual: the budget the slot pool must
+  // fit (device budget − resident − KV reserve).
+  int64_t device_residual_bytes = 0;
+  // Requested hot-set size in experts. Capacity resolves to this, capped
+  // by the residual; exceeding the residual refuses by name.
+  int64_t requested_hot_experts = 0;
+};
+
+// The per-layer logical-expert → slot remap over a fixed-capacity slot
+// pool. Touch() pins an expert into a slot (reassigning the
+// least-recently-used slot on overflow and firing the eviction hook);
+// SlotFor() reads the table (-1 = miss). Fingerprint() /
+// ContentChangedSince() are the reset-lane predicate: the GDN
+// slot-churn semantics (qwen3_5.cpp TT-GDN-SLOT-CHURN,
+// ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W) — a slot whose logical expert
+// changed flips the predicate, an identical re-selection does not.
+struct Kolibri1TTExpertSlotPolicy {
+  int64_t layers = 0;
+  int64_t experts = 0;
+  // One slot = one expert, one layer (fp8 + f32 scale grids).
+  int64_t expert_bytes = 0;
+  // Slots per layer; the streaming plan's hot_experts.
+  int64_t capacity = 0;
+  // capacity × expert_bytes: the device bytes the pool occupies.
+  int64_t slot_pool_bytes = 0;
+
+  using EvictHook = std::function<void(int64_t layer, int64_t expert,
+                                       int64_t slot)>;
+
+  // Registers the eviction callback. One hook at a time.
+  void SetEvictHook(EvictHook fn) { hook_ = std::move(fn); }
+
+  // Pins `expert` on `layer`: returns its slot, evicting the LRU resident
+  // when the layer's pool is full (hook fires with the freed triple).
+  // Re-pinning a resident expert returns its slot and evicts nothing.
+  int64_t Touch(int64_t layer, int64_t expert);
+  // The slot holding `expert` on `layer`, or -1 on a miss.
+  int64_t SlotFor(int64_t layer, int64_t expert) const;
+  int64_t ResidentCount(int64_t layer) const;
+  // The slot a fetch would fill next: the first free slot, else the LRU
+  // slot (what Touch() would hand out, read-only for the dispatch plan).
+  int64_t SuggestSlotFor(int64_t layer) const;
+
+  // The reset-lane predicate: an order-independent hash of every layer's
+  // slot→logical-expert table.
+  uint64_t Fingerprint() const;
+  bool ContentChangedSince(uint64_t recorded_fingerprint) const {
+    return Fingerprint() != recorded_fingerprint;
+  }
+
+  // Layer-scope access for the dispatch plan and the device stage (B2b).
+  const std::vector<int64_t>& TableFor(int64_t layer) const;
+
+ private:
+  // table_[layer][slot] = logical expert id, or -1 when the slot is free.
+  std::vector<std::vector<int64_t>> table_;
+  // slot → recency stamp, monotonic; lower = older.
+  std::vector<std::vector<uint64_t>> stamp_;
+  uint64_t clock_ = 0;
+  EvictHook hook_;
+
+  friend Kolibri1TTExpertSlotPolicy PlanKolibri1TTExpertSlotPolicy(
+      const Kolibri1TTSlotPolicyOptions&);
+};
+
+// Builds the policy: capacity = min(requested_hot_experts,
+// residual/expert_bytes); refuses by name when the requested hot set
+// exceeds the device residual (the deficit in the message).
+Kolibri1TTExpertSlotPolicy PlanKolibri1TTExpertSlotPolicy(
+    const Kolibri1TTSlotPolicyOptions& options);
+
+// One step's MoE dispatch for a set of layers. Pure policy: reads the
+// slot tables, never mutates the policy — the caller performs the fetch
+// (filling fetch_slots) and then Touch()es the fetched experts.
+struct Kolibri1TTLayerDispatch {
+  int64_t layer = 0;
+  // Requested experts already resident, with their slots.
+  std::vector<int64_t> resident_experts;
+  std::vector<int64_t> resident_slots;
+  // DISTINCT requested experts missing from the pool (router repeats
+  // collapse), and the slots the fetch must fill.
+  std::vector<int64_t> missed_experts;
+  std::vector<int64_t> fetch_slots;
+};
+
+struct Kolibri1TTDispatchPlan {
+  std::vector<Kolibri1TTLayerDispatch> layers;
+  // misses × expert_bytes (misses × 3,933,120 B on the real checkpoint):
+  // this step's stream byte bound, always ≤ the B1 per-token ceiling.
+  int64_t stream_bytes = 0;
+};
+
+// Dispatches one layer's router output (6-of-384 ids, repeats allowed)
+// against the current slot tables.
+Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatch(
+    const Kolibri1TTExpertSlotPolicy& policy,
+    const std::vector<std::pair<int64_t, std::vector<int64_t>>>&
+        layer_requests);
+
+// The all-miss worst case over every layer with one top-k set — the plan
+// the B1 per_token_stream_bytes ceiling bounds.
+Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatchAllLayers(
+    const Kolibri1TTExpertSlotPolicy& policy, int64_t layers,
+    const std::vector<int64_t>& topk_ids);
 
 }  // namespace vllm

@@ -598,3 +598,193 @@ TEST_CASE("kolibri1 TT: every fp8 manifest tensor maps one fp8 staging "
   CHECK(grids == fp8_weights);
   CHECK(fp8_weights == vllm_test::kKolibri1ScaleCount);
 }
+
+// ---- Wave B2a: the expert slot store policy, the MoE dispatch plan, and
+// the reset-lane predicate (device-free; spec §"B2 scope"). Red-first in
+// the same style as the wave-A and B1 cases: written against the spec
+// contract BEFORE the policy code landed, and every expected number here
+// is derived from the spec's byte math, not from the implementation.
+
+TEST_CASE("kolibri1 TT slot policy: capacity derives from the streaming "
+          "plan's hot set and the residual budget refuses by name") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  const Kolibri1TTStreamingPlan streaming =
+      PlanKolibri1TTStreaming(s, Kolibri1TTStreamingOptions{});
+  // The slot store's capacity IS the streaming plan's hot-expert count —
+  // never a second accounting.
+  Kolibri1TTSlotPolicyOptions o;
+  o.layers = s.layers;
+  o.experts = s.experts;
+  o.expert_bytes = s.expert_bytes;
+  o.device_residual_bytes = streaming.device_residual_bytes;
+  o.requested_hot_experts = streaming.hot_experts;
+  const Kolibri1TTExpertSlotPolicy policy = PlanKolibri1TTExpertSlotPolicy(o);
+  CHECK(policy.capacity == streaming.hot_experts);
+  CHECK(policy.slot_pool_bytes == streaming.hot_experts * s.expert_bytes);
+  CHECK(policy.slot_pool_bytes <= streaming.device_residual_bytes);
+  CHECK(policy.layers == s.layers);
+  CHECK(policy.experts == s.experts);
+  // A hot set larger than the residual refuses by name with the deficit.
+  o.requested_hot_experts = streaming.hot_experts + 5;
+  bool threw = false;
+  try {
+    (void)PlanKolibri1TTExpertSlotPolicy(o);
+  } catch (const std::exception& e) {
+    threw = true;
+    const std::string what = e.what();
+    CHECK(what.find("residual") != std::string::npos);
+    CHECK(what.find("deficit") != std::string::npos);
+    // The message names the exact deficit: requested_bytes − residual.
+    // The residual's sub-slot slack folds into the deficit, so the value
+    // is exact — assert the full "deficit <N> bytes" phrase. A
+    // sign-flipped deficit arithmetic yields a negative number and cannot
+    // match this positive phrase.
+    const int64_t requested_bytes =
+        (streaming.hot_experts + 5) * s.expert_bytes;
+    const int64_t deficit =
+        requested_bytes - streaming.device_residual_bytes;
+    CHECK(deficit > 0);
+    CHECK(what.find("deficit " + std::to_string(deficit) + " bytes") !=
+          std::string::npos);
+    CHECK(what.find(std::to_string(requested_bytes)) != std::string::npos);
+    CHECK(what.find(std::to_string(streaming.hot_experts + 5)) !=
+          std::string::npos);
+    CHECK(what.find("MODEL-TEXT-kolibri-1-tenstorrent") != std::string::npos);
+  }
+  CHECK(threw);
+}
+
+TEST_CASE("kolibri1 TT slot policy: pin, lookup, LRU eviction hook") {
+  Kolibri1TTSlotPolicyOptions o;
+  o.layers = 2;
+  o.experts = 4;
+  o.expert_bytes = 100;
+  o.device_residual_bytes = 300;  // capacity 3
+  o.requested_hot_experts = 3;
+  Kolibri1TTExpertSlotPolicy policy = PlanKolibri1TTExpertSlotPolicy(o);
+
+  std::vector<std::string> evictions;
+  policy.SetEvictHook([&](int64_t layer, int64_t expert, int64_t slot) {
+    evictions.push_back(std::to_string(layer) + ":" + std::to_string(expert) +
+                        "@" + std::to_string(slot));
+  });
+
+  // Pinning assigns slots; the lookup reflects the table.
+  const int64_t slot0 = policy.Touch(0, 1);
+  CHECK(slot0 >= 0);
+  CHECK(slot0 < policy.capacity);
+  CHECK(policy.SlotFor(0, 1) == slot0);
+  CHECK(policy.SlotFor(0, 2) == -1);
+  CHECK(policy.SlotFor(1, 1) == -1);  // tables are per-layer
+
+  // Re-pinning a resident expert keeps its slot and evicts nothing.
+  CHECK(policy.Touch(0, 1) == slot0);
+  CHECK(evictions.empty());
+
+  // Fill to capacity, then overflow evicts the least-recently-used entry
+  // and fires the hook with (layer, expert, slot).
+  (void)policy.Touch(0, 0);
+  (void)policy.Touch(0, 3);  // full: {1, 0, 3}
+  (void)policy.Touch(0, 3);  // refresh 3 → expert 1 is now LRU
+  const int64_t expert1_slot = policy.SlotFor(0, 1);
+  CHECK(policy.Touch(0, 2) >= 0);  // evicts 1 (LRU), not 3
+  CHECK(policy.SlotFor(0, 1) == -1);
+  CHECK(policy.SlotFor(0, 3) >= 0);
+  CHECK(policy.SlotFor(0, 0) >= 0);
+  REQUIRE(evictions.size() == 1);
+  CHECK(evictions[0] == "0:1@" + std::to_string(expert1_slot));
+  // Eviction reuses the freed slot: residents never exceed the capacity.
+  CHECK(policy.ResidentCount(0) <= policy.capacity);
+}
+
+TEST_CASE("kolibri1 TT MoE dispatch: resident/missed split and the "
+          "misses × 3,933,120 B stream bound") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  const Kolibri1TTStreamingPlan streaming =
+      PlanKolibri1TTStreaming(s, Kolibri1TTStreamingOptions{});
+  Kolibri1TTSlotPolicyOptions po;
+  po.layers = s.layers;
+  po.experts = s.experts;
+  po.expert_bytes = s.expert_bytes;
+  po.device_residual_bytes = streaming.device_residual_bytes;
+  po.requested_hot_experts = streaming.hot_experts;
+  Kolibri1TTExpertSlotPolicy policy = PlanKolibri1TTExpertSlotPolicy(po);
+  // Pre-resident hot set on layer 7: expert 20 pinned FIRST so that the
+  // router-requested expert occupies SLOT 0 (cold policy allocates
+  // low-first); expert 10 is hot but unrequested and takes slot 1. This
+  // exercises the slot-0 boundary of the resident/missed split — a
+  // `slot > 0` boundary mutation would drop 20 from the resident set.
+  (void)policy.Touch(7, 20);
+  (void)policy.Touch(7, 10);
+  CHECK(policy.SlotFor(7, 20) == 0);
+
+  // One step's router output on layer 7: 6-of-384, one repeat (two tokens
+  // drew expert 11) — the fetch list is DISTINCT experts.
+  Kolibri1TTDispatchPlan d = PlanKolibri1TTMoEDispatch(
+      policy, {{7, {11, 20, 5, 200, 11, 383}}});
+  REQUIRE(d.layers.size() == 1);
+  const Kolibri1TTLayerDispatch& ld = d.layers[0];
+  CHECK(ld.layer == 7);
+  const std::vector<int64_t> missed = ld.missed_experts;
+  CHECK(missed.size() == 4);               // 11, 5, 200, 383 — repeat collapses
+  CHECK(ld.resident_experts.size() == 1);  // 20; 10 is hot but unrequested
+  // The requested resident sits in slot 0 and its slot rides alongside.
+  REQUIRE(ld.resident_experts.size() == 1);
+  CHECK(ld.resident_experts[0] == 20);
+  CHECK(ld.resident_slots[0] == 0);
+  // Every missed expert has a target slot to fill.
+  CHECK(ld.fetch_slots.size() == missed.size());
+  for (const int64_t slot : ld.fetch_slots) {
+    CHECK(slot >= 0);
+    CHECK(slot < policy.capacity);
+  }
+  // The stream byte bound: each miss costs one expert, one layer.
+  CHECK(d.stream_bytes == 4 * s.expert_bytes);
+  CHECK(d.stream_bytes % 3933120 == 0);
+  // The all-miss worst case equals the B1 per-token ceiling (50 × 6 ×
+  // 3,933,120 B); a partial hit is strictly below it.
+  Kolibri1TTExpertSlotPolicy cold = PlanKolibri1TTExpertSlotPolicy(po);
+  const Kolibri1TTDispatchPlan all_miss = PlanKolibri1TTMoEDispatchAllLayers(
+      cold, s.layers, {1, 2, 3, 4, 5, 6});
+  CHECK(all_miss.stream_bytes == s.layers * 6 * s.expert_bytes);
+  CHECK(all_miss.stream_bytes == streaming.per_token_stream_bytes);
+  CHECK(d.stream_bytes < all_miss.stream_bytes);
+}
+
+TEST_CASE("kolibri1 TT reset lane: the slot-table fingerprint flips on a "
+          "content change and holds on an identical re-selection") {
+  Kolibri1TTSlotPolicyOptions o;
+  o.layers = 2;
+  o.experts = 4;
+  o.expert_bytes = 100;
+  o.device_residual_bytes = 200;  // capacity 2
+  o.requested_hot_experts = 2;
+  Kolibri1TTExpertSlotPolicy policy = PlanKolibri1TTExpertSlotPolicy(o);
+
+  // Capture-time table: layer 0 holds experts {1, 2}.
+  (void)policy.Touch(0, 1);
+  (void)policy.Touch(0, 2);
+  const uint64_t captured = policy.Fingerprint();
+
+  // An identical re-selection of the resident experts changes NOTHING:
+  // the predicate must NOT flip (no graph reset for a no-op step).
+  (void)policy.Touch(0, 1);
+  (void)policy.Touch(0, 2);
+  CHECK_FALSE(policy.ContentChangedSince(captured));
+  CHECK(policy.Fingerprint() == captured);
+
+  // A slot swap (one logical expert replaced by another) flips the
+  // predicate — the GDN slot-churn semantics: the captured graph binds
+  // slot content, so the caller must reset the graph.
+  (void)policy.Touch(0, 3);
+  CHECK(policy.ContentChangedSince(captured));
+  CHECK(policy.Fingerprint() != captured);
+
+  // A change on ANOTHER layer flips too (the fingerprint covers every
+  // layer's table), and the new state is stable under re-selection.
+  const uint64_t after = policy.Fingerprint();
+  (void)policy.Touch(1, 0);
+  CHECK(policy.ContentChangedSince(after));
+  const uint64_t after1 = policy.Fingerprint();
+  CHECK_FALSE(policy.ContentChangedSince(after1));
+}

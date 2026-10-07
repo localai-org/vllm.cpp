@@ -317,4 +317,190 @@ Kolibri1TTStreamingPlan PlanKolibri1TTStreaming(
   return plan;
 }
 
+// ---- Wave B2a: expert slot store policy, MoE dispatch, reset lane ----
+
+Kolibri1TTExpertSlotPolicy PlanKolibri1TTExpertSlotPolicy(
+      const Kolibri1TTSlotPolicyOptions& options) {
+    const std::string row = "(row MODEL-TEXT-kolibri-1-tenstorrent, spec "
+                            ".agents/specs/kolibri-tt.md)";
+    const int64_t max_hot =
+        options.expert_bytes > 0
+            ? options.device_residual_bytes / options.expert_bytes
+            : 0;
+    if (options.requested_hot_experts > max_hot) {
+      const int64_t requested_bytes = options.requested_hot_experts *
+                                      options.expert_bytes;
+      const int64_t deficit = requested_bytes - options.device_residual_bytes;
+      throw std::runtime_error(
+          "kolibri1-tt: slot store hot set of " +
+          std::to_string(options.requested_hot_experts) + " experts (" +
+          std::to_string(requested_bytes) +
+          " bytes) exceeds the device residual budget of " +
+          std::to_string(options.device_residual_bytes) + " bytes — deficit " +
+          std::to_string(deficit) +
+          " bytes. The hot set is capped by device budget − resident − KV "
+          "reserve; refuse rather than over-allocate the slot pool. " + row);
+    }
+    Kolibri1TTExpertSlotPolicy policy;
+    policy.layers = options.layers;
+    policy.experts = options.experts;
+    policy.expert_bytes = options.expert_bytes;
+    policy.capacity = options.requested_hot_experts;
+    policy.slot_pool_bytes = policy.capacity * options.expert_bytes;
+    policy.table_.assign(static_cast<size_t>(options.layers),
+                         std::vector<int64_t>(
+                             static_cast<size_t>(policy.capacity), -1));
+    policy.stamp_.assign(static_cast<size_t>(options.layers),
+                         std::vector<uint64_t>(
+                             static_cast<size_t>(policy.capacity), 0));
+    return policy;
+}
+
+
+int64_t Kolibri1TTExpertSlotPolicy::Touch(int64_t layer, int64_t expert) {
+    auto& tab = table_[static_cast<size_t>(layer)];
+    auto& st = stamp_[static_cast<size_t>(layer)];
+    // Resident already: refresh recency, keep the slot.
+    for (size_t s = 0; s < tab.size(); ++s) {
+      if (tab[s] == expert) {
+        st[s] = ++clock_;
+        return static_cast<int64_t>(s);
+      }
+    }
+    // Free slot first (they are allocated low-first and reused on evict).
+    for (size_t s = 0; s < tab.size(); ++s) {
+      if (tab[s] == -1) {
+        tab[s] = expert;
+        st[s] = ++clock_;
+        return static_cast<int64_t>(s);
+      }
+    }
+    // Overflow: evict the least-recently-used resident.
+    size_t victim = 0;
+    for (size_t s = 1; s < st.size(); ++s) {
+      if (st[s] < st[victim]) victim = s;
+    }
+    const int64_t evicted = tab[victim];
+    const int64_t slot = static_cast<int64_t>(victim);
+    tab[victim] = expert;
+    st[victim] = ++clock_;
+    if (hook_) hook_(layer, evicted, slot);
+    return slot;
+}
+
+int64_t Kolibri1TTExpertSlotPolicy::SlotFor(int64_t layer,
+                                              int64_t expert) const {
+    const auto& tab = table_[static_cast<size_t>(layer)];
+    for (size_t s = 0; s < tab.size(); ++s) {
+      if (tab[s] == expert) return static_cast<int64_t>(s);
+    }
+    return -1;
+}
+
+int64_t Kolibri1TTExpertSlotPolicy::ResidentCount(int64_t layer) const {
+    int64_t n = 0;
+    for (const int64_t e : table_[static_cast<size_t>(layer)]) {
+      if (e != -1) ++n;
+    }
+    return n;
+}
+
+int64_t Kolibri1TTExpertSlotPolicy::SuggestSlotFor(int64_t layer) const {
+    const auto& tab = table_[static_cast<size_t>(layer)];
+    const auto& st = stamp_[static_cast<size_t>(layer)];
+    for (size_t s = 0; s < tab.size(); ++s) {
+      if (tab[s] == -1) return static_cast<int64_t>(s);
+    }
+    size_t victim = 0;
+    for (size_t s = 1; s < st.size(); ++s) {
+      if (st[s] < st[victim]) victim = s;
+    }
+    return tab.empty() ? -1 : static_cast<int64_t>(victim);
+}
+
+const std::vector<int64_t>& Kolibri1TTExpertSlotPolicy::TableFor(
+      int64_t layer) const {
+    return table_[static_cast<size_t>(layer)];
+}
+
+uint64_t Kolibri1TTExpertSlotPolicy::Fingerprint() const {
+    // FNV-1a over (layer, slot, expert) for every occupied cell, in
+    // layer/slot order — order-independent w.r.t. touch history,
+    // sensitive to every slot→logical-expert change reachable through
+    // Touch() on any layer (a pure slot permutation is not reachable:
+    // Touch only reassigns the LRU slot on overflow, and identical
+    // re-selection keeps the table).
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](uint64_t v) {
+      h ^= v;
+      h *= 1099511628211ull;
+    };
+    for (size_t l = 0; l < table_.size(); ++l) {
+      for (size_t s = 0; s < table_[l].size(); ++s) {
+        if (table_[l][s] == -1) continue;
+        mix(static_cast<uint64_t>(l));
+        mix(static_cast<uint64_t>(s));
+        mix(static_cast<uint64_t>(table_[l][s]));
+      }
+    }
+    return h;
+}
+
+namespace {
+
+// Fills one layer's dispatch: distinct misses, resident split, target
+// slots for the fetch. Read-only over the tables.
+Kolibri1TTLayerDispatch DispatchLayer(const Kolibri1TTExpertSlotPolicy& policy,
+                                        int64_t layer,
+                                        const std::vector<int64_t>& ids) {
+    Kolibri1TTLayerDispatch d;
+    d.layer = layer;
+    std::vector<char> seen(static_cast<size_t>(policy.experts), 0);
+    for (const int64_t e : ids) {
+      if (e < 0 || e >= policy.experts) {
+        throw std::runtime_error(
+            "kolibri1-tt: router output expert id " + std::to_string(e) +
+            " out of range for " + std::to_string(policy.experts) +
+            " experts on layer " + std::to_string(layer));
+      }
+      if (seen[static_cast<size_t>(e)]) continue;  // repeats collapse
+      seen[static_cast<size_t>(e)] = 1;
+      const int64_t slot = policy.SlotFor(layer, e);
+      if (slot >= 0) {
+        d.resident_experts.push_back(e);
+        d.resident_slots.push_back(slot);
+      } else {
+        d.missed_experts.push_back(e);
+        d.fetch_slots.push_back(policy.SuggestSlotFor(layer));
+      }
+    }
+    return d;
+}
+
+}  // namespace
+
+Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatch(
+      const Kolibri1TTExpertSlotPolicy& policy,
+      const std::vector<std::pair<int64_t, std::vector<int64_t>>>&
+          layer_requests) {
+    Kolibri1TTDispatchPlan plan;
+    int64_t misses = 0;
+    for (const auto& [layer, ids] : layer_requests) {
+      plan.layers.push_back(DispatchLayer(policy, layer, ids));
+      misses += static_cast<int64_t>(plan.layers.back().missed_experts.size());
+    }
+    // Each miss streams one expert, one layer (fp8 + scale grids).
+    plan.stream_bytes = misses * policy.expert_bytes;
+    return plan;
+}
+
+Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatchAllLayers(
+      const Kolibri1TTExpertSlotPolicy& policy, int64_t layers,
+      const std::vector<int64_t>& topk_ids) {
+    std::vector<std::pair<int64_t, std::vector<int64_t>>> requests;
+    requests.reserve(static_cast<size_t>(layers));
+    for (int64_t l = 0; l < layers; ++l) requests.emplace_back(l, topk_ids);
+    return PlanKolibri1TTMoEDispatch(policy, requests);
+}
+
 }  // namespace vllm
