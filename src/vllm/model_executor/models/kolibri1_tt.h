@@ -90,4 +90,83 @@ Kolibri1TTStagingPlan PlanKolibri1TTStaging(
     const Kolibri1Weights& weights,
     const Kolibri1TTStagingOptions& options = {});
 
+// ---- Wave B1: single-P150 expert streaming (host-side policy only) ----
+//
+// The full routed-expert tier (50 × 384 × 3,933,120 B ≈ 70.33 GiB) cannot
+// reside on one P150, so decode STREAMS experts from a host-RAM tier keyed
+// on router output (spec §"Single-P150 expert streaming — design"). This
+// plan records the byte policy of that mode and refuses infeasible
+// operating points before any device or tier is touched. Device-free: no
+// allocation, no slot store, no ttnn — those are B2/B3 (spec §"Out").
+
+// The checkpoint geometry the streaming policy accounts over. Defaults are
+// the shipped kolibri1 checkpoint's byte math (spec § byte-math table);
+// every field is overridable so tests can exercise the refusals.
+struct Kolibri1TTStreamingShape {
+  int64_t layers = 50;
+  int64_t experts = 384;
+  int64_t topk = 6;
+  // One routed expert, one layer: fp8 bytes + f32 scale grids
+  // (3×1,310,720 + (4×20 + 4×20 + 20×4)×4 = 3,933,120).
+  int64_t expert_bytes = 3933120;
+  int64_t attention_bytes = 1703936000;      // 50 × 34,078,720, always resident
+  int64_t shared_expert_bytes = 196656000;   // 50 × 3,933,120, always resident
+  int64_t router_bytes = 98304000;           // 50 × bf16 [384,2560]
+  int64_t norm_bytes = 2 << 20;              // ~2 MiB
+  int64_t embed_head_bytes = 1310720000;     // bf16 [128000,2560] × 2
+};
+
+struct Kolibri1TTStreamingOptions {
+  // P150 DRAM per chip.
+  int64_t device_budget_bytes = int64_t(32) << 30;
+  // Host-RAM tier capacity for the full routed-expert tier. The NVMe tier
+  // is a pluggable leaf B2/B3 owe; a host refusal NAMES it, never spills.
+  int64_t host_budget_bytes = int64_t(96) << 30;
+  // KV cache bytes reserved on device before the hot set is sized.
+  int64_t kv_reserve_bytes = 0;
+  // Decode concurrency operating point (concurrent tokens per step).
+  int64_t concurrency = 1;
+  // Refuse (or warn, best-effort) when the expected per-layer touched
+  // fraction of the expert space exceeds this.
+  double touched_fraction_threshold = 0.25;
+  // true = warn in the plan instead of refusing at high concurrency.
+  bool best_effort = false;
+};
+
+struct Kolibri1TTStreamingPlan {
+  // Resident non-expert components (attention, shared expert, router,
+  // norms, embed + untied head).
+  int64_t resident_bytes = 0;
+  // device budget − resident − KV reserve.
+  int64_t device_residual_bytes = 0;
+  // Hot set derived from the residual: floor(residual / expert_bytes).
+  int64_t hot_experts = 0;
+  int64_t hot_set_bytes = 0;
+  // The full routed-expert tier the host tier must hold.
+  int64_t host_required_bytes = 0;
+  // layers × topk × expert_bytes: the per-token miss-stream bound.
+  int64_t per_token_stream_bytes = 0;
+  // At 60 GB/s and 25 GB/s (derived numbers, not measurements).
+  double stream_ms_low = 0.0;
+  double stream_ms_high = 0.0;
+  // Expected distinct-expert fraction touched per layer:
+  // 1 − (1 − topk/experts)^concurrency.
+  double touched_fraction_per_layer = 0.0;
+  // Non-empty only in best-effort mode above the threshold.
+  std::string concurrency_warning;
+};
+
+// Computes the streaming byte policy and refuses:
+//  - resident components alone exceeding the device budget (names the
+//    deficit),
+//  - the full routed-expert tier exceeding the host budget (names the
+//    deficit AND the NVMe leaf as owed — never a silent spill),
+//  - a concurrency whose touched fraction exceeds the declared threshold
+//    (names the (1−f) × routed-bytes per-step I/O consequence), unless
+//    best_effort asks for a warning instead.
+// Throws std::runtime_error on every refusal.
+Kolibri1TTStreamingPlan PlanKolibri1TTStreaming(
+    const Kolibri1TTStreamingShape& shape,
+    const Kolibri1TTStreamingOptions& options = {});
+
 }  // namespace vllm

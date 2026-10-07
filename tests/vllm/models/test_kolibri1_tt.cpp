@@ -13,6 +13,7 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -418,6 +419,165 @@ TEST_CASE("kolibri1 TT: manifest-derived staging total exceeds one P150") {
   CHECK(routed == 75497472000);
   CHECK(routed > int64_t(70) << 30);
   CHECK(routed < int64_t(71) << 30);
+}
+
+// ---- Wave B1: the single-P150 expert streaming plan (host-side policy) ----
+//
+// Red-first against spec §"B1 scope": the streaming plan is device-free, so
+// every case here runs in the same CPU-only gate as wave A. The expected
+// numbers are the spec's § byte-math table values, written out exactly.
+
+namespace {
+
+Kolibri1TTStreamingShape RealKolibri1StreamingShape() {
+  // The shipped checkpoint geometry: 50 layers, 384 experts, top-6, one
+  // expert = 3,932,160 fp8 bytes + 960 B of f32 scale grids.
+  Kolibri1TTStreamingShape s;
+  s.layers = 50;
+  s.experts = 384;
+  s.topk = 6;
+  s.expert_bytes = 3 * 512 * 2560 + (4 * 20 + 4 * 20 + 20 * 4) * 4;  // 3,933,120
+  s.attention_bytes = 50 * 34078720;    // q 6144×2560, k/v 512×2560, o 2560×6144 fp8
+  s.shared_expert_bytes = 50 * 3933120;
+  s.router_bytes = 50 * (384 * 2560 * 2);  // bf16 [384,2560] per layer
+  s.norm_bytes = 2 << 20;
+  s.embed_head_bytes = 2 * (128000 * 2560 * 2);  // embed + untied head, bf16
+  return s;
+}
+
+std::string StreamingFailure(const Kolibri1TTStreamingShape& s,
+                             const Kolibri1TTStreamingOptions& o) {
+  try {
+    const Kolibri1TTStreamingPlan p = PlanKolibri1TTStreaming(s, o);
+    (void)p;
+    return "";
+  } catch (const std::exception& e) {
+    return e.what();
+  }
+}
+
+}  // namespace
+
+TEST_CASE("kolibri1 TT streaming: resident accounting matches the byte-math "
+          "table") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  const Kolibri1TTStreamingPlan plan =
+      PlanKolibri1TTStreaming(s, Kolibri1TTStreamingOptions{});
+  // Exact component totals from the spec table (per layer × 50).
+  CHECK(s.attention_bytes == 1703936000);
+  CHECK(s.shared_expert_bytes == 196656000);
+  CHECK(s.router_bytes == 98304000);
+  CHECK(s.embed_head_bytes == 1310720000);
+  CHECK(plan.resident_bytes == s.attention_bytes + s.shared_expert_bytes +
+                                   s.router_bytes + s.norm_bytes +
+                                   s.embed_head_bytes);
+  // The spec's ~3.1 GiB resident claim (attention 1.625 + shared 0.188 +
+  // router 0.094 + embed/head 1.221 GiB + norms) — well under one P150.
+  CHECK(plan.resident_bytes > int64_t(3) << 30);
+  CHECK(plan.resident_bytes < int64_t(32) << 30);
+  // The routed experts stay OFF device: the streaming plan never stages
+  // 384 experts × 50 layers resident.
+  const int64_t routed = s.layers * s.experts * s.expert_bytes;
+  CHECK(routed == 75515904000);  // 70.33 GiB
+  CHECK(routed + plan.resident_bytes > int64_t(32) << 30);
+  // Resident alone exceeding the budget is refused by name.
+  Kolibri1TTStreamingOptions tiny;
+  tiny.device_budget_bytes = plan.resident_bytes - 1;
+  const std::string err = StreamingFailure(s, tiny);
+  REQUIRE(!err.empty());
+  CHECK(err.find("resident") != std::string::npos);
+  CHECK(err.find("deficit") != std::string::npos);
+}
+
+TEST_CASE("kolibri1 TT streaming: the hot set derives from the device "
+          "residual") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  Kolibri1TTStreamingOptions o;  // default 32 GiB P150, no KV reserve
+  const Kolibri1TTStreamingPlan plan = PlanKolibri1TTStreaming(s, o);
+  const int64_t residual =
+      (int64_t(32) << 30) - plan.resident_bytes;  // no KV reserve
+  CHECK(plan.device_residual_bytes == residual);
+  CHECK(plan.hot_experts == residual / s.expert_bytes);
+  CHECK(plan.hot_set_bytes == plan.hot_experts * s.expert_bytes);
+  CHECK(plan.hot_set_bytes <= residual);
+  CHECK(plan.hot_experts > 0);
+  // A KV reserve shrinks the hot set by exactly the same byte math.
+  o.kv_reserve_bytes = int64_t(4) << 30;
+  const Kolibri1TTStreamingPlan with_kv = PlanKolibri1TTStreaming(s, o);
+  const int64_t kv_residual =
+      (int64_t(32) << 30) - with_kv.resident_bytes - o.kv_reserve_bytes;
+  CHECK(with_kv.device_residual_bytes == kv_residual);
+  CHECK(with_kv.hot_experts == kv_residual / s.expert_bytes);
+  CHECK(with_kv.hot_experts < plan.hot_experts);
+}
+
+TEST_CASE("kolibri1 TT streaming: host-budget refusal names the deficit and "
+          "the NVMe leaf as owed") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  const int64_t host_required = s.layers * s.experts * s.expert_bytes;
+  Kolibri1TTStreamingOptions o;
+  o.host_budget_bytes = host_required / 2;
+  const std::string err = StreamingFailure(s, o);
+  REQUIRE(!err.empty());
+  CHECK(err.find("deficit") != std::string::npos);
+  CHECK(err.find(std::to_string(host_required - o.host_budget_bytes)) !=
+        std::string::npos);
+  // The NVMe tier is a named-but-unimplemented leaf: the refusal says the
+  // spill is owed, never silently degraded.
+  CHECK(err.find("NVMe") != std::string::npos);
+  CHECK(err.find("owed") != std::string::npos);
+  // The full host tier fits a generous budget.
+  o.host_budget_bytes = int64_t(96) << 30;
+  const std::string ok = StreamingFailure(s, o);
+  CHECK(ok.empty());
+}
+
+TEST_CASE("kolibri1 TT streaming: the per-token stream bound is "
+          "50 × 6 × 3,933,120 B") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  const Kolibri1TTStreamingPlan plan =
+      PlanKolibri1TTStreaming(s, Kolibri1TTStreamingOptions{});
+  CHECK(plan.per_token_stream_bytes ==
+        50 * 6 * 3933120);
+  CHECK(plan.per_token_stream_bytes == 1179936000);
+  // RAM-tier bandwidth envelope 25–60 GB/s ⇒ 20–47 ms/token (derived, not
+  // measured): 1179936000 / 25e9 = 47.197 ms, / 60e9 = 19.666 ms.
+  CHECK(plan.stream_ms_low > 19.0);
+  CHECK(plan.stream_ms_low < 20.0);
+  CHECK(plan.stream_ms_high > 47.0);
+  CHECK(plan.stream_ms_high < 48.0);
+}
+
+TEST_CASE("kolibri1 TT streaming: concurrency refusal above the declared "
+          "touched-fraction threshold, warning below") {
+  const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
+  Kolibri1TTStreamingOptions o;
+  o.host_budget_bytes = int64_t(96) << 30;
+  o.touched_fraction_threshold = 0.25;
+  // conc 32: f = 1 − (1 − 6/384)^32 ≈ 0.398 > 0.25 → refused by name.
+  o.concurrency = 32;
+  const std::string err = StreamingFailure(s, o);
+  REQUIRE(!err.empty());
+  CHECK(err.find("concurrency") != std::string::npos);
+  // The verdict names the (1−f) × routed-bytes per-step I/O consequence.
+  const double f = 1.0 - std::pow(1.0 - double(s.topk) / double(s.experts),
+                                  static_cast<double>(o.concurrency));
+  const int64_t per_step =
+      int64_t((1.0 - f) * double(s.layers * s.experts * s.expert_bytes));
+  CHECK(err.find(std::to_string(per_step)) != std::string::npos);
+  // Best-effort at the same operating point warns instead of refusing.
+  o.best_effort = true;
+  const Kolibri1TTStreamingPlan warned = PlanKolibri1TTStreaming(s, o);
+  CHECK(warned.concurrency_warning.find("concurrency") != std::string::npos);
+  CHECK(warned.concurrency_warning.find(std::to_string(per_step)) !=
+        std::string::npos);
+  // conc 4: f ≈ 0.061 < 0.25 → no refusal and no warning.
+  o.best_effort = false;
+  o.concurrency = 4;
+  const Kolibri1TTStreamingPlan calm = PlanKolibri1TTStreaming(s, o);
+  CHECK(calm.concurrency_warning.empty());
+  CHECK(calm.touched_fraction_per_layer < 0.25);
+  CHECK(calm.touched_fraction_per_layer > 0.0);
 }
 
 TEST_CASE("kolibri1 TT: every fp8 manifest tensor maps one fp8 staging "

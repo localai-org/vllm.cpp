@@ -3,6 +3,7 @@
 // 384-expert byte math this accounting enforces.
 #include "vllm/model_executor/models/kolibri1_tt.h"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -224,6 +225,94 @@ Kolibri1TTStagingPlan PlanKolibri1TTStaging(const Kolibri1Weights& weights,
         "(row MODEL-TEXT-kolibri-1-tenstorrent, spec "
         ".agents/specs/kolibri-tt.md ## Owed), and wave A refuses to stage "
         "a plan that cannot fit.");
+  }
+  return plan;
+}
+
+// ---- Wave B1: single-P150 expert streaming (host-side policy only) ----
+
+Kolibri1TTStreamingPlan PlanKolibri1TTStreaming(
+    const Kolibri1TTStreamingShape& shape,
+    const Kolibri1TTStreamingOptions& options) {
+  const std::string row = "(row MODEL-TEXT-kolibri-1-tenstorrent, spec "
+                          ".agents/specs/kolibri-tt.md)";
+  Kolibri1TTStreamingPlan plan;
+
+  // Resident accounting: the non-expert components are ALWAYS resident.
+  plan.resident_bytes = shape.attention_bytes + shape.shared_expert_bytes +
+                        shape.router_bytes + shape.norm_bytes +
+                        shape.embed_head_bytes;
+  if (plan.resident_bytes > options.device_budget_bytes) {
+    const int64_t deficit = plan.resident_bytes - options.device_budget_bytes;
+    throw std::runtime_error(
+        "kolibri1-tt: streaming resident components (attention + shared "
+        "expert + router + norms + embed/head) need " +
+        std::to_string(plan.resident_bytes) + " bytes but the device budget "
+        "is " + std::to_string(options.device_budget_bytes) + " — deficit " +
+        std::to_string(deficit) + " bytes. Expert streaming cannot start: "
+        "these components have no host tier. " + row);
+  }
+
+  // Hot-set sizing from the device residual.
+  plan.device_residual_bytes = options.device_budget_bytes -
+                               plan.resident_bytes -
+                               options.kv_reserve_bytes;
+  plan.hot_experts = shape.expert_bytes > 0
+                         ? plan.device_residual_bytes / shape.expert_bytes
+                         : 0;
+  plan.hot_set_bytes = plan.hot_experts * shape.expert_bytes;
+
+  // Host-tier accounting: the FULL routed-expert tier must fit RAM. The
+  // NVMe backing tier is a named-but-unimplemented leaf (B2/B3); a plan
+  // that cannot fit RAM refuses and names it — never a silent spill.
+  plan.host_required_bytes = shape.layers * shape.experts * shape.expert_bytes;
+  if (plan.host_required_bytes > options.host_budget_bytes) {
+    const int64_t deficit =
+        plan.host_required_bytes - options.host_budget_bytes;
+    throw std::runtime_error(
+        "kolibri1-tt: streaming host tier needs " +
+        std::to_string(plan.host_required_bytes) +
+        " bytes for all " + std::to_string(shape.layers) + " × " +
+        std::to_string(shape.experts) + " routed experts but the host budget "
+        "is " + std::to_string(options.host_budget_bytes) + " — deficit " +
+        std::to_string(deficit) + " bytes. The NVMe backing tier is owed "
+        "but not implemented (pluggable leaf behind the RAM tier, " + row +
+        " ## Owed); this plan refuses instead of silently spilling.");
+  }
+
+  // Per-token miss-stream bound and the RAM-bandwidth envelope (derived
+  // numbers, not measurements).
+  plan.per_token_stream_bytes = shape.layers * shape.topk * shape.expert_bytes;
+  constexpr double kGb = 1e9;
+  plan.stream_ms_low =
+      double(plan.per_token_stream_bytes) / (60.0 * kGb) * 1000.0;   // 60 GB/s
+  plan.stream_ms_high =
+      double(plan.per_token_stream_bytes) / (25.0 * kGb) * 1000.0;   // 25 GB/s
+
+  // Concurrency policy: the expert-streaming.md high-concurrency verdict,
+  // mirrored. Expected distinct experts touched per layer by `concurrency`
+  // tokens each drawing topk of `experts`:
+  // 1 − (1 − topk/experts)^concurrency.
+  const double p = double(shape.topk) / double(shape.experts);
+  const double f = 1.0 - std::pow(1.0 - p, double(options.concurrency));
+  plan.touched_fraction_per_layer = f;
+  const int64_t per_step_io =
+      int64_t((1.0 - f) * double(plan.host_required_bytes));
+  const std::string verdict =
+      "kolibri1-tt: concurrency " + std::to_string(options.concurrency) +
+      " touches an expected fraction " + std::to_string(f) +
+      " of the expert space per layer (threshold " +
+      std::to_string(options.touched_fraction_threshold) +
+      "); per-step stream I/O approaches (1−f) × routed tier = " +
+      std::to_string(per_step_io) +
+      " bytes regardless of reordering. Reduce concurrency or raise the "
+      "hot set. " + row;
+  if (f > options.touched_fraction_threshold) {
+    if (options.best_effort) {
+      plan.concurrency_warning = verdict;
+    } else {
+      throw std::runtime_error(verdict);
+    }
   }
   return plan;
 }
