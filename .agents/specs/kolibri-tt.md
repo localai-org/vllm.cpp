@@ -342,12 +342,125 @@ mapping, layer-scoped), not the bytes of the weights.
 Out (owed to B2b/B3): any device allocation or kernel, slot fetch
 executors, overlap, hot-set seeding. B2a touches no device.
 
+### B2 scope — B2b addendum (committed before any device work)
+
+B2b is the device-bound arm of B2 named in the B2 scope section above: the
+actual TT kernels. It consumes the landed B2a scaffolding unchanged —
+`Kolibri1TTExpertSlotPolicy` (`kolibri1_tt.h:203`, the slot table, LRU
+eviction hook, `Fingerprint`/`ContentChangedSince` reset predicate),
+`Kolibri1TTDispatchPlan` (`kolibri1_tt.h:272`, the resident/fetch split and
+the per-step stream byte bound), and the B1 `Kolibri1TTStreamingPlan`
+(`kolibri1_tt.h:137`, `per_token_stream_bytes`, the concurrency refusal) —
+and stages resident components per the wave-A dtype decision. No B2b code
+lands before this addendum, and no device work starts before the P150 card
+window (§ Gates).
+
+**Wave split inside B2b — two slices, ordered:**
+
+- **B2b-i — dense-resident device forward, no streaming.** The resident
+  non-expert set (§ byte-math table: attention 1.587 GiB, embed + untied
+  head 1.221 GiB, router 0.094 GiB, shared expert 0.188 GiB, norms ~2 MiB;
+  ≈ 3.3 GiB) runs entirely on device with the routed-expert tier absent:
+  - Attention: the hybrid geometry as staged — 40 sliding-window layers at
+    window 513 and 10 full-attention layers with full RNoPE (no rope tables
+    on the full group), two-group KV per the wave-A design; per-head q/k
+    RMS norms applied inside the attention path; the four sandwich norms
+    (`input_layernorm`, `post_attn_norm`, `post_attention_layernorm`,
+    `post_ffn_norm`) per the landed CPU row
+    (`.agents/specs/kolibri-1-cpu.md`).
+  - Router: bf16 `[384,2560]` gate, f32 `e_score_correction_bias`,
+    sigmoid-logit-add scoring, top-6-of-384 — the CPU row's contract, with
+    the f32 softmax/sigmoid compute path inherited from it. In slice i the
+    router output is used only for the shared expert + a nameable
+    unimplemented-routed-expert refusal; the routed path arrives in slice
+    ii.
+  - Embed + untied lm_head staged bf16, on-device sampling through the
+    landed decode seam (`ModelRegistry::Forward`, `dense_attn::AttnBlock`)
+    where the TT backend provides it.
+  - No streaming: slice i stages resident components only and carries no
+    slot pool. Completion condition: one greedy decode of a golden prompt
+    on the card.
+- **B2b-ii — streaming MoE.** The FP8_E4M3 slot buffers consume the B2a
+  slot policy verbatim (capacity = the streaming plan's `hot_experts`;
+  staged `Fp8BlockWeight::packed` bytes verbatim, row-major). Router
+  readback → host remap (the logical-expert→slot table) → fetch list →
+  fetch executor fills the slots → `Touch()`. Slot swaps join the
+  reset-on-content-change lane: `ContentChangedSince`
+  (`kolibri1_tt.h:233`) drives the graph reset exactly as the GDN churn
+  fix (`qwen3_5.cpp` TT-GDN-SLOT-CHURN,
+  ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W, #3404). The B1 per-token stream
+  bound is asserted at runtime: a step whose `stream_bytes` exceeds
+  `per_token_stream_bytes` fails loudly, never silently degrades. The
+  concurrency refusal/warning from B1 is inherited unchanged.
+
+**FP8/trace constraints (carried from § FP8 on P150, not re-derived):**
+FP8_E4M3 is RM-only at tensor creation
+(`ttnn/core/tensor/py_to_tt_tensor.cpp:58-59`); no flatbuffer serialization
+(`ttnn/core/tensor/flatbuffer/tensor_spec_flatbuffer.cpp:63`), so warmup
+re-stages per process; no `extract_shard` for readback
+(`ttnn/core/tensor/tensor_impl.cpp:481-483`), so the B2b-ii router readback
+and any slot-content verification go through a dtype pivot or a host-side
+shadow of the staged bytes. Scale grids stay host-side and stage with the
+slot (§ B2 scope).
+
+**Tests (red-first):**
+
+- Device-free (run on CPU, gate before any card time): the B2a planner
+  contracts are unchanged and their existing cases must stay green — B2b
+  adds no policy code. Any B2b host-side helper (the fetch executor's
+  host half, the readback dtype pivot) gets its own manifest-driven cases
+  in `tests/vllm/models/test_kolibri1_tt.cpp` before the device run.
+- Device-bound (P150 lease, `rc run`/`rc hold`):
+  - Token gate vs the CPU golden chains — the W3 methodology
+    (`tests/vllm/models/test_kolibri1_w3.cpp` against
+    `tests/vllm/models/kolibri1_goldens.json`,
+    `.agents/specs/kolibri-1-cpu.md` § Now): 141/145 argmax positions with
+    the 4 known flips adjudicated inside the 2.5-nat band, and **0 hard
+    flips allowed** — any flip outside the band is a gate failure, not a
+    re-adjudication. Slice i runs the gate with the routed-expert refusal
+    active only if the goldens cannot be replayed without it; the
+    full-model gate runs after slice ii.
+  - The production bench anchor (the TT precedent: the recorded anchor
+    recipe, process per leg, `BENCH_EXIT`/TPOT per
+    `.agents/specs/tenstorrent-decode-fusion.md` § evidence) runs only
+    after the token gate passes.
+
+**Explicit gate ordering:** no device measurement — throughput, latency,
+or memory — is B2b evidence until the dense-resident slice (B2b-i)
+completes a greedy decode on the card. Numbers recorded before that
+milestone are build or smoke output, not evidence.
+
+**Evidence plan.** Per slice, record: the build recipe against the tt-metal
+pin tree, the lease identity and window, the staged byte totals as measured
+on device vs the § byte-math plan, the token-gate result (exact counts and
+the per-flip nat gaps), and the bench anchor when it runs — in a
+`docs/bench-evidence/kolibri1-tt-<slice>-<date>.md` file. The
+aleph-alpha-inference oracle gateability attempt (`.agents/oracles/
+aleph-alpha-inference.md`, `gateable = no`) rides opportunistically in a
+B2b device window when the lease allows: run the pinned plugin on the GPU
+host, record the result in the oracle file either way. It is a rider, not a
+gate.
+
+**Stop conditions:**
+
+- The pin tree cannot compile the B2b device TU under
+  `-DVLLM_CPP_TENSTORRENT=ON` → stop, record the build failure, leave the
+  row `ACTIVE`.
+- The stale `_ttnncpp.so` link blocker (the `chunk_gated_delta_rule`
+  `use_mcast` symbol mismatch, `.agents/issues/BACKEND-TENSTORRENT/
+  ISSUE-LOCAL-01M2NSDATJQ1YNW1PA9ZBMAAM5.md` § stale-lib64): a verified
+  fresh `lib64/_ttnncpp.so` (ninja rebuild of `ttnn tt_metal` + copy) is a
+  **prerequisite for any TT test binary** and is owed before the first B2b
+  device run — recorded under `## Owed` below, not assumed done.
+- No card window: B2b cannot start. The row stays `ACTIVE` with the B2b
+  spec landed and implementation owed.
+
 ## Now
 
-`ACTIVE` — wave A (registration/config-reuse, staging plan, loader wiring,
-manifest) in review; the device forward is the next wave and owns its own
-spec section before any P150 work. The single-P150 expert streaming design
-above is recorded; B1 owes its spec section before implementation.
+`ACTIVE` — waves A and B1 landed; B2a landed (slot policy, dispatch plan,
+reset predicate in `kolibri1_tt.h/.cpp`). The B2b spec addendum above is
+authored and committed; B2b implementation awaits the P150 card window and
+the `_ttnncpp.so` pin rebuild prerequisite (§ Owed).
 
 ## Git integration
 
@@ -356,9 +469,13 @@ One pull request for wave A (spec + implementation together), branched from
 
 ## Owed
 
-- The TT forward wave: device attention (SWA 513 + full RNoPE), per-head
-  qk-norm, sandwich norms, sigmoid-logit-add MoE dispatch with 6-of-384
-  routing on device, sampling.
+- B2b implementation (the § B2 scope — B2b addendum): the dense-resident
+  device forward, then the streaming MoE. Owed to the card window; no code
+  before the addendum, which this commit supplies.
+- The `_ttnncpp.so` pin rebuild (verified-fresh `lib64/_ttnncpp.so`, ninja
+  `ttnn tt_metal` + copy) — a named prerequisite for every TT test binary
+  before the first B2b device run (the stale-lib64 blocker; the issue
+  reference lives in the addendum's stop conditions).
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
 - Single-P150 expert streaming: B1 planner spec + implementation (design
   section above), then B2/B3. The NVMe backing tier is a pluggable leaf
