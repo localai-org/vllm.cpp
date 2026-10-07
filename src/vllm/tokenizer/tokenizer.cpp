@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <fstream>
+#include <filesystem>
 #include <stdexcept>
 #include <utility>
 
@@ -599,6 +600,107 @@ void ExtractBosEos(const json& doc, int32_t& bos, int32_t& eos) {
   eos = id_of(single->back());
 }
 
+// ─── tokenizer_config.json special-token names (ISSUE-LOCAL-01M3RY20H90NMK37V74EH34Z77)
+//
+// ExtractBosEos resolves bos/eos ids ONLY from the post_processor's
+// TemplateProcessing template. Every Qwen-family tokenizer.json ships a bare
+// ByteLevel post_processor instead, so both ids come back -1 and the engine's
+// InputProcessor (input_processor.cpp:42-67) ends up with NO eos at all when
+// the model's config.json/generation_config.json also decline to name one:
+// nothing stops generation, and <|im_end|> is generated then ignored
+// (measured live on Qwen3.5-9B-EXL3: the model emits id 248046 at token 10 and
+// the request runs to finish_reason=length hallucinating further turns).
+//
+// HF's resolved `tokenizer.eos_token_id` -- which is what upstream vLLM's
+// InputProcessor reads -- comes from tokenizer_config.json's `eos_token`
+// (a string, or an AddedToken object with a `content` field), optionally
+// supplied by special_tokens_map.json. AutoTokenizer on the
+// Qwen3.5-9B-EXL3-4.00bpw tokenizer_config.json resolves
+// eos_token_id = 248046 (<|im_end|>), measured 2026-09-30 with
+// transformers 5.17.0. So the sibling config is read here, as a FALLBACK
+// applied only where the post_processor left the id unset.
+//
+// Scope, deliberately narrow: only the NAME->id resolution is taken, and only
+// for bos/eos. `add_bos_token`/`add_eos_token` are NOT honoured -- the pinned
+// DeepSeek-V2 measurement (test_bpe.cpp "tokenizer_config.json is NOT a
+// special-token source") showed HF's loaded class ignores them, and
+// EncodeWithSpecialTokens keeps reading only template_bos_/template_eos_.
+// Precedence is post_processor first: where the template already named an id
+// (OPT), that id stands -- the OPT-pinning subcase pairs a TemplateProcessing
+// BOS with a conflicting config bos_token and checks BosId() == 20.
+
+// The tokenizer_config.json/special_tokens_map.json value for a special-token
+// name is either a plain string ("eos_token": "<|im_end|>") or an AddedToken
+// object ("eos_token": {"__type": "AddedToken", "content": "<|im_end|>"}).
+// Anything else (null, a list) means the checkpoint did not declare one.
+std::string SpecialTokenNameOf(const json& v) {
+  if (v.is_string()) return v.get<std::string>();
+  if (v.is_object()) {
+    const auto it = v.find("content");
+    if (it != v.end() && it->is_string()) return it->get<std::string>();
+  }
+  return std::string();
+}
+
+// Resolves a special-token literal to its id inside `tok`: the added-token
+// table first (special tokens are added tokens on every HF checkpoint in
+// scope), then the stored vocab text -- tried both raw and byte-mapped, since
+// tokenizer.json vocab keys live in the GPT-2 mapped alphabet while config
+// names are plain text (EncodePlain does the same mapping). -1 when no token
+// spells the name.
+int32_t ConfigTokenId(const Tokenizer& tok, const std::string& text) {
+  if (text.empty()) return -1;
+  for (const SpecialToken& t : tok.AddedTokens()) {
+    if (t.text == text) return t.id;
+  }
+  const std::string mapped = MapBytesToUnicode(text);
+  for (int32_t id = 0; id < tok.VocabSize(); ++id) {
+    if (!tok.HasToken(id)) continue;
+    const std::string& stored = tok.TokenText(id);
+    if (stored == text || stored == mapped) return id;
+  }
+  return -1;
+}
+
+// Reads the eos/bos NAMES declared in tokenizer_config.json (and the older
+// special_tokens_map.json, which HF also consults) out of `model_dir`.
+// tokenizer_config.json is read SECOND so it wins, the order transformers'
+// from_pretrained merges them. A missing sibling is a no-op; a malformed one
+// fails loudly like every other unreadable model file. The ids themselves are
+// applied by Tokenizer::ApplyConfigSpecialIds (private-field access).
+std::pair<std::string, std::string> ConfigSpecialTokenNames(
+    const std::filesystem::path& model_dir, const std::string& source) {
+  std::string bos_name;
+  std::string eos_name;
+  for (const char* fname :
+       {"special_tokens_map.json", "tokenizer_config.json"}) {
+    const std::filesystem::path p = model_dir / fname;
+    if (!std::filesystem::exists(p)) continue;
+    std::ifstream in(p, std::ios::binary);
+    if (!in) continue;
+    json cfg;
+    try {
+      in >> cfg;
+    } catch (const json::exception& e) {
+      Fail("JSON parse error in " + p.string() + " (sibling of " + source +
+           "): " + e.what());
+    }
+    if (!cfg.is_object()) continue;
+    // tokenizer_config.json is read SECOND and wins when it DECLARES the
+    // key: transformers' from_pretrained applies the config's init kwargs
+    // after the map file has already been consumed. contains() gates the
+    // overwrite because value() cannot distinguish "absent" from an explicit
+    // null.
+    if (cfg.contains("bos_token")) {
+      bos_name = SpecialTokenNameOf(cfg.at("bos_token"));
+    }
+    if (cfg.contains("eos_token")) {
+      eos_name = SpecialTokenNameOf(cfg.at("eos_token"));
+    }
+  }
+  return {bos_name, eos_name};
+}
+
 // ---- GGUF kv access (FromGguf) ----
 
 const GgufValue& RequireKv(const GgufFile& f, const char* key) {
@@ -701,8 +803,29 @@ Tokenizer Tokenizer::FromHfJson(const std::string& tokenizer_json_path) {
   if (!in) Fail("cannot open " + tokenizer_json_path);
   std::string bytes((std::istreambuf_iterator<char>(in)),
                     std::istreambuf_iterator<char>());
-  return FromHfJsonBytes(
+  Tokenizer tok = FromHfJsonBytes(
       std::string_view(bytes.data(), bytes.size()), tokenizer_json_path);
+  // A tokenizer.json on disk has a sibling tokenizer_config.json on every HF
+  // checkpoint in scope; it (and special_tokens_map.json) can name eos/bos the
+  // post_processor does not. FromHfJsonBytes is file-less, so the sibling read
+  // lives here and not inside the shared parse. The post_processor keeps
+  // precedence: a name only fills an id the template left at -1.
+  // parent_path() of a BARE filename is empty; joining the sibling name onto
+  // it yields just the sibling's filename, which std::filesystem resolves
+  // against the current working directory -- the same directory the bare
+  // tokenizer.json was opened from. So an empty dir must NOT skip the lookup:
+  // "tokenizer.json" and "./tokenizer.json" are the same file (PR #3363).
+  const std::filesystem::path dir =
+      std::filesystem::path(tokenizer_json_path).parent_path();
+  const auto [bos_name, eos_name] =
+      ConfigSpecialTokenNames(dir, tokenizer_json_path);
+  if (tok.bos_id_ < 0 && !bos_name.empty()) {
+    tok.bos_id_ = ConfigTokenId(tok, bos_name);
+  }
+  if (tok.eos_id_ < 0 && !eos_name.empty()) {
+    tok.eos_id_ = ConfigTokenId(tok, eos_name);
+  }
+  return tok;
 }
 
 Tokenizer Tokenizer::FromHfJsonBytes(std::string_view tokenizer_json,
