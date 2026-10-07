@@ -77,7 +77,7 @@ Per routed expert per layer (fp8 bytes): `gate [512,2560]` + `up [512,2560]`
 |---|---|---|
 | 384 routed experts | 384 × 3,933,120 = 1,510,318,080 B (1.407 GiB) | **70.33 GiB** |
 | shared expert | 3,932,160 B + 960 B | 187.9 MiB |
-| attention (q 6144×2560, k/v 512×2560, o 2560×6144, fp8) | 34,078,720 B | 1.625 GiB |
+| attention (q 6144×2560, k/v 512×2560, o 2560×6144, fp8) | 34,078,720 B | 1.587 GiB |
 | router gate (bf16 [384,2560]) | 1,966,080 B | 93.75 MiB |
 | norms | ~40 KiB | ~2 MiB |
 | embed + untied lm_head (bf16 [128000,2560] each) | — | 1.221 GiB |
@@ -170,7 +170,7 @@ Decisions recorded with the developer (2026-10-06):
   ~236 ms/token) is the backing-store leaf, not the first target.
 - **Device hot set: yes.** A hotness-decayed-LFU cache (the
   `ENG-EXPERT-STREAM` mechanism) sized inside the device budget. Budget:
-  32 GiB − ~3.3 GiB resident (attention 1.625, embed+head 1.221, router
+  32 GiB − ~3.08 GiB resident (attention 1.587, embed+head 1.221, router
   0.094, shared expert 0.188, norms ~0.002, GiB) − KV cache − hot set.
 - **Concurrency refusal is inherited.** At conc≥32 the per-step touched
   fraction of 384 experts approaches 1 and per-step I/O approaches
@@ -215,7 +215,7 @@ In:
   are the device budget (default 32 GiB), the host-tier byte budget, the
   hot-set byte budget, and the concurrency operating point.
 - Resident accounting: non-expert components (§ byte math: attention
-  1.625 GiB, shared expert 0.188 GiB, router 0.094 GiB, norms ~2 MiB,
+  1.587 GiB, shared expert 0.188 GiB, router 0.094 GiB, norms ~2 MiB,
   embed + untied head 1.221 GiB) always resident; the planner refuses by
   name if they alone exceed the device budget.
 - Hot-set sizing: the planner takes the hot-set budget as an expert count

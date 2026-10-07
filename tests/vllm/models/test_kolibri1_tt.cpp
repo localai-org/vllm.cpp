@@ -516,10 +516,14 @@ TEST_CASE("kolibri1 TT streaming: host-budget refusal names the deficit and "
   const Kolibri1TTStreamingShape s = RealKolibri1StreamingShape();
   const int64_t host_required = s.layers * s.experts * s.expert_bytes;
   Kolibri1TTStreamingOptions o;
-  o.host_budget_bytes = host_required / 2;
+  o.host_budget_bytes = host_required - 1000;
   const std::string err = StreamingFailure(s, o);
   REQUIRE(!err.empty());
-  CHECK(err.find("deficit") != std::string::npos);
+  // deficit != budget here: the budget differs from the requirement by
+  // 1000, so this cannot pass by matching the budget alone.
+  const std::string deficit = std::to_string(host_required - o.host_budget_bytes);
+  CHECK(deficit == "1000");
+  CHECK(err.find("deficit " + deficit) != std::string::npos);
   CHECK(err.find(std::to_string(host_required - o.host_budget_bytes)) !=
         std::string::npos);
   // The NVMe tier is a named-but-unimplemented leaf: the refusal says the
