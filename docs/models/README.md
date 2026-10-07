@@ -13,7 +13,7 @@ which checkpoint was used, the exact command, and what has not been measured.
 | Model | What it is | Read the page for |
 |---|---|---|
 | [Qwen3.8 2.4T](qwen3-8-2-4t.md) | A 2.4-trillion-parameter mixture of experts, 370 GiB at `UD-Q1_0` | Serving a checkpoint three times larger than the machine's memory, at 11.05 s/token |
-| [Qwen3.8 27B](qwen3-8-27b.md) | A 27B dense model | Which quantized arms run, and why block-wise FP8 is CPU-only today |
+| [Qwen3.8 27B](qwen3-8-27b.md) | A 27B dense model | Checkpoint limits and correctness gates, with block-wise FP8 on CPU and CUDA `sm_120a` and `sm_121a` |
 | [Qwen3.6](qwen3-6.md) | The Qwen3.6 dense and MoE family | Which `lm_head` forms load, and the merged FP8 `in_proj_qkvz` GEMM |
 | [Qwen3.5](qwen3-5.md) | The Qwen3.5 Gated DeltaNet family | The `output_gate_type` key, and one load refusal that is about this code |
 | [Qwen3-Next](qwen3-next.md) | The Qwen3-Next Gated DeltaNet family | The `output_gate_type` key and its refusals |
