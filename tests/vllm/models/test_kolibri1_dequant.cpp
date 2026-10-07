@@ -8,7 +8,8 @@
 // bit divergence anywhere in the 256-value e4m3fn domain can flip a
 // near-tie adjudication. This gate is exhaustive over the byte domain:
 // all 256 e4m3fn values x representative block scales (1.0, a
-// subnormal-range 2^-14, a large 3.0e34, an exact negative), compared as
+// subnormal-range 2^-14, a large 3.0e34, an exact negative, a tie-pinning
+// 1.015625 with 64 exact ties, a full-mantissa 1.1), compared as
 // raw uint16 bit patterns, plus boundary chunks (odd K, small blocks) of
 // the full row driver.
 
@@ -46,7 +47,15 @@ TEST_CASE(
   std::vector<uint8_t> bytes(256);
   for (int i = 0; i < 256; ++i) bytes[static_cast<size_t>(i)] = static_cast<uint8_t>(i);
 
-  const float scales2[] = {1.0f, 0x1p-14f, 3.0e34f, -1.5f, 0.0f, 0x1p-9f};
+  // 1.015625f (0x3F820000) produces 64 exact bf16 ties across the 256
+  // bytes, pinning the kernel's round-to-nearest-even tie break (a
+  // tie-away kernel diverges on 32 of them). 1.1f (0x3F8CCCCD) is a
+  // full-mantissa scale, pinning the scale's precision (a bf16-rounded
+  // scale diverges on 96) and the scalar's f32-mul-then-bf16
+  // double-rounding order.
+  const float scales2[] = {1.0f, 0x1p-14f, 3.0e34f, -1.5f, 0.0f, 0x1p-9f,
+                           1.015625f /*64 exact ties: pins RNE*/,
+                           1.1f /*full mantissa: pins scale precision*/};
   for (float s : scales2) {
     // Pad past 16 so a full vector read never overruns. Two block scales
     // (K = 256, block_k = 128), both set to s.
