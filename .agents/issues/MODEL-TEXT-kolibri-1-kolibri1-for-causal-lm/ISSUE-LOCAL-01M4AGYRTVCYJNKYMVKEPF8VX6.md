@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4AGYRTVCYJNKYMVKEPF8VX6
 Title: VT_KOLIBRI1_PROFILE env var is undocumented (env-doc gate red on row/kolibri-perf)
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-07
 Updated: 2026-10-07
-Closed: -
+Closed: 2026-10-07
 
 ## Problem
 
@@ -16,4 +16,4 @@ Commit f45d4cd33 (perf(kolibri-1): thread the fp8-block dequant across the CPU p
 
 ## Resolution
 
--
+2026-10-07: fixed in 3cd62a9ac on row/kolibri-perf — VT_KOLIBRI1_PROFILE is now listed in scripts/env-doc-allowlist.txt beside the other *_PROFILE knobs (VT_GEMMA4_PROFILE, VLLM_MM_TOWER_PROFILE), matching the kernel-internal tuning-tail convention. check-env-doc.py, tests/scripts/test_check_env_doc.py and the full agent-preflight.sh are green (rc=0). The FetchContent count mismatch in test_check_test_registration was a local artifact: the stale gitignored build/ directory inside the worktree added 3 extra FetchContent_Declare sites (6 vs the 3 allowlisted); it was moved out of the worktree, no tracked file involved.
