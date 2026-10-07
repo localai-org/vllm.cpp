@@ -1,7 +1,7 @@
 # Send multimodal input
 
 The OpenAI-compatible server routes supported image and audio content parts
-through `/v1/chat/completions` to the model. Support depends on the model:
+through `/v1/chat/completions` to the model. This guide covers these examples:
 
 | Server architecture | Image items per prompt | Audio items per prompt | Video |
 |---|---:|---:|---|
@@ -18,8 +18,9 @@ that media reaches the model, not token parity on real checkpoints:
 and [dots3-note tests](../../tests/vllm/entrypoints/openai/test_api_server_dots3_mm_forward.cpp).
 No real-checkpoint token-parity or accelerator-performance claim follows from
 these tests. Other multimodal architectures do not gain HTTP support from
-registration alone. The text CLI and `vllm_chat` C API do not accept these
-media requests.
+registration alone. The text CLI does not accept these media requests.
+The C API uses the same multimodal chat handler as the server. See
+[C API limits](#c-api-limits).
 
 ## Send an image
 
@@ -78,7 +79,7 @@ registered chat paths refuse `video_url`.
 
 ## Add a `clip` multimodal projector to GGUF
 
-A GGUF multimodal model has two files: the language `.gguf` and a
+The Qwen3-VL projector path uses two files: the language `.gguf` and a
 `clip`-architecture `mmproj-*.gguf` carrying the vision tower. Name the second
 one with `--mmproj` (`vllm-server`) or `vllm_model_params.mmproj_path` (C ABI
 v22); it is never auto-discovered from a sibling filename, because a directory
@@ -90,21 +91,23 @@ holding two unrelated models must not silently fuse them.
   --mmproj /models/mmproj-BF16.gguf
 ```
 
-The loader opens the projector and reads its `clip.*` metadata and `v.*` and
-`mm.*` tensors. The engine then holds the same vision tower that the
-safetensors path builds. No forward pass consumes this tower yet. Neither the
-server nor the C ABI has a multimodal GGUF request path, so the flag validates
-and loads the tower but does not produce an image answer
+With default limits, the loader opens the projector and reads its `clip.*`
+metadata and `v.*` and `mm.*` tensors. The engine then holds the same vision tower that the
+safetensors path builds. No forward pass consumes this Qwen3-VL projector tower yet.
+Neither the server nor the C API can use this projector path to produce an
+image answer
 ([#821](https://github.com/mudler/vllm.cpp/issues/821)).
 
-The loader refuses four conditions by name before it reads the tokenizer or
-any language-model weight bytes:
+With default limits, the loader refuses these conditions before it reads the
+tokenizer or language-model weights. Zero limits skip some tensor checks, as
+explained under [Per-prompt input limits](#per-prompt-input-limits).
 
 - `--model` is not a `.gguf`. A safetensors checkpoint carries its tower in its
   own shards and needs no projector file.
 - the file's `general.architecture` is not `clip` (this is what you get for
   passing the language file twice).
-- its `clip.projector_type` is not `qwen3vl_merger`. A `muse-glimmer` projector
+- its `clip.projector_type` is not `qwen3vl_merger`. DeepSeek-V4 projectors use
+  a separate loader. A `muse-glimmer` projector
   is routed to MuseGlimmer's own recorded refusal instead, which names the
   missing axis.
 - it carries `v.patch_embd.weight` without `v.patch_embd.weight.1`. llama.cpp
@@ -121,154 +124,83 @@ limitations. Loader and gate evidence remains in
 
 ## Per-prompt input limits
 
-vLLM caps how many items of each modality one prompt may carry
-(`--limit-mm-per-prompt`), and `--language-model-only` is sugar for setting every
-one of those limits to 0. Both flags are accepted (#607, waves L1+L2) and both
-are enforced **on this server's chat path**, which is the one place that installs
-the multimodal chat seam the check runs behind.
+Use `--limit-mm-per-prompt` to cap media items per prompt. The server uses the
+lower of your configured limit and the architecture's ceiling.
+For example, `--limit-mm-per-prompt '{"image": 99}'` still allows only one image
+on Qwen3-VL. On dots3-note, it allows 99 images.
 
-Both are also C ABI fields (`vllm_model_params.language_model_only` /
-`.limit_mm_per_prompt`, ABI v19), and there they configure the engine, including
-a server built on it, but they do not change what a `vllm_chat` call returns:
-the C ABI has no multimodal request path yet, so an `image_url` content part sent
-through it is dropped and answered as text. The refusals below are the server's.
-`vllm_model_params.mmproj_path` (ABI v22) is in the same position: it loads and
-validates the projector, and no C-ABI call can feed the tower an image yet.
-
-The flag sets all modality limits to zero and refuses media requests.
-Qwen3-VL, MuseGlimmer, and `clip` projector loaders also skip a tower when all
-modalities it serves have zero limits. The dots3-note loader still loads its
-supported vision and audio towers, even with zero limits.
-
-With default limits, a Qwen3-VL server refuses three images with HTTP 400:
+Requests that exceed a limit return HTTP 400. For example, a Qwen3-VL request
+with two images receives:
 
 ```json
 {"error":{"type":"BadRequestError",
           "message":"At most 1 image(s) may be provided in one prompt."}}
 ```
 
-Two things follow from how the limit is computed
-(`min(user limit, what the model/seam supports)`):
+The error adds ``Set `--limit-mm-per-prompt` to increase this limit.`` only when
+raising your configured limit would permit the request. The architecture's ceiling
+still applies. The refusal does not otherwise distinguish a configured limit
+from an unsupported modality.
 
-- A user limit can only **lower** the ceiling, and what it lowers is declared
-  **per architecture** by the chat seam that architecture registers. On a
-  `Qwen3VLForConditionalGeneration` server, the option
-  `--limit-mm-per-prompt '{"image": 99}'` still refuses a second image, because that seam declares `{"image": 1}` and routes no video or
-  audio part at all, so those limits are 0 and such a part is refused by name
-  rather than dropped, which is what closed
-  [#686](https://github.com/mudler/vllm.cpp/issues/686).
-  **`Dots3NoteForCausalLM` is the exception, since W8a**
-  ([#2860](https://github.com/mudler/vllm.cpp/issues/2860)): its seam applies
-  every item of every modality in ONE pass over the prompt, so it declares
-  upstream's own `{"image": 512}`, plus `{"audio": 128}` when the checkpoint
-  carries an `audio_config`. There `'{"image": 99}'` resolves to
-  `min(99, 512) = 99` and the second image is SERVED, and one request may carry
-  an image and an audio part together. `video` is absent from that seam too, so
-  a video part is still refused by name at limit 0. `--limit-mm-per-prompt
-  '{"image": 1}'` is how an operator puts the single-image ceiling back.
-- The ``Set `--limit-mm-per-prompt` to increase this limit.`` hint appears only
-  when raising the limit would actually help, that is, when the seam could take
-  the items and the configuration is what refused them. Its absence is currently
-  the only way to tell an unimplemented arm from a configured limit; the
-  refusal message itself does not say which
-  ([#758](https://github.com/mudler/vllm.cpp/issues/758)).
+### Disable media and skip unused towers
 
-**What the zero limits now free.** In the Qwen3-VL, MuseGlimmer, and `clip`
-projector loaders, a tower whose every modality is at limit 0 is constructed but
-never loaded: its geometry is still parsed from `vision_config`,
-so a refusal can still name what is missing, and its checkpoint tensors are never
-read. This mirrors vLLM's `_mark_tower_model`
-(`vllm/model_executor/models/interfaces.py:288-293`), and it follows from the
-LIMITS rather than from the flag: `--limit-mm-per-prompt '{"image":0,"video":0}'`
-skips the same tower, and one non-zero modality keeps it.
+Use `--language-model-only` to set every modality limit to zero and refuse media
+requests. You can also set individual limits to zero:
 
-Tower-skip tests cover the checkpoint loaders for
-`MuseGlimmerForConditionalGeneration` and `Qwen3VLForConditionalGeneration`, and
-the `--mmproj` projector, which is the Qwen3-VL tower read out of a second
-`clip` GGUF beside a `.gguf` language file. On the `--mmproj` path the file is
-still opened and still partly validated at zero limits, and only its tensors go
-unread.
+```sh
+./build/examples/vllm-server \
+  --model /models/Qwen3.5-4B \
+  --limit-mm-per-prompt '{"image": 0, "video": 0}'
+```
 
-Which validation survives the zero limits is worth being exact about, because
-the two classes behave differently:
+Loaders that implement tower skipping leave its tensors unread when every
+modality served by that tower has a zero limit. These loaders include:
 
-- **Refused whatever the limits are** — the checks that run *before* the read:
-  a projector whose architecture or `clip.projector_type` this build cannot use
-  (`RefuseUnsupportedClipMmproj`), and one carrying tensors the reader would not
-  consume (`RefuseUnaccountedClipMmproj`). Both sit above the skip, alongside
-  `ClipMmprojVisionConfig`, so the geometry still resolves and the file is still
-  named in the error.
-- **NOT reached at zero limits** — the checks that live *inside*
-  `LoadQwen3VLVisionFromClipMmproj`, which is the call the skip removes. A
-  projector missing a tensor the tower needs, such as the temporal half
-  `v.patch_embd.weight.1`, is refused at default limits and walks straight past
-  the loader with `--language-model-only`. That is the construct half of
-  construct-without-initialise doing what it says: what stops is the storage,
-  and the reader's own missing-tensor refusals stop with it.
+- Qwen3.5 dense safetensors, when the checkpoint contains a vision tower.
+- Qwen3-VL safetensors.
+- MuseGlimmer safetensors, when the checkpoint contains a vision tower.
+- The Qwen3-VL tower in a `qwen3vl_merger` `clip` GGUF projector supplied through `--mmproj`.
 
-The server prints one line naming what was skipped, read back off the loaded
-model rather than off the flag:
+These towers serve image and video. Set both limits to zero to skip them.
+Setting only `image` to zero leaves the tower loaded, even when the server
+cannot accept video requests. `--language-model-only` skips the same towers.
+The dots3-note loader still loads its supported vision and audio towers at zero
+limits.
 
-```console
-$ vllm-server --model /path/to/muse-glimmer-30b --language-model-only
+The Qwen3.5 dense loader checks for vision tensor names before it skips the
+tower. The skip bypasses both vision tensor loading and vision configuration
+parsing. It does not add multimodal HTTP support for Qwen3.5 dense models.
+
+For a Qwen3-VL `clip` projector, zero limits do not bypass all validation:
+
+- The loader still opens the file, checks its architecture and projector type,
+  resolves its geometry, and refuses tensors that its reader cannot consume.
+- The loader skips tensor reads and their validation. For example, a missing
+  `v.patch_embd.weight.1` fails at default limits but does not fail with
+  `--language-model-only`.
+
+The server reports towers that the loaded model actually skipped:
+
+```text
 server: multimodal limits language-model-only=ON audio=0 image=0 video=0
 server: multimodal towers NOT loaded (every modality they serve is at limit 0): vision_tower
 ```
 
-Nothing is printed when nothing was skipped, so a text model and a multimodal
-model at their default limits both look exactly as they did before.
+The tower message is absent when the loader skips nothing. Memory savings depend
+on the checkpoint and loader. See [Memory benchmarks](../benchmarks/memory.md)
+for the Qwen3-VL-4B load-time host-memory measurements, their history, and
+unmeasured models. Those measurements do not establish serving memory usage or
+VRAM savings.
 
-**How many bytes that saves, measured on one model.** On
-**Qwen3-VL-4B-Instruct** the flag frees **0.770 GiB of host RSS at load**
-(826,916,864 bytes: peak 9,381,281,792 B without it against 8,554,364,928 B
-with it), and the swapped repeat agreed to within 339,968 B. Measured 2026-08-28
-on `dgx:gpu0` under an `rc` lease, `--device cpu`, at `525d2b991`, against a
-threshold of 747,625,881 B — 90% of the 830,695,424 B tower the checkpoint
-ships — that was derived before the run.
+### C API limits
 
-An earlier run of the same procedure, on 2026-08-24 at `41ab550b9`, read 1.542
-GiB. That is not a regression between the two, and the difference is not noise:
-about half of the older figure was a widening defect of ours, described in the
-second bullet below, and fixing it moved the saving to 0.499x of what it was.
-Both runs MET their own pre-derived threshold on both pairs.
+`vllm_model_params.language_model_only` and `vllm_model_params.limit_mm_per_prompt`
+configure the engine's limits. `vllm_model_params.mmproj_path` selects a projector.
+`vllm_chat` and `vllm_chat_stream` use the server's multimodal chat handler and
+codec. Pass media through the request JSON's content parts.
 
-Three things that figure is not, all of which matter before you quote it:
-
-- **It is one model's tower, not a general saving.** How much a skip frees is
-  how big that model's tower is, and nothing else. `muse-glimmer-30b`'s tower is
-  4.6x larger on disk, still held in host f32, and still unmeasured, so the
-  number above says nothing about it. Do not scale one into the other: the 4.6x
-  is an ON-DISK ratio, and because `muse-glimmer-30b` still widens while
-  Qwen3-VL no longer does, its RESIDENT tower is about 9.3x the 0.770 GiB above,
-  not 4.6x. Its threshold is derived from its own headers, 90% of 7.161 GiB, and
-  is unchanged by any of this.
-- **About half of the older figure was a defect of ours, and that defect is now
-  fixed and the fix is measured.** Qwen3-VL's tower is 0.774 GiB on disk in
-  bf16, and our loader used to widen it to host f32
-  ([#1359](https://github.com/mudler/vllm.cpp/issues/1359)). The Qwen3-VL half
-  of that landed, and the 2026-08-28 rerun is what confirms it: the default arm
-  — which is the arm that pays for the tower — dropped 828,219,392 B (0.771
-  GiB), from 10,209,501,184 B to 9,381,281,792 B, or **99.7% of the 830,695,424
-  B the fix predicted**. The `--language-model-only` arm loads no tower and so
-  should not have moved, and it did not: **+655,360 B, or +0.0077%**. That
-  control is why the drop can be attributed to the fix rather than to the change
-  of host. The saving the flag reports therefore fell to 0.499x of the older
-  figure, and the smaller number is the honest one — the flag now frees the
-  tower the checkpoint ships rather than the tower plus our widening.
-  `muse-glimmer-30b` still widens, blocked on
-  [#2166](https://github.com/mudler/vllm.cpp/issues/2166), and Gemma-4's vision
-  tower is unreached, tracked by
-  [#2173](https://github.com/mudler/vllm.cpp/issues/2173).
-- **It is load-time residency, and it is host RAM.** The measured window ends at
-  server readiness, and the build was CPU-only, so this is not a steady-state
-  serving figure and not a VRAM claim.
-
-The procedure and its pre-declared thresholds are `scripts/mm/tower_skip_rss.sh`
-and `.agents/specs/multimodal-track.md` §1.5 L3 — one threshold per model kind,
-`muse-glimmer` and `qwen3-vl`, each derived from that checkpoint's own
-safetensors headers, because one model's tower size does not describe another's.
-`muse-glimmer` has not run: it needs about 56 G staged to local disk on a leased
-device ([#607](https://github.com/mudler/vllm.cpp/issues/607),
-[#1358](https://github.com/mudler/vllm.cpp/issues/1358)). See
-[Memory benchmarks](../benchmarks/memory.md).
-
+A registered multimodal handler processes the request subject to its limits.
+An unregistered multimodal architecture, or a handler that cannot initialize,
+refuses media with `VLLM_ERR_INVALID_ARGUMENT`. Read `vllm_last_error()` for the
+architecture and missing capability. PNG, JPEG, and remote image fetching remain
+unavailable with the default codec. `vllm_generate` accepts text only.
