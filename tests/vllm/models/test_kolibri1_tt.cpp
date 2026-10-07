@@ -471,7 +471,7 @@ TEST_CASE("kolibri1 TT streaming: resident accounting matches the byte-math "
   CHECK(plan.resident_bytes == s.attention_bytes + s.shared_expert_bytes +
                                    s.router_bytes + s.norm_bytes +
                                    s.embed_head_bytes);
-  // The spec's ~3.1 GiB resident claim (attention 1.625 + shared 0.188 +
+  // The spec's ~3.08 GiB resident (attention 1.587 + shared 0.188 +
   // router 0.094 + embed/head 1.221 GiB + norms) — well under one P150.
   CHECK(plan.resident_bytes > int64_t(3) << 30);
   CHECK(plan.resident_bytes < int64_t(32) << 30);
