@@ -19,13 +19,16 @@ precision, and association — was proposed as the untried lever. This note
 records the verification: **that lever is already landed on main, gated, and
 is the default tier on this host.** The rejection's premise is falsified by
 the tree; no new kernel is warranted and re-implementing one would duplicate
-landed, gated work.
+landed, gated work. The prior rejection lives in
+`docs/bench-evidence/kolibri1-dequant-cache-negative-20261007.md`, which is
+committed on branch `row/kolibri-neon2` (pushed to the fork, `bafb7e3a4`) and
+not yet on `main`, so a `main` reader needs that branch to follow it.
 
 ## Where the lever lives
 
 - `src/vt/cpu/cpu_matmul_elem.cpp` (landed 18094ee28, 2026-07-22,
   "perf(cpu): elementwise GEMM specialized + SIMD-vectorized, BIT-EXACT"):
-  `Bt16Neon` (:154) accumulates 16 independent output columns as 4 NEON
+  `Bt16Neon` (:155) accumulates 16 independent output columns as 4 NEON
   vectors; per lane the p sequence is strictly increasing, products are
   `vmulq` + `vaddq` (NEVER `vfmaq`), so every rounding point matches the
   scalar reference at `-ffp-contract=off`. `BtM4Neon` (:198), `Nk16Neon`,
