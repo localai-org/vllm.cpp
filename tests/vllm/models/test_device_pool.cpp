@@ -881,3 +881,125 @@ TEST_CASE("dense_attn::MakeTensor refuses a rank above vt::kMaxRank") {
   // constructor's own `CheckRank` is removed while `MakeTensor` keeps its.
   CHECK(a.allocs() == 0);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE LEASE (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2). A kolibri-1 fp8-dequant
+// cache held decoded blocks via `DBuf::ReleaseShared()` — the cross-step
+// carrier — while forward traffic kept allocating scratch of the same size
+// class. Its diagnostics observed `POOL DOUBLE-HAND-OUT`: a fresh `DBuf` was
+// handed a pointer a live cache entry still owned, and the entry's bytes came
+// back as another tensor's data (`CACHE MISMATCH n=512 k=2560`). For the pool
+// to hand a live-leased block out, that block must have entered a free list
+// while its carrier was alive — i.e. SOMEONE returned it twice, and the pool
+// accepted the second return in silence.
+//
+// THE INSTRUMENT IS PER-TEST, NOT GLOBAL. The raw Put/Get free-list tripwire
+// tried during the cache experiment was unsound: a static set spanning pool
+// instances printed 2.45 M false positives with the cache disabled. Here each
+// case holds its own live-lease set, on ONE backend and ONE pool, and checks
+// every allocation it receives against exactly the leases it created.
+//
+// The two cases below use their OWN size class (55,296 bytes) so no earlier
+// case's free list can decide them, including under `--order-by=rand`.
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// The size class every lease case below uses, and the byte count a same-class
+// `DBuf`/`Put` names. 13,824 f32 elements round UP to 55,296 — distinct from
+// every shape used above this point in the file.
+const std::vector<int64_t> kLeaseShape{13824};
+constexpr size_t kLeaseBytes = 13824 * sizeof(float);
+
+}  // namespace
+
+TEST_CASE("device pool: the dequant-cache lease pattern keeps every live lease unaliased") {
+  // THE PATTERN, at pool level: allocate, lease out via the carrier, cycle
+  // same-class scratch traffic through Get/Put while the lease is outstanding,
+  // and never see the leased block again until the carrier dies. This is the
+  // sound instrument the cache experiment lacked; it is GREEN on a sound pool
+  // and stays green as the regression guard.
+  TagBackend& a = NewBackend();
+  Queue qa = QueueOn(0);
+  if (PoolBypass()) return;  // no free list to alias through in this lane
+
+  std::vector<void*> leased;
+  std::shared_ptr<void> carrier;
+  {
+    DBuf w(Dev{a, qa}, DType::kF32, kLeaseShape);
+    std::memset(w.ptr(), 0xAA, kLeaseBytes);
+    leased.push_back(w.ptr());
+    carrier = w.ReleaseShared();
+  }
+  REQUIRE(carrier != nullptr);
+
+  // Same-class traffic cycles several times: each block is filled with its own
+  // tag, returned, and re-handed. None of it may ever be the leased block, and
+  // the leased bytes must survive untouched.
+  for (int round = 0; round < 4; ++round) {
+    DBuf scratch(Dev{a, qa}, DType::kF32, kLeaseShape);
+    for (void* p : leased) CHECK(scratch.ptr() != p);
+    std::memset(scratch.ptr(), static_cast<unsigned char>(round), kLeaseBytes);
+    CHECK(static_cast<const unsigned char*>(leased[0])[0] == 0xAA);
+    CHECK(static_cast<const unsigned char*>(leased[0])[kLeaseBytes - 1] == 0xAA);
+  }
+  // Dropping the carrier hands the block back; the next request reuses it.
+  carrier.reset();
+  DBuf again(Dev{a, qa}, DType::kF32, kLeaseShape);
+  CHECK(again.ptr() == leased[0]);
+}
+
+TEST_CASE("device pool: a block returned while a LEASE is outstanding is REFUSED, not double-handed") {
+  // The defect the cache experiment's tripwire fired on. The observed sequence
+  // needs a second return of a block whose carrier is still alive — a Put the
+  // rightful owner did not make. Before the fix the pool accepted it in
+  // silence: the block entered the free list, the next `Get` handed it to a
+  // new owner, and the carrier's bytes became another tensor's data. The pool
+  // now refuses that return BY NAME, at the moment of the second Put, while
+  // the legal carrier return still works.
+  TagBackend& a = NewBackend();
+  Queue qa = QueueOn(0);
+  vllm::DevicePool& pool = vllm::Pool(a);
+
+  void* leased_ptr = nullptr;
+  std::shared_ptr<void> carrier;
+  {
+    DBuf w(Dev{a, qa}, DType::kF32, kLeaseShape);
+    leased_ptr = w.ptr();
+    std::memset(leased_ptr, 0xAA, kLeaseBytes);
+    carrier = w.ReleaseShared();
+  }
+  REQUIRE(leased_ptr != nullptr);
+
+  // THE SECOND RETURN. Nothing in the tree does this on purpose; the defect is
+  // that doing it BY ACCIDENT was indistinguishable from a legal return. The
+  // refusal must fire in BOTH lanes: under bypass the bogus Put would free a
+  // live block to the driver, which is the same defect with a louder symptom.
+  CHECK_THROWS_WITH_AS(
+      pool.Put(a, kLeaseBytes, leased_ptr),
+      doctest::Contains("still leased"), std::exception);
+
+  // The refusal left the block OUT of the free list: the next request cannot
+  // be handed the leased block, and a write through the new block cannot reach
+  // the carrier's bytes.
+  {
+    DBuf fresh(Dev{a, qa}, DType::kF32, kLeaseShape);
+    CHECK_MESSAGE(fresh.ptr() != leased_ptr,
+                  "POOL DOUBLE-HAND-OUT: a live-leased block was handed to a new owner");
+    std::memset(fresh.ptr(), 0xBB, kLeaseBytes);
+    CHECK(static_cast<const unsigned char*>(leased_ptr)[0] == 0xAA);
+    CHECK(static_cast<const unsigned char*>(leased_ptr)[kLeaseBytes - 1] == 0xAA);
+  }
+
+  // AND THE LEGAL RETURN STILL WORKS: the carrier's own deleter hands the
+  // block back and the pool reuses it, exactly as the ReleaseShared case above
+  // pins. A refusal that broke reuse would be `VT_POOL_BYPASS=1` wearing a fix
+  // costume.
+  carrier.reset();
+  if (PoolBypass()) {
+    CHECK(a.WasFreed(leased_ptr));
+    return;
+  }
+  DBuf again(Dev{a, qa}, DType::kF32, kLeaseShape);
+  CHECK(again.ptr() == leased_ptr);
+}

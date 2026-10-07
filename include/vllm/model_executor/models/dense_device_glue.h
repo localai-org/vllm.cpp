@@ -279,7 +279,15 @@ class DBuf {
     // over a null pointer with a custom deleter would still RUN that deleter and
     // push null into the free list.
     if (p == nullptr) return {};
-    return std::shared_ptr<void>(p, [pool, b, alloc](void* q) { pool->Put(*b, alloc, q); });
+    // REGISTER THE LEASE with the block's own pool, and let the deleter return
+    // it through `PutLeased`, which discharges the lease before the ordinary
+    // Put. The pool then knows the block is owned by this carrier, and any
+    // OTHER return of the live block — the second Put that made a cached block
+    // re-handed out while its entry still owned it (the kolibri-1 dequant-cache
+    // `POOL DOUBLE-HAND-OUT`, ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2) — is
+    // refused at the Put instead of silently aliasing the carrier's bytes.
+    pool->NoteLease(p);
+    return std::shared_ptr<void>(p, [pool, b, alloc](void* q) { pool->PutLeased(*b, alloc, q); });
   }
 
  private:
