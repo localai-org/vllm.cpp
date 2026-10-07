@@ -7,7 +7,7 @@ State: `ACTIVE`
 
 ## Scope
 
-`check_table_shapes` (`scripts/check-agent-record.py:1292`) counts the
+`scripts/check-agent-record.py::check_table_shapes` counts the
 unescaped pipes on every table line of every path it is handed and reports any
 line whose count differs from the first line of that table:
 
