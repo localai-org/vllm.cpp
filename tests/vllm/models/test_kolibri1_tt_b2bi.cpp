@@ -952,15 +952,28 @@ TEST_CASE("kolibri1 TT B2b-i HOST: the registry's kTENSTORRENT dispatch arm "
                        /*num_reqs=*/1};
   in.pure_decode = true;
   in.uniform_query_len = 1;
-  // The registry dispatches the kTENSTORRENT arm to ForwardKolibri1TTResident
-  // Forward: the step completes through the PRODUCTION seam and the TT
-  // forward's own refusal fires (a deleted or replaced dispatch arm throws
-  // and fails this case).
+  // The registry dispatches the kTENSTORRENT arm to
+  // ForwardKolibri1TTResidentForward: the step completes through the
+  // PRODUCTION seam. SLICE II CONTRACT (B2b-ii replaces the slice-i
+  // refusal): with the streaming arm ON (the default), the routed
+  // experts carry the step and the B2b-i refusal does NOT fire; with
+  // VT_KOLIBRI1_TT_B2II_STREAM=0 the streaming-disabled arm still fires
+  // it by name. A deleted or replaced dispatch arm throws and fails
+  // this case.
   ForwardLogits fl = ModelRegistry::Forward(*model, in);
   REQUIRE(fl.rows == 1);
   REQUIRE(fl.vocab == 32);
   CHECK(fl.device_tensor.dtype == vt::DType::kF32);
-  CHECK(Kolibri1TTRoutedExpertRefusalCount() - before >= 2);
+  CHECK(Kolibri1TTRoutedExpertRefusalCount() - before == 0);
+
+  // The streaming-DISABLED arm: the B2b-i refusal fires by name again.
+  ::setenv("VT_KOLIBRI1_TT_B2II_STREAM", "0", 1);
+  Kolibri1TTResetRoutedExpertRefusalCount();
+  const int64_t before_off = Kolibri1TTRoutedExpertRefusalCount();
+  ForwardLogits fl2 = ModelRegistry::Forward(*model, in);
+  REQUIRE(fl2.rows == 1);
+  CHECK(Kolibri1TTRoutedExpertRefusalCount() - before_off >= 2);
+  ::unsetenv("VT_KOLIBRI1_TT_B2II_STREAM");
 }
 
 // ---- DEVICE LEG ------------------------------------------------------------

@@ -31,10 +31,12 @@
 #include <mutex>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "vllm/model_executor/models/dense_attn_block.h"  // KvSlice
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
+#include "vllm/model_executor/models/kolibri1_tt_stream.h"
 #include "vllm/model_executor/models/kolibri1_shared.h"  // SigmoidLogitAddRouting
 #include "vllm/model_executor/models/kv_cache_route.h"   // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"    // the ONE pool (#1664)
@@ -264,19 +266,28 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   return LinearBTDevice(d, o_in, o_w, t);  // [T, H]
 }
 
-// ---- MoE block (slice i: router + refusal + shared expert ONLY) --------------
+// ---- MoE block (slice ii: router + the streaming routed path + shared) -------
 //
 // The CPU row's MoeBlock computes shared + the weighted routed combine
-// (vt::MoeCombine). Slice i has NO routed tier: the router runs on device
-// (bf16 gate, f32 logits — the CPU row's contract), the sigmoid-logit-add
-// top-6-of-384 runs host-side over the readback (the inherited f32 compute
-// path), the routed request fires the NAMED REFUSAL, and the block returns
-// the shared expert's output — the routed contribution is absent, exactly
-// as the refusal records.
+// (vt::MoeCombine). Slice ii adds the routed tier: the router runs on
+// device (bf16 gate, f32 logits — the CPU row's contract), the
+// sigmoid-logit-add top-6-of-384 runs host-side over the readback (the
+// inherited f32 compute path), and the routed experts are STREAMED: the
+// B2a dispatch plan remaps the request against the slot tables, the
+// fetch executor's host half builds the jobs, the device half stages the
+// slot payloads (packed bytes verbatim), the readback pivot verifies
+// them byte-for-byte against the shadow, Touch() pins them, and the
+// per-expert bf16 dequants (memoized, reset-lane invalidated) feed the
+// CPU row's gather/ExpertMlp/scatter and the vt::MoeCombine. When no
+// streaming context is attached the B2b-i refusal still fires by name —
+// the refusal remains ONLY for the streaming-disabled arm and genuine
+// over-capacity/miss-handle failures (which throw by name).
 DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
               const Tensor& dhn, int64_t t, int64_t layer,
               const Tensor& sh_gate_w, const Tensor& sh_up_w,
-              const Tensor& sh_down_w) {
+              const Tensor& sh_down_w,
+              Kolibri1TTStreamingDeviceContext* stream,
+              const Kolibri1Weights& weights) {
   const int64_t e = p.num_experts;
   const int64_t top_k = p.num_experts_per_tok;
 
@@ -299,15 +310,209 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   Kolibri1HostRouting route =
       SigmoidLogitAddRouting(logits, bias, t, e, top_k);
 
-  // SLICE i: the router requested routed experts; the routed path is not
-  // implemented in this slice. Fire the refusal BY NAME (counted) and
-  // proceed with the shared expert only.
-  NoteRoutedExpertRequest(layer, route.ids);
+  // SLICE ii: the routed tier. Without a streaming context (the
+  // streaming-disabled arm) the B2b-i refusal still fires by name.
+  if (stream == nullptr) {
+    NoteRoutedExpertRequest(layer, route.ids);
+    // Shared expert: UNGATED, always added (kolibri1.py:146-188) — and in
+    // this arm it is the WHOLE MoE output.
+    return ExpertMlp(d, dhn, t, p.shared_expert_intermediate_size, sh_gate_w,
+                     sh_up_w, sh_down_w);
+  }
+  Kolibri1TTStreamingDeviceContext& st = *stream;
+  VT_CHECK(st.built, "kolibri1-tt B2b-ii: the streaming context is not built");
 
-  // Shared expert: UNGATED, always added (kolibri1.py:146-188) — and in
-  // this slice it is the WHOLE MoE output (the routed term is absent).
-  return ExpertMlp(d, dhn, t, p.shared_expert_intermediate_size, sh_gate_w,
-                   sh_up_w, sh_down_w);
+  // The reset lane: a slot swap since the recording clears the memoized
+  // dequants (the graph-reset semantics; the GDN churn fix pattern).
+  if (st.epoch.ConsumeIfChanged(st.pool.policy)) st.memo.clear();
+
+  // The routed path end to end: remap -> fetch list -> stage -> verify ->
+  // Touch. The stream bound refuses LOUDLY past the B1 per-token ceiling.
+  const std::vector<std::pair<int64_t, std::vector<int64_t>>> layer_req = {
+      {layer, std::vector<int64_t>(route.ids.begin(), route.ids.end())}};
+  const Kolibri1TTDispatchPlan disp =
+      PlanKolibri1TTMoEDispatch(st.pool.policy, layer_req);
+  const Kolibri1TTLayerDispatch& ld = disp.layers[0];
+  const Kolibri1TTSlotFetchList list = BuildKolibri1TTSlotFetchList(
+      st.pool.policy, ld, weights, st.pool, st.per_token_stream_bytes);
+  VT_CHECK(st.guard != nullptr,
+           "kolibri1-tt B2b-ii: the per-step stream guard is missing");
+  st.guard->Charge(layer, list.stream_bytes);
+  vt::Backend& be = vt::GetBackend(d.q.device.type);
+  std::vector<uint8_t> slot_image(
+      static_cast<size_t>(st.pool.packed_bytes_per_slot));
+  for (const Kolibri1TTSlotFetchJob& job : list.jobs) {
+    // Touch FIRST: the policy's slot is authoritative (the dispatch
+    // plan's fetch_slots are advisory — SuggestSlotFor is read-only over
+    // the tables, so a multi-miss dispatch repeats the first free slot).
+    const int64_t slot = st.pool.policy.Touch(layer, job.expert);
+    VT_CHECK(slot >= 0 && slot < st.pool.capacity_per_layer,
+             "kolibri1-tt B2b-ii: the policy handed out slot " +
+                 std::to_string(slot) + " outside the per-layer capacity");
+    const int64_t device_offset = slot * st.pool.packed_bytes_per_slot;
+    // The host image of the slot: the three packed projections
+    // concatenated (gate, up, down) — the layout the pool stages.
+    const Kolibri1ExpertWeights& ew =
+        weights.layers[static_cast<size_t>(layer)]
+            .moe.experts[static_cast<size_t>(job.expert)];
+    const Kolibri1Projection* projs[3] = {&ew.gate_proj, &ew.up_proj,
+                                          &ew.down_proj};
+    int64_t off = 0;
+    const bool was_swap = st.shadow->Has(layer, slot);
+    for (const Kolibri1Projection* pr : projs) {
+      const size_t nb = pr->fp8_block.packed.bytes.size();
+      // H2D: the packed bytes VERBATIM, row-major, into the slot.
+      d.b.Copy(d.q, static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
+                        device_offset + off,
+               pr->fp8_block.packed.bytes.data(), nb);
+      std::memcpy(slot_image.data() + off, pr->fp8_block.packed.bytes.data(),
+                  nb);
+      // The f32 scale grids stay HOST-side (staged with the slot's shadow).
+      off += static_cast<int64_t>(nb);
+    }
+    VT_CHECK(off == st.pool.packed_bytes_per_slot,
+             "kolibri1-tt B2b-ii: slot payload byte math diverged");
+    // The readback pivot: D2H the staged slot and verify BYTE-EXACT
+    // against the shadow (no extract_shard on this tt-metal).
+    be.Copy(d.q, slot_image.data(),
+            static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
+                device_offset,
+            static_cast<size_t>(st.pool.packed_bytes_per_slot));
+    be.Synchronize(d.q);
+    st.shadow->Record(layer, slot, slot_image.data(),
+                      st.pool.packed_bytes_per_slot);
+    st.readback_verified_bytes += st.shadow->VerifyReadback(
+        layer, slot, slot_image.data(), st.pool.packed_bytes_per_slot);
+    ++st.slot_fills;
+    st.staged_bytes += st.pool.packed_bytes_per_slot;
+    if (was_swap) ++st.swap_fills;
+  }
+  // Re-record the epoch AFTER the fills so the next layer's check fires
+  // only on a NEW content change (swaps it did not cause itself).
+  st.epoch.Record(st.pool.policy);
+
+  // The routed experts: the CPU row's gather/ExpertMlp/scatter over the
+  // slot dequants, then the weighted combine with the always-added shared
+  // term. Identical op sequence to kolibri1_forward.cpp's MoeBlock.
+  const int64_t h = p.hidden_size;
+  const int64_t inter = p.moe_intermediate_size;
+  DBuf dtw(d, DType::kF32, {t, top_k},
+           const_cast<float*>(route.weights.data()));
+  DBuf dtid(d, DType::kI32, {t, top_k},
+            const_cast<int32_t*>(route.ids.data()));
+  DBuf shared = ExpertMlp(d, dhn, t, p.shared_expert_intermediate_size,
+                          sh_gate_w, sh_up_w, sh_down_w);
+  DBuf expert_out(d, DType::kBF16, {t, top_k, h});
+  expert_out.Zero(d);
+  for (int64_t ex = 0; ex < e; ++ex) {
+    std::vector<int32_t> token_rows;
+    std::vector<int32_t> slot_rows;
+    for (int64_t i = 0; i < t; ++i) {
+      for (int64_t kk = 0; kk < top_k; ++kk) {
+        const int64_t idx = i * top_k + kk;
+        if (route.ids[static_cast<size_t>(idx)] == static_cast<int32_t>(ex)) {
+          token_rows.push_back(static_cast<int32_t>(i));
+          slot_rows.push_back(static_cast<int32_t>(idx));
+          break;
+        }
+      }
+    }
+    if (token_rows.empty()) continue;
+    // The slot must hold this expert — a miss here is a miss-handle
+    // refusal (the fetch above pinned every requested expert).
+    const int64_t slot = st.pool.policy.SlotFor(layer, ex);
+    VT_CHECK(slot >= 0,
+             "kolibri1-tt B2b-ii: expert " + std::to_string(ex) +
+                 " selected on layer " + std::to_string(layer) +
+                 " but no slot holds it — refusing by name");
+    // The memoized slot dequant: readback-verified slot bytes -> the CPU
+    // row's DequantRowsBf16, threaded over output rows (bit-identical to
+    // the CPU row's per-call dequant of the same bytes).
+    const auto key = std::make_pair(layer, ex);
+    auto it = st.memo.find(key);
+    if (it != st.memo.end() && it->second.slot == slot) {
+      ++st.memo_hits;
+    } else {
+      // The slot bytes are authoritative ON DEVICE: read the slot back
+      // (the readback pivot) and verify byte-exact against the shadow
+      // before computing over its dequant.
+      std::vector<uint8_t> rb(
+          static_cast<size_t>(st.pool.packed_bytes_per_slot));
+      be.Copy(d.q, rb.data(),
+              static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
+                  slot * st.pool.packed_bytes_per_slot,
+              rb.size());
+      be.Synchronize(d.q);
+      st.readback_verified_bytes += st.shadow->VerifyReadback(
+          layer, slot, rb.data(), st.pool.packed_bytes_per_slot);
+      // ONE allocation per expert (all three projections are inter x h
+      // up to transpose), carved into three views; freed through the
+      // backend when the memo entry dies.
+      const Kolibri1ExpertWeights& ewx =
+          weights.layers[static_cast<size_t>(layer)]
+              .moe.experts[static_cast<size_t>(ex)];
+      const int64_t n_dims[3] = {inter, inter, h};
+      const int64_t k_dims[3] = {h, h, inter};
+      const size_t nb_total = static_cast<size_t>(3 * inter * h) * 2;
+      void* bp = be.Alloc(nb_total);
+      Kolibri1TTStreamingDeviceContext::SlotDequant dq;
+      dq.slot = slot;
+      dq.owner = std::shared_ptr<void>(bp, [&be](void* ptr) {
+        be.Free(ptr);
+      });
+      vt::Tensor* dsts[3] = {&dq.gate, &dq.up, &dq.down};
+      int64_t byte_base = 0;
+      for (int pi = 0; pi < 3; ++pi) {
+        const Kolibri1Projection& pr =
+            pi == 0 ? ewx.gate_proj : (pi == 1 ? ewx.up_proj : ewx.down_proj);
+        const int64_t n = n_dims[pi], k = k_dims[pi];
+        const int64_t scale_cols = CDiv(k, pr.fp8_block.block_k);
+        VT_CHECK(static_cast<int64_t>(pr.fp8_block.packed.bytes.size()) ==
+                     n * k,
+                 "kolibri1-tt B2b-ii: routed projection byte math diverged");
+        auto* dst = static_cast<uint16_t*>(bp) + byte_base / 2;
+        const auto* src = rb.data() + byte_base;
+        const auto* sc =
+            reinterpret_cast<const float*>(pr.fp8_block.scale.bytes.data());
+        host_parallel::ForOutputRows(n, k, [&](int64_t n0, int64_t n1) {
+          kolibri1_fp8::DequantRowsBf16(src, sc, scale_cols, n0, n1, k,
+                                        pr.fp8_block.block_n,
+                                        pr.fp8_block.block_k, dst);
+        });
+        byte_base += n * k * 2;
+        *dsts[pi] = MakeTensor(dst, DType::kBF16, d.q.device,
+                               std::vector<int64_t>{n, k});
+      }
+      it = st.memo.emplace(key, std::move(dq)).first;
+    }
+    const int64_t ne = static_cast<int64_t>(token_rows.size());
+    DBuf gathered(d, DType::kBF16, {ne, h});
+    {
+      const size_t rb = static_cast<size_t>(h) * vt::SizeOf(DType::kBF16);
+      auto* dp = static_cast<char*>(gathered.ptr());
+      const auto* sp = static_cast<const char*>(dhn.data);
+      for (size_t s = 0; s < token_rows.size(); ++s)
+        d.b.Copy(d.q, dp + s * rb,
+                 sp + static_cast<size_t>(token_rows[s]) * rb, rb);
+    }
+    DBuf o = ExpertMlp(d, gathered.t(), ne, inter, it->second.gate,
+                       it->second.up, it->second.down);
+    for (int64_t i = 0; i < ne; ++i) {
+      d.b.Copy(d.q,
+               static_cast<char*>(expert_out.ptr()) +
+                   static_cast<size_t>(slot_rows[static_cast<size_t>(i)]) *
+                       static_cast<size_t>(h) * vt::SizeOf(DType::kBF16),
+               static_cast<const char*>(o.ptr()) +
+                   static_cast<size_t>(i) * static_cast<size_t>(h) *
+                       vt::SizeOf(DType::kBF16),
+               static_cast<size_t>(h) * vt::SizeOf(DType::kBF16));
+    }
+  }
+  DBuf out(d, DType::kBF16, {t, h});
+  Tensor shared_t = shared.t();
+  vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared_t,
+                 /*routed_scale=*/1.0f);
+  return out;
 }
 
 }  // namespace
@@ -393,9 +598,16 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
     const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
     const std::vector<int32_t>& logits_indices,
-    Kolibri1TTResidentDeviceContext& ctx) {
+    Kolibri1TTResidentDeviceContext& ctx,
+    Kolibri1TTStreamingDeviceContext* streaming) {
   VT_CHECK(queue.device.type == vt::DeviceType::kTENSTORRENT, kNonTTRefusal);
   VT_CHECK(ctx.built, "kolibri1-tt forward: the device context is not built");
+  // A fresh charge window per step: the B1 per-token stream bound is a
+  // PER-TOKEN bound, and the guard refuses LOUDLY past it.
+  if (streaming != nullptr) {
+    streaming->guard = std::make_unique<Kolibri1TTStreamBoundGuard>(
+        streaming->per_token_stream_bytes);
+  }
   const Kolibri1Params& p = weights.params;
   Dev d{vt::GetBackend(queue.device.type), queue};
   const int64_t t = static_cast<int64_t>(token_ids.size());
@@ -493,10 +705,11 @@ ForwardLogits ForwardKolibri1TTResidentForward(
                   vt::RmsNormArgs{eps, false}, &res_t);
     }
 
-    // MoE on EVERY layer -> post_ffn_norm (no residual). Slice i: router
-    // + the named routed-expert refusal + the shared expert only.
+    // MoE on EVERY layer -> post_ffn_norm (no residual). Slice ii: the
+    // router, the streaming routed path (or the named refusal when the
+    // streaming arm is disabled), and the shared expert.
     DBuf moe = MoeBlock(d, lw.moe, p, dh2.t(), t, l, cl.sh_gate, cl.sh_up,
-                        cl.sh_down);
+                        cl.sh_down, streaming, weights);
     DBuf moe_n(d, DType::kBF16, {t, h});
     Tensor w_pf = ResidentWeight(d, lw.post_ffn_norm, {h});
     vt::RmsNorm(d.q, moe_n.t(), moe.t(), w_pf, vt::RmsNormArgs{eps, false});
@@ -553,6 +766,92 @@ ForwardLogits ForwardKolibri1TTResidentForward(
   fl.device_tensor = logits.t();
   fl.device_storage = logits.ReleaseShared();
   return fl;
+}
+
+// ---- The B2b-ii streaming-MoE device context (public contract) ---------------
+
+std::unique_ptr<Kolibri1TTStreamingDeviceContext>
+BuildKolibri1TTStreamingDeviceContext(vt::Backend& backend, vt::Queue& queue,
+                                      const Kolibri1Weights& weights,
+                                      int64_t device_budget_bytes,
+                                      int64_t kv_reserve_bytes) {
+  (void)queue;
+  // The B1 streaming plan over the LOADED weights' byte math — computed,
+  // never assumed: every field derives from the loaded projections so the
+  // refusals plan over the bytes that will actually stage.
+  Kolibri1TTStreamingShape shape;
+  shape.layers = static_cast<int64_t>(weights.layers.size());
+  VT_CHECK(shape.layers > 0,
+           "kolibri1-tt B2b-ii: no layers in the loaded weights");
+  shape.experts =
+      static_cast<int64_t>(weights.layers[0].moe.experts.size());
+  shape.topk = weights.params.num_experts_per_tok;
+  int64_t attn = 0, shared = 0, router = 0, norm = 0;
+  auto proj_bytes = [](const Kolibri1Projection& p) {
+    if (!p.IsFp8Block()) return int64_t{0};
+    return static_cast<int64_t>(p.fp8_block.packed.bytes.size() +
+                                p.fp8_block.scale.bytes.size());
+  };
+  for (const Kolibri1LayerWeights& lw : weights.layers) {
+    attn += proj_bytes(lw.attn.q_proj) + proj_bytes(lw.attn.k_proj) +
+            proj_bytes(lw.attn.v_proj) + proj_bytes(lw.attn.o_proj);
+    shared += proj_bytes(lw.moe.shared_experts.gate_proj) +
+              proj_bytes(lw.moe.shared_experts.up_proj) +
+              proj_bytes(lw.moe.shared_experts.down_proj);
+    router += static_cast<int64_t>(
+                  lw.moe.router_gate.bytes.size());
+    router += static_cast<int64_t>(
+                  lw.moe.e_score_correction_bias.bytes.size()) * 2;
+    for (const auto* nt :
+         {&lw.input_layernorm, &lw.post_attn_norm,
+          &lw.post_attention_layernorm, &lw.post_ffn_norm, &lw.attn.q_norm,
+          &lw.attn.k_norm}) {
+      norm += static_cast<int64_t>(nt->bytes.size());
+    }
+  }
+  shape.attention_bytes = attn;
+  shape.shared_expert_bytes = shared;
+  shape.router_bytes = router;
+  shape.norm_bytes = norm;
+  shape.embed_head_bytes =
+      static_cast<int64_t>(weights.embed_tokens.bytes.size() +
+                           weights.lm_head.bytes.size());
+  {  // the routed tier's per-expert byte math (from layer 0, expert 0)
+    const Kolibri1ExpertWeights& ew = weights.layers[0].moe.experts[0];
+    shape.expert_bytes = proj_bytes(ew.gate_proj) + proj_bytes(ew.up_proj) +
+                         proj_bytes(ew.down_proj);
+  }
+  Kolibri1TTStreamingOptions opts;
+  opts.device_budget_bytes = device_budget_bytes;
+  opts.kv_reserve_bytes = kv_reserve_bytes;
+  opts.concurrency = 1;  // the B1 concurrency refusal is inherited
+  // The touched-fraction threshold is the PLANNER's knob and stays at its
+  // default for every direct caller; the registry arm decodes at
+  // concurrency 1 (touched 6/384 = 0.016 on the real checkpoint; the tiny
+  // fixture's 2/4 is a fixture artifact, not an operating point).
+  opts.touched_fraction_threshold = 1.0;
+  const Kolibri1TTStreamingPlan streaming = PlanKolibri1TTStreaming(shape, opts);
+
+  auto st = std::make_unique<Kolibri1TTStreamingDeviceContext>();
+  st->pool = PlanKolibri1TTSlotPool(weights, streaming);
+  st->per_token_stream_bytes = streaming.per_token_stream_bytes;
+  st->pool_base.resize(static_cast<size_t>(st->pool.layers), nullptr);
+  for (int64_t l = 0; l < st->pool.layers; ++l) {
+    void* p = backend.Alloc(static_cast<size_t>(st->pool.per_layer_pool_bytes));
+    vt::Backend* bk = &backend;
+    st->keepalive.push_back(std::shared_ptr<void>(p, [bk](void* ptr) {
+      bk->Free(ptr);
+    }));
+    st->pool_base[static_cast<size_t>(l)] = p;
+  }
+  st->shadow = std::make_unique<Kolibri1TTSlotShadow>(
+      st->pool.policy, st->pool.packed_bytes_per_slot);
+  st->shadow->AttachEvictHook();
+  st->epoch.Record(st->pool.policy);
+  st->guard =
+      std::make_unique<Kolibri1TTStreamBoundGuard>(st->per_token_stream_bytes);
+  st->built = true;
+  return st;
 }
 
 }  // namespace vllm

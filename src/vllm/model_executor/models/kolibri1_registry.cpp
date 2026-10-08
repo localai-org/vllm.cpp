@@ -254,9 +254,31 @@ class Kolibri1LoadedModel final : public LoadedModel {
     return *tt_ctx_;
   }
 
+  // The B2b-ii streaming-MoE device context (the slot pool + the reset
+  // lane), built ONCE on the model's first Tenstorrent forward. The
+  // streaming arm is the DEFAULT routed path; VT_KOLIBRI1_TT_B2II_STREAM=0
+  // falls back to the B2b-i streaming-disabled arm (the refusal) for the
+  // b2bi gate.
+  Kolibri1TTStreamingDeviceContext* tt_stream_context(vt::Queue& queue) {
+    // Read per call (not latched): the b2bi host census flips the env to
+    // exercise BOTH arms — the streaming routed path and the
+    // streaming-disabled refusal — in one process.
+    const char* v = std::getenv("VT_KOLIBRI1_TT_B2II_STREAM");
+    if (v != nullptr && std::string(v) == "0") return nullptr;
+    if (stream_ctx_ == nullptr) {
+      vt::Backend& be = vt::GetBackend(queue.device.type);
+      stream_ctx_ = BuildKolibri1TTStreamingDeviceContext(
+          be, queue, weights_,
+          /*device_budget_bytes=*/int64_t{32} << 30,
+          /*kv_reserve_bytes=*/int64_t{2} << 30);
+    }
+    return stream_ctx_.get();
+  }
+
  private:
   Kolibri1Weights weights_;
   std::unique_ptr<Kolibri1TTResidentDeviceContext> tt_ctx_;
+  std::unique_ptr<Kolibri1TTStreamingDeviceContext> stream_ctx_;
 };
 
 // ---- Load / Prepare / Forward ----
@@ -306,11 +328,14 @@ ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
                                     input.multi_kv, input.queue,
                                     input.logits_indices);
     case vt::DeviceType::kTENSTORRENT:
-      // B2b-i: the dense-resident device forward (spec addendum, slice i).
+      // B2b-i/ii: the dense-resident device forward with the streaming
+      // MoE routed path (B2b-ii; spec addendum, slice ii). A null
+      // streaming context is the streaming-DISABLED arm (the named
+      // B2b-i refusal).
       return ForwardKolibri1TTResidentForward(
           input.token_ids, input.positions, input.attn_meta, input.attn_kv,
           m.weights(), input.multi_kv, input.queue, input.logits_indices,
-          m.tt_context(input.queue));
+          m.tt_context(input.queue), m.tt_stream_context(input.queue));
     default:
       throw std::runtime_error(
           std::string("Kolibri1ForCausalLM: the ") +

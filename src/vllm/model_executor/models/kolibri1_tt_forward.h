@@ -34,11 +34,13 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "vllm/model_executor/models/kolibri1_weights.h"
+#include "vllm/model_executor/models/kolibri1_tt_stream.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // PagedKvCache, ForwardLogits
 #include "vt/backend.h"
@@ -113,6 +115,62 @@ BuildKolibri1TTResidentDeviceContext(vt::Backend& backend, vt::Queue& queue,
 Kolibri1TTResidentDeviceContext& Kolibri1LoadedModelTTContext(
     LoadedModel& model, vt::Queue& queue);
 
+// ---- The B2b-ii streaming-MoE device context (slice ii) ---------------------
+
+// The device half of the streaming MoE: the FP8_E4M3 slot pool staged on
+// the card (capacity per layer = the pool plan's capacity_per_layer; the
+// slot payload = the three routed projections' packed bytes VERBATIM,
+// row-major, concatenated gate/up/down; the f32 scale grids stay
+// HOST-side), the slot shadow (the readback pivot's reference), the
+// per-step stream-bound guard, and the reset-lane epoch. Built once per
+// model over the B1 streaming plan's refusals (inherited unchanged).
+struct Kolibri1TTStreamingDeviceContext {
+  Kolibri1TTSlotPoolPlan pool;
+  // Per-layer pool bases (backend allocations, freed through the backend
+  // in order).
+  std::vector<void*> pool_base;
+  std::vector<std::shared_ptr<void>> keepalive;
+  // The slot shadow is built against the policy INSIDE `pool`; it must
+  // be constructed after the pool and owns the eviction hook.
+  std::unique_ptr<Kolibri1TTSlotShadow> shadow;
+  Kolibri1TTSlotEpoch epoch;
+  int64_t per_token_stream_bytes = 0;  // the B1 ceiling this context enforces
+  // The per-step stream-bound accumulator; re-created at each forward
+  // step (one guard charge window per token).
+  std::unique_ptr<Kolibri1TTStreamBoundGuard> guard;
+
+  // Gate/evidence counters.
+  int64_t slot_fills = 0;              // fetches staged (bytes below)
+  int64_t staged_bytes = 0;            // fp8 bytes staged host -> device
+  int64_t readback_verified_bytes = 0; // slot bytes verified vs the shadow
+  int64_t swap_fills = 0;              // fills that evicted a resident
+  int64_t memo_hits = 0;               // dequant memo hits
+  int64_t dram_free_before_staging = 0;
+  int64_t dram_free_after_staging = 0;
+  bool built = false;
+
+  // The memoized bf16 dequants of resident slots, keyed (layer, expert).
+  // The reset lane clears it whenever ContentChangedSince fires; a memo
+  // entry is also invalid when the expert's slot moved.
+  struct SlotDequant {
+    int64_t slot = -1;
+    std::shared_ptr<void> owner;
+    vt::Tensor gate, up, down;  // bf16 [n, k] device views
+  };
+  std::map<std::pair<int64_t, int64_t>, SlotDequant> memo;
+};
+
+// Builds the streaming context: the B1 streaming plan over the REAL
+// checkpoint's byte shape (device_budget_bytes, kv_reserve_bytes from the
+// options), the slot pool plan, and the per-layer device pool allocations.
+// Throws std::runtime_error on every inherited refusal (concurrency,
+// host tier, device residual) and on a pool that cannot be allocated.
+std::unique_ptr<Kolibri1TTStreamingDeviceContext>
+BuildKolibri1TTStreamingDeviceContext(vt::Backend& backend, vt::Queue& queue,
+                                      const Kolibri1Weights& weights,
+                                      int64_t device_budget_bytes,
+                                      int64_t kv_reserve_bytes);
+
 // ---- The B2b-i forward ------------------------------------------------------
 
 // Runs one forward step of the dense-resident slice on a Tenstorrent queue:
@@ -132,6 +190,7 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
     const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
     const std::vector<int32_t>& logits_indices,
-    Kolibri1TTResidentDeviceContext& ctx);
+    Kolibri1TTResidentDeviceContext& ctx,
+    Kolibri1TTStreamingDeviceContext* streaming = nullptr);
 
 }  // namespace vllm

@@ -117,8 +117,11 @@ Kolibri1TTSlotPoolPlan PlanKolibri1TTSlotPool(
                std::to_string(expert_bytes) +
                " bytes per slot) — refusing rather than planning an "
                "unallocatable pool " + kRow);
-  plan.capacity_per_layer = std::min(streaming.hot_experts, cap_by_share);
+  plan.capacity_per_layer =
+      std::min({streaming.hot_experts, cap_by_share, experts});
   plan.capacity_per_layer = std::max(plan.capacity_per_layer, int64_t{1});
+  // (the expert domain caps the useful hot set: more slots per layer than
+  // the layer has experts is dead bytes)
 
   Kolibri1TTSlotPolicyOptions opts;
   opts.layers = plan.layers;

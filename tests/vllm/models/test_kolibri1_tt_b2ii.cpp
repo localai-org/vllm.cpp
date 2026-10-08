@@ -321,7 +321,7 @@ TEST_CASE("kolibri1 TT B2b-ii: the slot pool plan — per-layer capacity, "
   // per-layer pool == capacity x expert_bytes.
   const int64_t share = st.device_residual_bytes / pool.layers;
   const int64_t want_cap =
-      std::min(st.hot_experts, share / expert_bytes);
+      std::min({st.hot_experts, share / expert_bytes, int64_t{4}});
   CHECK(pool.capacity_per_layer == want_cap);
   CHECK(pool.policy.capacity == pool.capacity_per_layer);
   CHECK(pool.policy.layers == 2);
