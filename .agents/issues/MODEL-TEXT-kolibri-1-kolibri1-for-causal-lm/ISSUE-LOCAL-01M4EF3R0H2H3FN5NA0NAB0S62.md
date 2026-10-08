@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4EF3R0H2H3FN5NA0NAB0S62
 Title: kolibri1 serving completion: chat template rendering plus kolibri1 reasoning and tool-call parsers
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: enhancement
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-08
 Updated: 2026-10-08
-Closed: -
+Closed: 2026-10-08
 
 ## Problem
 
@@ -16,4 +16,4 @@ The kolibri1 CPU arm reaches the model forward but not serving: the OpenAI chat 
 
 ## Resolution
 
--
+Landed on row/kolibri-serve 2026-10-08; see Resolution and docs/bench-evidence/kolibri1-serve-20261008.md.

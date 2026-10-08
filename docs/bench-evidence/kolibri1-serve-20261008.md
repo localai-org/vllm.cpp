@@ -75,12 +75,18 @@ targets against the unmodified tree):
   42->43 (tool) with dated comments.
 - `test_reasoning_qwen3` 164 PASS, `test_openai_tool_parsers` 64 PASS,
   `test_chat_template` 196 PASS (no behavior change to other parsers).
-- Row battery (ctest, this host): `test_kolibri1`, `test_kolibri1_dequant`,
-  `test_kolibri1_dequant_cache`, `test_kolibri1_w2`, `test_kolibri1_w3`,
-  `test_kolibri1_decode_bench`, `test_kolibri1_moe_glue` — all PASS
-  (test_kolibri1_tt / _b2i / _b2bi PASS in the same run).
-- W3 rerun in a verified quiet window (free > 110 GB, no other
-  test_kolibri1_w3 process), `VLLM_CPP_CPU_THREADS=8`: PASS.
+- Row battery (ctest, this host): `test_kolibri1`, `test_kolibri1_tt`,
+  `test_kolibri1_tt_b2i`, `test_kolibri1_tt_b2bi`, `test_kolibri1_dequant`,
+  `test_kolibri1_dequant_cache`, `test_kolibri1_moe_glue`, `test_kolibri1_w2`,
+  `test_kolibri1_decode_bench` — all PASS.
+- `test_kolibri1_w3` PASS in a verified quiet window: 2026-10-09 01:07 CEST,
+  211 GB free at start, `ps`-verified zero other `test_kolibri1` processes,
+  `VLLM_CPP_CPU_THREADS=8`, 539.95 s. Two earlier attempts were ABORTED BY
+  CONTENTION, not by the change: the first fired while a peer was building,
+  the second was OOM-killed at 75977088 kB anon RSS after a peer's
+  `test_kolibri1_decode_bench` started mid-run (dmesg
+  `oom-kill ... task=test_kolibri1_w`). The quiet-window check is what
+  serializes W3 on this host.
 
 Pre-existing, not touched by this change (verified on the same tree):
 `ctest`-cwd artifacts from `-ffile-prefix-map` (`test_linear_scaling_rope`
