@@ -69,9 +69,12 @@ end-to-end, not only in the unit tests.
 | portable (16-accumulator scalar C++) | 83.7 | 24.3 | 59.3 | 1.062 |
 | ref (one serial f32 accumulator per output) | 267.7 | 152.6 | 115.2 | 0.547 |
 
-- The landed NEON lever vs the TRUE scalar: **3.7× tok/s** (0.547 → 1.130).
+- The landed NEON lever vs the TRUE scalar (ref tier): **2.07× decode tok/s**
+  (1.130 vs 0.547) and **3.74× whole-run wall** (267.7 → 71.5 s, includes
+  prefill).
 - vs the portable 16-independent-accumulator tier (the pre-SIMD state of the
-  art in this file): **17% wall** (83.7 → 71.5 s).
+  art in this file, the best scalar tier): **14.6% less wall** (83.7 → 71.5 s)
+  = **1.171× whole-run**, **1.064× decode tok/s** (1.130 vs 1.062).
 - Host noise is real: an earlier same-binary neon run measured wall 81.0 s /
   0.96 tok/s under concurrent load; the A/B pairs above ran back-to-back
   idle. The tier ORDERING was stable in every pair measured.
@@ -110,8 +113,9 @@ swapped accumulation order.
 
 ## Outcome
 
-The order-preserving NEON GEMM is landed, reachable, gated, and worth 3.7×
-over the scalar on the production decode shape. The prior rejection is
+The order-preserving NEON GEMM is landed, reachable, gated, and worth 2.07×
+decode tok/s over the true scalar (3.74× whole-run wall, prefill included) on
+the production decode shape. The prior rejection is
 closed by this evidence. Follow-ups recorded, not owed here: the separable
 `moe_glue` copy residual, and the fp8-block dequant-cache question already
 carried by kolibri1-dequant-cache-negative-20261007.md.
