@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-03
-Updated: 2026-10-05
+Updated: 2026-10-08
 Closed: -
 
 ## Problem
@@ -26,6 +26,13 @@ The model registry has no kolibri1 support. Aleph-Alpha/Kolibri-1 (Kolibri1ForCa
   prompts (greedy, 32 tokens, fingerprints committed at
   tests/vllm/models/kolibri1_goldens.json), and the gate replays them:
   141/145 argmax positions match, 4 flips all near-ties inside the
-  measured 2.19 bf16 envelope, no hard flips. Still OPEN: the tokenizer
-  engine gap (R7 — the gate feeds HF ids directly), the oracle gateability
-  measurement (GPU), and the quantized/backend arms.
+  measured 2.19 bf16 envelope, no hard flips. Still OPEN: the oracle
+  gateability measurement (GPU) and the quantized/backend arms.
+- 2026-10-08 (R7): the tokenizer engine accepts the Kolibri-1 split regex
+  (recognition-only: the \p{N}{1} spelling of the classic Qwen2 pattern,
+  mapped onto SplitPattern::kQwen2Classic). The W1 tokenizer test now
+  asserts our Encode reproduces the HF reference ids from
+  kolibri1_goldens.json on all 8 golden prompts, gating the no-BOS encode
+  contract on a real load. Closed as
+  ISSUE-LOCAL-01M4D7DFJRQSCSRC03CHZW3EQN; W3 re-run green at 900/900 and
+  decode_bench at anchor 109726 on row/kolibri-r7.
