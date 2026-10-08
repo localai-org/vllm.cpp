@@ -242,7 +242,67 @@ void RunPair(const Sweep& c, DType q_dt, DType kv_dt, DType out_dt, uint32_t see
   }
 }
 
+// Replay of the REAL kolibri prefill operands dumped by the scratch
+// VT_DEBUG_DUMP_ATTN hook: the sweep passed where the model diverged, so pin
+// the exact bytes.
+void RunDumpedRealCall() {
+  auto rd = [](const char* n, std::vector<uint8_t>& b) {
+    FILE* f = std::fopen(n, "rb");
+    REQUIRE_MESSAGE(f != nullptr, n << " missing — run the probe with VT_DEBUG_DUMP_ATTN=1 first");
+    std::fseek(f, 0, SEEK_END); long sz = std::ftell(f); std::fseek(f, 0, SEEK_SET);
+    b.resize(static_cast<size_t>(sz)); if (std::fread(b.data(), 1, b.size(), f) != b.size()) { std::fclose(f); FAIL("short read"); } std::fclose(f);
+  };
+  std::vector<uint8_t> qb, kb, vb, mb, bb, sb, qslb, scb;
+  rd("/tmp/attn_q.bin", qb); rd("/tmp/attn_k.bin", kb); rd("/tmp/attn_v.bin", vb);
+  rd("/tmp/attn_meta.bin", mb); rd("/tmp/attn_btab.bin", bb); rd("/tmp/attn_sl.bin", sb);
+  rd("/tmp/attn_qsl.bin", qslb); rd("/tmp/attn_scales.bin", scb);
+  int64_t meta[8]; std::memcpy(meta, mb.data(), sizeof meta);
+  const auto [num_reqs, total_q, hq, d, d_v, block_size, hkv, fp8] = meta;
+  MESSAGE("replay: d=" << d << " hq=" << hq << " hkv=" << hkv << " bs=" << block_size
+          << " total_q=" << total_q);
+  DType dt = fp8 ? DType::kI8 : DType::kBF16;
+  DType qdt = DType::kBF16;
+  const std::vector<int64_t> q_shape = {total_q, hq, d};
+  const std::vector<int64_t> c_shape = {16, block_size, hkv, d};
+  Tensor tq = Contig(qb.data(), qdt, q_shape);
+  Tensor tk = Contig(kb.data(), dt, c_shape);
+  Tensor tv = Contig(vb.data(), dt, c_shape);
+  Tensor tbt = Contig(bb.data(), DType::kI32, {num_reqs, 16});
+  Tensor tsl = Contig(sb.data(), DType::kI32, {num_reqs});
+  Tensor tqsl = Contig(qslb.data(), DType::kI32, {num_reqs + 1});
+  PagedAttentionArgs args{};
+  args.scale = 0.08838834764831845f;
+  args.causal = true;
+  const size_t out_bytes = static_cast<size_t>(total_q * hq * d) * 2;
+  std::vector<uint8_t> scalar(out_bytes, 0xA5), neon(out_bytes, 0xA5);
+  Tensor tscalar = Contig(scalar.data(), DType::kBF16, q_shape);
+  Tensor tneon = Contig(neon.data(), DType::kBF16, q_shape);
+  Queue qq = Q();
+  setenv("VT_CPU_PAGED_ATTN_NEON", "0", 1);
+  vt::PagedAttention(qq, tscalar, tq, tk, tv, tbt, tsl, tqsl, args);
+  setenv("VT_CPU_PAGED_ATTN_NEON", "1", 1);
+  vt::PagedAttention(qq, tneon, tq, tk, tv, tbt, tsl, tqsl, args);
+  setenv("VT_CPU_PAGED_ATTN_NEON", "0", 1);
+  auto widen = [&](const std::vector<uint8_t>& raw) {
+    std::vector<float> v(static_cast<size_t>(total_q * hq * d));
+    std::vector<uint16_t> half(v.size());
+    std::memcpy(half.data(), raw.data(), out_bytes);
+    for (size_t i = 0; i < v.size(); ++i) v[i] = vt::BF16ToF32(half[i]);
+    return v;
+  };
+  const std::vector<float> got = widen(neon);
+  const std::vector<float> want = widen(scalar);
+  double maxd = 0; size_t bad = 0, first = 0;
+  for (size_t i = 0; i < got.size(); ++i) {
+    double dd = std::fabs(static_cast<double>(got[i]) - want[i]);
+    if (dd > maxd) { maxd = dd; }
+    if (!WithinEnvelope(got[i], want[i])) { if (!bad) first = i; ++bad; }
+  }
+  MESSAGE("replay maxdiff=" << maxd << " out-of-envelope=" << bad << " first=" << first);
+}
+
 TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the sweep") {
+  if (std::getenv("VT_DEBUG_DUMP_ATTN") != nullptr) RunDumpedRealCall();
   const std::vector<DType> kv_dts = {DType::kF32, DType::kF16, DType::kBF16, DType::kI8};
   const std::vector<DType> q_dts = {DType::kF32, DType::kBF16};
   const std::vector<DType> out_dts = {DType::kF32, DType::kBF16};
@@ -285,6 +345,18 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
     nc.seq_lens = {70};
     nc.causal = false;
     cs.push_back(nc);
+  }
+  // Kolibri-1 production shape: GQA 48/4, dh 128, fp8 KV, f32 query, bf16
+  // out, T=128 prefill over a 128-token context (the shape whose NEON lane
+  // first-token flip the decode bench caught).
+  {
+    Sweep kb;
+    kb.name = "kolibri production shape";
+    kb.qsl = {0, 128};
+    kb.seq_lens = {128};
+    kb.hq = 48;
+    kb.hkv = 4;
+    cs.push_back(kb);
   }
   // Softcap, block spanning at block_size 16, varlen with an empty row.
   {
