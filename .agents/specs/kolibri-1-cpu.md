@@ -172,12 +172,14 @@ forward gate.
   upstream's converting-copy semantics). The enumeration consumes the real
   names and `tests/vllm/models/kolibri1_manifest.inc` pins them against
   the shard headers.
-- **R7 — the tokenizer engine refuses the Kolibri-1 tokenizer.json.** Its
-  Qwen3Moe-style pre-tokenizer split regex uses a `(?i:...)` group form the
-  engine's recognized set does not cover, so `Tokenizer::FromHfJson`
-  throws "unrecognized pre-tokenizer split regex" (asserted by name in the
-  W1 gate test). Extending the recognized set is owed before any encode
-  path; nothing silently mis-tokenizes in the meantime.
+- **R7 — the tokenizer engine refuses the Kolibri-1 tokenizer.json.**
+  `Tokenizer::FromHfJson` throws "unrecognized pre-tokenizer split regex"
+  (asserted by name in the W1 gate test). RESOLVED 2026-10-08 — see
+  `## R7 resolution` below: the refusal was caused by the number
+  alternative's `\p{N}{1}` spelling (the recognized classic Qwen2 constant
+  writes `\p{N}`), NOT by the `(?i:...)` group form, which the engine
+  already implements. The earlier diagnosis recorded here was wrong and
+  is corrected by measurement in that section.
 
 ## Tests
 
@@ -242,6 +244,154 @@ the kolibri1 pre-tokenizer regex, R7 — the encode contract stays owed).
 Remaining for the row: R7 tokenizer, the aleph-alpha-inference oracle
 gateability measurement (GPU), GGUF/CUDA/Tenstorrent arms (later rows).
 
+R7 RESOLVED (2026-10-08, branch `row/kolibri-r7`): the tokenizer engine
+accepts the Kolibri-1 split regex — recognition-only extension, the
+regex maps onto the existing `kQwen2Classic` scanner because `\p{N}{1}` is
+the identity quantifier on `\p{N}`. The W1 tokenizer test now loads the
+real tokenizer.json and asserts our `Encode` reproduces the HF reference
+ids from `tests/vllm/models/kolibri1_goldens.json` on all 8 golden
+prompts (the no-BOS encode contract is gated on a real load for the first
+time). Design, corrected diagnosis, risks, and stop conditions:
+`## R7 resolution` below. Remaining for the row: the aleph-alpha-inference
+oracle gateability measurement (GPU), GGUF/CUDA/Tenstorrent arms (later
+rows).
+
+## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
+
+### Scope — what is actually in the file
+
+Read of `/mnt/models/Aleph-Alpha/Kolibri-1/tokenizer.json` (2026-10-08),
+every element the loader walks:
+
+- `pre_tokenizer`: a `Sequence` of
+  `Split(pattern={Regex: "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"}, behavior="Isolated", invert=false)`
+  followed by `ByteLevel(add_prefix_space=false, trim_offsets=true,
+  use_regex=false)` — the same pipeline shape every recognized Qwen-family
+  checkpoint ships (the walk at tokenizer.cpp:459-470 accepts it).
+- `normalizer`: null. `post_processor` and `decoder`: `ByteLevel`
+  (add_prefix_space=true, use_regex=true) — the standard Qwen shape, already
+  accepted.
+- `model`: BPE, 127900 vocab entries, no `continuing_subword_prefix`.
+- `added_tokens`: 20 specials, incl. `<|endoftext|>` 127901 and
+  `<|im_end|>` 127906.
+- `tokenizer_config.json`: `add_bos_token: false`, no bos token, eos
+  `<|im_end|>`, pad `<|endoftext|>`.
+- The ONLY element the engine refuses is the Split regex STRING.
+
+### The refusal site and the corrected diagnosis
+
+- Refusal site: `DetectPattern` (src/vllm/tokenizer/tokenizer.cpp:447-511)
+  recognizes a Split regex by WHOLE-PATTERN byte equality against verbatim
+  constants (:494-506) plus one `\p{N}{1,3}` substring heuristic (:507);
+  anything else hits
+  `Fail("unrecognized pre-tokenizer split regex: " + re)` at :510.
+- Measured diff (2026-10-08, character-level difflib over the decoded
+  pattern): the Kolibri-1 regex is byte-identical to `kClassicQwen2Regex`
+  (tokenizer.cpp:27-28) except ONE 3-byte insert — the number alternative
+  is `\p{N}{1}` where the constant writes `\p{N}`. Nothing else differs:
+  same `(?i:'s|'t|'re|'ve|'m|'ll|'d)` contraction group, same letter run,
+  same punct run, same three whitespace rules.
+- CORRECTION: the R7 text above (and the W1 test comment it quotes) blame
+  the `(?i:...)` group form. That diagnosis was wrong. The engine already
+  implements `(?i:...)`: `MatchContraction`
+  (src/vllm/tokenizer/pretokenizer.cpp:81-98) matches the contraction
+  case-insensitively with Unicode simple case folding (U+017F folds to
+  `s`), pinned against the HF onig engine by
+  tests/vllm/test_pretokenizer.cpp ("contractions are case-insensitive and
+  unconditional") and tools/gen_pretok_goldens.py. The refusal is caused
+  by the `\p{N}{1}` spelling alone.
+
+### Design
+
+- Add one verbatim constant `kClassicQwen2N1Regex` beside the existing
+  four (tokenizer.cpp:25-41), transcribed from the checkpoint, and return
+  `SplitPattern::kQwen2Classic` for it in `DetectPattern`, placed with the
+  other exact matches BEFORE the `\p{N}{1,3}` heuristic.
+- Why mapping onto `kQwen2Classic` is exact, not approximate: `{1}` is the
+  identity quantifier — `\p{N}{1}` matches exactly what `\p{N}` matches.
+  The kQwen2Classic scanner (pretokenizer.cpp:1044-1047: `max_digits=1`,
+  `marks_in_run=false`, `marks_excluded=false`, contraction group on)
+  implements that regex alternative-for-alternative: the case-insensitive
+  contraction group, `[^\r\n\p{L}\p{N}]?\p{L}+`, single-codepoint
+  `\p{N}`, ` ?[^\s\p{L}\p{N}]+[\r\n]*`, and the three whitespace rules.
+  The extension is RECOGNITION-ONLY; no scanner code changes.
+- Rejected: textual canonicalization of `\p{N}{1}` to `\p{N}` before the
+  equality checks (the CR/LF canonicalization at tokenizer.cpp:479-493 is
+  the precedent shape). A textual rewrite can corrupt a character class
+  that contains a literal `{1}` (e.g. `[\p{N}{1}]`), and this file's own
+  rule is "recognition is by whole pattern, never by a substring that a
+  sibling shares" (tokenizer.cpp:497-505). An exact-match constant cannot
+  change any other model's recognition.
+- Rejected: a general regex compiler for the Split pattern. Out of scope
+  for this unit; the engine deliberately hand-implements each recognized
+  pattern so an unsupported feature fails loudly at load instead of
+  mis-tokenizing.
+
+### Risks
+
+- Other models' tokenizers must not change behavior. The change is one
+  additive exact-match arm placed after the existing exact matches; every
+  previously recognized pattern still matches its own constant first. The
+  `\p{N}{1,3}` heuristic still fires only for patterns containing that
+  literal substring — the Kolibri-1 regex contains `\p{N}{1}|`, not
+  `\p{N}{1,3}`. Non-regression gate: the full tokenizer test surface
+  (below) stays green.
+- The case-insensitive group must match case-insensitively. The Kolibri-1
+  pattern maps onto the scanner whose contraction behavior is already
+  pinned against the HF oracle (test_pretokenizer.cpp); the new test adds
+  an equivalence probe over mixed-case contractions (below).
+
+### Tests (red-first)
+
+Rework the W1 refusal test case (tests/vllm/models/test_kolibri1.cpp:750-783,
+live-gated on the real model dir) into the R7 encode test:
+
+1. RED (before the fix): loading the real tokenizer.json throws
+   `unrecognized pre-tokenizer split regex` — the named refusal, captured
+   in the gate log.
+2. GREEN: the load succeeds; `Encode(prompt)` equals the HF reference
+   `input_ids` from tests/vllm/models/kolibri1_goldens.json for all 8
+   golden prompts. Those ids were produced by the REAL HF `tokenizers`
+   library (`scripts/gen-kolibri1-goldens.py:268-273`,
+   `encode(prompt, add_special_tokens=False)`) — so this assertion is the
+   HF-id-match evidence: the ids the W3 gate has been feeding directly are
+   now reproduced by our engine, and the no-BOS encode contract
+   (`add_bos_token: false`, Encode adds no BOS) is gated on a real load.
+3. Equivalence probe (nothing else changes): load a rewritten copy of the
+  same file whose regex is `\p{N}` where the checkpoint writes `\p{N}{1}`
+  (parsed JSON, one string edited, re-serialized — recognized TODAY as
+  kQwen2Classic) and assert byte-identical ids over a probe corpus: the 8
+  golden prompts plus mixed-case contractions (`I'M I'll DON'T can'tt`),
+  digit runs (`x123 1234567`), whitespace/newline mixes, German umlauts and
+  CJK. Both sides run our engine; the classic spelling is the one already
+  accepted, so identity proves the new arm adds recognition only.
+4. The existing tokenizer_config.json special-token assertions (eos
+  `<|im_end|>`, pad `<|endoftext|>`, no BOS) stay, plus a Decode round-trip
+  of the 8 prompts.
+
+### Gates
+
+- The new R7 test green (red capture first, above).
+- Full tokenizer test surface green: test_pretokenizer, test_bpe,
+  test_bpe_equivalence, test_detokenizer, test_unicode_data,
+  test_tokenizer_metaspace_split, test_tokenizer_parity,
+  test_tokenizer_parity_deepseek, test_tokenizer_parity_deepseek_v3,
+  test_tokenizer_parity_gpt4o, test_tokenizer_parity_mistral.
+- test_kolibri1 green (W1 gate incl. the reworked tokenizer case).
+- W3 gate unchanged and green: test_kolibri1_w3, 900/900 assertions
+  (8 threads, quiet window).
+- decode_bench gate unchanged and green: anchor last token 109726.
+- scripts/check-agent-record.py rc=0; scripts/agent-preflight.sh rc=0.
+
+### Stop conditions
+
+- If the tokenizer.json needs more than whole-pattern recognition of the
+  `\p{N}{1}` variant (a real regex feature the scanner cannot express),
+  STOP and report what is missing; do not rewrite the engine in this unit.
+- If our Encode disagrees with the HF reference ids on any golden prompt,
+  STOP: that would mean the scanner semantics differ, not just the
+  recognition — report as NEEDS_DECISION rather than widening anything.
+
 ## Git integration
 
 ONE pull request (developer's standing choice for this row).
@@ -255,10 +405,6 @@ ONE pull request (developer's standing choice for this row).
 - GGUF arms (k-quants), CUDA arm, Tenstorrent arm — later rows.
 - Reasoning parser / tool parser serving integration (plugin registers
   `kolibri1` reasoning + Hermes tool parsers).
-- Tokenizer engine: extend the recognized pre-tokenizer split-regex set to
-  cover the Kolibri-1 `(?i:...)` form (R7), then gate the no-BOS encode
-  contract (`add_bos_token: false`, eos 127906, pad 127901) on a real
-  load.
 - The CPU forward wave also owns the R1 disposition record: packed
   fp8-block + f32 scale is what the loader stores today; dequant-at-load
   vs a CPU fp8-block GEMM arm is decided when the forward consumes it.
