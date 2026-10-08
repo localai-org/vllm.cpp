@@ -34,3 +34,20 @@ The B2b-i bring-up slice landed 2026-10-08 (merged as cf6258c76 + b52c0baeb): th
   /tmp/pin-build libs are the working link. Issue stays OPEN until the slice
   merges; the token gate and bench anchor are B2b-ii's.
 -
+- 2026-10-08 (same branch, review-repair commits): the fresh mutation
+  review's three findings — every guarantee had NO host-side coverage, so
+  all three re-applied mutations left every card-less gate green — are
+  REPAIRED red-first WITHOUT a card. New host cases in
+  test_kolibri1_tt_b2bi.cpp: a HOST op census over the PRODUCTION forward
+  (host-memory backend + platform in the kTENSTORRENT slot, recording op
+  providers over the existing vt::OpProvider seam, disabled on scope exit;
+  per-step op order + the four sandwich norms consuming their OWN sentinel
+  weights + per-head q/k norms + router/shared/lm_head matmuls) carrying the
+  refusal counter assertion host-side (refusals >= layers x steps), and a
+  registry dispatch-identity case (Resolve -> Load -> Prepare ->
+  ModelRegistry::Forward on a TT queue completes and fires the refusal).
+  Mutations re-applied and RED: silenced counter (:851/:963), wrong
+  post_attn_norm weight (:907, records 3 and 9), deleted kTENSTORRENT arm
+  (:918 throw); each restored byte-for-byte and GREEN (10 cases, 182
+  assertions; full battery at landed counts, W3 900/900 + 141/145).
+  Evidence: docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md §9.

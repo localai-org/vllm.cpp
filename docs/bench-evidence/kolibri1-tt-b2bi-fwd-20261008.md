@@ -141,3 +141,69 @@ falsified and is not restated.
   0 hard) and the production bench anchor — only after B2b-ii.
 - Durable copy of `/tmp/pin-build` lib64 into the pin tree (operator
   decision, unchanged).
+
+## 9. Review repair — host-side coverage for the three mutation findings (2026-10-08)
+
+The fresh mutation review returned FAIL with three findings, all of one form:
+the guarantee had no host-side coverage, so every mutation left all card-less
+gates green. The repair adds a host op census over the PRODUCTION forward —
+a host-memory backend + platform registered in the kTENSTORRENT slot (the
+`test_resident_weight_host_addressable.cpp` pattern) plus recording op
+providers over the EXISTING `vt::OpProvider` seam (priority 100, one
+test-only provider name, DISABLED on scope exit, previous backend/platform
+restored) — so the forward runs end-to-end on the host while the census
+records which ops fired, in what order, consuming which norm weight. The
+tiny fixture's norm weights now carry DISTINCT bf16 sentinels (input_ln 1.0,
+post_attn 2.0, post_attention 3.0, post_ffn 4.0, q_norm 0.25, k_norm 0.3125,
+final 0.5), so the census identifies WHICH weight a recorded norm consumed.
+No device kernel executes; no parallel forward path exists; the device leg's
+semantics are untouched (`TenstorrentPresent()` excludes the stand-in, the
+guard restores the real backend and disables the recorders).
+
+New host cases (test_kolibri1_tt_b2bi.cpp):
+- "HOST: the forward's op census" (line 825): asserts the per-step op counts
+  and ORDER (1 embedding; per layer q,k,v,o + router + shared gate,up,down
+  matmuls, per-head q/k norms, RoPE on the sliding layer only, KV write +
+  paged attention, MoeSiluMul; 1 lm_head matmul) and the norm IDENTITY
+  sequence — each sandwich norm consuming ITS OWN sentinel weight in the CPU
+  row's order, with the residual-carrying norms exactly input_ln /
+  post_attention_layernorm / final — plus the refusal-firing contract
+  HOST-SIDE: `refusals >= layers x (1 + 2 steps)` (the device leg's
+  assertion, decoupled from the card).
+- "HOST: the registry's kTENSTORRENT dispatch arm resolves the
+  dense-resident forward" (line 918): Resolve -> Load -> Prepare on a TT
+  queue -> ModelRegistry::Forward completes and the refusal fires, THROUGH
+  the production seam.
+
+Red-first capture (each mutation is the reviewer's EXACT mutation; the full
+battery below stayed at its landed counts except the named cases):
+
+- MUTATION 1 — `NoteRoutedExpertRequest` counter increment silenced
+  (kolibri1_tt_forward.cpp:103): RED host-side —
+  `test_kolibri1_tt_b2bi.cpp:851 CHECK(refusals >= 2*(1+2)) NOT correct` and
+  `:963 CHECK(count - before >= 2) NOT correct` (10 cases: 8 passed,
+  2 failed; 180/182). Restored byte-for-byte: 10/10, 182/182 GREEN.
+- MUTATION 2 — post_attn_norm swapped to `lw.input_layernorm`
+  (kolibri1_tt_forward.cpp:478): RED host-side — `:907 CHECK(r.weight ==
+  expected.word) NOT correct`, norm records 3 and 9 recorded sentinel
+  0x3F80 (input_ln) instead of 0x4000 (post_attn) in BOTH layers (10 cases:
+  9 passed, 1 failed; 180/182). Restored: 10/10, 182/182 GREEN.
+- MUTATION 3 — kTENSTORRENT dispatch arm replaced with a throw
+  (kolibri1_registry.cpp:308): RED host-side — `:918 test case THREW
+  exception: Kolibri1ForCausalLM: the Tenstorrent forward arm is not
+  implemented.` (10 cases: 9 passed, 1 failed). Restored: 10/10, 182/182
+  GREEN.
+
+Post-repair host battery (build dir `/tmp/build-b2bi-repair`, pin libs,
+2026-10-08): test_kolibri1 234/234, test_kolibri1_tt 235/235,
+test_kolibri1_tt_b2i 204/204, test_kolibri1_tt_b2bi 10 cases / 182
+assertions (was 8/62), test_kolibri1_dequant 10/10, test_kolibri1_moe_glue
+21/21, test_kolibri1_w2 1608/1608, test_kolibri1_decode_bench 2/2 (anchor
+109726), test_kolibri1_w3 900/900 ARGMAX CHAIN 141/145 (4 near-tie flips,
+0 hard) — identical to the landed baseline. test_kolibri1_dequant_cache
+48/49: the documented PRE-EXISTING fork() failure in the default-off probe
+(line 335) reproduced identically on this host/TT env (retried isolated
+twice); unrelated to this change, which that binary does not compile.
+
+No device leg was re-run for this repair (host-side only, per the review
+scope); the device leg's semantics are exactly as landed at `cbdd7cce5`.

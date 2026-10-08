@@ -478,8 +478,14 @@ step; evidence
 `docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md`. The token gate
 (141/145 argmax vs the full-model goldens) stays OWED to B2b-ii: the
 goldens are full-model decodes and cannot be replayed without the routed
-experts; the refusal firing by name is the recorded proof. B2b-ii (the
-streaming MoE), then the token gate and the bench anchor, remain owed.
+experts; the refusal firing by name is the recorded proof. The fresh mutation
+review's three host-coverage findings were REPAIRED the same day (2026-10-08,
+PR #3421 follow-up commits): the forward's op sequence, the refusal firing,
+and the registry dispatch identity each now have a RED-first HOST-side case
+in test_kolibri1_tt_b2bi.cpp (the host op census over a recording kTENSTORRENT
+stand-in through the EXISTING vt::OpProvider seam — no parallel forward path;
+evidence `docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md` §9). B2b-ii
+(the streaming MoE), then the token gate and the bench anchor, remain owed.
 
 ## Git integration
 
@@ -494,7 +500,11 @@ One pull request for wave A (spec + implementation together), branched from
   CONDITION landed the same day (one greedy decode on the card, refusal
   firing by name — see `## Now`). Still owed: the streaming MoE (B2b-ii),
   then the full-model token gate (141/145 argmax, 4 flips adjudicated in
-  the 2.5-nat band, 0 hard) and the production bench anchor.
+  the 2.5-nat band, 0 hard) and the production bench anchor. The review
+  repair (2026-10-08) closed the three host-coverage findings: the refusal
+  firing, the forward's op sequence (per-norm weight identity), and the
+  kTENSTORRENT dispatch arm are each RED-first testable WITHOUT a card
+  (test_kolibri1_tt_b2bi.cpp host census; evidence doc §9).
 - The `_ttnncpp.so` pin rebuild (verified-fresh `lib64/_ttnncpp.so`, ninja
   `ttnn tt_metal` + copy) — a named prerequisite for every TT test binary
   before the first B2b device run (the stale-lib64 blocker; the issue
