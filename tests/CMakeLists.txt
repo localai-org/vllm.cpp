@@ -130,6 +130,10 @@ vllm_cpp_add_test(test_mimov2_w1 vllm/models/test_mimov2_w1.cpp)
 vllm_cpp_add_test(test_kolibri1 vllm/models/test_kolibri1.cpp)
 # kolibri1_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 target_include_directories(test_kolibri1 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# R7: the tokenizer test asserts our Encode against the HF reference ids in
+# the golden fingerprints (the same file the W3 gate reads).
+target_compile_definitions(test_kolibri1 PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 # MODEL-TEXT-kolibri-1 perf row (Phase 3 NEON): the fp8-block dequant kernel
 # (kolibri1_fp8_dequant.h) is BIT-IDENTICAL to the scalar reference over all
 # 256 e4m3fn values x the scale grid, on chunks, ragged blocks, and pool row

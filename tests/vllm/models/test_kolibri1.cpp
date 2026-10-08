@@ -36,6 +36,10 @@
 
 #include "kolibri1_manifest.inc"
 
+#ifndef KOLIBRI1_GOLDENS
+#define KOLIBRI1_GOLDENS "tests/vllm/models/kolibri1_goldens.json"
+#endif
+
 using vllm::AccountKolibri1Tensors;
 using vllm::EnumerateKolibri1Tensors;
 using vllm::Fp8BlockWeight;
@@ -747,31 +751,91 @@ TEST_CASE("kolibri1: a missing tensor is refused by the accounting pass") {
 
 // ---- Tokenizer (live-gated on the real checkpoint dir) ----
 
-TEST_CASE("kolibri1: the real fast tokenizer's split regex is not yet recognized") {
-  // WAVE-1 STATE, recorded as owed: the Kolibri-1 tokenizer.json uses a
-  // Qwen3Moe-style pre-tokenizer split regex with the (?i:...) group form
-  // the engine's recognized set does not cover, so Tokenizer::FromHfJson
-  // refuses it BY NAME rather than tokenizing wrongly ("no silent wrong
-  // tokenization"). The no-BOS encode contract is the wave that extends the
-  // engine's recognized set; serving-layer reasoning/tool parsers are
-  // separately owed per the spec.
+TEST_CASE("kolibri1: the engine encodes with the real tokenizer.json (R7)") {
+  // R7 (spec .agents/specs/kolibri-1-cpu.md, "R7 resolution"): the Kolibri-1
+  // pre-tokenizer Split regex is the classic Qwen2 pattern with the number
+  // alternative written \p{N}{1} where the recognized constant writes \p{N}
+  // — a semantically null quantifier. DetectPattern now recognizes the
+  // variant and maps it onto SplitPattern::kQwen2Classic, whose scanner
+  // implements that regex alternative-for-alternative (single-codepoint
+  // \p{N} grouping, the case-insensitive (?i:'s|'t|...) contraction group).
+  // Before the fix this test FAILED at the load: Tokenizer::FromHfJson threw
+  // "unrecognized pre-tokenizer split regex" (red capture in the gate log).
+  //
+  // The reference ids are the HF tokenizers ids the golden chains were built
+  // with (scripts/gen-kolibri1-goldens.py:268-273, the real HF `tokenizers`
+  // library, encode(prompt, add_special_tokens=False)), so the assertion is
+  // the HF-id match: the ids the W3 gate has been feeding directly are now
+  // reproduced by our engine, and the no-BOS encode contract
+  // (add_bos_token: false) is gated on a real load for the first time.
   if (!std::filesystem::exists(std::string(kRealModelDir) + "/tokenizer.json")) {
     MESSAGE("SKIP: " << kRealModelDir << " not mounted");
     return;
   }
-  std::string message;
-  try {
-    const vllm::tok::Tokenizer tok = vllm::tok::Tokenizer::FromHfJson(
-        std::string(kRealModelDir) + "/tokenizer.json");
-    (void)tok;
-  } catch (const std::exception& e) {
-    message = e.what();
-  }
-  REQUIRE_FALSE(message.empty());
-  CHECK(Names(message, "unrecognized pre-tokenizer split regex"));
+  const vllm::tok::Tokenizer tok = vllm::tok::Tokenizer::FromHfJson(
+      std::string(kRealModelDir) + "/tokenizer.json");
 
-  // The special-token contract from tokenizer_config.json, independent of
-  // the engine gap: eos <|im_end|> 127906, pad <|endoftext|> 127901, no BOS.
+  // The reference prompt set: the 8 golden prompts with their HF input ids.
+  std::ifstream gin(KOLIBRI1_GOLDENS);
+  REQUIRE_MESSAGE(gin.good(), "missing " KOLIBRI1_GOLDENS);
+  const nlohmann::json goldens = nlohmann::json::parse(gin);
+  std::vector<std::pair<std::string, std::vector<int32_t>>> reference;
+  for (const auto& p : goldens.at("prompts")) {
+    reference.emplace_back(p.at("prompt").get<std::string>(),
+                           p.at("input_ids").get<std::vector<int32_t>>());
+  }
+  REQUIRE(reference.size() == 8);
+  for (const auto& [prompt, ids] : reference) {
+    CAPTURE(prompt);
+    CHECK(tok.Encode(prompt) == ids);  // HF-id match, no BOS added
+    // The post_processor is a bare ByteLevel carrying neither bos nor eos,
+    // so add_special_tokens=True must be byte-identical to Encode.
+    CHECK(tok.EncodeWithSpecialTokens(prompt) == ids);
+    CHECK(tok.Decode(ids) == prompt);  // byte-exact round-trip
+  }
+
+  // Equivalence probe — the extension adds recognition, nothing else. Load a
+  // rewritten copy of the SAME file whose number alternative is respelled
+  // \p{N} (recognized before this change as kQwen2Classic) and require
+  // byte-identical ids over a corpus that exercises every alternative of the
+  // regex: mixed-case contractions, digit runs, whitespace/newline mixes,
+  // combining marks, the U+017F simple fold, German umlauts and CJK.
+  std::ifstream rin(std::string(kRealModelDir) + "/tokenizer.json",
+                   std::ios::binary);
+  nlohmann::json doc = nlohmann::json::parse(
+      std::string((std::istreambuf_iterator<char>(rin)),
+                  std::istreambuf_iterator<char>()));
+  auto& pattern =
+      doc.at("pre_tokenizer").at("pretokenizers").at(0).at("pattern");
+  std::string re = pattern.at("Regex").get<std::string>();
+  const std::string n1 = "\\p{N}{1}";
+  const size_t hit = re.find(n1);
+  REQUIRE(hit != std::string::npos);
+  REQUIRE(re.find(n1, hit + 1) == std::string::npos);  // exactly one
+  re.replace(hit, n1.size(), "\\p{N}");
+  pattern.at("Regex") = re;
+  const vllm::tok::Tokenizer classic = vllm::tok::Tokenizer::FromHfJsonBytes(
+      doc.dump(), "kolibri1 tokenizer.json, \\p{N}{1} respelled \\p{N}");
+  std::vector<std::string> probes;
+  for (const auto& [prompt, ids] : reference) probes.push_back(prompt);
+  probes.insert(probes.end(),
+                {"I'M I'll DON'T can'tt 'd 'vex",
+                 "it'S o'CLOCK y'ALL we'VE they'RE I'D",
+                 "x123 1234567 a1b2",
+                 "Hello  world\n\nfoo\tbar  ",
+                 "e\xCC\x81 \xCC\x81word",
+                 "a'\xC5\xBF" "b",
+                 "der Mond scheint hell \xC3\xBC" "ber den Bergen",
+                 " \xE4\xBD\xA0\xE5\xA5\xBD path/to/file",
+                 "trailing   ",
+                 ""});
+  for (const auto& probe : probes) {
+    CAPTURE(probe);
+    CHECK(tok.Encode(probe) == classic.Encode(probe));
+  }
+
+  // The special-token contract from tokenizer_config.json: eos <|im_end|>
+  // 127906, pad <|endoftext|> 127901, no BOS.
   std::ifstream in(std::string(kRealModelDir) + "/tokenizer_config.json");
   const nlohmann::json tc =
       nlohmann::json::parse(std::string((std::istreambuf_iterator<char>(in)),
@@ -780,4 +844,6 @@ TEST_CASE("kolibri1: the real fast tokenizer's split regex is not yet recognized
   CHECK(tc.at("bos_token").is_null());
   CHECK(tc.at("eos_token") == "<|im_end|>");
   CHECK(tc.at("pad_token") == "<|endoftext|>");
+  CHECK(tok.EosId() == -1);  // ByteLevel post_processor carries no eos id
+  CHECK(tok.BosId() == -1);  // no bos token exists
 }

@@ -18,7 +18,9 @@ enum class SplitPattern {
                   // Qwen3-Coder): single-codepoint \p{N} like kQwen2 but WITHOUT
                   // \p{M} in the letter run / punct-negation (marks fall into the
                   // punct run, exactly like Llama-3's classes but with 1-digit
-                  // number grouping).
+                  // number grouping). Also the Kolibri-1 spelling of this pattern,
+                  // whose number alternative is written \p{N}{1} — the identity
+                  // quantifier, so the same scanner is exact.
   kLlama3,  // Llama-3 family: \p{N}{1,3} digit groups, no \p{M} awareness.
   kGpt2,    // ORIGINAL GPT-2 byte-level BPE (OPT, GPT-2, and every other
             // pre-Llama HF checkpoint whose tokenizer.json carries NO explicit

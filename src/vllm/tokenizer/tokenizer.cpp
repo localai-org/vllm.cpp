@@ -26,6 +26,16 @@ constexpr const char* kQwen36Regex =
     R"((?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+)";
 constexpr const char* kClassicQwen2Regex =
     R"((?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+)";
+// Aleph-Alpha/Kolibri-1 (MODEL-TEXT-kolibri-1 R7, tokenizer.json read
+// 2026-10-08). Byte-identical to kClassicQwen2Regex except ONE insert: the
+// number alternative is written \p{N}{1} where the constant writes \p{N}.
+// {1} is the identity quantifier, so the two patterns match the SAME
+// language; the only reason this is a separate constant is that recognition
+// here is by whole-pattern byte equality, never by a substring a sibling
+// shares. It maps onto SplitPattern::kQwen2Classic below, whose scanner
+// implements single-codepoint \p{N} grouping — exactly what \p{N}{1} means.
+constexpr const char* kClassicQwen2N1Regex =
+    R"((?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+)";
 // Mistral Tekken (mistralai/Mistral-Nemo-Instruct-2407 and the other Tekken
 // checkpoints). Byte-equal to tiktoken's o200k_base pat_str except that the
 // optional (?i:'s|'t|...) group is absent from both letter alternatives and
@@ -493,6 +503,13 @@ SplitPattern DetectPattern(const json& doc) {
   }
   if (re == kQwen36Regex) return SplitPattern::kQwen2;
   if (re == kClassicQwen2Regex) return SplitPattern::kQwen2Classic;
+  // The Kolibri-1 spelling of the classic Qwen2 pattern: \p{N}{1} instead of
+  // \p{N}. Same language (the {1} quantifier is the identity on its atom),
+  // so the SAME scanner is exact — see the constant's comment above. Matched
+  // exactly, before the `\p{N}{1,3}` heuristic: this pattern contains
+  // `\p{N}{1}|`, not the heuristic's `\p{N}{1,3}` substring, but recognition
+  // stays whole-pattern per the rule at the heuristic below.
+  if (re == kClassicQwen2N1Regex) return SplitPattern::kQwen2Classic;
   if (re == kTekkenRegex) return SplitPattern::kTekken;
   // BOTH exact matches BEFORE the `\p{N}{1,3}` heuristic. kGpt4oRegex groups
   // digits in threes as well, so the heuristic below claims it and hands back
