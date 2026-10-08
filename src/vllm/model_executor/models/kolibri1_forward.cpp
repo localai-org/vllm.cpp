@@ -165,23 +165,27 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
               int64_t t, DType out_dtype = DType::kBF16) {
   if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype);
-  // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land). The
-  // cache is the fp8 decode path when enabled; the decoded block comes back
-  // as CACHE-OWNED bytes (independent allocations, never pool blocks — that
-  // ownership defect was v1's corruption). The pointer is consumed by the
-  // GEMM below and no further cache call happens before it, which is exactly
-  // the lifetime contract in kolibri1_dequant_cache.h. Budget 0 (the
-  // default) DISABLES the cache and keeps the original threaded pool decode,
-  // so main-line behavior is byte-for-byte unchanged unless the env var is
-  // set.
+  // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land, with
+  // the 2026-10-08 review repair ISSUE-LOCAL-01M4CVDDHAFD7R1QCK9F493SWZ).
+  // The cache is the fp8 decode path when enabled; the decoded block comes
+  // back as a LEASE that co-owns the bytes, so the lease is held across the
+  // GEMM below and released only after MatmulBT returns — the raw pointer
+  // the cache returned before was unprotected the moment GetOrDequant
+  // returned (a concurrent caller could evict and reuse the bytes mid-GEMM,
+  // maint-bot P1b on PR #3414). The entries OWN their bytes (independent
+  // allocations, never pool blocks — that ownership defect was v1's
+  // corruption). Budget 0 (the default) DISABLES the cache and keeps the
+  // original threaded pool decode, so main-line behavior is byte-for-byte
+  // unchanged unless the env var is set.
   Tensor wt;
   DBuf wt_buf;
+  kolibri1_dequant_cache::Lease dequant_lease;
   if (kolibri1_dequant_cache::ProcessCache().enabled()) {
     prof::Scope prof("dequant_fp8_block");  // cache lookups + cold decodes
-    const uint16_t* cached =
+    dequant_lease =
         kolibri1_dequant_cache::ProcessCache().GetOrDequant(w.fp8_block);
-    wt = dense_attn::MakeTensor(const_cast<uint16_t*>(cached), DType::kBF16,
-                                d.q.device,
+    wt = dense_attn::MakeTensor(const_cast<uint16_t*>(dequant_lease.data()),
+                                DType::kBF16, d.q.device,
                                 {w.fp8_block.n, w.fp8_block.k});
   } else {
     wt_buf = DequantFp8Block(d, w.fp8_block);

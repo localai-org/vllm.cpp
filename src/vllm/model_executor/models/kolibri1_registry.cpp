@@ -11,6 +11,7 @@
 // of the same row.
 
 #include "vllm/model_executor/models/kolibri1.h"
+#include "vllm/model_executor/models/kolibri1_dequant_cache.h"  // BumpModelGeneration
 #include "vllm/model_executor/models/kolibri1_forward.h"
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
@@ -230,7 +231,14 @@ class Kolibri1LoadedModel final : public LoadedModel {
  public:
   Kolibri1LoadedModel(const ModelRegistration& registration,
                       Kolibri1Weights weights)
-      : LoadedModel(registration), weights_(std::move(weights)) {}
+      : LoadedModel(registration), weights_(std::move(weights)) {
+    // Scope the process-wide dequant cache to THIS model incarnation
+    // (maint-bot P1a on PR #3414, ISSUE-LOCAL-01M4CVDDHAFD7R1QCK9F493SWZ):
+    // the cache key carries the model generation, so a later load that
+    // reuses this model's freed weight-buffer addresses can never be served
+    // this model's cached decodes.
+    kolibri1_dequant_cache::BumpModelGeneration();
+  }
   const Kolibri1Weights& weights() const { return weights_; }
 
  private:
