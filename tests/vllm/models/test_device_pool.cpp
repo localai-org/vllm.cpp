@@ -1003,3 +1003,57 @@ TEST_CASE("device pool: a block returned while a LEASE is outstanding is REFUSED
   DBuf again(Dev{a, qa}, DType::kF32, kLeaseShape);
   CHECK(again.ptr() == leased_ptr);
 }
+
+TEST_CASE("device pool: the CAPPED Put refuses a live-leased block too (the DBuf destructor path)") {
+  // The 4-argument (cap-aware) Put is the overload `DBuf::~DBuf` actually calls
+  // (dense_device_glue.h): it is the LIVE path for ordinary scratch teardown,
+  // not an edge case. The refusal guard must sit on it identically, and the
+  // refusal must fire in BOTH lanes: under bypass the bogus capped Put frees a
+  // live block to the driver — the same defect with a louder symptom.
+  TagBackend& a = NewBackend();
+  Queue qa = QueueOn(0);
+  vllm::DevicePool& pool = vllm::Pool(a);
+
+  // A cap large enough that the legal path POOLS the block rather than freeing
+  // it, so the post-refusal assertions below probe the free list, not the
+  // driver.
+  const size_t cap = kLeaseBytes * 8;
+
+  void* leased_ptr = nullptr;
+  std::shared_ptr<void> carrier;
+  {
+    DBuf w(Dev{a, qa}, DType::kF32, kLeaseShape);
+    leased_ptr = w.ptr();
+    std::memset(leased_ptr, 0xAA, kLeaseBytes);
+    carrier = w.ReleaseShared();
+  }
+  REQUIRE(leased_ptr != nullptr);
+
+  // THE SECOND RETURN through the capped overload — the shape an accidental
+  // extra teardown of a live DBuf produces.
+  CHECK_THROWS_WITH_AS(
+      pool.Put(a, kLeaseBytes, leased_ptr, cap),
+      doctest::Contains("still leased"), std::exception);
+
+  // The refusal left the block OUT of the capped free list: the next same-class
+  // request cannot be handed the leased block, and a write through the new
+  // block cannot reach the carrier's bytes.
+  {
+    DBuf fresh(Dev{a, qa}, DType::kF32, kLeaseShape);
+    CHECK_MESSAGE(fresh.ptr() != leased_ptr,
+                  "POOL DOUBLE-HAND-OUT via the capped Put: a live-leased block was handed to a new owner");
+    std::memset(fresh.ptr(), 0xBB, kLeaseBytes);
+    CHECK(static_cast<const unsigned char*>(leased_ptr)[0] == 0xAA);
+    CHECK(static_cast<const unsigned char*>(leased_ptr)[kLeaseBytes - 1] == 0xAA);
+  }
+
+  // AND THE LEGAL CAPPED RETURN STILL WORKS: the carrier's own deleter goes
+  // through the same capped overload and the block is reusable.
+  carrier.reset();
+  if (PoolBypass()) {
+    CHECK(a.WasFreed(leased_ptr));
+    return;
+  }
+  DBuf again(Dev{a, qa}, DType::kF32, kLeaseShape);
+  CHECK(again.ptr() == leased_ptr);
+}

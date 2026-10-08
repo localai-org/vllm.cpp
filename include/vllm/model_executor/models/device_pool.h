@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <string>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -674,15 +675,18 @@ class DevicePool {
     std::lock_guard<std::mutex> lk(mu_);
     return leased_.erase(p) != 0;
   }
-  const char* LeaseMessage(void* p, const char* op) {
-    // Built into a member buffer rather than a local: the throw site formats
-    // it immediately and the message only has to outlive the statement.
-    std::snprintf(lease_msg_, sizeof(lease_msg_),
+  std::string LeaseMessage(void* p, const char* op) {
+    // A per-call string, not a member buffer: two defect-path Puts on
+    // different threads format concurrently, and a shared buffer would race.
+    // The string is copied into the exception before the statement ends, so
+    // a local outlives the throw.
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
                   "DevicePool::%s: block %p is still leased (its DBuf::ReleaseShared carrier "
                   "is alive) — a second return of a live block is the POOL DOUBLE-HAND-OUT "
                   "defect, not a legal return",
                   op, static_cast<const void*>(p));
-    return lease_msg_;
+    return std::string(buf);
   }
 
   // The class the DRIVER allocated `p` at, and forget it. `fallback` covers a
@@ -725,7 +729,6 @@ class DevicePool {
   // cross-step hand-off; the carrier's deleter erases it.
   std::unordered_map<void*, size_t> block_class_;
   std::unordered_set<void*> leased_;
-  char lease_msg_[192];
   size_t retained_ = 0;  // bytes (class-rounded) held free, for the soft cap
   std::atomic<uint64_t> hits_{0};
   std::atomic<uint64_t> misses_{0};
