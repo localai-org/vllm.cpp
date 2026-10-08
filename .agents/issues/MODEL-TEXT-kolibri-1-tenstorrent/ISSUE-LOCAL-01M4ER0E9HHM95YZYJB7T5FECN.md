@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-08
-Updated: 2026-10-08
+Updated: 2026-10-09
 Closed: -
 
 ## Problem
@@ -16,4 +16,23 @@ B2b-i landed the dense-resident device forward with the routed-expert tier delib
 
 ## Resolution
 
+- 2026-10-09 (PARTIAL — the host half + device arm landed; the device
+  GATES are blocked external): the streaming MoE's host half landed
+  (slot-pool plan over `PlanKolibri1TTExpertSlotPolicy` unchanged, the
+  fetch executor's host half, the LOUD stream-bound guard, the slot
+  shadow / readback pivot, the eviction-hook integration, the
+  `Kolibri1TTSlotEpoch` reset lane) with red-first device-free coverage
+  in `test_kolibri1_tt_b2ii.cpp` (9/9), and the routed path REPLACED the
+  B2b-i refusal in the production TT forward (slot pool staged FP8_E4M3
+  verbatim; dispatch -> fetch -> stage -> readback-verify -> `Touch()`;
+  memoized dequants cleared by `ContentChangedSince`; `vt::MoeCombine`).
+  TT family 4/4; CPU battery green. The DEVICE legs (smoke, the 141/145
+  token gate, the bench anchor) are OWED: the P150 board is in an
+  external failure state (`cq_id 0 is out of range` reproduces on the
+  UNCHANGED base commit and both pin lib generations; the documented
+  recovery loop does not recover; dmesg shows a PCI rescan) — evidence
+  and the full blocker record in
+  `docs/bench-evidence/kolibri1-tt-b2ii-20261009.md` section 4. The
+  token-gate leg is committed and runs on the first healthy card
+  window. Issue stays OPEN on the device gates.
 -

@@ -457,35 +457,34 @@ gate.
 
 ## Now
 
-`ACTIVE` — waves A and B1 landed; B2a landed (slot policy, dispatch plan,
-reset predicate in `kolibri1_tt.h/.cpp`). B2b-i first slice landed
-(2026-10-08): the TT build compiles and links against the pin source via the
-fresh `/tmp/pin-build` lib64; the resident non-expert slice (3,311,163,520 B
-= 3.084 GiB, 753 tensors) stages on the P150 with byte-exact readback
-verification of all 1103 operands, and one device op (embedding bit-exact +
-layer-0 q_proj within the stated envelope) is verified against the CPU row —
-evidence `docs/bench-evidence/kolibri1-tt-b2i-smoke-20261008.md`. The device
-leg is green on BOTH builds: the pin build against the fresh `/tmp/pin-build`
-libs (smoke `SMOKE_RC=0`, 36,880/36,880 assertions) and the non-pin build +
-gdn stub. The earlier pin device-op hangs were the pin tree's STALE in-tree
-`build_Release/lib64`, not the pin source or the KMD/fw pair — no pin bump is
-owed (§ Owed). B2b-i completion landed (2026-10-08, same day): the
-dense-resident device forward (`kolibri1_tt_forward.cpp` + the production
-registry dispatch) ran ONE GREEDY DECODE of a golden prompt ON THE CARD —
-the slice's completion condition — with the routed-expert refusal firing by
-name 450 times (50 MoE blocks x 9 steps) and the shared expert carrying the
-step; evidence
-`docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md`. The token gate
-(141/145 argmax vs the full-model goldens) stays OWED to B2b-ii: the
-goldens are full-model decodes and cannot be replayed without the routed
-experts; the refusal firing by name is the recorded proof. The fresh mutation
-review's three host-coverage findings were REPAIRED the same day (2026-10-08,
-PR #3421 follow-up commits): the forward's op sequence, the refusal firing,
-and the registry dispatch identity each now have a RED-first HOST-side case
-in test_kolibri1_tt_b2bi.cpp (the host op census over a recording kTENSTORRENT
-stand-in through the EXISTING vt::OpProvider seam — no parallel forward path;
-evidence `docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md` §9). B2b-ii
-(the streaming MoE), then the token gate and the bench anchor, remain owed.
+`ACTIVE` — waves A and B1 landed; B2a landed; B2b-i landed (2026-10-08:
+the dense-resident device forward, one greedy decode on the card with the
+routed-expert refusal firing by name — see the B2b-i evidence docs).
+B2b-ii HOST HALF landed (2026-10-09, issue
+ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN): the streaming MoE's host side —
+the slot-pool plan over `PlanKolibri1TTExpertSlotPolicy` UNCHANGED, the
+fetch executor's host half (remap, fetch jobs, byte accounting), the
+per-step stream-bound guard with the LOUD refusal, the slot shadow (the
+readback pivot's reference; no `extract_shard` here), the eviction-hook
+integration, and the `Kolibri1TTSlotEpoch` reset-lane recording — plus
+the DEVICE ARM in the forward (slot pool staged FP8_E4M3 verbatim, the
+routed path dispatch -> fetch -> stage -> readback-verify -> `Touch()` ->
+memoized dequants -> `vt::MoeCombine`), replacing the B2b-i refusal in
+the production TT dispatch arm (the refusal remains only for the
+`VT_KOLIBRI1_TT_B2II_STREAM=0` arm and genuine over-capacity/miss-handle
+failures, by name). Evidence
+`docs/bench-evidence/kolibri1-tt-b2ii-20261009.md`: host gates
+9/9 (`test_kolibri1_tt_b2ii`), TT family 4/4, CPU battery green
+(`test_kolibri1_dequant_cache`'s fork() flake reproduces on the clean
+base in this window — pre-existing). The DEVICE legs are BLOCKED by an
+external board/driver failure (see evidence section 4: `cq_id 0 is out of
+range` reproduces on the UNCHANGED base and both pin lib generations;
+the documented recovery loop no longer recovers; dmesg shows a PCI
+rescan): the device smoke, THE TOKEN GATE (141/145), and the bench
+anchor remain owed — the gate leg is committed in
+`test_kolibri1_tt_b2ii.cpp` and runs the moment a healthy card window
+opens.
+
 
 ## Git integration
 
@@ -494,41 +493,29 @@ One pull request for wave A (spec + implementation together), branched from
 
 ## Owed
 
-- B2b implementation (the § B2 scope — B2b addendum): the B2b-i bring-up
-  slice landed 2026-10-08 (build/link, resident staging, one verified device
-  op — see `## Now`); the dense-resident device forward's COMPLETION
-  CONDITION landed the same day (one greedy decode on the card, refusal
-  firing by name — see `## Now`). Still owed: the streaming MoE (B2b-ii),
-  then the full-model token gate (141/145 argmax, 4 flips adjudicated in
-  the 2.5-nat band, 0 hard) and the production bench anchor. The review
-  repair (2026-10-08) closed the three host-coverage findings: the refusal
-  firing, the forward's op sequence (per-norm weight identity), and the
-  kTENSTORRENT dispatch arm are each RED-first testable WITHOUT a card
-  (test_kolibri1_tt_b2bi.cpp host census; evidence doc §9).
-- The `_ttnncpp.so` pin rebuild (verified-fresh `lib64/_ttnncpp.so`, ninja
-  `ttnn tt_metal` + copy) — a named prerequisite for every TT test binary
-  before the first B2b device run (the stale-lib64 blocker; the issue
-  reference lives in the addendum's stop conditions). DONE for the pin-side
-  build 2026-10-08: the fresh rebuild lives at `/tmp/pin-build` (symbol
-  verified with `nm -D`) and the pin vllm.cpp build links clean against it;
-  the durable copy into the pin tree's own `build_Release/lib64` remains
-  owed. The non-pin tree's lib64 is equally stale; its build links through
-  a no-op stub object for the one GDN symbol (not exercised by this row's
-  gates).
-- Stale pin lib64 (NOT a pin bump): the pin tree's in-tree
-  `build_Release/lib64` (2026-09-25) predates the pin source (6449cf13f7b,
-  2026-09-29) and hangs/crashes device ops (dmesg ARC timeout → AER →
-  recovery failed → PCI rescan). A fresh out-of-source rebuild at
-  `/tmp/pin-build` links AND runs green on this KMD 2.10.1-pre / fw 19.7.1
-  box (health trio rc=0; B2b-i smoke `SMOKE_RC=0`, 2026-10-08 — evidence
-  `docs/bench-evidence/kolibri1-tt-b2i-smoke-20261008.md` §2). The durable
-  copy of the fresh lib64 into the pin tree's own `build_Release/lib64`
-  remains owed — an operator decision pending.
+- B2b-ii device legs (blocked, section 4 of
+  `docs/bench-evidence/kolibri1-tt-b2ii-20261009.md`): the card window
+  must reopen on a HEALTHY board — the smoke (slot fills + readback
+  verification on card, stream bound asserted, swaps exercising the
+  reset predicate), THE TOKEN GATE (141/145 argmax, flips inside the
+  2.5-nat band, 0 hard, per-flip nat gaps; the leg is committed in
+  `test_kolibri1_tt_b2ii.cpp`, env `VT_KOLIBRI1_TT_B2II_MODEL`), then
+  the production bench anchor, then dram_free before/after slot-pool
+  staging.
+- B2b implementation (the B2 scope B2b addendum): B2b-i landed
+  2026-10-08; the B2b-ii HOST half + device arm landed 2026-10-09 (see
+  `## Now`); the device GATES above are the remaining B2b work.
+- The `_ttnncpp.so` pin rebuild — DONE for the pin-side build 2026-10-08
+  (fresh `/tmp/pin-build`, symbol-verified) and the durable copy into
+  the pin tree's own `build_Release/lib64` landed the same day
+  (rebuilt 21:45 from a585e5744a8). NOTE (2026-10-09): the durable lib
+  is UNVERIFIED against the green B2b-i gates since the board failure
+  of the evidence doc's section 4 — the first healthy card window must
+  re-run the B2b-i staging gate AND the health trio against the durable
+  lib before any new device measurement is trusted.
+- Stale pin lib64 — superseded by the durable copy above; the
+  `cq_id 0` board failure (evidence section 4) is NOT the stale-lib64
+  blocker (it reproduces on the fresh 6449 libs too).
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
-- Single-P150 expert streaming: B1 planner spec + implementation (design
-  section above), then B2/B3. The NVMe backing tier is a pluggable leaf
-  behind the RAM tier.
-- Tile-layout consumption of the staged FP8_E4M3 operands (tilize inside the
-  compute kernels; FP8 is RM-only at tensor creation).
-- Trace/warmup design that tolerates the FP8 flatbuffer serialization gap.
-- The aleph-alpha-inference oracle gateability measurement (GPU lease).
+- Single-P150 expert streaming: B1 planner spec + implementation landed;
+  the NVMe backing tier is a pluggable leaf behind the RAM tier.
