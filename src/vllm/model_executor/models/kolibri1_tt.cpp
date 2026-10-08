@@ -39,6 +39,12 @@ Kolibri1TTTensor PlanFp8(const std::string& name,
   t.bytes = w.n * w.k;  // one fp8-e4m3 byte per element, verbatim
   t.scale_bytes = w.scale.rank == 2 ? w.scale.shape[0] * w.scale.shape[1] * 4
                                     : 0;
+  // The host source bytes (device-free bookkeeping; the B2b-i device
+  // staging consumes exactly these).
+  t.host = w.packed.bytes.data();
+  t.scale_host = w.scale.bytes.data();
+  t.scale_rows = w.scale.rank == 2 ? w.scale.shape[0] : 0;
+  t.scale_cols = w.scale.rank == 2 ? w.scale.shape[1] : 0;
   if (w.scale.dtype != vt::DType::kF32) {
     throw std::runtime_error(
         "kolibri1-tt: fp8-block projection '" + name +
@@ -78,6 +84,7 @@ void PlanProjection(Kolibri1TTStagingPlan& plan, const std::string& name,
     t.rows = p.bf16.rank == 2 ? p.bf16.shape[0] : 0;
     t.cols = p.bf16.rank == 2 ? p.bf16.shape[1] : 0;
     t.bytes = Bf16Bytes(p.bf16);
+    t.host = p.bf16.bytes.data();
     Add(plan, std::move(t));
     return;
   }
@@ -501,6 +508,242 @@ Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatchAllLayers(
     requests.reserve(static_cast<size_t>(layers));
     for (int64_t l = 0; l < layers; ++l) requests.emplace_back(l, topk_ids);
     return PlanKolibri1TTMoEDispatch(policy, requests);
+}
+
+// ---- Wave B2b-i: the dense-resident device slice ----
+//
+// The resident slice is every non-expert component the B1 streaming plan
+// keeps on device (spec §"B2 scope — B2b addendum", slice i). The walk
+// mirrors the wave-A plan's per-tensor decisions over exactly that slice
+// and never touches lw.moe.experts — the routed tier is absent in B2b-i
+// (streamed in B2b-ii), so the plan also runs over a weights tree whose
+// experts were never loaded.
+
+namespace {
+
+// The resident component a planned tensor belongs to (the per-component
+// accounting the B1 streaming shape commits to).
+enum class ResidentComponent {
+    kAttention,
+    kSharedExpert,
+    kRouter,
+    kNorm,
+    kEmbedHead,
+};
+
+void AddResident(Kolibri1TTResidentStagingPlan& plan, Kolibri1TTTensor t,
+                   ResidentComponent component) {
+    const int64_t total = t.bytes + t.scale_bytes;
+    plan.total_bytes += total;
+    ++plan.tensor_count;
+    plan.tensors.push_back(std::move(t));
+    const Kolibri1TTTensor& st = plan.tensors.back();
+
+    plan.fp8_bytes += st.dtype == Kolibri1TTDType::kFp8E4M3 ? st.bytes : 0;
+    plan.scale_bytes += st.scale_bytes;
+    plan.bf16_bytes += st.dtype == Kolibri1TTDType::kBf16 ? st.bytes : 0;
+    plan.f32_bytes += st.dtype == Kolibri1TTDType::kF32 ? st.bytes : 0;
+
+    Kolibri1TTResidentComponentBytes& c = plan.components;
+    switch (component) {
+      case ResidentComponent::kAttention:
+        c.attention_fp8_bytes += st.bytes;
+        c.attention_scale_bytes += st.scale_bytes;
+        break;
+      case ResidentComponent::kSharedExpert:
+        c.shared_expert_fp8_bytes += st.bytes;
+        c.shared_expert_scale_bytes += st.scale_bytes;
+        break;
+      case ResidentComponent::kRouter:
+        if (st.dtype == Kolibri1TTDType::kF32) {
+          c.router_bias_bytes += st.bytes;
+        } else {
+          c.router_gate_bytes += st.bytes;
+        }
+        break;
+      case ResidentComponent::kNorm:
+        c.norm_bytes += st.bytes;
+        break;
+      case ResidentComponent::kEmbedHead:
+        c.embed_head_bytes += st.bytes;
+        break;
+    }
+    c.total_bytes = c.attention_fp8_bytes + c.attention_scale_bytes +
+                    c.shared_expert_fp8_bytes + c.shared_expert_scale_bytes +
+                    c.router_gate_bytes + c.router_bias_bytes + c.norm_bytes +
+                    c.embed_head_bytes;
+}
+
+// One bf16 module (norm / router gate / embed / head): rows x cols with
+// cols == 1 for the rank-1 norms, host bytes recorded.
+Kolibri1TTTensor PlanBf16Module(const std::string& name,
+                                  const OwnedTensor& t) {
+    Kolibri1TTTensor out;
+    out.name = name;
+    out.dtype = Kolibri1TTDType::kBf16;
+    out.rows = t.rank >= 1 ? t.shape[0] : 0;
+    out.cols = t.rank == 2 ? t.shape[1] : 1;
+    out.bytes = Bf16Bytes(t);
+    out.host = t.bytes.data();
+    return out;
+}
+
+// One fp8-block resident projection: the checkpoint's fp8 arm. A
+// non-fp8 projection here means the loader stored something the resident
+// slice's dtype decision does not cover — refuse by name rather than
+// plan a projection the device staging cannot fill.
+Kolibri1TTTensor PlanFp8Resident(const std::string& name,
+                                   const Kolibri1Projection& p) {
+    if (!p.IsFp8Block()) {
+      throw std::runtime_error(
+          "kolibri1-tt: resident projection '" + name +
+          "' is not an fp8-block weight — the B2b-i resident slice stages "
+          "attention and shared-expert projections native FP8_E4M3 (spec "
+          ".agents/specs/kolibri-tt.md §FP8); a bf16 module here is refused "
+          "rather than silently re-armed");
+    }
+    return PlanFp8(name, p.fp8_block);
+}
+
+}  // namespace
+
+Kolibri1TTResidentStagingPlan PlanKolibri1TTResidentStaging(
+      const Kolibri1Weights& weights, const Kolibri1TTStagingOptions& options) {
+    const Kolibri1Params& p = weights.params;
+    Kolibri1TTResidentStagingPlan plan;
+    plan.params = p;
+
+    // The mesh / expert-parallel staging layout is owed (spec ## Owed): the
+    // resident slice plans a single P150, exactly the device the B2b-i
+    // bring-up brings up.
+    if (options.mesh_chips != 0) {
+      throw std::runtime_error(
+          "kolibri1-tt: the B2b-i resident slice plans a single P150; "
+          "mesh_chips=" + std::to_string(options.mesh_chips) +
+          " is refused — the mesh / expert-parallel staging layout is OWED "
+          "(row MODEL-TEXT-kolibri-1-tenstorrent, spec "
+          ".agents/specs/kolibri-tt.md ## Owed)");
+    }
+
+    // Geometry assertion: identical to the wave-A plan (the two-group hybrid
+    // the CPU row landed; RNoPE on the full group).
+    for (int64_t i = 0; i < static_cast<int64_t>(p.layer_types.size()); ++i) {
+      if (p.IsSlidingLayer(i)) {
+        ++plan.swa_layers;
+      } else {
+        ++plan.full_layers;
+      }
+    }
+    if (plan.full_layers + plan.swa_layers != p.num_hidden_layers ||
+        plan.full_layers == 0 || plan.swa_layers == 0) {
+      throw std::runtime_error(
+          "kolibri1-tt: hybrid geometry must have both a full-attention (RNoPE) "
+          "and a sliding-window group; got " +
+          std::to_string(plan.full_layers) + " full / " +
+          std::to_string(plan.swa_layers) + " swa of " +
+          std::to_string(p.num_hidden_layers) + " layers");
+    }
+    if (p.use_sliding_window && p.sliding_window <= 0 && plan.swa_layers > 0) {
+      throw std::runtime_error(
+          "kolibri1-tt: sliding-window layers require a positive "
+          "sliding_window — got " + std::to_string(p.sliding_window) +
+          " (the checkpoint pins 513; the device attention wave designs for "
+          "that geometry)");
+    }
+
+    // Embed + untied lm_head + final norm (bf16).
+    AddResident(plan,
+                PlanBf16Module("model.embed_tokens.weight",
+                               weights.embed_tokens),
+                ResidentComponent::kEmbedHead);
+    AddResident(plan, PlanBf16Module("lm_head.weight", weights.lm_head),
+                ResidentComponent::kEmbedHead);
+    AddResident(plan, PlanBf16Module("model.norm.weight", weights.final_norm),
+                ResidentComponent::kNorm);
+
+    for (size_t l = 0; l < weights.layers.size(); ++l) {
+      const Kolibri1LayerWeights& lw = weights.layers[l];
+      const std::string layer = "model.layers." + std::to_string(l) + ".";
+      // The four sandwich norms (bf16).
+      for (const OwnedTensor* norm :
+           {&lw.input_layernorm, &lw.post_attn_norm,
+            &lw.post_attention_layernorm, &lw.post_ffn_norm}) {
+        AddResident(plan, PlanBf16Module(layer + "norm", *norm),
+                    ResidentComponent::kNorm);
+      }
+      // Attention projections (fp8-block → FP8_E4M3 native) + per-head q/k
+      // norms (bf16).
+      AddResident(plan, PlanFp8Resident(layer + "self_attn.q_proj",
+                                       lw.attn.q_proj),
+                  ResidentComponent::kAttention);
+      AddResident(plan, PlanFp8Resident(layer + "self_attn.k_proj",
+                                       lw.attn.k_proj),
+                  ResidentComponent::kAttention);
+      AddResident(plan, PlanFp8Resident(layer + "self_attn.v_proj",
+                                       lw.attn.v_proj),
+                  ResidentComponent::kAttention);
+      AddResident(plan, PlanFp8Resident(layer + "self_attn.o_proj",
+                                       lw.attn.o_proj),
+                  ResidentComponent::kAttention);
+      for (const OwnedTensor* qk : {&lw.attn.q_norm, &lw.attn.k_norm}) {
+        AddResident(plan, PlanBf16Module(layer + "qk_norm", *qk),
+                    ResidentComponent::kNorm);
+      }
+      // Router gate (bf16) + e_score_correction_bias (f32, widened at load).
+      AddResident(plan,
+                  PlanBf16Module(layer + "mlp.gate.weight",
+                                 lw.moe.router_gate),
+                  ResidentComponent::kRouter);
+      if (lw.moe.e_score_correction_bias.dtype != vt::DType::kF32) {
+        throw std::runtime_error(
+            "kolibri1-tt: e_score_correction_bias must be f32 (the loader "
+            "widens it losslessly)");
+      }
+      {
+        Kolibri1TTTensor bt;
+        bt.name = layer + "moe.router.expert_bias";
+        bt.dtype = Kolibri1TTDType::kF32;
+        bt.rows = ShapeElems(lw.moe.e_score_correction_bias);
+        bt.cols = 1;
+        bt.bytes = bt.rows * 4;
+        bt.host = lw.moe.e_score_correction_bias.bytes.data();
+        AddResident(plan, std::move(bt), ResidentComponent::kRouter);
+      }
+      // The shared expert (fp8-block → FP8_E4M3 native). The ROUTED experts
+      // are deliberately absent: B2b-i carries no expert tier.
+      AddResident(plan,
+                  PlanFp8Resident(layer + "mlp.shared_experts.gate_proj",
+                                  lw.moe.shared_experts.gate_proj),
+                  ResidentComponent::kSharedExpert);
+      AddResident(plan,
+                  PlanFp8Resident(layer + "mlp.shared_experts.up_proj",
+                                  lw.moe.shared_experts.up_proj),
+                  ResidentComponent::kSharedExpert);
+      AddResident(plan,
+                  PlanFp8Resident(layer + "mlp.shared_experts.down_proj",
+                                  lw.moe.shared_experts.down_proj),
+                  ResidentComponent::kSharedExpert);
+    }
+
+    if (plan.total_bytes != plan.components.total_bytes) {
+      throw std::runtime_error(
+          "kolibri1-tt: resident component accounting drifted from the plan "
+          "total — an internal accounting defect, not a checkpoint property");
+    }
+    if (plan.total_bytes > options.device_budget_bytes) {
+      const int64_t deficit = plan.total_bytes - options.device_budget_bytes;
+      throw std::runtime_error(
+          "kolibri1-tt: the B2b-i resident slice (attention + shared expert + "
+          "router + norms + embed/head; the routed experts stream in B2b-ii) "
+          "needs " + std::to_string(plan.total_bytes) +
+          " device bytes but the single P150 budget is " +
+          std::to_string(options.device_budget_bytes) + " — deficit " +
+          std::to_string(deficit) +
+          " bytes. These components have no host tier, so expert streaming "
+          "cannot start (row MODEL-TEXT-kolibri-1-tenstorrent, spec "
+          ".agents/specs/kolibri-tt.md ### B2 scope — B2b addendum, slice i).");
+    }
+    return plan;
 }
 
 }  // namespace vllm

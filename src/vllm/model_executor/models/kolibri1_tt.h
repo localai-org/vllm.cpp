@@ -51,6 +51,14 @@ struct Kolibri1TTTensor {
   int64_t cols = 0;
   int64_t bytes = 0;  // device bytes for the packed operand
   int64_t scale_bytes = 0;  // f32 scale grid bytes (0 for bf16 tensors)
+  // Where the staged bytes live on the host (device-free bookkeeping).
+  // The B2b-i resident planner fills them for every tensor it plans and
+  // the device staging consumes exactly these bytes; the wave-A planner
+  // fills them on the projections it shares helpers with.
+  const void* host = nullptr;        // packed operand bytes, verbatim
+  const void* scale_host = nullptr;  // f32 scale grid bytes (fp8 only)
+  int64_t scale_rows = 0;
+  int64_t scale_cols = 0;
 };
 
 struct Kolibri1TTStagingPlan {
@@ -288,5 +296,76 @@ Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatch(
 Kolibri1TTDispatchPlan PlanKolibri1TTMoEDispatchAllLayers(
     const Kolibri1TTExpertSlotPolicy& policy, int64_t layers,
     const std::vector<int64_t>& topk_ids);
+
+// ---- Wave B2b-i: the dense-resident device slice (spec §"B2 scope — B2b
+// addendum", slice i) ----
+//
+// B2b-i runs the RESIDENT non-expert components entirely on device with
+// the routed-expert tier absent (streamed in B2b-ii): attention (q/k/v/o
+// fp8-block), the shared expert (fp8-block), the router (bf16 gate + f32
+// bias), the norms (bf16, incl. the per-head q/k norms and the final
+// norm), and embed + untied lm_head (bf16). This plan reuses the wave-A
+// per-tensor dtype decisions verbatim over exactly that slice and asserts
+// the hybrid geometry like the wave-A plan. It refuses ONLY when the
+// resident slice alone exceeds the device budget — the single-device
+// FULL-model refusal (wave A, §math) must NOT fire here: the resident
+// slice is what fits one P150 (~3.09 GiB of the ~73.6 GiB full model).
+// The routed experts are never enumerated, so the plan also runs over a
+// weights tree whose expert tier was never loaded. Device-free like every
+// plan in this TU: the device staging itself is the TT backend's seam
+// (vt::tenstorrent, tenstorrent_staging.cpp), driven by the host pointers
+// this plan records per tensor.
+
+// Per-component byte accounting of the resident slice. The operand bytes
+// match the B1 streaming shape's committed numbers exactly (attention
+// 1,703,936,000; shared 196,608,000 fp8 + 48,000 grids = the B1
+// shared_expert_bytes 196,656,000; router gate 98,304,000; embed+head
+// 1,310,720,000); the grids and the router bias are itemized beside them
+// so the grand total is exact rather than the B1 shape's ~2 MiB norm
+// approximation.
+struct Kolibri1TTResidentComponentBytes {
+  int64_t attention_fp8_bytes = 0;    // q/k/v/o packed operands
+  int64_t attention_scale_bytes = 0;  // their f32 scale grids
+  int64_t shared_expert_fp8_bytes = 0;
+  int64_t shared_expert_scale_bytes = 0;
+  int64_t router_gate_bytes = 0;   // bf16 [num_experts, hidden] per layer
+  int64_t router_bias_bytes = 0;   // f32 [num_experts] per layer
+  int64_t norm_bytes = 0;          // bf16: sandwich + q/k norms + final
+  int64_t embed_head_bytes = 0;    // bf16 embed + untied lm_head
+  int64_t total_bytes = 0;
+};
+
+struct Kolibri1TTResidentStagingPlan {
+  Kolibri1Params params;
+  // The resident slice only, in plan order; every tensor carries its host
+  // source pointers (host / scale_host) for the device staging.
+  std::vector<Kolibri1TTTensor> tensors;
+
+  int64_t total_bytes = 0;  // == components.total_bytes
+  int64_t fp8_bytes = 0;    // packed fp8 operand bytes (FP8_E4M3)
+  int64_t scale_bytes = 0;  // f32 scale grid bytes staged beside them
+  int64_t bf16_bytes = 0;   // bf16 modules (router gate, norms, embed, head)
+  int64_t f32_bytes = 0;    // the router bias (f32)
+  int64_t tensor_count = 0;
+
+  Kolibri1TTResidentComponentBytes components;
+  int64_t full_layers = 0;
+  int64_t swa_layers = 0;
+};
+
+// Plans the B2b-i resident slice over fully-loaded (or resident-only)
+// kolibri1 weights: every fp8-block projection → FP8_E4M3 native (bytes
+// from Fp8BlockWeight::packed, row-major, verbatim), the router gate,
+// norms, embed and lm_head → BF16, the router bias → F32. Asserts the
+// checkpoint's hybrid geometry (two KV groups, full-rotary head_dim 128)
+// exactly like the wave-A plan, and refuses:
+//  - a non-zero mesh_chips (the resident slice plans a single P150; the
+//    mesh / expert-parallel staging layout is owed, spec ## Owed),
+//  - a resident slice whose total exceeds the device budget (the refusal
+//    names the byte deficit and that these components have no host tier).
+// Throws std::runtime_error on every refusal.
+Kolibri1TTResidentStagingPlan PlanKolibri1TTResidentStaging(
+    const Kolibri1Weights& weights,
+    const Kolibri1TTStagingOptions& options = {});
 
 }  // namespace vllm

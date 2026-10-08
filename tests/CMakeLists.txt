@@ -180,6 +180,15 @@ target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR
 if(VLLM_CPP_TENSTORRENT)
   vllm_cpp_add_test(test_kolibri1_tt vllm/models/test_kolibri1_tt.cpp)
   target_include_directories(test_kolibri1_tt PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # B2b-i first slice (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b
+  # addendum): the resident staging plan's host-side gates (run under ctest
+  # with NO card) plus the device bring-up leg (card + VT_KOLIBRI1_TT_B2I_
+  # MODEL; operator-run, evidence in docs/bench-evidence/). The goldens
+  # path feeds the device op's token ids, same as test_kolibri1_w3.
+  vllm_cpp_add_test(test_kolibri1_tt_b2i vllm/models/test_kolibri1_tt_b2i.cpp)
+  target_include_directories(test_kolibri1_tt_b2i PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(test_kolibri1_tt_b2i PRIVATE
+    KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)

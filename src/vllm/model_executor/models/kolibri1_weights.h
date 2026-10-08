@@ -35,6 +35,8 @@
 
 namespace vllm {
 
+class LoadedModel;  // model_registry.h
+
 // One linear projection. Exactly one slot is populated: the fp8-block arm
 // (quantized checkpoint) or the bf16 arm (modules_to_not_convert modules:
 // the router gate).
@@ -135,5 +137,11 @@ Kolibri1Accounting AccountKolibri1Tensors(
 // and on a router gate that is not bf16.
 Kolibri1Weights LoadKolibri1Weights(
     const std::vector<SafetensorsFile>& shards, const HfConfig& config);
+
+// The checked accessor for the weights a ModelRegistry::Load produced: the
+// B2b device waves receive the registry's LoadedModel (Prepare/Forward) and
+// read the loaded tree back out through this seam instead of re-loading.
+// Refuses by name when `model` is not a Kolibri1ForCausalLM load.
+const Kolibri1Weights& Kolibri1LoadedModelWeights(LoadedModel& model);
 
 }  // namespace vllm

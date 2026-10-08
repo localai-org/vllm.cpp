@@ -1851,7 +1851,8 @@ if(VLLM_CPP_TENSTORRENT)
     src/vt/tenstorrent/tenstorrent_keepquant.cpp
     src/vt/tenstorrent/tenstorrent_paged.cpp
     src/vt/tenstorrent/tenstorrent_gdn.cpp
-    src/vt/tenstorrent/tenstorrent_capture.cpp)
+    src/vt/tenstorrent/tenstorrent_capture.cpp
+    src/vt/tenstorrent/tenstorrent_staging.cpp)
   target_include_directories(vllm_tenstorrent_ops PRIVATE
     ${CMAKE_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/include ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(vllm_tenstorrent_ops PRIVATE TTNN::TTNN)

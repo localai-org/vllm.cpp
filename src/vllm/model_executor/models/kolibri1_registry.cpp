@@ -303,4 +303,10 @@ inline constexpr ModelFactory kKolibri1Factory{
 REGISTER_VLLM_MODEL(kolibri1, "Kolibri1ForCausalLM", kKolibri1Factory,
                     kKolibri1Info)
 
+// The checked accessor over the registry's loaded model (the B2b device
+// waves read the weights back out of the LoadedModel they are handed).
+const Kolibri1Weights& Kolibri1LoadedModelWeights(LoadedModel& model) {
+  return ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM").weights();
+}
+
 }  // namespace vllm

@@ -458,9 +458,17 @@ gate.
 ## Now
 
 `ACTIVE` — waves A and B1 landed; B2a landed (slot policy, dispatch plan,
-reset predicate in `kolibri1_tt.h/.cpp`). The B2b spec addendum above is
-authored and committed; B2b implementation awaits the P150 card window and
-the `_ttnncpp.so` pin rebuild prerequisite (§ Owed).
+reset predicate in `kolibri1_tt.h/.cpp`). B2b-i first slice landed
+(2026-10-08): the TT build compiles and links against the pin source via the
+fresh `/tmp/pin-build` lib64; the resident non-expert slice (3,311,163,520 B
+= 3.084 GiB, 753 tensors) stages on the P150 with byte-exact readback
+verification of all 1103 operands, and one device op (embedding bit-exact +
+layer-0 q_proj within the stated envelope) is verified against the CPU row —
+evidence `docs/bench-evidence/kolibri1-tt-b2i-smoke-20261008.md`. The device
+leg ran on the non-pin tt-metal: the pin cannot run device ops on KMD
+2.10.1-pre / fw 19.7.1 as of today (pin bump owed, § Owed). Slice completion
+(one greedy decode on the card), B2b-ii, and the token gate / bench anchor
+remain owed.
 
 ## Git integration
 
@@ -469,13 +477,26 @@ One pull request for wave A (spec + implementation together), branched from
 
 ## Owed
 
-- B2b implementation (the § B2 scope — B2b addendum): the dense-resident
-  device forward, then the streaming MoE. Owed to the card window; no code
-  before the addendum, which this commit supplies.
+- B2b implementation (the § B2 scope — B2b addendum): the B2b-i bring-up
+  slice landed 2026-10-08 (build/link, resident staging, one verified device
+  op — see `## Now`); the dense-resident device forward's completion
+  condition (one greedy decode on the card), then the streaming MoE
+  (B2b-ii), remain owed.
 - The `_ttnncpp.so` pin rebuild (verified-fresh `lib64/_ttnncpp.so`, ninja
   `ttnn tt_metal` + copy) — a named prerequisite for every TT test binary
   before the first B2b device run (the stale-lib64 blocker; the issue
-  reference lives in the addendum's stop conditions).
+  reference lives in the addendum's stop conditions). DONE for the pin-side
+  build 2026-10-08: the fresh rebuild lives at `/tmp/pin-build` (symbol
+  verified with `nm -D`) and the pin vllm.cpp build links clean against it;
+  the durable copy into the pin tree's own `build_Release/lib64` remains
+  owed. The non-pin tree's lib64 is equally stale; its build links through
+  a no-op stub object for the one GDN symbol (not exercised by this row's
+  gates).
+- tt-metal pin bump: the pinned source (6449cf13f7b) cannot run device ops
+  on KMD 2.10.1-pre / fw 19.7.1 as of 2026-10-08 (cast case green; matmul,
+  embedding, and the 753-operand staging hang the board; dmesg ARC timeout →
+  AER → recovery failed → PCI rescan). B2b device legs run on the non-pin
+  tree (d20b8e27f29) until the pin is reconciled.
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
 - Single-P150 expert streaming: B1 planner spec + implementation (design
   section above), then B2/B3. The NVMe backing tier is a pluggable leaf

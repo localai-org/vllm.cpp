@@ -545,4 +545,79 @@ inline StagingStats GetStagingStats() { return {}; }
 inline void ResetStagingStats() {}
 #endif
 
+// ---- Kolibri-1 B2b-i device bring-up (MODEL-TEXT-kolibri-1-tenstorrent,
+// spec .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum, slice i) ----
+// The B2b-i first slice's device staging: the dense-resident slice's
+// operands staged on the shared mesh device, BYTES VERBATIM per the
+// wave-A dtype decision — FP8_E4M3 operands native ROW_MAJOR (the pin
+// marks FP8_E4M3 "Blackhole only, ROW-MAJOR only for now",
+// tt_metal/api/tt-metalium/tensor/tensor_types.hpp:35-37), bf16/f32
+// ROW_MAJOR. This is the residency the B2b device forward consumes.
+// Implemented in tenstorrent_staging.cpp (a ttnn-linking TU of the same
+// object library as tenstorrent_ops.cpp); the structs are plain data so
+// model TUs and tests drive the staging without ttnn headers.
+
+// One resident operand described host-side: the packed bytes at `host`,
+// staged verbatim in the given kind. rows x cols, with cols == 1 for
+// rank-1 tensors.
+struct TtStageOperand {
+  const void* host = nullptr;
+  int64_t rows = 0;
+  int64_t cols = 0;
+  enum class Kind : uint8_t { kFp8E4M3, kBf16, kF32 } kind = Kind::kBf16;
+};
+
+struct TtStagingReport {
+  int64_t tensors = 0;
+  int64_t fp8_tensors = 0;
+  int64_t bf16_tensors = 0;
+  int64_t f32_tensors = 0;
+  int64_t bytes_staged = 0;           // device bytes (packed operands)
+  int64_t dram_total_bytes = 0;       // probed chip DRAM (capacity)
+  int64_t dram_free_after_bytes = 0;  // probed after the staging
+  int64_t chips = 0;
+  int64_t first_chip_id = -1;
+};
+
+// Stages every operand on the shared mesh device, verbatim, and returns
+// the report. Staged tensors are addressable by handle 0..n-1 in request
+// order through ReadbackStagedOperandF32; they live for the process
+// lifetime (the #1486 never-destroyed residency pattern — the smoke's
+// staged slice is the bring-up's deliverable, not a per-call transient).
+TtStagingReport StageResidentOperands(Queue& q,
+                                      const std::vector<TtStageOperand>& ops);
+
+// Readback of staged operand `handle` as f32 values (row-major, rows*cols
+// elements, in request order). FP8_E4M3 operands go through the dtype
+// pivot the pin requires: the pin's to_vector has no FP8 case and its
+// to_dtype needs host storage (ttnn/core/tensor/tensor_ops.cpp:595-599),
+// so the staged tensor is brought to host (cpu()) and pivoted host-side
+// FP8→F32 (tt_metal/impl/tensor/tensor_apis.cpp:429) — the same pivot the
+// pin's own print path uses (ttnn/core/tensor/tensor_impl.cpp:267-275).
+std::vector<float> ReadbackStagedOperandF32(Queue& q, int64_t handle);
+
+// Raw-byte readback of staged operand `handle`: the packed bytes exactly as
+// they sit on the host after a blocking cpu(), with NO dtype pivot. The
+// FP8_E4M3 pivot above is NOT byte-exact — tt-metal's host FP8→F32 decode
+// flushes subnormals to zero (tt_metal/impl/data_format/float8.cpp,
+// float8_e4m3::operator float: "HW flushes subnormals"), and to_vector has
+// no FP8_E4M3 case — so byte-level verification of an fp8 operand goes
+// through the host buffer directly (DistributedHostBuffer::apply +
+// HostBuffer::view_bytes, dtype-agnostic).
+std::vector<uint8_t> ReadbackStagedOperandBytes(Queue& q, int64_t handle);
+
+#ifdef VLLM_CPP_TENSTORRENT
+#else
+inline TtStagingReport StageResidentOperands(
+    Queue&, const std::vector<TtStageOperand>&) {
+  return {};
+}
+inline std::vector<float> ReadbackStagedOperandF32(Queue&, int64_t) {
+  return {};
+}
+inline std::vector<uint8_t> ReadbackStagedOperandBytes(Queue&, int64_t) {
+  return {};
+}
+#endif
+
 }  // namespace vt::tenstorrent
