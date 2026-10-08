@@ -469,8 +469,17 @@ leg is green on BOTH builds: the pin build against the fresh `/tmp/pin-build`
 libs (smoke `SMOKE_RC=0`, 36,880/36,880 assertions) and the non-pin build +
 gdn stub. The earlier pin device-op hangs were the pin tree's STALE in-tree
 `build_Release/lib64`, not the pin source or the KMD/fw pair — no pin bump is
-owed (§ Owed). Slice completion (one greedy decode on the card), B2b-ii, and
-the token gate / bench anchor remain owed.
+owed (§ Owed). B2b-i completion landed (2026-10-08, same day): the
+dense-resident device forward (`kolibri1_tt_forward.cpp` + the production
+registry dispatch) ran ONE GREEDY DECODE of a golden prompt ON THE CARD —
+the slice's completion condition — with the routed-expert refusal firing by
+name 450 times (50 MoE blocks x 9 steps) and the shared expert carrying the
+step; evidence
+`docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md`. The token gate
+(141/145 argmax vs the full-model goldens) stays OWED to B2b-ii: the
+goldens are full-model decodes and cannot be replayed without the routed
+experts; the refusal firing by name is the recorded proof. B2b-ii (the
+streaming MoE), then the token gate and the bench anchor, remain owed.
 
 ## Git integration
 
@@ -481,9 +490,11 @@ One pull request for wave A (spec + implementation together), branched from
 
 - B2b implementation (the § B2 scope — B2b addendum): the B2b-i bring-up
   slice landed 2026-10-08 (build/link, resident staging, one verified device
-  op — see `## Now`); the dense-resident device forward's completion
-  condition (one greedy decode on the card), then the streaming MoE
-  (B2b-ii), remain owed.
+  op — see `## Now`); the dense-resident device forward's COMPLETION
+  CONDITION landed the same day (one greedy decode on the card, refusal
+  firing by name — see `## Now`). Still owed: the streaming MoE (B2b-ii),
+  then the full-model token gate (141/145 argmax, 4 flips adjudicated in
+  the 2.5-nat band, 0 hard) and the production bench anchor.
 - The `_ttnncpp.so` pin rebuild (verified-fresh `lib64/_ttnncpp.so`, ninja
   `ttnn tt_metal` + copy) — a named prerequisite for every TT test binary
   before the first B2b device run (the stale-lib64 blocker; the issue

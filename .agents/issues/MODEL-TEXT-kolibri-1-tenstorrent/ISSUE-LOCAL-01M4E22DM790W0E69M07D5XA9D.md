@@ -16,4 +16,21 @@ The B2b-i bring-up slice landed 2026-10-08 (merged as cf6258c76 + b52c0baeb): th
 
 ## Resolution
 
+- 2026-10-08 (branch row/kolibri-tt-b2bi-fwd, commit cbdd7cce5): the
+  dense-resident device forward landed and the COMPLETION CONDITION is met.
+  One greedy decode of the first golden prompt completed on the P150 card
+  through the production seam (ModelRegistry::Prepare builds the 350-projection
+  / 3.540 GiB bf16 resident context; ModelRegistry::Forward runs prefill + 8
+  decode steps; 78/78 assertions). The routed-expert refusal fired BY NAME 450
+  times (50 MoE blocks x 9 steps) and the shared expert carried the step; the
+  full-model 141/145 token gate stays owed to B2b-ii (the goldens cannot be
+  replayed without the routed experts). Host gates green: test_kolibri1
+  234/234, w2 1608/1608, w3 900/900 (141/145, 4 near-tie, 0 hard),
+  test_kolibri1_tt 235/235, b2i 204/204, the new test_kolibri1_tt_b2bi host
+  cases green after red-first capture. Evidence:
+  docs/bench-evidence/kolibri1-tt-b2bi-fwd-20261008.md. One finding recorded
+  against the earlier Owed note: the non-pin tree's stale lib64 does not link
+  this row's TT binaries at all (missing use_mcast symbol); the pin fresh
+  /tmp/pin-build libs are the working link. Issue stays OPEN until the slice
+  merges; the token gate and bench anchor are B2b-ii's.
 -
