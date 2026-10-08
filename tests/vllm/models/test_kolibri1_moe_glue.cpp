@@ -100,6 +100,17 @@ struct Lcg {
   }
 };
 
+// The k=0 (empty-route) edge is intentionally NOT covered: it is
+// unreachable through the public API — Tensor::Contiguous VT_CHECKs s > 0
+// (src/vt/tensor.cpp:28), so a [t, 0, h] expert_out or a [t, 0] weights
+// tensor cannot even be constructed, and moe_router_topk enforces top_k
+// in [1, num_experts] (src/vt/ops.cpp:3436), so the router never emits
+// zero routed slots. Both paths agree at k=0 by construction — the j loop
+// is empty in the NEON body, the scalar tail and the scalar reference
+// alike, so every output element is the same scale-then-shared sequence
+// over an empty sum — hence the ragged/tail coverage above stops at k=1
+// on purpose.
+
 // The EXACT MoeCombineKernel math (src/vt/cpu/cpu_ops.cpp), transcribed:
 // f32 accumulation over j in increasing order, routed_scale applied to the
 // assembled routed sum only, the shared term added last, ONE round to bf16.
