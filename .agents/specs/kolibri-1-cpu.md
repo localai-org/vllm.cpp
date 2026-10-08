@@ -326,6 +326,22 @@ test_kolibri1_decode_bench anchor 109726 — all green; W3 not rerun (no
 forward change). Evidence: docs/bench-evidence/kolibri1-serve-20261008.md
 "Re-review repair".
 
+NEXT-LEVER UNIT (2026-10-08, branch `row/kolibri-perf-next`): the CPU decode
+lever space after the NEON GEMM tier and the dequant cache is measured and
+closed — see docs/bench-evidence/kolibri1-perf-next-lever-20261008.md (issue
+ISSUE-LOCAL-01M4EEX40G7NH571CR5GQY4CA1). Production reproduces at 3.17-3.21
+decode tok/s (8 threads, 16 GiB). Attribution: linear_gemm ~50% of forward
+(at the order-preserving ALU roof), cold-miss whole-matrix decodes ~26%,
+attention ~17%, lm_head 4%; the recorded "moe_glue residual" reading is
+corrected — the moe_glue scope nests the routed experts' GEMM/dequant, so its
+separable residual is small. Falsified by measurement: fp8-direct GEMV
+(bit-exact but 8× slower — the order-preserving kernel is ALU-bound, not
+bandwidth-bound) and any bit-exact GEMM inner-loop change (the contract
+forbids fmla/dot). The one open lever is the dequant-cache production budget
+— a developer policy decision; the unit delivers the budget-sensitivity
+table and the 8/16/32 GiB sensitivity numbers (knee still open at 32 GiB,
++5-6% over 16 GiB) and lands no product code.
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file
