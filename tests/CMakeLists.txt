@@ -218,6 +218,8 @@ if(VLLM_CPP_TENSTORRENT)
 # device TU's gate under the GPU lease.
   vllm_cpp_add_test(test_kolibri1_tt_b2ii vllm/models/test_kolibri1_tt_b2ii.cpp)
   target_include_directories(test_kolibri1_tt_b2ii PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(test_kolibri1_tt_b2ii PRIVATE
+    KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)

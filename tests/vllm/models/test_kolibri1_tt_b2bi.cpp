@@ -1187,17 +1187,29 @@ TEST_CASE("kolibri1 TT B2b-i: device leg — resident context, embedding "
   }
   const double t_decode = NowSec() - t_dec0;
 
-  // The COMPLETION CONDITION: the decode finished on the card. The routed
-  // experts were requested every layer every step and REFUSED BY NAME.
+  // The COMPLETION CONDITION: the decode finished on the card. SLICE II
+  // CONTRACT: the routed experts CARRY the decode (streaming arm on, the
+  // default) and the B2b-i refusal stays SILENT; the streaming counters
+  // show the slot fills and the readback verification.
   const int64_t refusals = Kolibri1TTRoutedExpertRefusalCount();
-  CHECK(refusals >=
-        p.num_hidden_layers * (1 + kDecodeSteps));  // every MoE block fired
+  CHECK(refusals == 0);
+  Kolibri1TTStreamingDeviceContext* st =
+      Kolibri1LoadedModelTTStreamContext(*model, q);
+  REQUIRE(st != nullptr);
+  CHECK(st->slot_fills >= 1);
+  CHECK(st->readback_verified_bytes >=
+        st->slot_fills * st->pool.packed_bytes_per_slot);
   std::fprintf(stderr,
                "[kolibri1-tt-b2bi] GREEDY DECODE COMPLETE on card: "
-               "%zu tokens in %.1f s; routed-expert refusals fired %lld "
-               "times (by name; the routed tier arrives in B2b-ii)\n",
-               seq.size(), t_decode, static_cast<long long>(refusals));
-  // The goldens' expected tokens are NOT asserted here: the goldens are
-  // full-model decodes and cannot be replayed without the routed experts
-  // (addendum gate ordering). The 141/145 argmax gate stays owed to B2b-ii.
+               "%zu tokens in %.1f s; routed refusals %lld; slot fills %lld "
+               "(%lld swap), %lld B staged, %lld B readback-verified, "
+               "memo hits %lld\n",
+               seq.size(), t_decode, static_cast<long long>(refusals),
+               static_cast<long long>(st->slot_fills),
+               static_cast<long long>(st->swap_fills),
+               static_cast<long long>(st->staged_bytes),
+               static_cast<long long>(st->readback_verified_bytes),
+               static_cast<long long>(st->memo_hits));
+  // The argmax token gate (141/145, the W3 methodology) is the b2ii
+  // device gate's, in test_kolibri1_tt_b2ii.cpp.
 }

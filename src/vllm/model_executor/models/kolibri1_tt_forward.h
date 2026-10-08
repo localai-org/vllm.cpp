@@ -171,6 +171,13 @@ BuildKolibri1TTStreamingDeviceContext(vt::Backend& backend, vt::Queue& queue,
                                       int64_t device_budget_bytes,
                                       int64_t kv_reserve_bytes);
 
+
+// The checked accessor for the streaming context a load produced (null
+// when VT_KOLIBRI1_TT_B2II_STREAM=0). The device gates read the
+// streaming counters through this seam.
+Kolibri1TTStreamingDeviceContext* Kolibri1LoadedModelTTStreamContext(
+    LoadedModel& model, vt::Queue& queue);
+
 // ---- The B2b-i forward ------------------------------------------------------
 
 // Runs one forward step of the dense-resident slice on a Tenstorrent queue:

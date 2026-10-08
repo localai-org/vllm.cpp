@@ -41,7 +41,11 @@
 #include <string>
 #include <vector>
 
+#include <limits>
+
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
+#include "vllm/model_executor/models/kolibri1_tt_forward.h"
+#include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/kolibri1_shared.h"
 #include "vllm/model_executor/models/kolibri1_tt.h"
 #include "vllm/model_executor/models/kolibri1_tt_stream.h"
@@ -591,4 +595,236 @@ TEST_CASE("kolibri1 TT B2b-ii: the router readback pivot — whole-buffer "
     threw = true;
   }
   CHECK(threw);
+}
+
+// ---- DEVICE LEG: the token gate (the W3 methodology on the P150) -----------
+//
+// Runs only with a Tenstorrent card AND VT_KOLIBRI1_TT_B2II_MODEL=<real
+// checkpoint dir> (operator-run under the GPU lease; evidence in
+// docs/bench-evidence/). THE TOKEN GATE, deferred from B2b-i: replay the
+// golden prompts on the TT device path with the FULL model — the W3
+// methodology (tests/vllm/models/test_kolibri1_w3.cpp): 141/145 argmax
+// positions, the known flips adjudicated INSIDE the 2.5-nat band, 0 hard
+// flips allowed. Any flip outside the band is a gate FAILURE, not a
+// re-adjudication; per-flip nat gaps are MESSAGE'd for the evidence doc.
+
+#ifndef KOLIBRI1_GOLDENS
+#define KOLIBRI1_GOLDENS "kolibri1_goldens.json"
+#endif
+
+namespace {
+
+constexpr double kNatBand = 2.5;
+constexpr int32_t kGateSteps = 32;
+
+struct GateGolden {
+  std::string prompt;
+  std::vector<int32_t> input_ids;
+  std::vector<int32_t> generated_ids;
+};
+
+std::vector<GateGolden> LoadGateGoldens() {
+  const nlohmann::json j =
+      nlohmann::json::parse(std::ifstream(KOLIBRI1_GOLDENS));
+  std::vector<GateGolden> out;
+  for (const auto& p : j.at("prompts")) {
+    GateGolden g;
+    g.prompt = p.at("prompt").get<std::string>();
+    for (const auto& v : p.at("input_ids"))
+      g.input_ids.push_back(v.get<int32_t>());
+    for (const auto& v : p.at("generated_ids"))
+      g.generated_ids.push_back(v.get<int32_t>());
+    out.push_back(std::move(g));
+  }
+  return out;
+}
+
+v1::CommonAttentionMetadata GateMeta(int64_t t, int64_t ctx_before,
+                                     int64_t block_table_num_cols) {
+  v1::CommonAttentionMetadata m;
+  m.num_reqs = 1;
+  m.num_actual_tokens = static_cast<int>(t);
+  m.max_query_len = static_cast<int>(t);
+  m.max_seq_len = static_cast<int>(ctx_before + t);
+  m.query_start_loc = {0, static_cast<int32_t>(t)};
+  m.query_start_loc_cpu = m.query_start_loc;
+  m.seq_lens = {static_cast<int32_t>(ctx_before + t)};
+  m.seq_lens_cpu = m.seq_lens;
+  m.num_computed_tokens_cpu = {static_cast<int32_t>(ctx_before)};
+  m.block_table_tensor.assign(static_cast<size_t>(block_table_num_cols), 0);
+  for (int64_t i = 0; i < block_table_num_cols; ++i)
+    m.block_table_tensor[static_cast<size_t>(i)] = static_cast<int32_t>(i);
+  m.block_table_num_cols = static_cast<int>(block_table_num_cols);
+  for (int64_t i = 0; i < t; ++i) m.slot_mapping.push_back(ctx_before + i);
+  m.causal = true;
+  return m;
+}
+
+bool TenstorrentDevicePresent() {
+  vt::Backend* b = vt::TryGetBackend(vt::DeviceType::kTENSTORRENT);
+  return b != nullptr;
+}
+
+// One device forward over `ids` at `ctx_before`; downloads the LAST row's
+// logits and returns them.
+std::vector<float> ForwardLastLogits(LoadedModel& model, const HfConfig& config,
+                                     vt::Queue& q, vt::Backend& be,
+                                     std::vector<PagedKvCache>& kv,
+                                     const std::vector<int32_t>& ids,
+                                     int64_t ctx_before, int64_t num_blocks) {
+  const int64_t t = static_cast<int64_t>(ids.size());
+  const v1::CommonAttentionMetadata meta =
+      GateMeta(t, ctx_before, num_blocks / 2);
+  v1::GDNAttentionMetadata gdn_meta;
+  std::vector<GdnStateCache> gdn_state;
+  std::vector<int32_t> positions(static_cast<size_t>(t));
+  for (int64_t i = 0; i < t; ++i)
+    positions[static_cast<size_t>(i)] = static_cast<int32_t>(ctx_before + i);
+  ModelForwardInput in{ids, positions, meta, gdn_meta, kv, gdn_state, config,
+                       q, /*logits_indices=*/{}, /*num_reqs=*/1};
+  in.pure_decode = (t == 1);
+  in.uniform_query_len = (t == 1 ? 1 : 0);
+  ForwardLogits fl = ModelRegistry::Forward(model, in);
+  REQUIRE(fl.rows >= 1);
+  std::vector<float> logits(static_cast<size_t>(fl.vocab));
+  be.Copy(q, logits.data(),
+          static_cast<const uint8_t*>(fl.device_tensor.data) +
+              (fl.rows - 1) * fl.vocab * static_cast<int64_t>(sizeof(float)),
+          static_cast<size_t>(fl.vocab) * sizeof(float));
+  be.Synchronize(q);
+  return logits;
+}
+
+}  // namespace
+
+TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
+          "on the card (W3 methodology, 141/145 in the 2.5-nat band)") {
+  if (!TenstorrentDevicePresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || *model_dir == '\0') {
+    MESSAGE("SKIPPED: VT_KOLIBRI1_TT_B2II_MODEL not set");
+    return;
+  }
+  const std::string dir = model_dir;
+  if (!std::filesystem::exists(dir + "/model.safetensors.index.json")) {
+    MESSAGE("SKIPPED: " << dir << " is not a Kolibri-1 checkpoint");
+    return;
+  }
+
+  // Load through the PRODUCTION registry path.
+  const HfConfig config = vllm::LoadHfConfig(dir + "/config.json");
+  const ModelRegistration& reg = ModelRegistry::Resolve(config);
+  REQUIRE(reg.architecture == "Kolibri1ForCausalLM");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(dir + "/model.safetensors.index.json"));
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items()) {
+    (void)name;
+    shard_names.insert(shard.get<std::string>());
+  }
+  std::vector<SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(SafetensorsFile::Open(dir + "/" + shard));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+  std::unique_ptr<LoadedModel> model = ModelRegistry::Load(config, source);
+  REQUIRE(model != nullptr);
+  vt::Backend& be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue q = be.CreateQueue();
+  ModelRegistry::Prepare(*model, config, q);
+  Kolibri1TTStreamingDeviceContext* st =
+      Kolibri1LoadedModelTTStreamContext(*model, q);
+  REQUIRE(st != nullptr);
+  const Kolibri1Weights& w = Kolibri1LoadedModelWeights(*model);
+  const Kolibri1Params& p = w.params;
+
+  // Per-layer KV caches (bf16), the b2bi device-leg pattern.
+  const int64_t hkv = p.num_key_value_heads;
+  const int64_t hd = p.head_dim;
+  const int64_t block_size = 16;
+  const int64_t num_blocks = 32;
+  const int64_t kv_bytes = num_blocks * 2 * block_size * hkv * hd *
+                           static_cast<int64_t>(vt::SizeOf(vt::DType::kBF16));
+  std::vector<std::shared_ptr<void>> kv_keep;
+  std::vector<PagedKvCache> kv;
+  kv.reserve(static_cast<size_t>(p.num_hidden_layers));
+  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+    void* buf = be.Alloc(kv_bytes);
+    kv_keep.emplace_back(buf, [&be](void* ptr) { be.Free(ptr); });
+    std::memset(buf, 0, static_cast<size_t>(kv_bytes));
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = block_size;
+    c.num_kv_heads = hkv;
+    c.head_size = hd;
+    kv.push_back(c);
+  }
+
+  int64_t argmax_matches = 0, argmax_total = 0, near_ties = 0, hard_flips = 0;
+  std::vector<std::string> flip_records;
+
+  for (const GateGolden& gp : LoadGateGoldens()) {
+    // Fresh KV per prompt (zeroed: no stale context can leak across
+    // prompts).
+    for (auto& kkeep : kv_keep)
+      std::memset(kkeep.get(), 0, static_cast<size_t>(kv_bytes));
+    // The W3 chain: greedy from the prompt; each step's forward covers
+    // exactly one new position (incremental decode over the KV cache —
+    // identical math to the CPU row's full recompute, the goldens'
+    // semantics).
+    std::vector<int32_t> seq = gp.input_ids;
+    bool diverged = false;
+    for (int32_t step = 0; step < kGateSteps && !diverged; ++step) {
+      const int64_t ctx = static_cast<int64_t>(seq.size()) - 1;
+      const std::vector<float> logits = ForwardLastLogits(
+          *model, config, q, be, kv, {seq.back()}, ctx, num_blocks);
+      const int32_t got = static_cast<int32_t>(
+          std::max_element(logits.begin(), logits.end()) - logits.begin());
+      const int32_t want = gp.generated_ids[static_cast<size_t>(step)];
+      ++argmax_total;
+      if (got == want) {
+        ++argmax_matches;
+      } else {
+        // The nat gap: got's logit MINUS want's logit — how far the
+        // golden token was from the winner (<= band => near-tie).
+        const double gap = static_cast<double>(
+            logits[static_cast<size_t>(want)] - logits[static_cast<size_t>(got)]);
+        flip_records.push_back("'" + gp.prompt + "' step " +
+                               std::to_string(step) + ": got " +
+                               std::to_string(got) + " want " +
+                               std::to_string(want) + ", nat gap " +
+                               std::to_string(gap));
+        if (-gap <= kNatBand) {
+          ++near_ties;
+        } else {
+          ++hard_flips;
+          MESSAGE("HARD flip at '" << gp.prompt << "' step " << step
+                                   << ": got " << got << " want " << want
+                                   << " (gap " << gap << " beyond band "
+                                   << kNatBand << ")");
+        }
+        diverged = true;  // later steps compare different contexts
+        break;
+      }
+      seq.push_back(got);
+    }
+  }
+
+  MESSAGE("ARGMAX CHAIN: " << argmax_matches << "/" << argmax_total
+                           << " compared positions match the golden greedy "
+                              "decode; flips "
+                           << (argmax_total - argmax_matches) << " (near-ties "
+                           << near_ties << ", hard " << hard_flips << ")");
+  for (const std::string& r : flip_records) MESSAGE("flip: " << r);
+  MESSAGE("streaming counters: slot fills "
+          << st->slot_fills << " (swaps " << st->swap_fills << "), staged "
+          << st->staged_bytes << " B, readback-verified "
+          << st->readback_verified_bytes << " B, memo hits " << st->memo_hits);
+  // THE GATE VERDICT: 141/145 with the flips inside the band, 0 hard.
+  CHECK(argmax_matches >= 141);
+  CHECK(hard_flips == 0);
 }

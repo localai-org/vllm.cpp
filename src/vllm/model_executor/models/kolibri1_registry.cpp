@@ -384,4 +384,13 @@ Kolibri1TTResidentDeviceContext& Kolibri1LoadedModelTTContext(
       .tt_context(queue);
 }
 
+// The checked accessor over the loaded model's B2b-ii streaming context
+// (the gate/evidence counters the device leg reads). Null when the
+// streaming arm is disabled by env.
+Kolibri1TTStreamingDeviceContext* Kolibri1LoadedModelTTStreamContext(
+    LoadedModel& model, vt::Queue& queue) {
+  return ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM")
+      .tt_stream_context(queue);
+}
+
 }  // namespace vllm
