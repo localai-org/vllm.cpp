@@ -799,7 +799,11 @@ TEST_CASE("kolibri1: the engine encodes with the real tokenizer.json (R7)") {
   // \p{N} (recognized before this change as kQwen2Classic) and require
   // byte-identical ids over a corpus that exercises every alternative of the
   // regex: mixed-case contractions, digit runs, whitespace/newline mixes,
-  // combining marks, the U+017F simple fold, German umlauts and CJK.
+  // combining marks, the U+017F simple fold, German umlauts and CJK — plus
+  // two strings whose ids separate the kQwen2Classic arm from the kQwen2
+  // one: their \p{M} handling differs (pretokenizer.cpp:1045-1046), so a
+  // mapping of the \p{N}{1} spelling onto kQwen2 instead of kQwen2Classic
+  // flips exactly those ids and turns this probe red.
   std::ifstream rin(std::string(kRealModelDir) + "/tokenizer.json",
                    std::ios::binary);
   nlohmann::json doc = nlohmann::json::parse(
@@ -824,6 +828,13 @@ TEST_CASE("kolibri1: the engine encodes with the real tokenizer.json (R7)") {
                  "x123 1234567 a1b2",
                  "Hello  world\n\nfoo\tbar  ",
                  "e\xCC\x81 \xCC\x81word",
+                 // Distinguish kQwen2Classic from kQwen2 (pretokenizer.cpp
+                 // :1045-1046): classic takes a combining mark as an ordinary
+                 // punct-run codepoint, the Qwen3.6 arm folds it into a letter
+                 // run and excludes it from punct runs. HF onig ids for the
+                 // classic arm: [32, 15612, 114] and [32, 63690].
+                 " \xCC\x88r",                 // space U+0308 r
+                 " \xE2\x9C\x94\xEF\xB8\x8F",   // space U+2714 U+FE0F
                  "a'\xC5\xBF" "b",
                  "der Mond scheint hell \xC3\xBC" "ber den Bergen",
                  " \xE4\xBD\xA0\xE5\xA5\xBD path/to/file",
