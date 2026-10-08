@@ -2660,6 +2660,14 @@ vllm_cpp_add_test(test_reasoning_deepseek_v3
   vllm/entrypoints/openai/reasoning_parsers/test_deepseek_v3.cpp)
 vllm_cpp_add_test(test_reasoning_qwen3
   vllm/entrypoints/openai/reasoning_parsers/test_qwen3.cpp)
+vllm_cpp_add_test(test_reasoning_kolibri1
+  vllm/entrypoints/openai/reasoning_parsers/test_kolibri1.cpp)
+vllm_cpp_add_test(test_tool_parser_kolibri1
+  vllm/entrypoints/openai/tool_parsers/test_kolibri1.cpp)
+vllm_cpp_add_test(test_kolibri1_chat_template
+  vllm/entrypoints/test_kolibri1_chat_template.cpp)
+target_compile_definitions(test_kolibri1_chat_template PRIVATE
+  KOLIBRI1_TEMPLATE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 vllm_cpp_add_test(test_tool_parser_xlam
   vllm/entrypoints/openai/tool_parsers/test_xlam_tool_parser.cpp)
 vllm_cpp_add_test(test_tool_parser_phi4mini

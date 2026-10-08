@@ -244,17 +244,32 @@ the kolibri1 pre-tokenizer regex, R7 — the encode contract stays owed).
 Remaining for the row: R7 tokenizer, the aleph-alpha-inference oracle
 gateability measurement (GPU), GGUF/CUDA/Tenstorrent arms (later rows).
 
-R7 RESOLVED (2026-10-08, branch `row/kolibri-r7`): the tokenizer engine
-accepts the Kolibri-1 split regex — recognition-only extension, the
-regex maps onto the existing `kQwen2Classic` scanner because `\p{N}{1}` is
-the identity quantifier on `\p{N}`. The W1 tokenizer test now loads the
-real tokenizer.json and asserts our `Encode` reproduces the HF reference
-ids from `tests/vllm/models/kolibri1_goldens.json` on all 8 golden
-prompts (the no-BOS encode contract is gated on a real load for the first
-time). Design, corrected diagnosis, risks, and stop conditions:
-`## R7 resolution` below. Remaining for the row: the aleph-alpha-inference
-oracle gateability measurement (GPU), GGUF/CUDA/Tenstorrent arms (later
-rows).
+SERVING COMPLETION (2026-10-08, branch `row/kolibri-serve`): the OpenAI
+chat path now serves kolibri1 end to end on CPU. The checkpoint's
+tokenizer_config.json chat template renders through the minja adapter
+byte-identically to CPython jinja2 references on 15 scenarios covering
+the plugin's thinking switch (tests/fixtures/
+kolibri1_chat_template_references.json); the one renderer divergence the
+gate caught — minja's `tojson` dumped insertion order where jinja2's
+default policy sorts keys (DEFAULT_POLICIES["json.dumps_kwargs"] =
+{"sort_keys": True}) — is fixed in the adapter with a child-scope
+sorted-dump `tojson` (src/vllm/entrypoints/chat_template.cpp). The
+kolibri1 reasoning parser ports the plugin's reasoning.py @ 049a6a7bd240:
+the Qwen3 engine grammar with the starting state derived the way the
+template switches thinking (reasoning_effort wins and only "none"
+disables; else a literal enable_thinking false does), threaded from the
+request's chat_template_kwargs per call. The kolibri1 tool parser is the
+plugin's registration mirrored exactly: an alias to the Hermes
+`<tool_call>` class (__init__.py:50-54). Both detection tables resolve
+"kolibri1" off the template's no-reasoning sentence, ahead of the
+generic `<think>` and hermes rows. Gates: test_reasoning_kolibri1,
+test_tool_parser_kolibri1, test_kolibri1_chat_template green (red-first:
+detection resolved think_auto/hermes and the registry names did not
+exist before the change); the full host battery and the row's kolibri
+gates stay green; W3 rerun in a verified quiet window. Evidence:
+docs/bench-evidence/kolibri1-serve-20261008.md. Remaining for the row:
+the aleph-alpha-inference oracle gateability measurement (GPU),
+GGUF/CUDA/Tenstorrent arms (later rows).
 
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 

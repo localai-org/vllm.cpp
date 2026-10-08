@@ -13,7 +13,9 @@
 #include "vllm/model_executor/model_loader/gguf_reader.h"
 #include "vllm/v1/engine/validation_error.h"  // refused kwarg -> HTTP 400
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -209,6 +211,48 @@ std::string RenderChatTemplate(
     std::shared_ptr<minja::Context> builtins = minja::Context::builtins();
     std::shared_ptr<minja::Context> context =
         minja::Context::make(minja::Value(top), builtins);
+    // tojson with jinja2's DEFAULT policy: CPython Jinja sorts object keys
+    // (jinja2.defaults.DEFAULT_POLICIES["json.dumps_kwargs"] =
+    // {"sort_keys": True}), and that is the tojson every transformers /
+    // vLLM-served template runs under -- the Kolibri tool preamble renders
+    // `{{ tool | tojson }}` and byte-matches the jinja2 references only with
+    // the sort. minja's builtin dumps in insertion order, so this child-scope
+    // global shadows it (same signature: value + optional indent; set() on
+    // the child cannot touch the shared builtins).
+    context->set(
+        "tojson",
+        minja::Value::callable(
+            [](const std::shared_ptr<minja::Context>&,
+               minja::ArgumentsValue& args) -> minja::Value {
+              minja::Value value = args.args.at(0);
+              int64_t indent = -1;
+              for (const auto& [name, v] : args.kwargs) {
+                if (name == "indent") indent = v.get<int64_t>();
+              }
+              std::function<minja::Value(minja::Value)> sort_keys =
+                  [&](minja::Value v) -> minja::Value {
+                if (v.is_object()) {
+                  std::vector<std::string> keys;
+                  for (const auto& k : v.keys()) keys.push_back(k.get<std::string>());
+                  std::sort(keys.begin(), keys.end());
+                  minja::Value out = minja::Value::object();
+                  for (const auto& k : keys) {
+                    out.set(minja::Value(k), sort_keys(v.at(minja::Value(k))));
+                  }
+                  return out;
+                }
+                if (v.is_array()) {
+                  minja::Value out = minja::Value::array();
+                  for (std::size_t i = 0; i < v.size(); ++i) {
+                    out.push_back(sort_keys(v.at(minja::Value(static_cast<int64_t>(i)))));
+                  }
+                  return out;
+                }
+                return v;
+              };
+              return minja::Value(sort_keys(value).dump(indent,
+                                                       /*to_json=*/true));
+            }));
     context->set("bos_token", minja::Value(bos_token));
     context->set("eos_token", minja::Value(eos_token));
     context->set("tools", minja::Value(BuildTools(tools)));

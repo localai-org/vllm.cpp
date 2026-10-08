@@ -75,6 +75,14 @@ namespace {
 //     step3's fullwidth ones.
 constexpr ToolParserMarker kToolParserMarkers[] = {
     {"muse_glimmer", "<atem:function_calls>"},
+    // kolibri1: the Kolibri template's no-reasoning system sentence (see the
+    // reasoning table above) — placed before the hermes row, which the same
+    // template ALSO matches (its tool preamble wraps calls in bare
+    // <tool_call>); the plugin registers the kolibri1 NAME over the Hermes
+    // class (aleph-alpha-inference __init__.py:50-54), so detection must
+    // resolve to that name, not to hermes, for name parity.
+    {"kolibri1",
+     "Reasoning is disabled. Proceed straight to answering"},
     {"longcat", "<longcat_tool_call>"},
     {"deepseek_v3", "<｜tool▁calls▁begin｜>"},
     {"deepseek_v32", "<｜DSML｜function_calls>"},
