@@ -1,3 +1,38 @@
 # Vendored Triton AOT artifacts are generated code (embedded cubins): collapse
 # in diffs/review and exclude from language stats. Regen: scripts/regen-triton-aot.sh
 src/vt/cuda/triton_aot_vendored/** linguist-generated=true
+
+# ---------------------------------------------------------------------------
+# Line endings.
+#
+# Several checkers compare file content as EXACT BYTES, so a CRLF checkout
+# makes them fail on content that is correct. The worst case is
+# `_archive_evidence_matches_source` in scripts/issue_records.py: it splits the
+# frozen archive on a newline byte and requires the raw bytes at a declared
+# line to equal evidence quoted in an _intake issue, but that quote is
+# normalised through `normalize_body`, which strips the carriage return. On a
+# CRLF checkout the two differ by exactly one CR, so
+# `agent-issue-index.py --refresh` can never pass -- permanently, and for a
+# reason that reads like a bad record rather than a bad environment.
+#
+# Measured scope, not a guess: a `core.autocrlf=true` clone + checkout of this
+# revision was compared against the LF worktree. The record surface is wider
+# than *.md -- .agents/completed/*.csv manifests, .agents/evidence/** JSON and
+# stdout captures, .agents/specs/*.log and *.patch, and .agents/scripts/*.sh /
+# *.py all arrived CRLF while the .md rows stayed LF. There are ZERO binary
+# blobs under .agents/ or scripts/ (2488 and 313 files scanned), so a
+# directory-wide text rule is safe; and there are ZERO tracked text blobs
+# outside docs/bench-evidence that contain \r\n, so this policy normalises
+# nothing that exists today -- it only stops the class from arriving.
+* text=auto eol=lf
+
+# Captured bench evidence, where a CR is part of the recorded artifact and must
+# survive verbatim. Pinned directory-wide rather than file-by-file: the tree
+# carries more CR-bearing text logs than the three files that contain \r\n
+# (progress-bar carriage returns in limb3-strict-gate and q4km-neartie logs),
+# and any of them committed from an autocrlf checkout would be rewritten.
+docs/bench-evidence/** -text
+
+# Parity goldens are fixture bytes -- .npy/.i32/.raw tensors and generated
+# manifests -- never line-ending-normalised.
+tests/parity/goldens/** -text
