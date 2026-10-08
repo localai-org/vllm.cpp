@@ -267,7 +267,7 @@ every element the loader walks:
   `Split(pattern={Regex: "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"}, behavior="Isolated", invert=false)`
   followed by `ByteLevel(add_prefix_space=false, trim_offsets=true,
   use_regex=false)` — the same pipeline shape every recognized Qwen-family
-  checkpoint ships (the walk at tokenizer.cpp:459-470 accepts it).
+  checkpoint ships (the walk at tokenizer.cpp:469-480 accepts it).
 - `normalizer`: null. `post_processor` and `decoder`: `ByteLevel`
   (add_prefix_space=true, use_regex=true) — the standard Qwen shape, already
   accepted.
@@ -280,11 +280,11 @@ every element the loader walks:
 
 ### The refusal site and the corrected diagnosis
 
-- Refusal site: `DetectPattern` (src/vllm/tokenizer/tokenizer.cpp:447-511)
+- Refusal site: `DetectPattern` (src/vllm/tokenizer/tokenizer.cpp:457-527)
   recognizes a Split regex by WHOLE-PATTERN byte equality against verbatim
-  constants (:494-506) plus one `\p{N}{1,3}` substring heuristic (:507);
+  constants (:504-513) plus one `\p{N}{1,3}` substring heuristic (:524);
   anything else hits
-  `Fail("unrecognized pre-tokenizer split regex: " + re)` at :510.
+  `Fail("unrecognized pre-tokenizer split regex: " + re)` at :527.
 - Measured diff (2026-10-08, character-level difflib over the decoded
   pattern): the Kolibri-1 regex is byte-identical to `kClassicQwen2Regex`
   (tokenizer.cpp:27-28) except ONE 3-byte insert — the number alternative
@@ -304,7 +304,7 @@ every element the loader walks:
 ### Design
 
 - Add one verbatim constant `kClassicQwen2N1Regex` beside the existing
-  four (tokenizer.cpp:25-41), transcribed from the checkpoint, and return
+  four (tokenizer.cpp:25-51), transcribed from the checkpoint, and return
   `SplitPattern::kQwen2Classic` for it in `DetectPattern`, placed with the
   other exact matches BEFORE the `\p{N}{1,3}` heuristic.
 - Why mapping onto `kQwen2Classic` is exact, not approximate: `{1}` is the
@@ -316,11 +316,11 @@ every element the loader walks:
   `\p{N}`, ` ?[^\s\p{L}\p{N}]+[\r\n]*`, and the three whitespace rules.
   The extension is RECOGNITION-ONLY; no scanner code changes.
 - Rejected: textual canonicalization of `\p{N}{1}` to `\p{N}` before the
-  equality checks (the CR/LF canonicalization at tokenizer.cpp:479-493 is
+  equality checks (the CR/LF canonicalization at tokenizer.cpp:481-503 is
   the precedent shape). A textual rewrite can corrupt a character class
   that contains a literal `{1}` (e.g. `[\p{N}{1}]`), and this file's own
   rule is "recognition is by whole pattern, never by a substring that a
-  sibling shares" (tokenizer.cpp:497-505). An exact-match constant cannot
+  sibling shares" (tokenizer.cpp:514-522). An exact-match constant cannot
   change any other model's recognition.
 - Rejected: a general regex compiler for the Split pattern. Out of scope
   for this unit; the engine deliberately hand-implements each recognized
@@ -343,7 +343,7 @@ every element the loader walks:
 
 ### Tests (red-first)
 
-Rework the W1 refusal test case (tests/vllm/models/test_kolibri1.cpp:750-783,
+Rework the W1 refusal test case (tests/vllm/models/test_kolibri1.cpp:754-849,
 live-gated on the real model dir) into the R7 encode test:
 
 1. RED (before the fix): loading the real tokenizer.json throws

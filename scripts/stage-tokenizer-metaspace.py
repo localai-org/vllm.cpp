@@ -6,7 +6,7 @@
 # WHY: our C++ engine's LoadedEngine::FromModelDir loads the tokenizer from
 # `tokenizer.json` (tok::Tokenizer::FromHfJson), and our parser requires a
 # non-null pre_tokenizer and rejects a non-empty normalizer Sequence
-# (src/vllm/tokenizer/tokenizer.cpp:283,345). Yi (Yi-1.5-*) ships a tokenizer.json
+# (src/vllm/tokenizer/tokenizer.cpp:293,355). Yi (Yi-1.5-*) ships a tokenizer.json
 # whose whitespace handling is a normalizer Sequence [Replace " "->"▁"] with a NULL
 # pre_tokenizer; Yi-Coder-* and internlm3-8b-instruct ship ONLY a SentencePiece
 # `tokenizer.model` with NO tokenizer.json at all. Either way FromModelDir cannot

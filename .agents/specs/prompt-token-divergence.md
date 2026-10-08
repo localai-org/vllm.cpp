@@ -114,7 +114,7 @@ STAGED copy the server read).
    tokenizer under every wrong pattern it likewise always predicts 1024, never
    915.
 7. **Not Unicode normalisation.** The checkpoint declares `normalizer: NFC` and
-   `tokenizer.cpp:510-513` records the deviation that we accept it and do not
+   `tokenizer.cpp:527-530` records the deviation that we accept it and do not
    apply it. Every one of the 48 prompts is ALREADY NFC, so the deviation is
    inert here. (It is still owed: a client that sends non-NFC text gets a
    different tokenization from HF. The tokenizer parity goldens feed it no
@@ -296,7 +296,7 @@ sets `VLLM_CPP_SERVER=OFF`.
   `tests/parity/goldens/tokenizer_qwen36/corpus.txt`
   ([#2948](https://github.com/mudler/vllm.cpp/issues/2948)); the corpus now
   carries **687** marks, and the aarch64 lane executes them.
-- The NFC deviation at `src/vllm/tokenizer/tokenizer.cpp:510-513` is accepted
+- The NFC deviation at `src/vllm/tokenizer/tokenizer.cpp:527-530` is accepted
   rather than applied. Neither the golden corpus nor any other gate feeds it
   non-NFC text, so the deviation is unexercised rather than passing. **This is
   deliberate in the added entries too**: every one is NFC-stable, so they probe

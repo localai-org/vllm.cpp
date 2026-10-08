@@ -19791,7 +19791,7 @@ vllm-bench: failed: tokenizer: unsupported tokenizer.ggml.pre "llama4"
 ```
 
 The file carries `tokenizer.ggml.model = gpt2` (accepted) and
-`tokenizer.ggml.pre = llama4`, refused at `src/vllm/tokenizer/tokenizer.cpp:749`.
+`tokenizer.ggml.pre = llama4`, refused at `src/vllm/tokenizer/tokenizer.cpp:766`.
 llama.cpp routes `llama4` to `LLAMA_VOCAB_PRE_TYPE_GPT4O`, `clean_spaces = false`
 (`src/llama-vocab.cpp:2294-2299`), whose regex pair (`:428-434`) is neither our
 `kLlama3` nor either `kQwen2`. So this is a genuinely missing pre-tokenizer, not

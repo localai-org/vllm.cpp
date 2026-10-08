@@ -58,9 +58,9 @@ In scope:
 - The interning decision described under `## Design`, and the load-time refusal
   it needs, on **both** load surfaces. `merge_ranks_` is built from
   `tokenizer.json` by `src/vllm/tokenizer/tokenizer.cpp::FromHfJson`
-  (`InsertMerge` at `src/vllm/tokenizer/tokenizer.cpp:680`) and from a GGUF's
+  (`InsertMerge` at `src/vllm/tokenizer/tokenizer.cpp:697`) and from a GGUF's
   `tokenizer.ggml.merges` by `src/vllm/tokenizer/tokenizer.cpp::FromGguf`
-  (`src/vllm/tokenizer/tokenizer.cpp:741`, the same `InsertMerge` at `:864`).
+  (`src/vllm/tokenizer/tokenizer.cpp:758`, the same `InsertMerge` at `:864`).
   Both reach the same table and the same `BpeMerge`, so the refusal has to be
   written once where the table is built and gated on both. `FromGguf` is already
   gated: `tests/vllm/test_bpe.cpp` builds a zero-tensor GGUF and loads it
@@ -218,8 +218,8 @@ core, which is itself the finding:
 `src/vllm/tokenizer/tokenizer.cpp::EncodePlainSp` calls the same `BpeMerge`, and
 its pretokenization is Metaspace, not the split regex. When `metaspace_split_`
 is false it calls `encode_piece` on the whole input
-(`src/vllm/tokenizer/tokenizer.cpp:1005-1007`). Two shipped families are in that
-state: `src/vllm/tokenizer/tokenizer.cpp:566` hardcodes `false` for the Gemma
+(`src/vllm/tokenizer/tokenizer.cpp:1022-1024`). Two shipped families are in that
+state: `src/vllm/tokenizer/tokenizer.cpp:583` hardcodes `false` for the Gemma
 metaspace layout, and the committed Mistral golden
 `tests/parity/goldens/tokenizer_mistral/tokenizer.json` declares
 `"split": false` in its own `pre_tokenizer`.
@@ -325,7 +325,7 @@ selects this version. The implementing row records the version it read.
 | `mod.rs:9`, `model.rs:19` identifier-keyed `MergeMap` | `MergeRanks = unordered_map<string, int32_t>` in `include/vllm/tokenizer/bpe.h` | an identifier-pair-keyed table built at load |
 | `MergeKey` in `src/vllm/tokenizer/bpe.cpp`, deleted by this row | one `std::string` per probe | deleted; there is no key to build |
 | `model.rs:180-189` `MergeTokenOutOfVocabulary` | no rule; the failure appears per request in `src/vllm/tokenizer/tokenizer.cpp::EncodePlain` | refused at load, naming the missing token, on `FromHfJson` AND `FromGguf` |
-| `model.rs:169-173`, `:186` `new_token = format!("{}{}", a, &b[prefix_len..])` | no counterpart: the `MergeKey` this row deletes concatenated `a` and `b` whole | still whole. `prefix_len` is `continuing_subword_prefix.len()`, and `src/vllm/tokenizer/tokenizer.cpp:624-631` already REFUSES a non-empty `continuing_subword_prefix` at load, so `prefix_len` is 0 on every checkpoint we accept and the term is inert for us. Port the concatenation without it, and do not silently drop the refusal that makes that legal |
+| `model.rs:169-173`, `:186` `new_token = format!("{}{}", a, &b[prefix_len..])` | no counterpart: the `MergeKey` this row deletes concatenated `a` and `b` whole | still whole. `prefix_len` is `continuing_subword_prefix.len()`, and `src/vllm/tokenizer/tokenizer.cpp:641-648` already REFUSES a non-empty `continuing_subword_prefix` at load, so `prefix_len` is 0 on every checkpoint we accept and the term is inert for us. Port the concatenation without it, and do not silently drop the refusal that makes that legal |
 | `model.rs:382-460` `merge_word` | `src/vllm/tokenizer/tokenizer.cpp::EncodePlainSp`'s symbol builder | unchanged in behaviour, emitting identifiers |
 | `model.rs:475-496` word cache | absent | still absent, and out of scope |
 
@@ -701,7 +701,7 @@ prove after.
    `src/vllm/tokenizer/tokenizer.cpp::FromHfJson` and once through
    `src/vllm/tokenizer/tokenizer.cpp::FromGguf`, whose
    `tokenizer.ggml.merges` reaches the same `InsertMerge` at
-   `src/vllm/tokenizer/tokenizer.cpp:864`. `tests/vllm/test_bpe.cpp` already
+   `src/vllm/tokenizer/tokenizer.cpp:881`. `tests/vllm/test_bpe.cpp` already
    builds a zero-tensor GGUF and loads it through `FromGguf`, so the GGUF case
    is one more kv block in an existing fixture, not new machinery. Also assert
    that the existing well-formed GGUF still loads, because that is the
