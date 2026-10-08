@@ -25,9 +25,10 @@ production registry's loaded weights via the new
 `Kolibri1LoadedModelWeights` accessor), and `test_kolibri1_tt_b2i` (host-side
 staging gates under ctest with no card + the env-gated device leg).
 
-Device leg PASS on the P150 (non-pin tt-metal d20b8e27f29 + gdn stub; the
-pin cannot run device ops on KMD 2.10.1-pre / fw 19.7.1 — pin bump owed,
-NEEDS_DECISION for the operator): real fp8 checkpoint through
+Device leg PASS on the P150 on BOTH builds — the pin build against the
+fresh `/tmp/pin-build` lib64 (smoke `SMOKE_RC=0`, 36,880/36,880 assertions,
+86.7 s) and the non-pin tt-metal d20b8e27f29 + gdn stub (73.9 s): real fp8
+checkpoint through
 `ModelRegistry::Load` (18.8 s); resident plan 3,311,163,520 B (3.084 GiB,
 753 tensors) staged as 1103 operands in 2.54 s on chip 0 (dram_free_after
 30,833,363,968 B of 34,178,731,008 B); the full-model single-device refusal
@@ -49,6 +50,7 @@ kernel-internal); `agent-preflight.sh --staged` rc=0. Evidence:
 `docs/bench-evidence/kolibri1-tt-b2i-smoke-20261008.md`.
 
 Remains owed (not this slice): the greedy decode (the slice's completion
-condition), the token gate, the bench anchor, B2b-ii, and the tt-metal pin
-bump. The #1486-class `env -i` segfault is filed separately as
+condition), the token gate, the bench anchor, B2b-ii, and the durable
+fresh-lib64 copy into the pin tree (the earlier pin device-op hangs were
+the stale in-tree libs, not the pin source — no pin bump owed). The #1486-class `env -i` segfault is filed separately as
 `ISSUE-LOCAL-01M4D5W0HSEPNP26AT30CEP874` (known residue, not a blocker).

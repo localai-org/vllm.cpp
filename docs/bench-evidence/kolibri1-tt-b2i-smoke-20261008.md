@@ -62,48 +62,70 @@ Resolution used here:
   non-pin build links through `/tmp/kolibri-tt-gdn-stub.o`, a no-op
   definition of the one mangled symbol. The GDN decode ops are not exercised
   by this row's gates (no GDN op runs in B2b-i; the wave-A/B1 GDN suites are
-  host-side policy tests). Relink helper: `/tmp/kolibri-b2i-relink.sh`.
+  host-side policy tests). Relink helper: `/tmp/kolibri-b2i-relink.sh`. The
+  non-pin build is one of TWO device legs run for this slice; the pin build
+  against the fresh libs is the other (§ 2, § 4).
 
-## 2. Why the device leg runs on the non-pin tt-metal (NEEDS_DECISION: pin)
+## 2. The stale-lib64 root cause: pin device ops hang with the in-tree
+   libs, green with the fresh rebuild
 
 The spec pins the tt-metal pin tree (`6449cf13f7b`) as the build reference.
-Measured today, the pin build's device runtime cannot execute a device op on
-this box's current driver/firmware, while the non-pin tree can:
+Measured today, the pin build running the pin tree's OWN in-tree
+`build_Release/lib64` (stale: built 2026-09-25, predating the pin HEAD
+6449cf13f7b of 2026-09-29) cannot execute device ops on this box, while the
+fresh rebuild of the SAME pin source and the non-pin tree both can:
 
-| case (our `test_tenstorrent_backend`) | pin build | non-pin build |
-|---|---|---|
-| `kCastBf16 / kCastF32 round-trip` | SUCCESS (66/66 assertions) | SUCCESS |
-| `kMatmul matches a host F32 reference` | HANGS — real-time profiler `Device 0 sync sample N/100 timed out after 2000ms`, 3 consecutive timeouts, killed by the script timeout → FAILURE | SUCCESS |
-| `kEmbedding matches a host F32 reference` | hangs the board the same way | SUCCESS |
-| 753-operand resident staging (B2b-i plan) | hangs the board the same way | completes (below) |
+| case (our `test_tenstorrent_backend`) | pin + in-tree stale libs | pin + fresh `/tmp/pin-build` libs | non-pin build |
+|---|---|---|---|
+| `kCastBf16 / kCastF32 round-trip` | SUCCESS (66/66) | SUCCESS (66/66, rc=0) | SUCCESS |
+| `kMatmul matches a host F32 reference` | HANGS — real-time profiler `Device 0 sync sample N/100 timed out after 2000ms`, 3 consecutive timeouts → FAILURE | SUCCESS (2/2, rc=0) | SUCCESS |
+| `kEmbedding matches a host F32 reference` | hangs the board the same way | SUCCESS (3/3, rc=0) | SUCCESS |
+| 1103-operand resident staging (this slice) | hangs the board the same way | completes (§ 4) | completes (§ 4) |
 
-Board-death signature under the pin build (dmesg):
+Board-death signature under the stale in-tree libs (dmesg):
 `tenstorrent 0002:01:00.0: Timeout waiting for ARC response` /
 `Timeout waiting for space in ARC message queue` → `AER: ... can't recover` →
 `device recovery failed` → PCI rescan; `/dev/tenstorrent/0` disappears (only
-`by-id/` remains). The pin build ran the 27B decode ledger green on 2026-09-30
-(`.agents` TT evidence), so the breakage is new between then and today — a
-driver/firmware/board-state change (KMD 2.10.1-pre, fw 19.7.1), not a source
-regression the pin controls. The pin's second build dir `build_release_script`
-(2026-09-29) is separately broken (undefined `tt::umd::Cluster::
-read_from_device/write_to_device`, libtracy conflict) and was not used.
+`by-id/` remains). The same stale libs also kill the suite with rc=134
+backtraces inside `libtt_metal.so`. The pin ran the 27B decode ledger green on
+2026-09-30 with libs that matched the then-current source; the in-tree libs
+went stale when the pin source advanced past them (the `use_mcast`
+`chunk_gated_delta_rule` signature, § 1). The pin's second build dir
+`build_release_script` (2026-09-29) is separately broken (undefined
+`tt::umd::Cluster::read_from_device/write_to_device`, libtracy conflict) and
+was not used.
 
-The pin also has a teardown defect independent of the hang: every pin binary
-aborts at exit in `MetalContext::destroy_all_instances` (std::filesystem
-abort, the #1486 class) AFTER printing `Status: SUCCESS`, and that abort
-poisons the board — the next open gets `Setting power state failed` +
-`Read 0xffffffff ... PCIeHangError`. Pin runs therefore require a reset
-before and after, and suite success is judged by `Status: SUCCESS`, never by
-the exit code alone (the teardown abort exits 134).
+Fresh-rebuild runs of the SAME pin source (ldd confirms the
+`/tmp/pin-build/lib64` libs load; `LD_LIBRARY_PATH` beats the binary's
+`DT_RUNPATH`): the first gate attempt (13:02) hit two rc=134 failures
+(embedding, matmul) with no `Status: SUCCESS` line — residual board state
+after the morning's stale-lib board deaths; the per-case `tt-smi -r 0`
+recovery in the gate script cleared it, and the full rerun (13:24-13:25)
+was green on all three cases with rc=0 (logs
+`/tmp/pin-gate-{embedding,matmul,cast}.log`). The B2b-i device smoke on the
+pin build against the fresh libs then PASSED end-to-end (13:35-13:37):
+`SMOKE_RC=0`, 36,880/36,880 assertions, `Status: SUCCESS` (log
+`/tmp/pin-smoke-b2i.log`).
 
-**Decision recorded:** the compile gate stays on the pin source (via the
-fresh `/tmp/pin-build` lib64); the device leg runs on the non-pin tree
-(`d20b8e27f29`, 2026-09-18 build — the stack the project's earlier recorded
-device evidence ran on), linked with the gdn stub. **NEEDS_DECISION for the
-operator: bump or replace the tt-metal pin** — the pinned source cannot run
-device ops on KMD 2.10.1-pre / fw 19.7.1 as of 2026-10-08. Until the pin is
-reconciled, every future B2b device leg needs this non-pin deviation recorded
-the same way.
+**Conclusion: the hang was the stale in-tree libs — not the pin source and
+not the KMD 2.10.1-pre / fw 19.7.1 driver/firmware pair.** The pinned source
+runs device ops on this box once its libs are rebuilt fresh. NO tt-metal pin
+bump is owed. What IS owed: the durable copy of the fresh lib64 into the pin
+tree's own `build_Release/lib64` (§ 1) — an operator decision pending.
+
+The pin also has a teardown defect independent of the libs: pin binaries
+have aborted at exit in `MetalContext::destroy_all_instances`
+(std::filesystem abort, the #1486 class) AFTER printing `Status: SUCCESS` in
+earlier runs today (rc=134). The final fresh-lib gate and smoke both exited
+rc=0. Pin runs therefore reset the card before and after as a habit, and
+suite success is judged by `Status: SUCCESS`, never by the exit code alone.
+
+**Decision recorded:** the compile gate AND the device legs both run on the
+pin source — the device legs against the fresh `/tmp/pin-build` lib64
+(proven green above), with the non-pin build (`d20b8e27f29`, 2026-09-18
+build, gdn stub) kept as the second, independent device leg. The stale
+in-tree lib64 is the named prerequisite (§ 1); its durable replacement is an
+operator decision. No pin bump, no non-pin deviation to record.
 
 ## 3. Host-side gates (ctest, no card)
 
@@ -207,6 +229,30 @@ op legs: 10.5 s embedding, 3.0 s GEMM for 94 MFLOP — a non-tensor-core
 fallback path for tiny M, not the production decode shape). The whole leg:
 73.9 s (load 18.8 / plan 0.001 / stage 2.54 / verify 14.4 / op 16.0).
 
+The same device bring-up case was then run on the PIN build
+(`/tmp/build-kolibri-b2i`, built against the pin source via the fresh
+`/tmp/pin-build` lib64) under the same lock/reset/cache discipline
+(13:35-13:37):
+
+```
+VT_KOLIBRI1_TT_B2I_PROGRESS=1 VT_KOLIBRI1_TT_B2I_MODEL=/mnt/models/Aleph-Alpha/Kolibri-1 \
+  /tmp/build-kolibri-b2i/tests/test_kolibri1_tt_b2i -tc="*device bring-up*"
+```
+
+```
+[kolibri1-tt-b2i] staged 1103 operands (350 fp8 / 353 bf16 / 400 f32) = 3311163520 B in 14.84 s
+[kolibri1-tt-b2i] readback verified 350 fp8 operands (+grids) / 353 bf16 / 50 f32 in 14.2 s — mismatches=0
+[kolibri1-tt-b2i] embedding: 15360 elements, mismatches=0 (9411.8 ms)
+[kolibri1-tt-b2i] q_proj GEMM: device 2164.7 ms vs CPU 83.9 ms; bit-exact 7285/36864; max_ulp=1055 max_abs=2.441e-03 max_rel=7.726e+01 max_err_ratio=1.375e+00 (per 2^-8*terms); envelope_violations=0
+[kolibri1-tt-b2i] device leg PASS in 86.7 s total (load 21.2 / plan 0.001 / stage 14.84 / verify 14.2 / op 14.0)
+[doctest] assertions: 36880 | 36880 passed | 0 failed |
+[doctest] Status: SUCCESS!
+```
+
+`SMOKE_RC=0` (log `/tmp/pin-smoke-b2i.log`). Same assertion count, same
+byte accounting, same envelope result as the non-pin leg — the two builds
+agree on the staged bytes and the device-op numerics.
+
 ## 5. The q_proj GEMM comparison — method stated before running, and the
 falsified premise
 
@@ -267,8 +313,10 @@ numerics within the stated envelope.
   without `TT_METAL_ROOT`. Consequence in this row's gates:
   `test_kolibri1_dequant_cache` fails 1/7 under TT builds (host-side run,
   no card involved in the failing case). Known residue, pre-existing.
-- **Pin teardown poisoning** (§ 2): pin binaries abort at exit after
-  `Status: SUCCESS` and poison the board; always reset between pin runs.
+- **Pin teardown poisoning** (§ 2): pin binaries have aborted at exit after
+  `Status: SUCCESS` (the #1486 class, rc=134) in earlier runs today; the
+  final fresh-lib gate and smoke both exited rc=0. Always reset between pin
+  runs regardless.
 - **Shared-box contention:** many concurrent agent sessions on this host
   reset the card under `flock` (some without). Recovery procedure that worked
   all day: kill stuck procs by pid; under `$HOME/gpu.lock` loop
@@ -286,6 +334,8 @@ numerics within the stated envelope.
 | Host-side staging cases, TT build, no card (`test_kolibri1_tt_b2i`) | PASS — 6/6 cases, 204 assertions, `Status: SUCCESS!` |
 | CPU-only build, `ctest -R kolibri` | PASS — 6/6: `test_kolibri1` 3.25 s, `test_kolibri1_dequant` 0.01 s, `test_kolibri1_dequant_cache` 0.14 s, `test_kolibri1_w2` 267.35 s, `test_kolibri1_w3` 2979.94 s, `test_kolibri1_decode_bench` 292.91 s (total 3543.61 s) |
 | Device leg (non-pin build, P150) | PASS — 36880/36880 assertions, `Status: SUCCESS!`, 73.9 s |
+| Pin health trio (pin build + fresh `/tmp/pin-build` libs, P150) | PASS — embedding 3/3, matmul 2/2, cast 66/66, rc=0 each (13:24-13:25, `/tmp/pin-gate-*.log`) |
+| Device leg (pin build + fresh libs, P150) | PASS — 36880/36880 assertions, `Status: SUCCESS!`, SMOKE_RC=0, 86.7 s (13:35-13:37, `/tmp/pin-smoke-b2i.log`) |
 | `scripts/check-agent-record` | PASS — rc=0 (`agent record OK: ENGINE=179 MODEL=384 QUANT=87 KERNEL=60 BACKEND=90 ANCHOR-ROT=0`) |
 | `scripts/check-env-doc` | PASS — rc=0 both directions (457 production vars documented or classified; 215 doc-table vars read; `VT_KOLIBRI1_TT_B2I_PROGRESS` allowlisted as kernel-internal) |
 | `scripts/agent-preflight.sh --staged` | PASS — rc=0 at commit time; 5 standard host-config gates SKIPPED with reasons (check-arm-isa-build, check-cpu-isa-build, check-cuda-fat-gencode, check-pr-size, check-triton-aot-multiarch) |
@@ -298,5 +348,7 @@ numerics within the stated envelope.
   production bench anchor come after it, per the spec's gate ordering.
 - B2b-ii (streaming MoE): slot buffers, router readback → host remap → fetch
   executor, per the addendum.
-- The durable copy of the fresh `_ttnncpp.so` into the pin tree's
-  `build_Release/lib64` (§ 1); the tt-metal pin bump decision (§ 2).
+- The durable copy of the fresh `_ttnncpp.so` (the whole fresh lib64) into
+  the pin tree's `build_Release/lib64` (§ 1) — an operator decision pending.
+  NO tt-metal pin bump is owed: the stale in-tree libs were the root cause of
+  the pin device-op hangs (§ 2).

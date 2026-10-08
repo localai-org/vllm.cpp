@@ -465,10 +465,12 @@ fresh `/tmp/pin-build` lib64; the resident non-expert slice (3,311,163,520 B
 verification of all 1103 operands, and one device op (embedding bit-exact +
 layer-0 q_proj within the stated envelope) is verified against the CPU row —
 evidence `docs/bench-evidence/kolibri1-tt-b2i-smoke-20261008.md`. The device
-leg ran on the non-pin tt-metal: the pin cannot run device ops on KMD
-2.10.1-pre / fw 19.7.1 as of today (pin bump owed, § Owed). Slice completion
-(one greedy decode on the card), B2b-ii, and the token gate / bench anchor
-remain owed.
+leg is green on BOTH builds: the pin build against the fresh `/tmp/pin-build`
+libs (smoke `SMOKE_RC=0`, 36,880/36,880 assertions) and the non-pin build +
+gdn stub. The earlier pin device-op hangs were the pin tree's STALE in-tree
+`build_Release/lib64`, not the pin source or the KMD/fw pair — no pin bump is
+owed (§ Owed). Slice completion (one greedy decode on the card), B2b-ii, and
+the token gate / bench anchor remain owed.
 
 ## Git integration
 
@@ -492,11 +494,15 @@ One pull request for wave A (spec + implementation together), branched from
   owed. The non-pin tree's lib64 is equally stale; its build links through
   a no-op stub object for the one GDN symbol (not exercised by this row's
   gates).
-- tt-metal pin bump: the pinned source (6449cf13f7b) cannot run device ops
-  on KMD 2.10.1-pre / fw 19.7.1 as of 2026-10-08 (cast case green; matmul,
-  embedding, and the 753-operand staging hang the board; dmesg ARC timeout →
-  AER → recovery failed → PCI rescan). B2b device legs run on the non-pin
-  tree (d20b8e27f29) until the pin is reconciled.
+- Stale pin lib64 (NOT a pin bump): the pin tree's in-tree
+  `build_Release/lib64` (2026-09-25) predates the pin source (6449cf13f7b,
+  2026-09-29) and hangs/crashes device ops (dmesg ARC timeout → AER →
+  recovery failed → PCI rescan). A fresh out-of-source rebuild at
+  `/tmp/pin-build` links AND runs green on this KMD 2.10.1-pre / fw 19.7.1
+  box (health trio rc=0; B2b-i smoke `SMOKE_RC=0`, 2026-10-08 — evidence
+  `docs/bench-evidence/kolibri1-tt-b2i-smoke-20261008.md` §2). The durable
+  copy of the fresh lib64 into the pin tree's own `build_Release/lib64`
+  remains owed — an operator decision pending.
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
 - Single-P150 expert streaming: B1 planner spec + implementation (design
   section above), then B2/B3. The NVMe backing tier is a pluggable leaf
