@@ -244,18 +244,25 @@ std::vector<FixtureTensor> TinyFixture(const TinyShape& s = {}) {
   t.push_back({"lm_head.weight", "BF16", {s.vocab, s.hidden},
                Bf16Filled({s.vocab, s.hidden}, 0x3F80)});
   t.push_back({"model.norm.weight", "BF16", {s.hidden},
-               Bf16Filled({s.hidden}, 0x3F80)});
+               Bf16Filled({s.hidden}, 0x3F00)});  // 0.5, the final norm
+  // The four sandwich norms and the per-head q/k norms carry DISTINCT bf16
+  // sentinel values, so the host-side op census can identify WHICH weight a
+  // recorded RmsNorm consumed (a wrong-weight mutation changes the sentinel,
+  // not just the pointer). 1.0 / 2.0 / 3.0 / 4.0 / 0.25 / 0.3125.
+  const std::pair<const char*, uint16_t> norms[] = {
+      {"input_layernorm", 0x3F80},           {"post_attn_norm", 0x4000},
+      {"post_attention_layernorm", 0x4040},  {"post_ffn_norm", 0x4080},
+  };
   for (int64_t l = 0; l < 2; ++l) {
     const std::string base = "model.layers." + std::to_string(l) + ".";
-    for (const char* norm : {"input_layernorm", "post_attn_norm",
-                             "post_attention_layernorm", "post_ffn_norm"}) {
+    for (const auto& [norm, word] : norms) {
       t.push_back({base + norm + ".weight", "BF16", {s.hidden},
-                   Bf16Filled({s.hidden}, 0x3F80)});
+                   Bf16Filled({s.hidden}, word)});
     }
     t.push_back({base + "self_attn.q_norm.weight", "BF16", {s.head_dim},
-                 Bf16Filled({s.head_dim}, 0x3F80)});
+                 Bf16Filled({s.head_dim}, 0x3E00)});
     t.push_back({base + "self_attn.k_norm.weight", "BF16", {s.head_dim},
-                 Bf16Filled({s.head_dim}, 0x3F80)});
+                 Bf16Filled({s.head_dim}, 0x3E80)});
     AppendProjection(t, base + "self_attn.q_proj", s.heads * s.head_dim,
                      s.hidden);
     AppendProjection(t, base + "self_attn.k_proj", s.kv_heads * s.head_dim,
@@ -562,12 +569,409 @@ TEST_CASE("kolibri1 TT B2b-i: the resident projection byte math matches the "
   CHECK(fp8_bytes * 2 == 2 * ManifestResidentProjectionFp8Bytes());
 }
 
+// ---- HOST: the op census (a recording stand-in for the Tenstorrent queue) --
+//
+// The forward refuses a non-Tenstorrent queue by name, and the only
+// production-seam consumer below was the card-gated device leg — so a wrong
+// norm weight, a silenced refusal, or a deleted registry arm all left every
+// host gate green. This census closes that: a host-memory backend registered
+// under kTENSTORRENT (the test_resident_weight_host_addressable.cpp pattern,
+// in the TT slot) plus recording op providers over the EXISTING
+// vt::OpProvider seam let the production forward run end-to-end on the host
+// while the census records which ops fired, in what order, consuming which
+// norm weight. No device kernel executes; no parallel forward path exists —
+// the recorded ops are the forward's own vt op calls.
+//
+// The recording providers register at priority 100 (above every native
+// kernel) under one test-only provider name, and the guard DISABLES that
+// name on scope exit, so on a card box the device leg selects the native
+// kernels exactly as landed.
+
+namespace {
+
+struct CensusRecord {
+  const char* op;   // stable op tag
+  uint16_t weight;  // first bf16 word of the weight operand (0 when none)
+  bool residual;    // the norm carried the residual stream
+};
+
+std::vector<CensusRecord>& Census() {
+  static std::vector<CensusRecord> c;
+  return c;
+}
+
+uint16_t CensusBf16Word(const vt::Tensor& t) {
+  if (t.data == nullptr || vt::SizeOf(t.dtype) != 2) return 0;
+  return static_cast<const uint16_t*>(t.data)[0];
+}
+
+// The queue-guard fixture: one host-memory backend + platform in the
+// kTENSTORRENT slot for the scope, recording providers enabled, the previous
+// registration restored afterwards (a card box keeps its real backend and
+// its real kernels; TenstorrentPresent() below excludes the stand-in so a
+// card-less box keeps skipping the device leg exactly as before).
+class CensusTTQueue final : public vt::Backend {
+ public:
+  void* Alloc(size_t bytes) override {
+    // Zeroed, so the router logits the MoE block downloads are deterministic
+    // zeros and the host routing is stable.
+    return std::calloc(1, bytes == 0 ? 1 : bytes);
+  }
+  void Free(void* p) override { std::free(p); }
+  void Memset(vt::Queue&, void* p, int v, size_t n) override {
+    std::memset(p, v, n);
+  }
+  void Copy(vt::Queue&, void* dst, const void* src, size_t n) override {
+    std::memcpy(dst, src, n);
+  }
+  vt::Queue CreateQueue() override {
+    return vt::Queue{vt::Device{vt::DeviceType::kTENSTORRENT, 0}, nullptr};
+  }
+  bool UnifiedMemory() const override { return true; }
+  bool DeviceMemoryIsHostAddressable() const override { return true; }
+};
+
+vt::Backend* CensusTTBackendPtr() {
+  static CensusTTQueue backend;
+  return &backend;  // NOLINT
+}
+
+class CensusTTPlatform final : public vllm::platforms::Platform {
+ public:
+  vt::DeviceType device_type() const override {
+    return vt::DeviceType::kTENSTORRENT;
+  }
+  vt::Backend& backend() const override {
+    return *static_cast<CensusTTQueue*>(CensusTTBackendPtr());
+  }
+  vllm::platforms::DeviceCapability get_device_capability() const override {
+    return {10, 0};
+  }
+  std::vector<vt::DType> supported_dtypes() const override {
+    return {vt::DType::kBF16, vt::DType::kF32};
+  }
+  vllm::platforms::ResidencyPolicy residency_policy() const override {
+    return {};
+  }
+};
+
+constexpr const char* kCensusProvider = "kolibri1-tt-b2bi-census";
+
+// The recorders: one per op id the dense-resident forward can emit.
+void RecRmsNorm(vt::Queue&, vt::Tensor&, const vt::Tensor&,
+                const vt::Tensor& w, const vt::RmsNormArgs&,
+                vt::Tensor* residual) {
+  Census().push_back({"RmsNorm", CensusBf16Word(w), residual != nullptr});
+}
+void RecResidualRmsNorm(vt::Queue&, vt::Tensor&, const vt::Tensor&,
+                        const vt::Tensor&, const vt::Tensor*,
+                        const vt::Tensor& w, const vt::ResidualRmsNormArgs&,
+                        vt::Tensor*) {
+  // The fused add-norm composite folds the residual into ONE norm call; it is
+  // the same norm contract as RmsNorm(residual) with the same weight operand.
+  Census().push_back({"RmsNorm", CensusBf16Word(w), true});
+}
+void RecMatmulBT(vt::Queue&, vt::Tensor&, const vt::Tensor&,
+                 const vt::Tensor& w) {
+  Census().push_back({"MatmulBT", CensusBf16Word(w), false});
+}
+void RecEmbedding(vt::Queue&, vt::Tensor&, const vt::Tensor& table,
+                  const vt::Tensor&) {
+  Census().push_back({"Embedding", CensusBf16Word(table), false});
+}
+void RecRopeNeox(vt::Queue&, vt::Tensor&, vt::Tensor&, const vt::Tensor&,
+                 const vt::RopeArgs&) {
+  Census().push_back({"RopeNeox", 0, false});
+}
+void RecReshapeAndCache(vt::Queue&, const vt::Tensor&, const vt::Tensor&,
+                        vt::Tensor&, vt::Tensor&, const vt::Tensor&) {
+  Census().push_back({"ReshapeAndCache", 0, false});
+}
+void RecPagedAttention(vt::Queue&, vt::Tensor&, const vt::Tensor&,
+                       const vt::Tensor&, const vt::Tensor&, const vt::Tensor&,
+                       const vt::Tensor&, const vt::Tensor&,
+                       const vt::PagedAttentionArgs&) {
+  Census().push_back({"PagedAttention", 0, false});
+}
+void RecMoeSiluMul(vt::Queue&, vt::Tensor&, const vt::Tensor&,
+                   const vt::Tensor&) {
+  Census().push_back({"MoeSiluMul", 0, false});
+}
+
+void RegisterCensusOps() {
+  static const bool done = [] {
+    const auto reg = [&](vt::OpId op, void* fn) {
+      vt::RegisterOpProvider(op, vt::DeviceType::kTENSTORRENT,
+                             {kCensusProvider, 100, nullptr, fn});
+    };
+    reg(vt::OpId::kRmsNorm,
+        reinterpret_cast<void*>(static_cast<vt::RmsNormFn>(&RecRmsNorm)));
+    reg(vt::OpId::kResidualRmsNorm,
+        reinterpret_cast<void*>(static_cast<vt::ResidualRmsNormFn>(
+            &RecResidualRmsNorm)));
+    reg(vt::OpId::kMatmulBT,
+        reinterpret_cast<void*>(static_cast<vt::MatmulFn>(&RecMatmulBT)));
+    reg(vt::OpId::kEmbedding,
+        reinterpret_cast<void*>(static_cast<vt::EmbeddingFn>(&RecEmbedding)));
+    reg(vt::OpId::kRopeNeox,
+        reinterpret_cast<void*>(static_cast<vt::RopeFn>(&RecRopeNeox)));
+    reg(vt::OpId::kReshapeAndCache,
+        reinterpret_cast<void*>(static_cast<vt::ReshapeAndCacheFn>(
+            &RecReshapeAndCache)));
+    reg(vt::OpId::kPagedAttention,
+        reinterpret_cast<void*>(static_cast<vt::PagedAttentionFn>(
+            &RecPagedAttention)));
+    reg(vt::OpId::kMoeSiluMul,
+        reinterpret_cast<void*>(static_cast<vt::MoeSiluMulFn>(&RecMoeSiluMul)));
+    return true;
+  }();
+  (void)done;
+}
+
+void EnableCensusOps(bool on) {
+  for (const vt::OpId op : {vt::OpId::kRmsNorm, vt::OpId::kResidualRmsNorm,
+                            vt::OpId::kMatmulBT, vt::OpId::kEmbedding,
+                            vt::OpId::kRopeNeox, vt::OpId::kReshapeAndCache,
+                            vt::OpId::kPagedAttention, vt::OpId::kMoeSiluMul}) {
+    (void)op;
+    vt::DisableOpProvider(kCensusProvider, !on);
+  }
+}
+
+struct CensusTTGuard {
+  CensusTTGuard() {
+    RegisterCensusOps();
+    EnableCensusOps(true);
+    prev_backend_ = vt::TryGetBackend(vt::DeviceType::kTENSTORRENT);
+    vt::RegisterBackend(vt::DeviceType::kTENSTORRENT, CensusTTBackendPtr());
+    try {
+      prev_platform_ = &vllm::platforms::GetPlatform(
+          vt::DeviceType::kTENSTORRENT);
+    } catch (const std::exception&) {
+      prev_platform_ = nullptr;
+    }
+    // Register AFTER reading the previous backend (the read is the value we
+    // may restore), and register the platform only when the real one is
+    // absent (a card box keeps its real platform).
+    if (prev_platform_ == nullptr) {
+      static CensusTTPlatform platform;
+      vllm::platforms::RegisterPlatform(vt::DeviceType::kTENSTORRENT,
+                                        &platform);
+    }
+  }
+  ~CensusTTGuard() {
+    EnableCensusOps(false);
+    Census().clear();
+    if (prev_backend_ != nullptr) {
+      vt::RegisterBackend(vt::DeviceType::kTENSTORRENT, prev_backend_);
+    }
+    // prev_platform_ == nullptr leaves the stand-in platform registered: a
+    // card-less box has no TT path left to consult it (TenstorrentPresent()
+    // answers false through the backend check), and the platform registry
+    // has no unregister.
+  }
+  vt::Backend* prev_backend_ = nullptr;
+  vllm::platforms::Platform* prev_platform_ = nullptr;
+};
+
+// One layer's tiny KV caches over the census backend.
+struct CensusKv {
+  std::vector<std::shared_ptr<void>> keep;
+  std::vector<PagedKvCache> caches;
+};
+
+CensusKv MakeCensusKv(vt::Backend& be, int64_t layers) {
+  const int64_t block_size = 16;
+  const int64_t num_blocks = 8;
+  const int64_t bytes = num_blocks * 2 * block_size * 2 * 16 * 2;  // hkv=2, dh=16, bf16
+  CensusKv kv;
+  for (int64_t l = 0; l < layers; ++l) {
+    void* buf = be.Alloc(static_cast<size_t>(bytes));
+    kv.keep.emplace_back(buf, [&be](void* p) { be.Free(p); });
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = block_size;
+    c.num_kv_heads = 2;
+    c.head_size = 16;
+    kv.caches.push_back(c);
+  }
+  return kv;
+}
+
+// Runs one forward step through the PRODUCTION entry point and returns the
+// census slice it emitted.
+std::vector<CensusRecord> CensusStep(const Kolibri1Weights& w,
+                                     Kolibri1TTResidentDeviceContext& ctx,
+                                     vt::Queue& q, const std::vector<PagedKvCache>& kv,
+                                     int64_t t, int64_t ctx_before) {
+  const v1::CommonAttentionMetadata meta = OneReqMeta(t, ctx_before, 4);
+  std::vector<int32_t> positions(static_cast<size_t>(t));
+  std::iota(positions.begin(), positions.end(),
+            static_cast<int32_t>(ctx_before));
+  std::vector<int32_t> tokens(static_cast<size_t>(t), 1);
+  const size_t begin = Census().size();
+  (void)ForwardKolibri1TTResidentForward(tokens, positions, meta, kv, w,
+                                         /*multi_kv=*/nullptr, q,
+                                         /*logits_indices=*/{}, ctx);
+  return std::vector<CensusRecord>(Census().begin() +
+                                       static_cast<std::ptrdiff_t>(begin),
+                                   Census().end());
+}
+
+}  // namespace
+
+TEST_CASE("kolibri1 TT B2b-i HOST: the forward's op census — the sandwich "
+          "norms consume THEIR OWN weights in the CPU row's order, and the "
+          "routed-expert refusal fires every MoE block") {
+  CensusTTGuard guard;
+  const HfConfig config = MakeTinyConfig();
+  TempCheckpoint ckpt(TinyFixture());
+  std::vector<SafetensorsFile> shards;
+  shards.push_back(SafetensorsFile::Open(ckpt.path()));
+  const Kolibri1Weights w = LoadKolibri1Weights(shards, config);
+  vt::Backend& be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue q = be.CreateQueue();
+  auto ctx = BuildKolibri1TTResidentDeviceContext(be, q, w);
+  REQUIRE(ctx != nullptr);
+  CensusKv kv = MakeCensusKv(be, 2);
+
+  // The refusal-firing contract, HOST-SIDE (the device leg's >=
+  // layers*(1+steps) assertion, decoupled from the card): the MoE block of
+  // EVERY layer of EVERY step requests routed experts and fires the counted
+  // refusal by name.
+  Kolibri1TTResetRoutedExpertRefusalCount();
+  const std::vector<CensusRecord> prefill = CensusStep(w, *ctx, q, kv.caches,
+                                                       /*t=*/2, /*ctx=*/0);
+  const std::vector<CensusRecord> decode1 = CensusStep(w, *ctx, q, kv.caches,
+                                                       /*t=*/1, /*ctx=*/2);
+  const std::vector<CensusRecord> decode2 = CensusStep(w, *ctx, q, kv.caches,
+                                                       /*t=*/1, /*ctx=*/3);
+  CHECK(Kolibri1TTRoutedExpertRefusalCount() >=
+        2 * (1 + 2));  // layers x (prefill + 2 decode steps)
+
+  // Every step runs the IDENTICAL op sequence (decode differs only in T).
+  REQUIRE(decode1.size() == decode2.size());
+  for (size_t i = 0; i < decode1.size(); ++i) {
+    REQUIRE(decode1[i].op == decode2[i].op);
+    REQUIRE(decode1[i].weight == decode2[i].weight);
+  }
+
+  // The op set and counts for one step (2 layers, one sliding + one full,
+  // hidden 64, 4 experts): the CPU row's op-for-op mirror.
+  int embedding = 0, rope = 0, cache = 0, paged = 0, silu = 0, matmul = 0,
+      norm = 0, other = 0;
+  for (const CensusRecord& r : prefill) {
+    if (r.op == std::string("Embedding")) ++embedding;
+    else if (r.op == std::string("RopeNeox")) ++rope;
+    else if (r.op == std::string("ReshapeAndCache")) ++cache;
+    else if (r.op == std::string("PagedAttention")) ++paged;
+    else if (r.op == std::string("MoeSiluMul")) ++silu;
+    else if (r.op == std::string("MatmulBT")) ++matmul;
+    else if (r.op == std::string("RmsNorm")) ++norm;
+    else ++other;
+  }
+  CHECK(other == 0);
+  CHECK(embedding == 1);
+  CHECK(rope == 1);  // the sliding layer only (RNoPE: the full layer has none)
+  CHECK(cache == 2);
+  CHECK(paged == 2);
+  CHECK(silu == 2);
+  CHECK(matmul == 2 * 8 + 1);  // q,k,v,o + router + shared gate,up,down; lm_head
+  CHECK(norm == 2 * 6 + 1);    // 4 sandwich + q/k head norms; final norm
+
+  // IDENTITY, not just counts: the norm sequence per layer consumes each
+  // layer's OWN four sandwich weights (the fixture's distinct sentinels:
+  // input_ln 1.0, post_attn 2.0, post_attention 3.0, post_ffn 4.0) in the
+  // CPU row's order, with the per-head q/k norms (0.25 / 0.3125) between the
+  // qkv projection and attention, and the final norm (0.5) carrying the
+  // residual last. The residual-carrying norms are exactly input_ln,
+  // post_attention_layernorm, and the final norm (the fused add-norm
+  // contract); post_attn and post_ffn norm WITHOUT a residual.
+  struct ExpectedNorm {
+    uint16_t word;
+    bool residual;
+  };
+  const ExpectedNorm layer_norms[] = {
+      {0x3F80, true}, {0x3E00, false}, {0x3E80, false},
+      {0x4000, false}, {0x4040, true}, {0x4080, false},
+  };
+  const ExpectedNorm final_norm{0x3F00, true};
+  size_t n = 0;
+  for (const CensusRecord& r : prefill) {
+    if (r.op != std::string("RmsNorm")) continue;
+    const ExpectedNorm& expected =
+        n < 12 ? layer_norms[n % 6] : final_norm;
+    CAPTURE(n);
+    CHECK(r.weight == expected.word);
+    CHECK(r.residual == expected.residual);
+    if (r.weight != expected.word || r.residual != expected.residual) {
+      MESSAGE("norm record " << n << ": word=0x" << std::hex << r.weight
+                             << " residual=" << r.residual);
+    }
+    ++n;
+  }
+  REQUIRE(n == 13);
+}
+
+TEST_CASE("kolibri1 TT B2b-i HOST: the registry's kTENSTORRENT dispatch arm "
+          "resolves the dense-resident forward (dispatch identity)") {
+  CensusTTGuard guard;
+  const HfConfig config = MakeTinyConfig();
+  TempCheckpoint ckpt(TinyFixture());
+  std::vector<SafetensorsFile> shards;
+  shards.push_back(SafetensorsFile::Open(ckpt.path()));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+  const ModelRegistration& reg = ModelRegistry::Resolve(config);
+  REQUIRE(reg.architecture == "Kolibri1ForCausalLM");
+  reg.factory->parse_config(config);
+  std::unique_ptr<LoadedModel> model = ModelRegistry::Load(config, source);
+  REQUIRE(model != nullptr);
+  vt::Backend& be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue q = be.CreateQueue();
+  // Prepare on the TT queue materializes the B2b-i device context eagerly —
+  // the production prepare path, not a test-built context.
+  ModelRegistry::Prepare(*model, config, q);
+
+  CensusKv kv = MakeCensusKv(be, 2);
+  v1::GDNAttentionMetadata gdn_meta;
+  std::vector<GdnStateCache> gdn_state;
+  Kolibri1TTResetRoutedExpertRefusalCount();
+  const int64_t before = Kolibri1TTRoutedExpertRefusalCount();
+  const v1::CommonAttentionMetadata meta = OneReqMeta(1, 0, 4);
+  ModelForwardInput in{{5},
+                       {0},
+                       meta,
+                       gdn_meta,
+                       kv.caches,
+                       gdn_state,
+                       config,
+                       q,
+                       /*logits_indices=*/{},
+                       /*num_reqs=*/1};
+  in.pure_decode = true;
+  in.uniform_query_len = 1;
+  // The registry dispatches the kTENSTORRENT arm to ForwardKolibri1TTResident
+  // Forward: the step completes through the PRODUCTION seam and the TT
+  // forward's own refusal fires (a deleted or replaced dispatch arm throws
+  // and fails this case).
+  ForwardLogits fl = ModelRegistry::Forward(*model, in);
+  REQUIRE(fl.rows == 1);
+  REQUIRE(fl.vocab == 32);
+  CHECK(fl.device_tensor.dtype == vt::DType::kF32);
+  CHECK(Kolibri1TTRoutedExpertRefusalCount() - before >= 2);
+}
+
 // ---- DEVICE LEG ------------------------------------------------------------
 
 namespace {
 
 bool TenstorrentPresent() {
-  return vt::TryGetBackend(vt::DeviceType::kTENSTORRENT) != nullptr;
+  // The census's host stand-in is NOT a device: exclude it so a card-less box
+  // keeps skipping the device leg after the census cases ran.
+  vt::Backend* b = vt::TryGetBackend(vt::DeviceType::kTENSTORRENT);
+  return b != nullptr && b != CensusTTBackendPtr();
 }
 
 struct GoldenPrompt {
