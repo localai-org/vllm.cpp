@@ -1158,8 +1158,9 @@ that invokes `ffmpeg`, path configurable with `--video-ffmpeg`).
 ## Consuming it as a library (C ABI)
 
 Link `libvllm` (static or shared) and include [`include/vllm.h`](../include/vllm.h).
-It exposes a flat, exception-free, llama.cpp-style C ABI (`VLLM_ABI_VERSION 17`,
-35 exported functions) suitable for `dlopen` / FFI / LocalAI integration.
+It exposes a flat, exception-free, llama.cpp-style C ABI (`VLLM_ABI_VERSION 30`)
+for `dlopen`, FFI, and LocalAI integration. Call `vllm_abi_version()` at runtime
+to detect a header and library mismatch.
 
 ```c
 #include "vllm.h"
@@ -1185,7 +1186,9 @@ vllm_engine_free(engine);
 ```
 
 The ABI covers lifecycle, blocking and streaming completion, non-blocking
-concurrent requests, memory helpers, and diagnostics. Later ABI versions add:
+concurrent requests, memory helpers, and diagnostics. The table lists early ABI
+additions. See the [C API reference](reference/c-api.md#recent-abi-additions)
+for newer interfaces and their limits:
 
 | ABI | Adds |
 |---:|---|
@@ -1208,6 +1211,17 @@ concurrent requests, memory helpers, and diagnostics. Later ABI versions add:
 
 Chat templates render through the vendored google/minja engine, the same
 renderer llama.cpp ships.
+
+### Speaker diarization
+
+ABI 30 adds `vllm_diarization_load()` for a separate Nemotron-3-Diarization
+GGUF model. The API accepts WAV paths or mono float32 PCM at 16 kHz. Use
+`vllm_diarization_free()` for results and `vllm_engine_free()` for the model.
+
+The combined transcription API needs an additional ASR context that an ordinary
+transcription load does not guarantee. No verified combined-ASR loading recipe
+is provided here. Read the [audio API limits](reference/c-api.md#speaker-diarization-and-attributed-transcription)
+before using these functions. The bundled server has no diarization startup option.
 
 ## Consuming it from C++
 
