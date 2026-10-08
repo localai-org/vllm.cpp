@@ -21,6 +21,10 @@
 #include "vt/quant.h"   // cpu::BlockToFloat — the quantized gather's row decode
 #include "vt/unaligned.h"
 
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 namespace vt::cpu {
 namespace {
 
@@ -3368,11 +3372,85 @@ void MoeRouterTopKKernel(Queue&, Tensor& weights, Tensor& indices, const Tensor&
 // on `fused_output.dtype == torch.float16`; the analogue here is `out`, whose
 // dtype `MoeCombine` gates through `IsOutFloat` (ops.cpp:22 — f32/bf16 only, no
 // kF16), so no caller can reach it. Pinned by the f16-out refusal test.
+#if defined(__aarch64__)
+
+// bf16 store for 4 f32 lanes, BIT-IDENTICAL to vt::F32ToBF16 per lane:
+// round-to-nearest-even via 0x7FFF + lsb (may carry into the exponent), and
+// the NaN branch truncate-and-quiet ((u >> 16) | 0x40). This is the same
+// vectorized store kolibri1_fp8_dequant.h's F32x4ToBf16x4 uses, asserted
+// bit-identical to F32ToBF16 over the domain by test_kolibri1_dequant.cpp.
+inline uint16x4_t F32x4ToBf16x4(float32x4_t v) {
+  const uint32x4_t u = vreinterpretq_u32_f32(v);
+  const uint32x4_t exp_all_ones =
+      vceqq_u32(vandq_u32(u, vdupq_n_u32(0x7F800000U)), vdupq_n_u32(0x7F800000U));
+  const uint32x4_t mant_nonzero = vceqq_u32(vandq_u32(u, vdupq_n_u32(0x7FFFFFU)), vdupq_n_u32(0U));
+  const uint32x4_t nan_mask = vandq_u32(exp_all_ones, vmvnq_u32(mant_nonzero));
+  const uint32x4_t lsb = vandq_u32(vshrq_n_u32(u, 16), vdupq_n_u32(1U));
+  // 0x7FFF + lsb: round to nearest even, may carry into the exponent.
+  const uint32x4_t rnd = vaddq_u32(vaddq_u32(u, vdupq_n_u32(0x7FFFU)), lsb);
+  const uint32x4_t norm = vshrq_n_u32(rnd, 16);
+  const uint32x4_t nan_bf = vorrq_u32(vshrq_n_u32(u, 16), vdupq_n_u32(0x40U));
+  return vqmovn_u32(vbslq_u32(nan_mask, nan_bf, norm));
+}
+
+// bf16 widening of 4 lanes, bit-identical to vt::BF16ToF32 (the shift-left-16
+// is an exact integer rewrite; the same widening the GEMM's LoadV4<kBF16>
+// uses, asserted there).
+inline float32x4_t Bf16x4ToF32x4(uint16x4_t b) {
+  return vreinterpretq_f32_u32(vshll_n_u16(b, 16));
+}
+
+#endif  // defined(__aarch64__)
+
 void MoeCombineKernel(Queue&, Tensor& out, const Tensor& expert_out, const Tensor& weights,
                       const Tensor* shared, float routed_scale) {
   const int64_t t = out.shape[0], h = out.shape[1], k = weights.shape[1];
   ForRows(t, [&](int64_t r0, int64_t r1) {
   for (int64_t row = r0; row < r1; ++row) {
+#if defined(__aarch64__)
+    // ORDER-PRESERVING NEON across the independent output COLUMNS — the same
+    // construction as the landed Bt16Neon GEMM tier (cpu_matmul_elem.cpp): the
+    // reduction axis (j) is NEVER vectorized or reordered; each lane runs the
+    // scalar loop's exact sequence acc = 0; for j: acc += w_j * eo_j, with
+    // products vmulq + vaddq (NEVER vfmaq), so every rounding point matches the
+    // scalar body at the project-pinned -ffp-contract=off. The scale multiply
+    // and the shared add keep their scalar placement (one rounding each, in
+    // the same order), and the store is the RNE of F32ToBF16. Bit-identity
+    // over the real expert geometries (2560-wide hidden, 6-of-384 slots, the
+    // shared-expert path, ragged/tail shapes, ties/overflow/NaN,
+    // cross-thread) is pinned by tests/vllm/models/test_kolibri1_moe_glue.cpp.
+    // The fast path covers the all-bf16 polarity (kolibri1's); every other
+    // dtype combination keeps the scalar loop below, unchanged.
+    if (out.dtype == DType::kBF16 && expert_out.dtype == DType::kBF16 &&
+        (shared == nullptr || shared->dtype == DType::kBF16)) {
+      const float* wrow = weights.Ptr<float>() + row * k;
+      const auto* eo = static_cast<const uint16_t*>(expert_out.data) + row * k * h;
+      const auto* shp =
+          shared != nullptr ? static_cast<const uint16_t*>(shared->data) + row * h : nullptr;
+      auto* op = out.Ptr<uint16_t>() + row * h;
+      int64_t col = 0;
+      for (; col + 4 <= h; col += 4) {
+        float32x4_t acc = vdupq_n_f32(0.0f);
+        for (int64_t j = 0; j < k; ++j) {
+          const float32x4_t w = vdupq_n_f32(wrow[j]);
+          acc = vaddq_f32(acc, vmulq_f32(w, Bf16x4ToF32x4(vld1_u16(eo + j * h + col))));
+        }
+        if (routed_scale != 1.0f) acc = vmulq_f32(acc, vdupq_n_f32(routed_scale));
+        if (shp != nullptr)
+          acc = vaddq_f32(acc, Bf16x4ToF32x4(vld1_u16(shp + col)));
+        vst1_u16(op + col, F32x4ToBf16x4(acc));
+      }
+      for (; col < h; ++col) {  // scalar tail, the identical per-element order
+        float acc = 0.0f;
+        for (int64_t j = 0; j < k; ++j)
+          acc += wrow[j] * BF16ToF32(eo[j * h + col]);
+        if (routed_scale != 1.0f) acc *= routed_scale;
+        if (shp != nullptr) acc += BF16ToF32(shp[col]);
+        op[col] = F32ToBF16(acc);
+      }
+      continue;
+    }
+#endif
     for (int64_t col = 0; col < h; ++col) {
       float acc = 0.0f;
       for (int64_t j = 0; j < k; ++j)

@@ -172,6 +172,13 @@ target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 moe_glue lever (ISSUE-LOCAL-01M4D7FYY1WQZV9PNR6GBWS2R5):
+# the expert-output combine (vt::MoeCombine) is BIT-IDENTICAL to the in-test
+# scalar reference over the real expert geometries (2560-wide hidden,
+# 6-of-384 routed slots over the 384-expert domain, the shared-expert path,
+# ragged/tail shapes, ties/overflow/NaN, cross-thread identity) — raw-uint16.
+vllm_cpp_add_test(test_kolibri1_moe_glue vllm/models/test_kolibri1_moe_glue.cpp)
+target_include_directories(test_kolibri1_moe_glue PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1-tenstorrent wave-A gate (spec
 # .agents/specs/kolibri-tt.md): the TT staging plan over the landed
 # kolibri1 loader — device-FREE policy, so the test compiles like any
