@@ -864,6 +864,7 @@ add_library(vllm STATIC
   # non-Tenstorrent queues by name.
   src/vllm/model_executor/models/kolibri1_tt.cpp
   src/vllm/model_executor/models/kolibri1_tt_forward.cpp
+  src/vllm/model_executor/models/kolibri1_tt_stream.cpp
   src/vllm/model_executor/models/kolibri1_registry.cpp
   src/vllm/model_executor/models/kolibri1_weights.cpp
   src/vllm/model_executor/models/kolibri1_forward.cpp

@@ -211,6 +211,13 @@ if(VLLM_CPP_TENSTORRENT)
   target_include_directories(test_kolibri1_tt_b2bi PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_definitions(test_kolibri1_tt_b2bi PRIVATE
     KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# test_kolibri1_tt_b2ii is the B2b-ii streaming-MoE HOST gate (issue
+# ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN): the fetch executor's host half,
+# the slot pool plan, the slot shadow / readback pivot, the stream-bound
+# refusals, and the reset lane — NO card. The device leg rides the b2bi
+# device TU's gate under the GPU lease.
+  vllm_cpp_add_test(test_kolibri1_tt_b2ii vllm/models/test_kolibri1_tt_b2ii.cpp)
+  target_include_directories(test_kolibri1_tt_b2ii PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
