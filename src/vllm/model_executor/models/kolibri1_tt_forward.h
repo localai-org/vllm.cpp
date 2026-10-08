@@ -1,0 +1,137 @@
+// Kolibri-1 — Tenstorrent B2b-i dense-resident device forward (private
+// header, MODEL-TEXT-kolibri-1-tenstorrent, spec
+// .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum, slice i; issue
+// ISSUE-LOCAL-01M4E22DM790W0E69M07D5XA9D).
+//
+// Slice i runs the RESIDENT non-expert set entirely on device with the
+// routed-expert tier ABSENT: attention (hybrid geometry — 40 sliding-window
+// layers at window 513, 10 full-attention RNoPE layers, two-group KV,
+// per-head q/k RMS norms), the four sandwich norms, the router (bf16
+// [384,2560] gate, f32 e_score_correction_bias, sigmoid-logit-add,
+// top-6-of-384, the CPU row's f32 compute path), the shared expert, and
+// embed + untied lm_head, with on-device sampling through the landed decode
+// seam (ModelRegistry::Forward, vt::GreedyArgmax). The routed path is
+// REFUSED BY NAME (B2b-ii owns it); the refusal fires whenever the router
+// selects routed experts and the decode proceeds with the shared expert
+// only — which is why the golden chains (full-model decodes) cannot be
+// replayed in this slice and the 141/145 token gate stays owed until
+// B2b-ii.
+//
+// The forward mirrors the CPU row's op sequence op-for-op
+// (kolibri1_forward.cpp) — the same vt ops, the same order, the same
+// shapes — over the resident slice. The ONE deliberate compute difference:
+// the CPU row dequants each fp8-block projection per call (its documented
+// R1 disposition); this slice dequants ONCE per weight into a
+// device-resident bf16 buffer (the same DequantRowsBf16 bytes, memoized —
+// the b2i bring-up verified the device GEMM consumes exactly these bf16
+// dequants of the byte-verified staged fp8). The device fp8-block GEMM that
+// would consume the staged FP8_E4M3 operands in tile layout is the B2b
+// COMPUTE wave's, not this slice's (addendum § FP8/trace constraints).
+//
+// Backend-agnostic TU: it uses only vt ops and the shared residency seam
+// (dense_attn::ResidentWeight), so it compiles in every build; it REFUSES
+// a non-Tenstorrent queue by name at its boundary.
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "vllm/model_executor/models/kolibri1_weights.h"
+#include "vllm/model_executor/models/model_registry.h"
+#include "vllm/model_executor/models/qwen3_5.h"  // PagedKvCache, ForwardLogits
+#include "vt/backend.h"
+#include "vt/tensor.h"
+
+namespace vllm {
+
+// ---- The B2b-i routed-expert refusal (slice i's named refusal) -------------
+//
+// The router's top-6-of-384 output always requests ROUTED experts; in this
+// slice the routed tier is absent by design, so the MoE block fires this
+// refusal BY NAME (counted, message printed once per process) and the step
+// proceeds with the shared expert only. The refusal is an observable,
+// counted event — NOT a throw — because the slice's completion condition is
+// one greedy decode COMPLETING on the card with the refusal active (the
+// goldens cannot be replayed without the routed experts; the 141/145 token
+// gate stays owed to B2b-ii, per the addendum's gate ordering).
+
+// The refusal message for one layer's router request: names the missing
+// part, the owning slice, the row, and the issue. Pure function of its
+// inputs (host-side testable, no card).
+std::string Kolibri1TTRoutedExpertRefusalMessage(
+    int64_t layer, const std::vector<int32_t>& requested_ids);
+
+// Process-wide count of fired routed-expert requests (one per MoE block per
+// step — layers x steps for a full decode). Read by the gate to show the
+// refusal firing by name in the gate configuration.
+int64_t Kolibri1TTRoutedExpertRefusalCount();
+// Test seam: zeroes the counter (and the once-per-process message latch).
+void Kolibri1TTResetRoutedExpertRefusalCount();
+
+// ---- The device-resident compute context -----------------------------------
+//
+// The memoized bf16 dequants of the resident slice's fp8-block projections
+// (attention q/k/v/o + the shared expert's gate/up/down), dequanted ONCE
+// per weight with the CPU row's DequantRowsBf16 (the R1 disposition) into
+// backend allocations held for the model's lifetime. The bf16 modules
+// (router gate, norms, embed, lm_head, q/k norms, router bias) ride the
+// shared dense_attn::ResidentWeight residency seam instead (memoized in the
+// OwnedTensor's d_dev), exactly like every other device model.
+struct Kolibri1TTResidentDeviceContext {
+  struct Layer {
+    vt::Tensor q, k, v, o;               // attention [N, K] bf16
+    vt::Tensor sh_gate, sh_up, sh_down;  // shared expert [N, K] bf16
+  };
+  std::vector<Layer> layers;
+  // Owns the dequant allocations the layer views point into (freed through
+  // the backend when the context dies, in order).
+  std::vector<std::shared_ptr<void>> keepalive;
+
+  int64_t projections = 0;      // fp8 projections dequanted (350 on the real ckpt)
+  int64_t uploaded_bytes = 0;   // bf16 bytes uploaded to the backend
+  double build_seconds = 0.0;   // wall clock of the one-time build
+  bool built = false;
+};
+
+// Builds the context: dequants every resident fp8-block projection host-side
+// (threaded over output rows through the ONE pool, bit-identical to the CPU
+// row's per-call dequant by the pool determinism contract) into backend
+// allocations. Throws std::runtime_error on a malformed projection. The
+// returned context owns its allocations (freed through the backend).
+std::unique_ptr<Kolibri1TTResidentDeviceContext>
+BuildKolibri1TTResidentDeviceContext(vt::Backend& backend, vt::Queue& queue,
+                                     const Kolibri1Weights& weights);
+
+// The checked accessor for the device context a ModelRegistry::Load +
+// prepare produced: the B2b device waves (and their gates) read the model's
+// context back out through this seam instead of re-building it, so the
+// per-op agreement battery verifies the PRODUCTION residency the decode
+// runs. Builds lazily on first use (prepare builds it eagerly). Refuses
+// by name when `model` is not a Kolibri1ForCausalLM load.
+Kolibri1TTResidentDeviceContext& Kolibri1LoadedModelTTContext(
+    LoadedModel& model, vt::Queue& queue);
+
+// ---- The B2b-i forward ------------------------------------------------------
+
+// Runs one forward step of the dense-resident slice on a Tenstorrent queue:
+// embedding -> N sandwich-norm layers (sliding: RoPE + window; full: RNoPE;
+// GQA with per-head qk-norm) -> MoE on EVERY layer (router on device, f32
+// sigmoid-logit-add top-6-of-384, the routed-expert refusal fired BY NAME,
+// the shared expert computed) -> final norm -> untied lm_head. `ctx` is the
+// model's device-resident compute context (built once; see above).
+//
+// `multi_kv` resolves each layer's PagedKvCache by layer name; null falls
+// back to `attn_kv[layer]`. Logits gather follows `logits_indices` when it
+// is a strict subset of the step. Refuses a non-Tenstorrent queue by name
+// (the CPU row owns the CPU arm; every other device is owed).
+ForwardLogits ForwardKolibri1TTResidentForward(
+    const std::vector<int32_t>& token_ids, const std::vector<int32_t>& positions,
+    const v1::CommonAttentionMetadata& attn_meta,
+    const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
+    const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
+    const std::vector<int32_t>& logits_indices,
+    Kolibri1TTResidentDeviceContext& ctx);
+
+}  // namespace vllm

@@ -13,6 +13,7 @@
 #include "vllm/model_executor/models/kolibri1.h"
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"  // BumpModelGeneration
 #include "vllm/model_executor/models/kolibri1_forward.h"
+#include "vllm/model_executor/models/kolibri1_tt_forward.h"  // the B2b-i device arm
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits, ModelForwardInput
@@ -241,8 +242,21 @@ class Kolibri1LoadedModel final : public LoadedModel {
   }
   const Kolibri1Weights& weights() const { return weights_; }
 
+  // The B2b-i device-resident compute context (the memoized bf16 dequants
+  // of the resident fp8-block projections), built ONCE on the model's first
+  // Tenstorrent use — eagerly by prepare, lazily by the forward otherwise.
+  // The CPU arm never builds one.
+  Kolibri1TTResidentDeviceContext& tt_context(vt::Queue& queue) {
+    if (tt_ctx_ == nullptr) {
+      vt::Backend& be = vt::GetBackend(queue.device.type);
+      tt_ctx_ = BuildKolibri1TTResidentDeviceContext(be, queue, weights_);
+    }
+    return *tt_ctx_;
+  }
+
  private:
   Kolibri1Weights weights_;
+  std::unique_ptr<Kolibri1TTResidentDeviceContext> tt_ctx_;
 };
 
 // ---- Load / Prepare / Forward ----
@@ -266,21 +280,49 @@ std::unique_ptr<LoadedModel> LoadKolibri1ForCausalLM(
 
 void PrepareKolibri1ForCausalLM(LoadedModel& model, const HfConfig& config,
                                 vt::Queue& queue) {
-  // W1: prepare is a no-op; the forward wave owns device materialization.
-  (void)model;
+  // The CPU arm needs no device materialization (the forward wave's
+  // residency seam uploads lazily). A Tenstorrent queue materializes the
+  // B2b-i device context eagerly at prepare — the resident slice's fp8
+  // projections dequanted once into device-resident bf16 buffers (spec
+  // .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum, slice i).
+  if (queue.device.type != vt::DeviceType::kTENSTORRENT) return;
   (void)config;
-  (void)queue;
+  auto& m = ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM");
+  (void)m.tt_context(queue);
 }
 
 ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
                                          const ModelForwardInput& input) {
   auto& m = ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM");
-  // W2: the CPU hybrid forward (RNoPE, qk-norm, sandwich norms,
-  // sigmoid-logit-add MoE) lives in kolibri1_forward.cpp.
-  return ForwardKolibri1Forward(input.token_ids, input.positions,
-                                input.attn_meta, input.attn_kv, m.weights(),
-                                input.multi_kv, input.queue,
-                                input.logits_indices);
+  // The device dispatch: the CPU row owns the CPU arm (unchanged); the
+  // Tenstorrent B2b-i dense-resident slice owns the TT arm; every other
+  // device is refused by name here, before any model code runs.
+  switch (input.queue.device.type) {
+    case vt::DeviceType::kCPU:
+      // W2: the CPU hybrid forward (RNoPE, qk-norm, sandwich norms,
+      // sigmoid-logit-add MoE) lives in kolibri1_forward.cpp.
+      return ForwardKolibri1Forward(input.token_ids, input.positions,
+                                    input.attn_meta, input.attn_kv, m.weights(),
+                                    input.multi_kv, input.queue,
+                                    input.logits_indices);
+    case vt::DeviceType::kTENSTORRENT:
+      // B2b-i: the dense-resident device forward (spec addendum, slice i).
+      return ForwardKolibri1TTResidentForward(
+          input.token_ids, input.positions, input.attn_meta, input.attn_kv,
+          m.weights(), input.multi_kv, input.queue, input.logits_indices,
+          m.tt_context(input.queue));
+    default:
+      throw std::runtime_error(
+          std::string("Kolibri1ForCausalLM: the ") +
+          vt::DeviceTypeName(input.queue.device.type) +
+          " forward arm is not implemented. The landed arms are the CPU row "
+          "(MODEL-TEXT-kolibri-1, spec .agents/specs/kolibri-1-cpu.md) and "
+          "the Tenstorrent B2b-i dense-resident slice "
+          "(MODEL-TEXT-kolibri-1-tenstorrent, spec .agents/specs/kolibri-tt.md "
+          "### B2 scope — B2b addendum, slice i); the " +
+          vt::DeviceTypeName(input.queue.device.type) +
+          " arm is a separate owed row.");
+  }
 }
 
 // ---- ModelInfo / ModelFactory ----
@@ -307,6 +349,14 @@ REGISTER_VLLM_MODEL(kolibri1, "Kolibri1ForCausalLM", kKolibri1Factory,
 // waves read the weights back out of the LoadedModel they are handed).
 const Kolibri1Weights& Kolibri1LoadedModelWeights(LoadedModel& model) {
   return ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM").weights();
+}
+
+// The checked accessor over the registry's loaded model's B2b-i device
+// context (built by prepare on a Tenstorrent queue, lazily otherwise).
+Kolibri1TTResidentDeviceContext& Kolibri1LoadedModelTTContext(
+    LoadedModel& model, vt::Queue& queue) {
+  return ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM")
+      .tt_context(queue);
 }
 
 }  // namespace vllm

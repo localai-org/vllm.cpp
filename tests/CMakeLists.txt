@@ -200,6 +200,17 @@ if(VLLM_CPP_TENSTORRENT)
   target_include_directories(test_kolibri1_tt_b2i PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_definitions(test_kolibri1_tt_b2i PRIVATE
     KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+  # B2b-i dense-resident FORWARD gate (spec .agents/specs/kolibri-tt.md
+  # ### B2 scope — B2b addendum, slice i; issue
+  # ISSUE-LOCAL-01M4E22DM790W0E69M07D5XA9D): the refusal/routing/context
+  # host cases (NO card) plus the device leg (card +
+  # VT_KOLIBRI1_TT_B2BI_MODEL; operator-run, evidence in docs/bench-evidence/).
+  # One greedy decode of a golden prompt on the card is the slice's
+  # completion condition.
+  vllm_cpp_add_test(test_kolibri1_tt_b2bi vllm/models/test_kolibri1_tt_b2bi.cpp)
+  target_include_directories(test_kolibri1_tt_b2bi PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_definitions(test_kolibri1_tt_b2bi PRIVATE
+    KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)

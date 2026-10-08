@@ -42,9 +42,10 @@
 
 #include "vllm/model_executor/models/dense_attn_block.h"  // StepInputs, KvSlice
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
-#include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
+#include "vllm/model_executor/models/kolibri1_shared.h"  // the routing + step inputs, shared with the TT row
+#include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
 #include "vt/ops.h"
 
@@ -209,47 +210,9 @@ DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
 }
 
 // ── Router: sigmoid-logit-add (kolibri1.py:126-142) ─────────────────────────
-// Selection on logits + bias, weights = sigmoid of the UNBIASED logits, NO
-// renormalisation (norm_topk_prob=false). Router logits are f32 (the gate
-// linear's out_dtype=torch.float32 upstream, :171-177). Ties break to the
-// LOWER expert index, matching torch.topk's stable CPU order for the exact
-// ties a test constructs deliberately.
-struct HostRouting {
-  std::vector<int32_t> ids;      // [T, top_k]
-  std::vector<float> weights;    // [T, top_k]
-};
-
-HostRouting SigmoidLogitAddRouting(const std::vector<float>& logits,
-                                   const std::vector<float>& bias, int64_t t,
-                                   int64_t num_experts, int64_t top_k) {
-  HostRouting r;
-  r.ids.resize(static_cast<size_t>(t * top_k));
-  r.weights.resize(static_cast<size_t>(t * top_k));
-  for (int64_t i = 0; i < t; ++i) {
-    const float* row = &logits[static_cast<size_t>(i * num_experts)];
-    // Partial selection: top_k passes of argmax over the biased scores.
-    std::vector<char> taken(static_cast<size_t>(num_experts), 0);
-    for (int64_t kk = 0; kk < top_k; ++kk) {
-      int64_t best = -1;
-      float best_score = 0.0f;
-      for (int64_t e = 0; e < num_experts; ++e) {
-        if (taken[static_cast<size_t>(e)]) continue;
-        const float score = row[e] + bias[static_cast<size_t>(e)];
-        if (best < 0 || score > best_score) {
-          best = e;
-          best_score = score;
-        }
-      }
-      taken[static_cast<size_t>(best)] = 1;
-      // The WEIGHT reads the unbiased logit (docstring kolibri1.py:134-136).
-      r.weights[static_cast<size_t>(i * top_k + kk)] =
-          1.0f / (1.0f + std::exp(-row[best]));
-      r.ids[static_cast<size_t>(i * top_k + kk)] = static_cast<int32_t>(best);
-    }
-    // norm_topk_prob=false: the renormalisation branch (:140-141) is skipped.
-  }
-  return r;
-}
+// The routing math lives in kolibri1_shared.h (a PURE RELOCATION out of this
+// TU, shared verbatim with the Tenstorrent B2b-i device forward); the CPU
+// row's op sequence is byte-identical to the pre-extraction form.
 
 // ── Attention block (kolibri1.py:39-123) ────────────────────────────────────
 DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p,
@@ -350,7 +313,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     be.Synchronize(d.q);
   }
 
-  HostRouting route;
+  Kolibri1HostRouting route;
   {
     prof::Scope prof("moe_topk");
     route = SigmoidLogitAddRouting(logits, bias, t, e, top_k);
@@ -416,30 +379,6 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   return out;
 }
 
-dense_attn::StepInputs BuildStepInputs(Dev d,
-                                       const v1::CommonAttentionMetadata& meta,
-                                       const std::vector<int32_t>& positions) {
-  const int64_t t = static_cast<int64_t>(positions.size());
-  DBuf d_positions(d, DType::kI32, {t}, positions.data());
-  DBuf d_slot_mapping(d, DType::kI64,
-                      {static_cast<int64_t>(meta.slot_mapping.size())},
-                      meta.slot_mapping.data());
-  DBuf d_block_table(d, DType::kI32,
-                     {meta.num_reqs, meta.block_table_num_cols},
-                     const_cast<int32_t*>(meta.block_table_tensor.data()));
-  DBuf d_seq_lens(d, DType::kI32, {meta.num_reqs},
-                  const_cast<int32_t*>(meta.seq_lens.data()));
-  DBuf d_query_start_loc(d, DType::kI32, {meta.num_reqs + 1},
-                         const_cast<int32_t*>(meta.query_start_loc.data()));
-  dense_attn::StepInputs si;
-  si.positions = std::move(d_positions);
-  si.slot_mapping = std::move(d_slot_mapping);
-  si.block_table = std::move(d_block_table);
-  si.seq_lens = std::move(d_seq_lens);
-  si.query_start_loc = std::move(d_query_start_loc);
-  return si;
-}
-
 }  // namespace
 
 ForwardLogits ForwardKolibri1Forward(
@@ -493,7 +432,7 @@ ForwardLogits ForwardKolibri1Forward(
       kv_ptr = &attn_kv[static_cast<size_t>(l)];
     }
 
-    dense_attn::StepInputs si = BuildStepInputs(d, attn_meta, positions);
+    dense_attn::StepInputs si = Kolibri1BuildStepInputs(d, attn_meta, positions);
 
     // input_layernorm + residual (the vLLM fused add-norm contract).
     DBuf dhn(d, DType::kBF16, {t, h});

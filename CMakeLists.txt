@@ -856,7 +856,14 @@ add_library(vllm STATIC
   # hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add MoE).
   # kolibri1_tt.cpp is the MODEL-TEXT-kolibri-1-tenstorrent wave-A staging
   # plan (device-free; spec .agents/specs/kolibri-tt.md).
+  # kolibri1_shared.h is the CPU row's routing/step-input helpers, shared
+  # VERBATIM with the TT row (a pure relocation; the CPU gates pin it).
+  # kolibri1_tt_forward.cpp is the B2b-i dense-resident device forward
+  # (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum, slice i);
+  # it is backend-agnostic (vt ops + the shared residency seam) and refuses
+  # non-Tenstorrent queues by name.
   src/vllm/model_executor/models/kolibri1_tt.cpp
+  src/vllm/model_executor/models/kolibri1_tt_forward.cpp
   src/vllm/model_executor/models/kolibri1_registry.cpp
   src/vllm/model_executor/models/kolibri1_weights.cpp
   src/vllm/model_executor/models/kolibri1_forward.cpp
