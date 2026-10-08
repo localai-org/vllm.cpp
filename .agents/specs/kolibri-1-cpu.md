@@ -351,6 +351,22 @@ remaining lever; the unit delivers the budget-sensitivity table and the
 8/16/32 GiB sensitivity numbers (knee still open at 32 GiB, +5-6% over 16
 GiB) and lands no product code.
 
+NEON paged-attention lane (2026-10-08, branch `row/kolibri-neon-attn`, issue
+ISSUE-LOCAL-01M4EQ7TPR5Q7JQGNM8628X9HW): the shared CPU seam
+`vt::PagedAttention` gains an aarch64 lane for the K dot-product and V
+accumulation behind `VT_CPU_PAGED_ATTN_NEON` (default OFF; scalar stays the
+reference and the fallback). attn_core halves (4.9->2.3 s at t32, 5.3->2.5 s
+at t8 over the 64-step decode bench); decode tok/s +6% (t8) under load, idle
+re-measure owed. Gates with the lane ON: W3 900/900, ARGMAX 141/145 with 4
+near-tie flips and 0 hard flips (worst topk diff 2.057 vs the committed scalar
+fingerprint 2.186); kolibri battery green; the unit sweep runs the scalar
+kernel as oracle over the variant matrix (f32/f16/bf16/fp8 KV, GQA, window,
+softcap, varlen) plus a replay of the real prefill operands (1 bf16 ulp).
+OPEN: the decode-bench strict token anchor flips on a 0.197-nat near-tie with
+the lane ON — the default flip is blocked on (1) the idle-host A/B and (2) a
+near-tie adjudication of that anchor (gate-semantics change, own spec).
+Evidence: docs/bench-evidence/kolibri1-neon-paged-attn-20261008.md.
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file
