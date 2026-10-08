@@ -140,8 +140,24 @@ target_include_directories(test_kolibri1_dequant PRIVATE ${CMAKE_SOURCE_DIR}/src
 # (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2): byte identity cold/hot, budget
 # invariance in one binary, and entry OWNERSHIP under pool traffic (the v1
 # aliasing shape).
+# Case 5 (default off) runs in a fork/exec'd helper with an empty environment,
+# so the ProcessCache() static budget is read where the env var is PROVABLY
+# unset. The helper is declared FIRST so the parent test target depends on it:
+# a header mutation must relink the helper or the pin silently tests a stale
+# binary (observed: the genex define alone created no rebuild dependency).
+add_executable(test_kolibri1_dequant_cache_default
+               vllm/models/test_kolibri1_dequant_cache_default_helper.cpp)
+target_include_directories(test_kolibri1_dequant_cache_default
+                           PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_kolibri1_dequant_cache_default PRIVATE vllm::vllm)
+vllm_cpp_set_warnings(test_kolibri1_dequant_cache_default)
 vllm_cpp_add_test(test_kolibri1_dequant_cache vllm/models/test_kolibri1_dequant_cache.cpp)
 target_include_directories(test_kolibri1_dequant_cache PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_dependencies(test_kolibri1_dequant_cache test_kolibri1_dequant_cache_default)
+target_compile_definitions(
+  test_kolibri1_dequant_cache
+  PRIVATE
+    KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER="$<TARGET_FILE:test_kolibri1_dequant_cache_default>")
 # MODEL-TEXT-kolibri-1 W2 gate: the CPU forward against the in-test scalar
 # reference (the kolibri1.py transcription), the ragged batch, the
 # logits_indices gather, and the full-depth 50-layer structural run.

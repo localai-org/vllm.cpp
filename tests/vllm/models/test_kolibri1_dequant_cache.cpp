@@ -20,12 +20,26 @@
 //  3. OWNERSHIP: a hit entry's bytes are unchanged after intervening pool
 //     Get/Put traffic of the same size class (the exact shape that killed v1;
 //     on the hardened pool, a second return now throws instead).
+//  4. LRU VICTIM: the evicting budget evicts the LEAST recently used entry,
+//     not the most recent one (distinguished by which key hits next).
+//  5. DEFAULT OFF: `ProcessCache()` with `VT_KOLIBRI1_DEQUANT_CACHE_MB`
+//     unset is disabled (budget 0), pinned in a fork/exec'd helper whose
+//     environment provably lacks the variable.
+//
+// KNOWN LIMITS: byte-identity cannot catch a key weakened to scale-pointer
+// only (mitigated by weight-owned process-lifetime storage, not by a test),
+// and the ownership guarantee's teeth are by-construction rather than
+// asserted — a future reader need not rediscover either.
 
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
@@ -198,4 +212,61 @@ TEST_CASE("kolibri1 dequant cache: a hit entry's bytes are unchanged after "
   const uint16_t* again = cache.GetOrDequant(w);
   CHECK_EQ(again, first);
   CHECK_EQ(std::memcmp(again, ref.data(), ref.size() * 2), 0);
+}
+
+// ── 4. LRU victim selection: the least recently used entry goes first ───────
+TEST_CASE("kolibri1 dequant cache: the evicting budget evicts the LRU entry, "
+          "not the most recent one") {
+  std::vector<Fp8BlockWeight> weights;
+  for (int i = 0; i < 3; ++i) {
+    weights.push_back(MakeWeight(8, 512, 4, 128, 100 + i));
+  }
+  const size_t kEntry = 8 * 512 * 2;  // bytes per entry
+  Cache cache(kEntry * 2);            // room for exactly two entries
+  auto& counters = vllm::kolibri1_dequant_cache::Counters();
+  const uint64_t misses0 = counters.misses;
+  const uint64_t evictions0 = counters.evictions;
+
+  cache.GetOrDequant(weights[0]);
+  cache.GetOrDequant(weights[1]);
+  cache.GetOrDequant(weights[0]);  // TOUCH: recency order is now 0, then 1
+  CHECK_EQ(counters.misses - misses0, 2);
+
+  // One insert over budget: exactly one eviction, and it must take the LRU
+  // victim (weight 1). An MRU policy would evict the just-touched weight 0.
+  cache.GetOrDequant(weights[2]);
+    CHECK_EQ(counters.evictions - evictions0, 1);
+  CHECK_EQ(cache.resident_bytes(), kEntry * 2);
+
+  // The touched weight 0 is still resident: this is a HIT, not a fresh miss.
+  cache.GetOrDequant(weights[0]);
+  CHECK_EQ(counters.misses - misses0, 3);
+  // And the LRU victim weight 1 was the one evicted: this IS a fresh miss.
+  cache.GetOrDequant(weights[1]);
+  CHECK_EQ(counters.misses - misses0, 4);
+}
+
+// ── 5. Default off: ProcessCache() with the env var unset is disabled ───────
+TEST_CASE("kolibri1 dequant cache: ProcessCache() defaults to a disabled "
+          "cache when VT_KOLIBRI1_DEQUANT_CACHE_MB is unset") {
+  // The budget is read ONCE per process at the static init inside
+  // ProcessCache(). To pin the DEFAULT (and not whatever this process
+  // happens to carry, or an earlier test case has already latched), the
+  // assertion runs in a fork/exec'd helper binary launched with an
+  // environment that provably lacks the variable; the helper exits 0 iff
+  // budget_bytes() == 0 and !enabled().
+  REQUIRE_EQ(std::getenv("VT_KOLIBRI1_DEQUANT_CACHE_MB"),
+             static_cast<char*>(nullptr));
+  const pid_t pid = fork();
+  REQUIRE(pid >= 0);
+  if (pid == 0) {
+    char* envp[] = {nullptr};  // empty environment: the var is provably unset
+    execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper", static_cast<char*>(nullptr),
+           envp);
+    _exit(127);  // exec failed — not a pass
+  }
+  int status = 0;
+  REQUIRE_EQ(waitpid(pid, &status, 0), pid);
+  REQUIRE(WIFEXITED(status));
+  CHECK_EQ(WEXITSTATUS(status), 0);
 }
