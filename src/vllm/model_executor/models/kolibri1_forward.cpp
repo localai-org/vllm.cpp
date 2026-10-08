@@ -44,6 +44,7 @@
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
 #include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
+#include "vllm/model_executor/models/kolibri1_dequant_cache.h"
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
 #include "vt/ops.h"
 
@@ -98,6 +99,14 @@ void Report(int64_t calls) {
                static_cast<long long>(calls));
   for (const auto& [k, v] : Acc())
     std::fprintf(stderr, "[kolibri1-profile]   %-20s %10.2f s\n", k.c_str(), v);
+  const auto& c = kolibri1_dequant_cache::Counters();
+  std::fprintf(stderr,
+               "[kolibri1-profile]   dequant_cache hits=%llu misses=%llu "
+               "evictions=%llu decode_calls=%llu\n",
+               static_cast<unsigned long long>(c.hits),
+               static_cast<unsigned long long>(c.misses),
+               static_cast<unsigned long long>(c.evictions),
+               static_cast<unsigned long long>(c.decode_calls));
 }
 
 }  // namespace prof
@@ -156,10 +165,31 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
               int64_t t, DType out_dtype = DType::kBF16) {
   if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype);
-  DBuf wt = DequantFp8Block(d, w.fp8_block);
+  // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land). The
+  // cache is the fp8 decode path when enabled; the decoded block comes back
+  // as CACHE-OWNED bytes (independent allocations, never pool blocks — that
+  // ownership defect was v1's corruption). The pointer is consumed by the
+  // GEMM below and no further cache call happens before it, which is exactly
+  // the lifetime contract in kolibri1_dequant_cache.h. Budget 0 (the
+  // default) DISABLES the cache and keeps the original threaded pool decode,
+  // so main-line behavior is byte-for-byte unchanged unless the env var is
+  // set.
+  Tensor wt;
+  DBuf wt_buf;
+  if (kolibri1_dequant_cache::ProcessCache().enabled()) {
+    prof::Scope prof("dequant_fp8_block");  // cache lookups + cold decodes
+    const uint16_t* cached =
+        kolibri1_dequant_cache::ProcessCache().GetOrDequant(w.fp8_block);
+    wt = dense_attn::MakeTensor(const_cast<uint16_t*>(cached), DType::kBF16,
+                                d.q.device,
+                                {w.fp8_block.n, w.fp8_block.k});
+  } else {
+    wt_buf = DequantFp8Block(d, w.fp8_block);
+    wt = wt_buf.t();
+  }
   prof::Scope prof("linear_gemm");
   DBuf out(d, out_dtype, {t, w.fp8_block.n});
-  vt::MatmulBT(d.q, out.t(), x, wt.t());
+  vt::MatmulBT(d.q, out.t(), x, wt);
   return out;
 }
 

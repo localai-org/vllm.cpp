@@ -136,6 +136,12 @@ target_include_directories(test_kolibri1 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # partitions.
 vllm_cpp_add_test(test_kolibri1_dequant vllm/models/test_kolibri1_dequant.cpp)
 target_include_directories(test_kolibri1_dequant PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 re-land of the dequant cache
+# (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2): byte identity cold/hot, budget
+# invariance in one binary, and entry OWNERSHIP under pool traffic (the v1
+# aliasing shape).
+vllm_cpp_add_test(test_kolibri1_dequant_cache vllm/models/test_kolibri1_dequant_cache.cpp)
+target_include_directories(test_kolibri1_dequant_cache PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1 W2 gate: the CPU forward against the in-test scalar
 # reference (the kolibri1.py transcription), the ragged batch, the
 # logits_indices gather, and the full-depth 50-layer structural run.

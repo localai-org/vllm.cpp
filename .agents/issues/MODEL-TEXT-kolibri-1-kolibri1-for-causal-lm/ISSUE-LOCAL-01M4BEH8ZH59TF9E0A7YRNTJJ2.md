@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2
 Title: fp8 dequant cache: cached blocks aliased while leased; W3 fails with an active cache
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-07
 Updated: 2026-10-07
-Closed: -
+Closed: 2026-10-07
 
 ## Problem
 
@@ -44,3 +44,21 @@ The kolibri-1 CPU perf session (2026-10-07, worktree /tmp/vllm-kolibri-neon2, br
   the fix tree: test_kolibri1 27/186, test_kolibri1_dequant 3/10,
   test_kolibri1_w3 900/900 chain 141/145 (4 near-tie, 0 hard), fingerprints
   2.18646/2.6763 — no regression.
+
+- 2026-10-07 (row/kolibri-cache2): CLOSED. The cache's second-return question
+  is resolved BY CONSTRUCTION — the re-landed cache's entries OWN their bytes
+  (independent `std::vector<uint16_t>` allocations sized to the block), never a
+  pool block, a `DBuf`, or any memory the cache did not allocate, so a cache
+  entry cannot be handed out from under by the pool, and there is no second
+  return for the hardened pool to refuse. The hardened-pool throw never fired
+  in any cached run. The passing hitting-budget gates close the behavior half:
+  `test_kolibri1_w3` at `VT_KOLIBRI1_DEQUANT_CACHE_MB=16384` with
+  hits=348418 is 900/900, ARGMAX chain 141/145 (4 near-tie, 0 hard),
+  fingerprints 2.18646/26763 — byte-identical to the landed baseline;
+  `test_kolibri1_decode_bench` anchor 109726 with a byte-identical CHAIN at
+  off/8/16 GiB (16 GiB hits=71157); `test_kolibri1` 27/186;
+  `test_kolibri1_dequant` 3/10; new `test_kolibri1_dequant_cache` 3/34
+  (byte identity cold/hot, budget invariance in one binary, ownership under
+  pool traffic), compile-red on base, two mutation reds. Decode bench 2.50x
+  (49.40 -> 19.78 s) at 16 GiB. Evidence:
+  docs/bench-evidence/kolibri1-dequant-cache-reland-20261007.md.
