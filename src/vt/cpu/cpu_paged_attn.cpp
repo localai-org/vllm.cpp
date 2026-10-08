@@ -13,7 +13,11 @@
 // current step's K/V are assumed already written into the cache
 // (vt::ReshapeAndCache), so the read is entirely from the paged blocks.
 #include <algorithm>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -98,6 +102,54 @@ void StoreRowF32(const Tensor& t, int64_t elem_offset, int64_t n, const float* s
     default: VT_CHECK(false, "paged_attention StoreF32: unsupported dtype");
   }
 }
+
+// ---------------------------------------------------------------------------
+// PERF-CPU-ATTN-NEON. The K dot-product and the V accumulation below run the
+// SAME math as the scalar reference, one float32x4 at a time, aarch64 only and
+// behind VT_CPU_PAGED_ATTN_NEON (default off; the scalar path stays the
+// reference and the non-aarch64 path). Two consequences the scalar body does
+// not have:
+//   1. The K reduction order changes (four interleaved lanes summed by
+//      vaddvq_f32 instead of a strictly sequential f32 chain), so the NEON path
+//      is NOT bit-identical to the scalar one. It is adjudicated by the model
+//      gates, not by a memcmp: the unit sweep bounds the score/output drift
+//      (tests/vt/test_ops_paged_attn_neon.cpp) and the kolibri battery —
+//      including the W3 near-tie ARGMAX chain — is the contract.
+//   2. Every width the vector path serves must be a multiple of the 4-lane
+//      group in BOTH d (K/Q width) and d_v (V width); anything else, and any
+//      non-aarch64 build, falls back to the untouched scalar body below.
+// The element encodings are decoded with the same helpers the scalar arm uses
+// (F16ToF32 / BF16ToF32 / LoadKvFp8E4M3), four elements at a time; the bf16
+// lane widens by a 16-bit shift into the high half, exactly BitsToF32 does.
+// ---------------------------------------------------------------------------
+#if defined(__aarch64__)
+bool PagedAttnNeonActive() {
+  const char* e = std::getenv("VT_CPU_PAGED_ATTN_NEON");
+  return e != nullptr && e[0] == '1';
+}
+
+// Four consecutive K/V elements as an f32 vector, the vector counterpart of
+// KvElem. Same scales, same converters, four lanes.
+template <KvKind kKind>
+inline float32x4_t KvElem4(const void* base, int64_t off, float scale) {
+  if constexpr (kKind == KvKind::kF32) {
+    (void)scale;
+    return vld1q_f32(static_cast<const float*>(base) + off);
+  } else if constexpr (kKind == KvKind::kF16) {
+    (void)scale;
+    return vcvt_f32_f16(vld1_f16(reinterpret_cast<const float16_t*>(base) + off));
+  } else if constexpr (kKind == KvKind::kBF16) {
+    (void)scale;
+    uint16x4_t u = vld1_u16(static_cast<const uint16_t*>(base) + off);
+    return vreinterpretq_f32_u32(vshll_n_u16(u, 16));
+  } else {
+    float tmp[4];
+    for (int i = 0; i < 4; ++i)
+      tmp[i] = vt::LoadKvFp8E4M3(static_cast<const uint8_t*>(base)[off + i], scale);
+    return vld1q_f32(tmp);
+  }
+}
+#endif  // __aarch64__
 
 // Paged causal GQA attention. For request r, query token at global index t and
 // local index `local`, the absolute position is p = context + local where
@@ -218,6 +270,16 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
     }
   }
 
+  // NEON lane, resolved ONCE per invocation. Off by default: VT_CPU_PAGED_ATTN_NEON=1
+  // is the opt-in while the A/B evidence stands; the scalar body below stays the
+  // reference and the non-aarch64 path.
+#if defined(__aarch64__)
+  const bool neon_active = PagedAttnNeonActive();
+#else
+  const bool neon_active = false;
+  (void)neon_active;
+#endif
+
   // The token loop, with the K and V element encodings bound at compile time.
   // Body text is unchanged from the per-element form apart from the two loads.
   auto run = [&](auto kv_tag) {
@@ -260,6 +322,49 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
           // -inf and 0, so the loop and output are bit-identical to the
           // pre-sink kernel.
           float m = sink_p != nullptr ? sink_p[h] : -std::numeric_limits<float>::infinity();
+#if defined(__aarch64__)
+          if (neon_active && d % 4 == 0 && d_v % 4 == 0) {
+            // The NEON lane: same scores, same masking, same softmax passes.
+            // Only the K reduction and the V accumulation run four lanes wide.
+            for (int64_t j = jmin; j <= jmax; ++j) {
+              const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
+              const int64_t off = j % block_size;
+              const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
+              float32x4_t vacc = vdupq_n_f32(0.0f);
+              for (int64_t e = 0; e < d; e += 4)
+                vacc = vfmaq_f32(vacc, vld1q_f32(q + e),
+                                 KvElem4<decltype(kv_tag)::value>(k_base, kbase + e, k_scale));
+              // Lane-serial-in-block, block-sequential: NOT the scalar order.
+              float dot = vaddvq_f32(vacc);
+              dot *= scale;
+              if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
+              probs[static_cast<size_t>(j - jmin)] = dot;
+              if (dot > m) m = dot;
+            }
+            float denom = sink_p != nullptr ? 1.0f : 0.0f;
+            for (int64_t j = jmin; j <= jmax; ++j) {
+              const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
+              probs[static_cast<size_t>(j - jmin)] = e;
+              denom += e;
+            }
+            const float inv = 1.0f / denom;
+            for (int64_t e = 0; e < d_v; ++e) acc[static_cast<size_t>(e)] = 0.0f;
+            for (int64_t j = jmin; j <= jmax; ++j) {
+              const float pw = probs[static_cast<size_t>(j - jmin)] * inv;
+              const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
+              const int64_t off = j % block_size;
+              const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
+              const float32x4_t pwv = vdupq_n_f32(pw);
+              for (int64_t e = 0; e < d_v; e += 4) {
+                float32x4_t a = vld1q_f32(acc.data() + e);
+                a = vfmaq_f32(a, pwv, KvElem4<decltype(kv_tag)::value>(v_base, vbase + e, v_scale));
+                vst1q_f32(acc.data() + e, a);
+              }
+            }
+            StoreRowF32(out, qoff, d_v, acc.data());
+          } else
+#endif
+          {
           for (int64_t j = jmin; j <= jmax; ++j) {
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
@@ -294,6 +399,7 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
                   pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
           }
           StoreRowF32(out, qoff, d_v, acc.data());
+          }
         }
       }
     });

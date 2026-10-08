@@ -3832,6 +3832,11 @@ target_include_directories(test_ops_conv3d PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_ops_attn_relpos vt/test_ops_attn_relpos.cpp)
 target_include_directories(test_ops_attn_relpos PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_ops_paged_attn vt/test_ops_paged_attn.cpp)
+# PERF-CPU-ATTN-NEON: the aarch64 NEON lane behind VT_CPU_PAGED_ATTN_NEON vs
+# the scalar oracle over the randomized sweep; the K-reduction reorder is
+# adjudicated by the stated tolerance envelope, not a memcmp. Non-aarch64
+# builds skip loudly.
+vllm_cpp_add_test(test_ops_paged_attn_neon vt/test_ops_paged_attn_neon.cpp)
 # SPEC-DFLASH2 W10 (#1857): the host lane-classification seam of the CUDA
 # paged-attention dispatch (include/vt/paged_attn_route.h).
 vllm_cpp_add_test(test_paged_attn_route vt/test_paged_attn_route.cpp)
