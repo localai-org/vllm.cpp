@@ -519,3 +519,9 @@ ONE pull request (developer's standing choice for this row).
 - The CPU forward wave also owns the R1 disposition record: packed
   fp8-block + f32 scale is what the loader stores today; dequant-at-load
   vs a CPU fp8-block GEMM arm is decided when the forward consumes it.
+- NUMA interleave row (this spec, the in-process PolicyGuard change): the
+  `kolibri1_weights.cpp` `PolicyGuard` site is pinned only by the A/B bench
+  (deleting it moves the measured decode tok/s); no focused test goes red
+  for that deletion. The dequant-cache guard site IS test-pinned. A
+  loader-level focused test is owed, or this stays bench-pinned with the
+  evidence doc naming it (it does, §Claimed guarantees guarantee 4).

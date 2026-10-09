@@ -40,7 +40,7 @@
 #include <cstdlib>
 #include <string>
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(_WIN32)
 #include <cstddef>
 #include <cstdint>
 
@@ -58,7 +58,7 @@ namespace kolibri1_numa {
 // every guard construction (uncached) so a test binary can flip the env —
 // the call rate is per load and per cache miss, never per element.
 inline bool Enabled() {
-#if defined(__linux__)
+#if defined(__linux__) && !defined(_WIN32)
   const char* v = std::getenv("VT_KOLIBRI1_NUMA_INTERLEAVE");
   return v == nullptr || std::string(v) != "0";
 #else
@@ -66,7 +66,7 @@ inline bool Enabled() {
 #endif
 }
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(_WIN32)
 
 namespace detail {
 
