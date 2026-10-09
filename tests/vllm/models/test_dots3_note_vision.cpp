@@ -405,7 +405,11 @@ std::vector<double> MoeFfn(const TinySpec& s, const TinyCheckpoint& ck,
           gp[static_cast<size_t>(j)] + rb[static_cast<size_t>(j)];
     }
     // `torch.topk(gating_with_bias, k=topk, sorted=False)` (:193)
-    std::vector<char> taken(static_cast<size_t>(ne), 0);
+    // assign() not the fill constructor: gcc-15 inlines the fill-ctor memset
+    // and mis-derives a negative bound for `ne` (-Wstringop-overflow under
+    // -Werror) on this host; the assign path does not trigger it.
+    std::vector<char> taken;
+    taken.assign(static_cast<size_t>(ne), 0);
     std::vector<int64_t> sel;
     double last_selected = 1e300;
     for (int64_t r = 0; r < k; ++r) {
