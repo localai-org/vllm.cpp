@@ -117,3 +117,65 @@ device path is broken at the board/driver level on this host right now:
   `VT_KOLIBRI1_TT_B2II_MODEL`).
 - Bench anchor (only after the token gate) per the recorded recipe.
 - dram_free before/after slot-pool staging, once the card window opens.
+
+## 6. Device window, second session (2026-10-09, pin-forward stack)
+
+Branch `row/ci-tt-pin-forward` (base origin/main + the tt-metal
+pin-forward port, PR #3430). Stack: tt-metal pin main + tt_umd 0.9.12,
+KMD 2.11.1-pre, FW 19.15.0, tt-smi 6.7.0. Model
+`/mnt/models/Aleph-Alpha/Kolibri-1`. Clean kernel cache before every
+measured leg; `tt-smi -r 0` + 15 s + cache/shm clear before device legs.
+
+What landed this session (commits on `row/ci-tt-pin-forward`):
+
+- the native `kMoeCombine` TT kernel (host-staged, bit-exact to the CPU
+  oracle; red-first test 961/961 green);
+- the token gate's own defect fix: it decoded step 0 from a zeroed KV
+  cache while claiming the prompt positions computed (the gate leg had
+  never reached numerics before, so this was its first exposure); the W3
+  walk is now one token per step — a whole-prompt prefill step also
+  exceeds the B1 per-step stream bound (1242865920 B charged against
+  1179936000 B at layer 15);
+- the f32-shadow RmsNorm arm: the pinned tt-metal's device bf16
+  `rms_norm` returned EXACTLY ZERO for the model's per-head q/k norms —
+  attention output 0.0 at every layer, 0/8 hard flips with nonsense
+  tokens. After the fix the attention stream matches the CPU row
+  (layer-0 attn_n sum 17.25 TT vs 17.23 CPU, the CPU row over identical
+  inputs).
+
+Gate result (W3 methodology, `test_kolibri1_tt_b2ii` device leg):
+
+| config | compared | match | flips | hard | per-flip nat gaps |
+|---|---|---|---|---|---|
+| host-free decode ON (default) | 8 | 0 | 8 | 8 | 6.6-12.6 (nonsense tokens) |
+| `VT_TT_HOST_FREE_DECODE=0` | 33 | 26 | 7 | 7 | 2.69, 2.91, 3.20, 4.02, 4.32, 5.60 (near-ties, semantic tokens) |
+
+VERDICT: the gate is FAILING and stays open — 141/145 with 0 hard flips
+is the contract, and no configuration reaches it. With host-materialized
+KV/rope handoffs the model is numerically CLOSE to the CPU row (every
+flip is a genuine semantic near-tie just past the band); with the
+host-free device paths the activations corrupt. The gap to the band is
+the same order as the two open op-level drifts.
+
+Op-level verdicts (both reproduce on the clean cache):
+
+- `kGdnDecode` wide-range state: state max_abs 0.0051074 vs tol 0.002,
+  rel_rms 3.6e-5 (the error concentrates in small elements, max_rel 81).
+  Mechanism: the composed step's `dot = sum(Sd*krow)` reduction — the
+  eltwise multiply is exact (2e-9 vs a double oracle); the reduction
+  loses ~4e-5 relative on |dot| ~ 1e3, and `v' = (v - dot) * beta`
+  amplifies it. A pairwise reshape-sum experiment made it WORSE
+  (0.0195) and was reverted. OPEN.
+- `kMatmulBTQuantGrouped` decode P=1 Q4_K: 154/1024 outputs past the
+  elementwise envelope, worst_rel 0.130697, worst_abs 285 (diffs ~0.2%
+  of |17e3|-scale outputs). Not exercised by the kolibri1 path (fp8
+  experts, bf16 GEMMs). OPEN.
+- NEW intermittent (unowned): `batched decode RAC is capture-safe
+  (num_slots=2)` failed mid-suite once (V shadow 109/128 token-exact)
+  and passed in isolation and on a full-suite re-run.
+
+Owed after this session: root-cause the host-free device handoff
+(device rope / device ReshapeAndCache / device residual norm are the
+paths host materialization bypasses); the two op-level drifts above;
+the decode bench anchor 109726 (chain 101807/109726), gated behind the
+token gate per the addendum.

@@ -570,6 +570,106 @@ TEST_CASE("kTENSTORRENT kRmsNorm matches a host F32 reference (weight, no residu
   CHECK(max_abs_diff < 0.5f);
 }
 
+// BF16 per-head norm arm (the kolibri1 q/k-norm shape): bf16 in, bf16 out,
+// 48x128 — a shape whose tile padding (48 rows in a 64-row TILE) the pinned
+// tt-metal's bf16 rms_norm mishandled. RED-FIRST evidence: on the pin-forward
+// stack this case's predecessor state produced zeros/1e38 garbage from the
+// device bf16 arm (the kolibri1 TT model's attention output was exactly zero
+// at every layer — the q/k norms are the first bf16 RmsNorm of each block),
+// and the f32-shadow kernel arm (the fix) reproduces the host f32 oracle.
+// The f32 shadow matches the CPU oracle's f32 sumsq MORE closely than the
+// bf16 arm it replaced; the one bf16 output rounding is the store.
+TEST_CASE("kTENSTORRENT kRmsNorm bf16 [48,128] per-head arm matches the host f32 oracle") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kRmsNorm, DeviceType::kTENSTORRENT));
+
+  constexpr int64_t Rows = 48, D = 128;
+  constexpr float Eps = 1e-6f;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  auto rms_norm = reinterpret_cast<vt::RmsNormFn>(
+      vt::GetOp(vt::OpId::kRmsNorm, DeviceType::kTENSTORRENT));
+
+  std::mt19937 rng(20261009);
+  std::uniform_real_distribution<float> val(-2.0f, 2.0f);
+  auto bf16 = [](float v) {
+    uint32_t b;
+    std::memcpy(&b, &v, sizeof(b));
+    return static_cast<uint16_t>((b + 0x7fff + ((b >> 16) & 1)) >> 16);
+  };
+  auto widen = [](uint16_t b) {
+    float v;
+    const uint32_t bits = static_cast<uint32_t>(b) << 16;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
+  };
+  std::vector<uint16_t> hx(Rows * D), hw(D);
+  std::vector<float> xf(Rows * D), wf(D);
+  for (size_t i = 0; i < hx.size(); ++i) {
+    xf[i] = val(rng);
+    hx[i] = bf16(xf[i]);
+    xf[i] = widen(hx[i]);  // the oracle reads the stored bf16, as the kernel does
+  }
+  for (int64_t j = 0; j < D; ++j) {
+    wf[j] = 0.5f + static_cast<float>(j % 5) * 0.1f;
+    hw[j] = bf16(wf[j]);
+    wf[j] = widen(hw[j]);
+  }
+
+  void* mem_x = backend.Alloc(hx.size() * 2);
+  void* mem_w = backend.Alloc(hw.size() * 2);
+  void* mem_out = backend.Alloc(hx.size() * 2);
+  Queue q = backend.CreateQueue();
+  backend.Copy(q, mem_x, hx.data(), hx.size() * 2);
+  backend.Copy(q, mem_w, hw.data(), hw.size() * 2);
+
+  Tensor x = Tensor::Contiguous(mem_x, vt::DType::kBF16,
+                                Device{DeviceType::kTENSTORRENT, 0}, {Rows, D});
+  Tensor w = Tensor::Contiguous(mem_w, vt::DType::kBF16,
+                                Device{DeviceType::kTENSTORRENT, 0}, {D});
+  Tensor out = Tensor::Contiguous(mem_out, vt::DType::kBF16,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {Rows, D});
+  vt::RmsNormArgs args;
+  args.eps = Eps;
+  args.gemma = false;
+  rms_norm(q, out, x, w, args, /*residual=*/nullptr);
+
+  // Read through the backend seam: the op leaves out device-current.
+  std::vector<uint16_t> ho(hx.size());
+  backend.Copy(q, ho.data(), mem_out, ho.size() * 2);
+  backend.Synchronize(q);
+  backend.Free(mem_x);
+  backend.Free(mem_w);
+  backend.Free(mem_out);
+
+  int nans = 0;
+  double worst_rel = 0.0;
+  for (int64_t r = 0; r < Rows; ++r) {
+    double sumsq = 0.0;
+    for (int64_t j = 0; j < D; ++j) sumsq += static_cast<double>(xf[r * D + j]) *
+                                            static_cast<double>(xf[r * D + j]);
+    const double inv = 1.0 / std::sqrt(sumsq / static_cast<double>(D) + Eps);
+    for (int64_t j = 0; j < D; ++j) {
+      const float got = widen(ho[r * D + j]);
+      if (std::isnan(got)) {
+        ++nans;
+        continue;
+      }
+      const double ref =
+          static_cast<double>(xf[r * D + j]) * inv * static_cast<double>(wf[j]);
+      worst_rel = std::max(worst_rel,
+                           std::fabs(static_cast<double>(got) - ref) /
+                               std::max(1e-6, std::fabs(ref)));
+    }
+  }
+  CHECK(nans == 0);
+  // One bf16 output rounding of an f32-computed norm: 2^-8 relative + slack
+  // for the f32 tile roundings inside the norm.
+  CHECK(worst_rel < 0.02);
+}
+
 // Gemma style (w+1) — the Qwen3.5 norm (every RmsNorm site passes gemma=true).
 // The device arm must bake +1 into the gamma it hands ttnn::rms_norm; dropping
 // it collapsed ambient host-free prefill to `,` (BACKEND-TENSTORRENT-QWEN35
