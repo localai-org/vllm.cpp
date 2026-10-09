@@ -3064,6 +3064,12 @@ target_include_directories(test_rocm_quant_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # #785 P1 host package (fixture/oracle/trace classifier). CPU-only.
 vllm_cpp_add_test(test_ops_paged_attn_sharedk_wmma_p1
   vt/test_ops_paged_attn_sharedk_wmma_p1.cpp)
+# The CTest-registration lock reads tests/CMakeLists.txt. ABSOLUTE, baked at
+# configure time: __FILE__ is source-root-RELATIVE under -ffile-prefix-map
+# (CMakeLists.txt), so a __FILE__-relative probe resolves against the process
+# CWD and ctest's CWD (<build>/tests) misses it.
+target_compile_definitions(test_ops_paged_attn_sharedk_wmma_p1 PRIVATE
+  VLLM_CPP_TESTS_CMAKELISTS="${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
 vllm_cpp_add_test(test_triton_aot_arch_dispatch
   vt/test_triton_aot_arch_dispatch.cpp)
 target_include_directories(test_triton_aot_arch_dispatch PRIVATE
