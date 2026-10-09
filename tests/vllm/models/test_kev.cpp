@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -230,13 +231,56 @@ TEST_CASE("kev.PointerHead.perturbation.wrong_scale_detected") {
   auto correct = vllm::kev::PointerHeadForward(
       params, weights, h_decide, h_opts, 5);
 
-  // Wrong scale: use hidden_size instead of head_dim.
+  // Wrong scale: 1/sqrt(hidden_size) instead of 1/sqrt(head_dim). The scale is
+  // overridden WITHOUT touching head_dim, so the [dp, d] projections keep
+  // their shape and the mutation still runs — it only mis-scales every logit
+  // by the constant factor sqrt(dp/d). (The pre-fix form set
+  // wrong.head_dim = hidden_size, which resizes the projection loops past the
+  // 256-row golden weights: an out-of-bounds read, not a scale mutation.)
   vllm::kev::HeadParams wrong = params;
-  wrong.head_dim = params.hidden_size;  // scale = 1/sqrt(d) instead of 1/sqrt(dp)
+  wrong.scale_override = 1.0 / std::sqrt(static_cast<double>(d));
   auto mutated = vllm::kev::PointerHeadForward(
       wrong, weights, h_decide, h_opts, 5);
 
   CHECK_FALSE(ApproxEqual(correct, mutated, 1e-4F));
+}
+
+TEST_CASE("kev.PointerHead.refuses mismatched shapes by name") {
+  // The loader reads head_dim from the config and the weights from
+  // head.safetensors independently, so a mismatch must throw rather than read
+  // out of bounds (the sanitize-cpu lane caught exactly that OOB read here).
+  const int64_t d = kev_head_goldens::kHiddenSize;
+  auto params = GoldenParams();
+  auto weights = GoldenWeights();
+  std::vector<float> h_decide(
+      kev_head_goldens::kHDecide3,
+      kev_head_goldens::kHDecide3 + d);
+  std::vector<float> h_opts(
+      kev_head_goldens::kHOpts3,
+      kev_head_goldens::kHOpts3 + 5 * d);
+
+  // head_dim disagrees with the weight rows: the golden weights carry
+  // kHeadDim rows, the params claim hidden_size.
+  vllm::kev::HeadParams mismatched = params;
+  mismatched.head_dim = params.hidden_size;
+  CHECK_THROWS_AS(
+      vllm::kev::PointerHeadForward(mismatched, weights, h_decide, h_opts, 5),
+      std::invalid_argument);
+
+  // A truncated bias vector is refused the same way.
+  vllm::kev::HeadWeights short_bias = weights;
+  short_bias.q_bias.resize(short_bias.q_bias.size() / 2);
+  CHECK_THROWS_AS(
+      vllm::kev::PointerHeadForward(params, short_bias, h_decide, h_opts, 5),
+      std::invalid_argument);
+
+  // A truncated option matrix is refused the same way.
+  std::vector<float> short_opts(
+      kev_head_goldens::kHOpts3,
+      kev_head_goldens::kHOpts3 + 2 * d);
+  CHECK_THROWS_AS(
+      vllm::kev::PointerHeadForward(params, weights, h_decide, short_opts, 5),
+      std::invalid_argument);
 }
 
 // ── LoRA merge: golden parity + perturbation gates ────────────────────
