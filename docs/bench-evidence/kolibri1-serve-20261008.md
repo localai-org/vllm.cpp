@@ -258,6 +258,96 @@ model_dump null shape).
   anchors shifted by the +5-line `RestoreToolSchemaOrder` call were repaired:
   1354→1359, 1365→1370, 1614→1619).
 
+## Re-review repair (2026-10-09, PR #3422 scoped re-review + the operator's clean-head check)
+
+The operator's clean-head re-verification at the review-repair head
+`d93d9d492` found the repair itself RED, and the "Gates (this tree, after
+the repair)" list above is corrected by this section: **`test_openai_run_batch`
+16 was a STALE BINARY.** At `d93d9d492` the suite fails 3 of 7 cases —
+`test_run_batch.cpp:451`, `:507`, `:601` all throw
+`[json.exception.type_error.302] type must be string, but is object` — while
+the doctest summary still reads `assertions: 16 | 16 passed`, which is what
+the repair's gate report counted. The PR's CI lane (build-test-cpu runs the
+full ctest) would be red. ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN.
+
+**The crash.** The repair wired `RestoreToolSchemaOrder(body, request)` into
+`RunBatch::DispatchChat` (run_batch.cpp:110), but the seam's first parameter
+is the body TEXT (`const std::string&`, protocol.h:605) and `body` is the
+parsed `nlohmann::json` object; the implicit `get<std::string>()` conversion
+throws on every object body, and `DispatchChat` has no try/catch around the
+call, so every object-body chat line through `RunBatch` throws. The other two
+call sites pass the raw body string and were already correct
+(api_server.cpp:400, vllm_c.cpp:518).
+
+**The fix** (commit `a6679a82a`). The original request text IS available:
+`RunLine(const std::string& request_json)` parses it and dropped the text.
+`RunLine` now re-serializes the chat body (the line's top-level `body`
+member) from an ORDER-PRESERVING `nlohmann::ordered_json` parse of the
+original line text and threads it through
+`DispatchChat(custom_id, body, body_json)`; `DispatchChat` calls
+`RestoreToolSchemaOrder(body_json, request)`. `ordered_json::dump` keeps
+insertion order, so the re-read restores the request document's schema key
+order into the prompt, matching the other entry points. A first in-flow
+attempt (`body.dump()`) was REVERTED: `body` is the key-sorted
+`nlohmann::json`, so its dump is already sorted and the order restoration
+reads sorted text — the crash goes away but the seam no-ops and the batch
+path loses the document's schema key order.
+
+**Red-first / mutation evidence** (`/tmp/build-kolibri-serve`, this host):
+- Committed throwing call + the new F1 test: 4 of 8 cases throw
+  type_error.302 (the 3 pre-existing + the new case); assertions read
+  `16 | 16 passed` while 4 cases fail — the stale-binary signature.
+- `body.dump()` mutation: the 3 pre-existing cases go GREEN but the new F1
+  case fails BOTH key-order assertions (the prompt carries the key-sorted
+  schema) — the seam no-op is detected.
+- The fix: 8/8 cases, 89/89 assertions, SUCCESS; the F1 case's prompt carries
+  the document-ordered schema.
+
+**F1 (coverage gap)** — ISSUE-LOCAL-01M4FR1D7RH7CN5X2R2CAR6N61: the
+ordered-parameters seam was detected by NO committed test. Two entry-point
+tests now pin it (commit `2f535c002a`):
+- `test_run_batch.cpp`, new case "run_batch: a tools line keeps the
+  document's schema key order in the prompt": drives `RunBatch::RunLine` with
+  a RAW JSONL line whose nested chat body is non-alphabetical at every level
+  (the raw string is load-bearing — `BatchLine()` would re-serialize through
+  the key-sorting `nlohmann::json` and destroy the order under test). Asserts
+  (a) no exception + a 200 row and (b) the prompt seam receives the schema in
+  the request document's key order, not the sorted form, captured via a
+  `CapturingToolsPrompt` seam (the capture pattern the api_server harness
+  uses).
+- `test_api_server.cpp`, new case "api_server: an unsorted tool schema keeps
+  its document key order in the rendered prompt": posts an unsorted-schema
+  tools request through the PRODUCTION `/v1/chat/completions` dispatch with
+  the real Qwen3.8 fixture template and asserts the rendered prompt bytes.
+  Mutation-proven: with `RestoreToolSchemaOrder` no-op'd at api_server.cpp:400
+  the case fails both key-order assertions (RED); restored, green.
+
+**F2 (mislabeled guard)** — same issue: the "byte-stable for already-ordered
+schemas" case's `AlphabeticalTool` fixture was NOT fully alphabetical, so
+its before/after byte-identity claim was not demonstrated. The fixture is now
+genuinely alphabetical at every level (`properties` < `required` < `type`;
+single-property schema) and the case renders the schema alone
+(`{{ tools[0].function.parameters | tojson }}`) because the tool wrapper's
+`model_dump` field order is not alphabetical. Mutation-proven: with the
+`tojson` default mutated to sorted keys (the override the repair removed) the
+insertion-order case goes RED while this byte-stable case stays GREEN — the
+agreement it claims to pin. `test_chat_template` 45/45 cases, 204/204
+assertions.
+
+**Gates (this tree, at the FIXED head, CPU-only build,
+/tmp/build-kolibri-serve, 2026-10-09):** `test_openai_run_batch` 8/8 cases /
+89/89 assertions (7 pre-existing + the new F1 case); `test_openai_api_server`
+104/104 / 1521/1521 (1517 pre-existing + 4 new); `test_openai_serving`
+48/48 / 1365/1365; `test_chat_template` 45/45 / 204/204;
+`test_kolibri1_chat_template` 4/4 / 61/61; `test_reasoning_kolibri1` 7/7 /
+43/43; `test_tool_parser_kolibri1` 3/3 / 19/19;
+`test_reasoning_parser_detect` 8/8 / 75/75; `test_tool_parser_detect` 16/16 /
+361/361; `test_kolibri1` 27/27 / 234/234; `test_kolibri1_decode_bench` 1/1 /
+2/2 (anchor chain `101807, 109726, …`, last token 109726) — all PASS.
+W3 (`test_kolibri1_w3`) NOT rerun: no forward change.
+`scripts/check-agent-record.py` OK (ANCHOR-ROT=0);
+`scripts/agent-preflight.sh --staged` exits 0.
+
 ## Out of scope
 
 - The oracle gateability measurement (`vllm serve` with the plugin on a GPU

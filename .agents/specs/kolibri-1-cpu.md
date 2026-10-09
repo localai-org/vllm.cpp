@@ -293,6 +293,39 @@ suites green; W3 not rerun (no forward change). Remaining for the row:
 the aleph-alpha-inference oracle gateability measurement (GPU),
 GGUF/CUDA/Tenstorrent arms (later rows).
 
+RE-REVIEW REPAIR (2026-10-09, PR #3422, branch row/kolibri-serve): the
+operator's clean-head re-verification at d93d9d492 found the review repair
+itself RED — test_openai_run_batch failed 3 of 7 cases, all throwing
+json.exception.type_error.302, because DispatchChat called
+RestoreToolSchemaOrder(body, request) with the parsed json OBJECT where the
+seam takes the body TEXT (the repair's recorded 'run_batch 16/16' gate counted
+assertions and missed the throwing cases — a stale binary).
+ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN. Fixed by threading the original
+request text through: RunLine re-serializes the chat body from an
+order-preserving ordered_json parse of the original line and DispatchChat
+calls RestoreToolSchemaOrder(body_json, request) — a first body.dump()
+attempt was reverted because the sorted dump no-ops the order restoration.
+The scoped re-review's two findings also landed
+(ISSUE-LOCAL-01M4FR1D7RH7CN5X2R2CAR6N61): F1, the ordered-parameters seam
+is now detected at two entry points (a new test_run_batch case drives
+RunLine with a raw non-alphabetical tools line and asserts the 200 row and
+the document-ordered schema at the prompt seam; a new test_api_server case
+posts an unsorted-schema request through the production dispatch — both
+mutation-proven against a no-op seam and against the throwing call); F2,
+the 'byte-stable for already-ordered schemas' guard's AlphabeticalTool
+fixture is now genuinely alphabetical at every level and renders the schema
+alone, so its before/after byte-identity claim is real (mutation-proven:
+stays green under a sorted tojson while the insertion-order case goes red).
+RE-REVIEW GATES (2026-10-09, fixed head): test_openai_run_batch 8/8 cases /
+89 assertions (7 pre-existing + the new F1 case), test_openai_api_server
+1521, test_openai_serving 1365, test_chat_template 204,
+test_kolibri1_chat_template 61, test_reasoning_kolibri1 43,
+test_tool_parser_kolibri1 19, test_reasoning_parser_detect 75,
+test_tool_parser_detect 361, test_kolibri1 27/234,
+test_kolibri1_decode_bench anchor 109726 — all green; W3 not rerun (no
+forward change). Evidence: docs/bench-evidence/kolibri1-serve-20261008.md
+"Re-review repair".
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file

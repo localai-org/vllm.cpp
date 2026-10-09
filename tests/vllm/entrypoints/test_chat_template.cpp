@@ -689,16 +689,21 @@ std::vector<ChatCompletionToolsParam> UnsortedUnicodeTool() {
   return {t};
 }
 
-// Every level already alphabetical: sorted and insertion order agree, so the
-// sorted-dump override the adapter carried BEFORE the review repair and the
-// pinned renderer's insertion-order tojson produce the SAME bytes here.
+// The schema is alphabetical at EVERY level (properties < required < type;
+// the single-property schema needs no order), so the sorted-dump override the
+// adapter carried BEFORE the review repair and the pinned renderer's
+// insertion-order tojson produce the SAME bytes for it. The tool WRAPPER's
+// field order (type/function, name/description/parameters) is the pinned
+// renderer's fixed model_dump order — NOT alphabetical — so the byte-identity
+// claim can only be demonstrated on the schema itself, which is what the
+// case below renders.
 std::vector<ChatCompletionToolsParam> AlphabeticalTool() {
   ChatCompletionToolsParam t;
   t.type = "function";
   t.function.name = "get_weather";
   t.function.description = "Get the weather for a city.";
   t.function.parameters = nlohmann::ordered_json::parse(
-      R"({"type":"object","properties":{"city":{"type":"string"}},"required":["city"]})");
+      R"({"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"})");
   return {t};
 }
 
@@ -728,22 +733,20 @@ TEST_CASE("chat_template: tojson keeps the pinned renderer's insertion order") {
 }
 
 TEST_CASE("chat_template: tojson is byte-stable for already-ordered schemas") {
-  // The repair must not alter a non-kolibri model's rendering where the
-  // pinned renderer and the old sorted override already agreed: for this
-  // alphabetically-ordered tool the bytes are identical before and after.
-  const std::vector<ChatMessage> msgs = {
-      ChatMessage{"user", std::string("weather?")}};
+  // The repair must not alter a rendering where the pinned renderer and the
+  // old sorted override already agreed: for this alphabetically-ordered
+  // schema the sorted and insertion-order dumps are the same bytes, so this
+  // case stays green even under a sorted tojson — the byte-identity-before/
+  // after claim is real. The schema is rendered alone because the tool
+  // wrapper's field order (type/function, name/description/parameters) is the
+  // pinned model_dump order, which is NOT alphabetical.
   const std::string out = apply_chat_template(
-      kToolTemplate, msgs, /*add_generation_prompt=*/false, /*bos=*/"",
-      /*eos=*/"", AlphabeticalTool());
+      "{{ tools[0].function.parameters | tojson }}", {},
+      /*add_generation_prompt=*/false, /*bos=*/"", /*eos=*/"",
+      AlphabeticalTool());
   CHECK(out ==
-        "<|im_start|>system\n# Tools\n<tools>"
-        "{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", "
-        "\"description\": \"Get the weather for a city.\", \"parameters\": "
-        "{\"type\": \"object\", \"properties\": {\"city\": {\"type\": "
-        "\"string\"}}, \"required\": [\"city\"]}}}"
-        "</tools><|im_end|>"
-        "<|im_start|>user\nweather?<|im_end|>");
+        "{\"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": "
+        "[\"city\"], \"type\": \"object\"}");
 }
 
 TEST_CASE("chat_template: tojson options match the pinned renderer") {
