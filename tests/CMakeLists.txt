@@ -3712,6 +3712,13 @@ vllm_cpp_add_test(test_ops_rope vt/test_ops_rope.cpp)
 vllm_cpp_add_test(test_ops_rope_cache vt/test_ops_rope_cache.cpp)
 vllm_cpp_add_test(test_ops_fused_norm_rope vt/test_ops_fused_norm_rope.cpp)
 vllm_cpp_add_test(test_compiled_gemma vt/test_compiled_gemma.cpp)
+# The frozen torch.compile fixtures are read through an ABSOLUTE dir baked at
+# configure time (the DOTS3_NOTE_CKPT_FIXTURE_DIR convention): __FILE__ is
+# source-root-RELATIVE under -ffile-prefix-map (CMakeLists.txt), so a
+# __FILE__-relative fixture path resolves against the process CWD and ctest's
+# CWD (<build>/tests) misses it.
+target_compile_definitions(test_compiled_gemma PRIVATE
+  COMPILED_GEMMA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vt/fixtures/compiled_gemma")
 vllm_cpp_add_test(test_ops_gdn vt/test_ops_gdn.cpp)
 target_include_directories(test_ops_gdn PRIVATE ${CMAKE_SOURCE_DIR}/src)
 if(VLLM_CPP_TRITON)
