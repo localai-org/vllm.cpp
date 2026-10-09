@@ -39,7 +39,10 @@ gates, not by the memcmp-style test.
 - REACH anchor (aggregate): the raw NEON output must bit-differ from scalar in
   more than half the swept configurations. Mutation (lane selector wired to
   constant false, scratch build): anchor at **0 of 272**, REQUIRE red; restored
-  byte-for-byte, green at 190/272.
+  byte-for-byte, green at 190/272. Re-run on the grown sweep (see the review
+  repair section below): anchor at **0 of 384**, red; restored, green at
+  244/384 — the sweep grew from 272 to 384 configurations when the unset-knob
+  default and the non-x4 fallback shapes landed.
 
 ## Unit sweep
 
@@ -129,3 +132,49 @@ VLLM_CPP_CPU_THREADS=8 VT_CPU_PAGED_ATTN_NEON=1 numactl --interleave=all \
   ./tests/test_kolibri1_decode_bench     # tok/s + attn_core via VT_KOLIBRI1_PROFILE=1
 VLLM_CPP_CPU_THREADS=8 VT_CPU_PAGED_ATTN_NEON=1 ./tests/test_kolibri1_w3
 ```
+
+## Review repair (2026-10-09)
+
+Review of this row found two coverage holes in the test and two record
+inconsistencies. Repairs are test/records only; no product code changed.
+
+- F1, unset-knob default (blocking): `RunPair` set `VT_CPU_PAGED_ATTN_NEON`
+  for every invocation, so the shipped default (env unset => lane OFF) was
+  never exercised. Repair: every `RunPair` now runs a third invocation with
+  `unsetenv` and requires it BIT-EXACT with the scalar oracle
+  (`tests/vt/test_ops_paged_attn_neon.cpp:241`), aggregated into
+  `g_fallback_cases` / `g_fallback_bitexact_cases` with a sweep-end
+  REQUIRE. Mutation (knob parse inverted: unset => lane ON, scratch build):
+  red at the unset-knob assertion, `decode t=1 unset-knob run is NOT
+  bit-exact with scalar — the default lane is ON`; restored byte-for-byte
+  (`git status` clean on `src/`), green again.
+- F2, non-x4 fallback (blocking): the x4-fallback guarantee (`d % 4 == 0 &&
+  d_v % 4 == 0`, cpu_paged_attn.cpp:330) had zero coverage — the sweep used
+  only d in {64, 128} and never d_v != d. Repair: sweep shapes d in
+  {64, 66, 70, 128} plus d=128/d_v=66 (fallback arms) and d=128/d_v=64 (x4
+  control with d_v != d); non-x4 configurations require the NEON dispatch
+  BIT-EXACT with scalar (`tests/vt/test_ops_paged_attn_neon.cpp:278`) — the
+  fallback IS the scalar kernel. Mutations, each in a scratch build and
+  restored byte-for-byte after:
+  - x4 terms dropped (`(void)neon_active; if (d % 4 == 0 && d_v % 4 == 0)`):
+    red at the REACH anchor — 384/384 bit-equal, "the NEON lane likely did
+    not run".
+  - `neon_active &&` term dropped (`if (neon_active)`): red — SIGABRT in the
+    NEON lane on the non-x4 shapes (the lane reads four lanes wide past a
+    non-x4 head dim).
+- F3, stale mutation counts: the doc and the PR body cited "anchor 0 of 272,
+  green 190/272" against a sweep that had grown to 288 and now 384
+  configurations. The lane->false mutation was re-run once on the final
+  sweep: anchor 0 of 384, red; restored, green at 244/384. Both numbers now
+  stated with the growth note here and in the PR body.
+- F4, PR body wording: "Closes ISSUE-LOCAL-01M4EQ7TPR5Q7JQGNM8628X9HW"
+  changed to "Refs" — the issue deliberately stays OPEN until the lane
+  default-flip decision.
+
+Post-repair gates (all green, build /tmp/build-neon-repair, CPU-only):
+
+- `test_ops_paged_attn_neon`: 384 swept configurations, NEON bit-differs in
+  244, fallback-gated runs bit-exact 432/432, 15.16M assertions SUCCESS.
+- `test_kolibri1`: 27/27 cases SUCCESS.
+- `test_kolibri1_decode_bench` with the knob UNSET: anchored last token
+  109726, SUCCESS — the default-off lane remains load-bearing for the anchor.
