@@ -709,13 +709,30 @@ inline Exl3Weight LoadExl3(const TensorResolver& get,
   const int64_t k = tr.shape[0] * 16;
   const int64_t n = tr.shape[1] * 16;
   const int64_t words = tr.shape[2];
-  VT_CHECK(words > 0 && words % 16 == 0,
-           "dense loader: trellis last dim must be 16*bits words for " + proj + ", got " +
+  // THE PARTITION IS TOTAL: `words % 16 == 0` is an INTEGER rate
+  // (`bits = words / 16`), `words % 16 == 8` is a HALF-INTEGER rate
+  // (`K = KA + 0.5`, `KA = (words - 8) / 16` — 56 words is KA 3, i.e. 3.5 bpw,
+  // the `OrcaSAQ-2-27B-EXL3-3.21bpw` tile). No width is ambiguous. The frac
+  // side is additionally bounded `KA in [1, 7]`, the oracle's own frac range
+  // (`frac.cu` `frac_bpb`), and requires the mul1 marker — checked below, once
+  // the codebook is resolved. The tile borrows at `16*KA + 8` WORDS
+  // (`32*KA + 16` BYTES), so the integer borrow below uses the KA-scaled width.
+  VT_CHECK(words > 0 && (words % 16 == 0 || words % 16 == 8),
+           "dense loader: trellis last dim must be 16*bits words (integer rate) or "
+           "16*KA+8 words (half-integer rate K+0.5, mul1 codebook) for " + proj + ", got " +
                std::to_string(words));
-  const int64_t bits = words / 16;
-  VT_CHECK(bits >= 1 && bits <= 8,
-           "dense loader: exl3 bits must be in [1, 8] for " + proj + "; the trellis last dim " +
-               std::to_string(words) + " implies " + std::to_string(bits));
+  const bool is_frac = words % 16 == 8;
+  const int64_t bits = is_frac ? (words - 8) / 16 : words / 16;
+  if (is_frac) {
+    VT_CHECK(bits >= 1 && bits <= 7,
+            "dense loader: half-integer rate K+0.5 requires KA in [1, 7] for " + proj +
+                "; the trellis last dim " + std::to_string(words) + " implies KA=" +
+                std::to_string(bits));
+  } else {
+    VT_CHECK(bits >= 1 && bits <= 8,
+             "dense loader: exl3 bits must be in [1, 8] for " + proj + "; the trellis last dim " +
+                 std::to_string(words) + " implies " + std::to_string(bits));
+  }
 
   const StTensor& suh = get(proj + ".suh");
   const StTensor& svh = get(proj + ".svh");
@@ -789,14 +806,27 @@ inline Exl3Weight LoadExl3(const TensorResolver& get,
   // Lifting it is safe now only because `Exl3DecodeCodeword(cw, 2)` implements
   // upstream's byte-sum decode and is gated against hand-computed values.
   r.codebook = has_mul1 ? 2 : (has_mcg ? 1 : 0);
+  // A HALF-INTEGER RATE IS mul1 ONLY. The oracle's packer/decoder define the
+  // fractional rates for cb 2 alone (`frac.cu`); a frac tensor carrying no
+  // marker (or an mcg marker) would decode through the wrong codebook — the
+  // same-distribution-wrong-values failure the comment above documents — so it
+  // refuses by name instead.
+  r.half = is_frac;
+  VT_CHECK(!is_frac || r.codebook == 2,
+           "dense loader: " + proj + " has a half-integer rate (K+0.5, " +
+               std::to_string(words) +
+               " trellis words); the oracle defines fractional rates for the mul1 "
+               "codebook only, and this projection does not carry a mul1 marker");
 
   // ENG-LOAD-DIRECT-UPLOAD (#150): all three are taken VERBATIM into a
   // same-size destination, so all three qualify for the borrow path. The
-  // trellis is BORROWED AS BYTES at 32*bits: identical bytes, and the dtype
+  // trellis is BORROWED AS BYTES at 32*bits — or 32*KA+16 for a frac tile
+  // (`16*KA + 8` uint16 words on disk): identical bytes, and the dtype
   // differs from disk only because `vt::DType` has no 16-bit integer and
   // `vt::Exl3Gemm` reads the operand as `kI8` anyway.
-  if (!BorrowStTensorBytes(r.trellis, tr, vt::DType::kI8, {k / 16, n / 16, 32 * bits})) {
-    r.trellis = MakeOwned(vt::DType::kI8, {k / 16, n / 16, 32 * bits});
+  const int64_t tile_bytes = 32 * bits + (is_frac ? 16 : 0);
+  if (!BorrowStTensorBytes(r.trellis, tr, vt::DType::kI8, {k / 16, n / 16, tile_bytes})) {
+    r.trellis = MakeOwned(vt::DType::kI8, {k / 16, n / 16, tile_bytes});
     VT_CHECK(tr.nbytes == r.trellis.bytes.size(),
              "dense loader: trellis byte-size mismatch for " + proj);
     std::memcpy(r.trellis.bytes.data(), tr.data, tr.nbytes);

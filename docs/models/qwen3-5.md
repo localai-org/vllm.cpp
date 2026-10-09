@@ -57,3 +57,35 @@ one file, and what a reader saw was the opposite of the truth: a refusal naming
 a block-wise FP8 scale tensor the checkpoint had never contained
 ([#1256](https://github.com/mudler/vllm.cpp/issues/1256)). A message that blames
 the wrong side costs more than the failure does.
+
+## EXL3 checkpoints: integer and half-integer rates
+
+The EXL3 trellis arm reads each tensor's bit width off the tensor itself, so a
+per-layer or per-tensor mixed rate needs no flag. Integer `K` (2..8) and
+half-integer `K+0.5` rates both decode on ROCm; the fractional form is
+`mul1`-codebook only, alternating `KA` and `KA+1` bits per position
+(`mask 0xAAAA`), which is what the `3.5bpw`-class checkpoints publish. A frac
+tensor without a `mul1` marker, or at `KA` outside 1..7, refuses by name.
+CUDA and Vulkan have no frac arm yet and refuse the same way; on ROCm the
+frac tensors run on the dot/`Exl3GemmK` path (the GEMV and reconstruct arms
+are integer-width only, and the router keeps frac off them).
+
+Gated against [`orcarouter/OrcaSAQ-2-27B-EXL3-3.21bpw`](https://huggingface.co/orcarouter/OrcaSAQ-2-27B-EXL3-3.21bpw):
+
+| file | bytes | sha256 |
+|---|---|---|
+| `model.safetensors` | 12,270,437,068 | `0b733783fd9e4dc053455955a9acff0317a9735cea51c62721a281a2a0025f34` |
+| `model-dequant-embed.safetensors` | 2,542,796,920 | `c00a917770d131bd33a73f8dba11d392a7625a10e1ef2f643bb10ffe68c95558` |
+| `config.json` | 6,151 | `6392a2cf7ee8a5dddf615ee067b9831dbcbb47a1f127d84e1f4e6f9e30728568` |
+
+(The HF repo requires auth, so the revision sha could not be read; the file
+hashes above pin the exact bytes.) Per-tensor rates in that checkpoint:
+32/48/56/64/96 uint16 words per tile = 2/3/3.5/4/6 bpw, codebook `mul1`,
+`bits_per_weight: 3.21`.
+
+Measured on ROCm gfx1100 (2026-10-05): the checkpoint loads and greedy-decodes
+coherent output; generation matches the exllamav3 oracle's greedy trace up to
+the first FP-order argmax tie (char ~160 of 256-token captures), the same
+drift point the integer-rate sibling checkpoint shows against the same
+oracle — i.e. parity is distributional, not token-exact, and is recorded that
+way in `.agents/specs/quant-exl3-frac-rates.md`.

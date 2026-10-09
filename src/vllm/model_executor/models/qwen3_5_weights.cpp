@@ -1861,6 +1861,15 @@ bool HasQwen3_5MoeVisionTower(const std::vector<SafetensorsFile>& shards) {
 
 // The tower geometry for a Qwen3.5 conditional-generation checkpoint, shared by
 // BOTH arms (full argument in qwen3_5_weights.h, above the two public wrappers).
+// The family is NOT one tower: the published 27B/35B checkpoints ship
+// depth 27 / hidden 1152 / intermediate 4304, while Qwen3.5-4B ships
+// depth 24 / hidden 1024 / intermediate 4096 (its vision_config mirrors the
+// Qwen3-VL-4B tower). Every member declares these values in config.json's
+// `vision_config`, so the constants below are ONLY the fallback for a config
+// that omits the block — the checkpoint's own declaration is authoritative
+// (ISSUE-LOCAL-01M3SQMXYKT2RV2D6MHCY2FCAC: hardcoding the big towers made the
+// loader index blocks.0..26 against a 24-block 4B checkpoint and fatal on
+// `model.visual.blocks.24.norm1.weight`).
 multimodal::Qwen3VLVisionConfig Qwen3_5FamilyVisionConfig(
     const HfConfig& config) {
   multimodal::Qwen3VLVisionConfig v;
@@ -1903,6 +1912,11 @@ multimodal::Qwen3VLVisionConfig Qwen3_5FamilyVisionConfig(
     const auto ds = vc->find("deepstack_visual_indexes");
     if (ds != vc->end() && ds->is_array())
       v.deepstack_visual_indexes = ds->get<std::vector<int>>();
+    // norm_eps is a float, outside the int64_t `read` lambda; a checkpoint
+    // that publishes it wins over the 1e-6f fallback.
+    const auto ne = vc->find("norm_eps");
+    if (ne != vc->end() && ne->is_number())
+      v.norm_eps = ne->get<float>();
   }
   return v;
 }

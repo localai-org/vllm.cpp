@@ -56,9 +56,13 @@
 // against a 64 KiB budget. The blockers above are not worked around; they are
 // not encountered. Speed is a later row and this file offers none.
 #include <hip/hip_runtime.h>
+#include "rocm_env.h"
 #include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -67,8 +71,60 @@
 #include "vt/ops.h"
 #include "vt/rocm/rocm_device_bind.h"
 #include "vt/rocm/rocm_f16_codec.h"
+#include "vt/rocm/rocm_exl3_decode.h"
+#include "vt/rocm/rocm_exl3_fold.h"
 
 namespace vt::rocm {
+// The m<=8 GEMV arm lives in rocm_exl3_gemv.hip (spec
+// .agents/specs/rocm-exl3-gemv.md): upstream's own `exl3_gemv_kernel.cuh`
+// geometry, ROCm-ported via exllamav3-rocm. It writes the same f32 `raw`
+// scratch, so step 3 below is unchanged whichever arm runs step 2. A false
+// return is a DECLINE — the same contract the CUDA arm's `Exl3GemvTryLaunch`
+// carries — and the call falls through to `Exl3GemmK`. `fold` offers step 3
+// to the m=1 direct arms (rocm_exl3_fold.h).
+bool Exl3GemvTryLaunchRocm(hipStream_t st, const Tensor& a_had, const Tensor& trellis,
+                           float* raw, int size_m, int size_k, int size_n, int device,
+                           const Exl3GemmArgs& args, Exl3GemvOutFold* fold);
+
+// Spec rocm-exl3-gemv-residual: the dot arm (rocm_exl3_dot.hip) — a fused
+// decode+dot kernel at every width 1..8, for shapes the upstream GEMV
+// envelope declines (bits > 4 included) and for mid-m through 8-row chunks.
+bool Exl3DotTryLaunchRocm(hipStream_t st, const Tensor& a_had, const Tensor& trellis,
+                          float* raw, int size_m, int size_k, int size_n, int device,
+                          const Exl3GemmArgs& args);
+// Spec gfx1100-exl3-decode-60tps: the fused in-had m=1 arm. When it accepts,
+// it computes a_had inside the kernel (HadBlock128ToH2, bit-identical to
+// HadK<true,true>) and the caller MUST NOT launch the separate input
+// hadamard. a_raw is the UNTRANSFORMED input (f16 storage), suh_ptr the
+// pre-scale vector. Same decline contract as Exl3GemvTryLaunchRocm.
+bool Exl3GemvM1FusedTryLaunchRocm(hipStream_t st, const void* a_raw,
+                                  const uint16_t* suh_ptr,
+                                  const Tensor& trellis, float* raw,
+                                  int size_k, int size_n, int device,
+                                  const Exl3GemmArgs& args, bool a_bf16);
+bool Exl3DotChunkedTryLaunchRocm(hipStream_t st, const Tensor& a_had,
+                                 const Tensor& trellis, float* raw, int size_m,
+                                 int size_k, int size_n, int device,
+                                 const Exl3GemmArgs& args);
+
+// The reconstruct+hipBLAS arm (rocm_exl3_recon.hip), registered as
+// kExl3ReconstructGemm and reused here for shapes the fused path cannot
+// accelerate: bits > 4 (the 6 bpw lm_head) and mid-m prefill. An EMPTY
+// w_scratch selects its persistent per-stream scratch, matching the contract
+// include/vt/ops.h documents for the registered entry.
+void Exl3ReconstructGemmKernelRocm(Queue& q, Tensor& c, const Tensor& a,
+                                   const Tensor& trellis, const Tensor& suh,
+                                   const Tensor& svh, Tensor& a_had,
+                                   Tensor& w_scratch, const Exl3GemmArgs& args);
+
+// The had_r_128 stages, callable by the reconstruct+GEMM arm in
+// rocm_exl3_recon.hip, which runs the same transform before and after its
+// hipBLAS GEMM. `half_in`/`half_out` select among the four instantiations the
+// fused path uses; anything else is refused rather than silently widened.
+void Exl3LaunchHadRocm(hipStream_t st, void* out, const void* in, const uint16_t* pre,
+                       const uint16_t* post, float r_scale, int64_t rows, int64_t cols,
+                       int in_dt, int out_dt);
+
 namespace {
 
 inline void Check(hipError_t err, const char* what) {
@@ -98,142 +154,99 @@ __device__ inline float NegBySignBit(float v) {
 __device__ inline uint16_t MulF16(uint16_t a, uint16_t b) {
   return DF32ToF16(DF16ToF32(a) * DF16ToF32(b));
 }
+// ─── the trellis decode lives in rocm_exl3_decode.h ─────────────────────────
+// Exl3TileCodeword / Exl3DecodeCodeword / Exl3TileRowMajorIndex, shared with
+// rocm_exl3_recon.hip (the reconstruct+GEMM arm) so the two ops an EXL3
+// checkpoint decodes through read identical codebooks rather than two
+// drifting copies.
 
-// cpu_exl3_dequant.cpp RoundHalf.
-__device__ inline float RoundHalf(float v) { return DF16ToF32(DF32ToF16(v)); }
-
-// ─── the trellis decode (cpu_exl3_dequant.cpp) ───────────────────────────────
-
-// The tile's uint32 view (exl3_dq.cuh:25-26), assembled by hand so the trellis
-// may sit at any alignment inside the loaded buffer.
-__device__ inline uint32_t TileWord32(const uint16_t* tile, int index) {
-  return static_cast<uint32_t>(tile[2 * index]) |
-         (static_cast<uint32_t>(tile[2 * index + 1]) << 16);
-}
-
-// Exl3TileCodeword, verbatim. `+ 256*bits` keeps the tail-biting wrap
-// non-negative; the `% words32` on the word index is the wrap itself.
-__device__ inline uint16_t TileCodeword(const uint16_t* tile, int bits, int t) {
-  const int words32 = bits * 256 / 32;
-  const int b0 = t * bits + bits - 16 + 256 * bits;
-  const int b1 = b0 + 16;
-  const int i0 = b0 / 32;
-  const int i1 = (b1 - 1) / 32;
-  const int s0 = (i1 + 1) * 32 - b1;
-  const uint32_t a = TileWord32(tile, i0 % words32);
-  const uint32_t b = TileWord32(tile, i1 % words32);
-  const uint64_t merged = (static_cast<uint64_t>(a) << 32) | b;
-  return static_cast<uint16_t>((merged >> s0) & 0xffffu);
-}
-
-// Exl3DecodeCodeword (codebook.cuh:56-90). All THREE codebooks, because an AMD
-// box has no reason to see fewer artifacts than an NVIDIA one:
-//   cb 0  3INST, the DEFAULT — a checkpoint that ships neither an `mcg` nor a
-//         `mul1` marker lands here, which is every stock turboderp/*-exl3
-//   cb 1  MCG, which the SparkInfer DeepSeek-V4 artifact marks
-//   cb 2  mul1, a DIFFERENT SHAPE and not a third multiplier: the product's four
-//         UNSIGNED BYTES are summed into a fixed accumulator, the sum is
-//         REINTERPRETED as an fp16 bit pattern, and an fp16 affine map turns it
-//         into the codebook value
-// `codebook` is validated on the host before launch, so there is no fall-off arm
-// here; a device VT_CHECK does not exist and a silent wrong decode is exactly
-// the failure this family documents (right distribution, no correlation).
-__device__ inline float DecodeCodeword(uint16_t codeword, int codebook) {
-  uint32_t x = static_cast<uint32_t>(codeword);
-  if (codebook == 2) {
-    x *= 0x83DCD12Du;
-    // `__dp4a(x, 0x01010101u, acc)` == acc + the four UNSIGNED bytes of x.
-    // Scalar here for the same reason rocm_grouped_gemm.hip's Dp4a is scalar:
-    // integer arithmetic is exact either way, and v_dot4 is a perf lever, not a
-    // correctness requirement.
-    const uint32_t byte_sum = (x & 0xffu) + ((x >> 8) & 0xffu) + ((x >> 16) & 0xffu) +
-                              ((x >> 24) & 0xffu);
-    // 0x6400 is chosen so the reinterpretation is EXACT: the fp16 binade
-    // [1024, 2048) has an ULP of exactly 1.0 and the byte sum is at most 1020,
-    // so the pattern never leaves that binade.
-    const uint32_t sum = 0x6400u + byte_sum;
-    const float h = DF16ToF32(static_cast<uint16_t>(sum));
-    // BIT PATTERNS, not the rounded decimals upstream's comments carry: 0x1eee
-    // is 887/131072 and 0xc931 is -1329/128.
-    const float k_inv = DF16ToF32(static_cast<uint16_t>(0x1eeeu));
-    const float k_bias = DF16ToF32(static_cast<uint16_t>(0xc931u));
-    // Upstream ends in __hfma, ONE rounding. Evaluating the product and the sum
-    // separately in f32 reproduces it exactly (the CPU arm proves why over all
-    // 1021 reachable sums), and -ffp-contract=off keeps the compiler from
-    // fusing them into a different single rounding.
-    return RoundHalf(h * k_inv + k_bias);
-  }
-  if (codebook == 0) {
-    x *= 89226354u;
-    x += 64248484u;
-  } else {
-    x *= 0xCBAC1FEDu;
-  }
-  x = (x & 0x8fff8fffu) ^ 0x3b603b60u;
-  const float lo = DF16ToF32(static_cast<uint16_t>(x & 0xffffu));
-  const float hi = DF16ToF32(static_cast<uint16_t>(x >> 16));
-  return RoundHalf(lo + hi);  // __hadd: the sum is taken in fp16
-}
-
-// Exl3TileRowMajorIndex (quantize.py:28-42). `t / 8` is the tensor-core lane,
-// `t % 8` its eight fragment slots. The host's kRowOffset[8] = {0,1,8,9,0,1,8,9}
-// is written as arithmetic here so no constant array lands in scratch.
-__device__ inline int TileRowMajorIndex(int t) {
-  const int lane = t >> 3;
-  const int sub = t & 7;
-  const int q = sub & 3;
-  const int row_offset = q < 2 ? q : q + 6;  // 0,1,8,9
-  const int r = (lane % 4) * 2 + row_offset;
-  const int c = lane / 4 + (sub < 4 ? 0 : 8);
-  return r * 16 + c;
-}
 
 // ─── step 1 and step 3: had_r_128 ────────────────────────────────────────────
 //
-// One 32-lane group per 128-block, four groups per workgroup, `h[4][32]` in LDS.
-// Lane t holds the four values of columns 4t..4t+3, so lane bit `i` carries
-// Hadamard level 4*i and levels 4..64 are exactly the five xor-partner steps —
-// which is why this is ShuffleHadWarp and not a rewritten butterfly.
+// One wave32 per 128-block, four waves per workgroup. Lane t holds the four
+// values of columns 4t..4t+3, so lane bit `i` carries Hadamard level 4*i and
+// levels 4..64 are exactly the five xor-partner steps — ShuffleHadWarp. The
+// partners are exchanged in registers: DPP row_xmask for xor 1/2/4/8 and
+// v_permlanex16 for xor 16 (ISA §7.7.1), so a block needs no LDS and no
+// barrier; each lane's per-element operations (own-first adds, sign-bit
+// flips) are the LDS formulation's, in the same order.
 //
-// IN-PLACE IS SAFE, and by construction rather than by luck: every lane loads
-// its four inputs BEFORE the first barrier and stores AFTER the last one, so no
-// element is written while any lane may still read it. Upstream says the same of
-// its own kernel ("Works inplace if y == x", hadamard.cu:86) and Exl3Gemm's
-// contract permits `a_had` to alias `a`.
-template <bool HalfIn, bool HalfOut>
+// IN-PLACE IS SAFE: a wave owns its whole 128-block, and every lane's four
+// loads precede the first exchange, which no store can overtake. Upstream
+// says the same of its own kernel ("Works inplace if y == x",
+// hadamard.cu:86) and Exl3Gemm's contract permits `a_had` to alias `a`.
+// InD/OutD are element dtype codes: 0 = f32, 1 = f16, 2 = bf16. bf16 exists
+// because the EXL3 linear callers sit on a bf16 residual stream: folding the
+// CastF16 stage into the load (DF32ToF16(bf16->f32) is bit-identical to
+// CastF16K<bf16>) and the CastBf16 into the store (__float2bfloat16, the same
+// op CastBf16K runs) erases two elementwise launches per call.
+// Lane t ^ I's value of v, in registers.
+template <int I>
+__device__ __forceinline__ float HadXorLane(float v) {
+  const int x = __float_as_int(v);
+  if constexpr (I == 16)
+    return __int_as_float(
+        __builtin_amdgcn_permlanex16(x, x, 0x76543210, 0xfedcba98, false, false));
+  else
+    return __int_as_float(__builtin_amdgcn_mov_dpp(x, 0x160 + I, 0xf, 0xf, false));
+}
+
+template <int I>
+__device__ __forceinline__ void HadXorLevel(float (&x)[4], int t) {
+  const bool flip = (t & I) != 0;
+#pragma unroll
+  for (int j = 0; j < 4; ++j) {
+    const float par = HadXorLane<I>(x[j]);
+    const float own = flip ? NegBySignBit(x[j]) : x[j];
+    x[j] = own + par;  // own FIRST, as the host adds
+  }
+}
+
+__device__ __forceinline__ void Unpack4x16(uint2 w, uint16_t (&h)[4]) {
+  h[0] = static_cast<uint16_t>(w.x);
+  h[1] = static_cast<uint16_t>(w.x >> 16);
+  h[2] = static_cast<uint16_t>(w.y);
+  h[3] = static_cast<uint16_t>(w.y >> 16);
+}
+
+template <int InD, int OutD>
 __global__ void HadK(void* __restrict__ out, const void* __restrict__ in,
                      const uint16_t* __restrict__ pre, const uint16_t* __restrict__ post,
                      float r_scale, int64_t nblocks, int64_t blocks_per_row, int64_t cols,
                      int64_t total_groups) {
-  __shared__ float sh[4][4][32];  // [group][j][lane] — 2 KiB
   const int ty = static_cast<int>(threadIdx.y);
   const int t = static_cast<int>(threadIdx.x);
 
   for (int64_t g = blockIdx.x; g < total_groups; g += gridDim.x) {
     const int64_t gb = g * 4 + ty;
-    const bool live = gb < nblocks;
-    const int64_t row = live ? gb / blocks_per_row : 0;
-    const int64_t blk = live ? gb % blocks_per_row : 0;
-    const int64_t base = row * cols + blk * 128;
-    const int64_t sbase = blk * 128;  // the scale vectors are indexed by COLUMN
+    if (gb >= nblocks) continue;  // wave-uniform: a wave is one 128-block
+    const int64_t row = gb / blocks_per_row;
+    const int64_t blk = gb % blocks_per_row;
+    const int64_t base = row * cols + blk * 128 + 4 * t;
+    const int64_t sbase = blk * 128 + 4 * t;  // the scale vectors are indexed by COLUMN
 
     // load + pre-scale (hadamard_inner.cuh:109-114 for the half arm, :167-174
     // for the float arm: an fp16 multiply BEFORE the widen, versus a widen and
     // an f32 multiply).
+    uint16_t ps[4] = {0, 0, 0, 0};
+    if (pre != nullptr) Unpack4x16(*reinterpret_cast<const uint2*>(pre + sbase), ps);
     float v[4];
+    if constexpr (InD == 0) {
+      const float4 f = *reinterpret_cast<const float4*>(static_cast<const float*>(in) + base);
+      const float fv[4] = {f.x, f.y, f.z, f.w};
 #pragma unroll
-    for (int j = 0; j < 4; ++j) {
-      const int64_t off = base + 4 * t + j;
-      const int64_t soff = sbase + 4 * t + j;
-      if (!live) {
-        v[j] = 0.0f;
-      } else if (HalfIn) {
-        const uint16_t* p = static_cast<const uint16_t*>(in);
-        const uint16_t w = pre != nullptr ? MulF16(p[off], pre[soff]) : p[off];
+      for (int j = 0; j < 4; ++j) v[j] = pre != nullptr ? fv[j] * DF16ToF32(ps[j]) : fv[j];
+    } else {
+      uint16_t h[4];
+      Unpack4x16(*reinterpret_cast<const uint2*>(static_cast<const uint16_t*>(in) + base), h);
+#pragma unroll
+      for (int j = 0; j < 4; ++j) {
+        // bf16 source: fold the caller's CastF16 into the load — widen then
+        // DF32ToF16 round, the exact chain CastF16K<bf16> runs, so the f16
+        // value the transform sees is bit-identical.
+        if constexpr (InD == 2) h[j] = DF32ToF16(__uint_as_float(static_cast<uint32_t>(h[j]) << 16));
+        const uint16_t w = pre != nullptr ? MulF16(h[j], ps[j]) : h[j];
         v[j] = DF16ToF32(w);
-      } else {
-        const float* p = static_cast<const float*>(in);
-        v[j] = pre != nullptr ? p[off] * DF16ToF32(pre[soff]) : p[off];
       }
     }
 
@@ -243,64 +256,77 @@ __global__ void HadK(void* __restrict__ out, const void* __restrict__ in,
     const float d0 = v[0] - v[1];
     const float s1 = v[2] + v[3];
     const float d1 = v[2] - v[3];
-    __syncthreads();  // every load above is now complete, so an aliased write is safe
-    sh[ty][0][t] = s0 + s1;
-    sh[ty][1][t] = d0 + d1;
-    sh[ty][2][t] = s0 - s1;
-    sh[ty][3][t] = d0 - d1;
+    float x[4] = {s0 + s1, d0 + d1, s0 - s1, d0 - d1};
 
     // levels 4..64: ShuffleHadWarp, five xor-partner steps.
-    for (int i = 1; i < 32; i <<= 1) {
-      __syncthreads();
-      const int p = t ^ i;
-      const bool flip = (t & i) != 0;
-      float own[4], par[4];
-#pragma unroll
-      for (int j = 0; j < 4; ++j) {
-        own[j] = flip ? NegBySignBit(sh[ty][j][t]) : sh[ty][j][t];
-        par[j] = sh[ty][j][p];
-      }
-      __syncthreads();
-#pragma unroll
-      for (int j = 0; j < 4; ++j) sh[ty][j][t] = own[j] + par[j];  // own FIRST, as the host adds
-    }
-    __syncthreads();
+    HadXorLevel<1>(x, t);
+    HadXorLevel<2>(x, t);
+    HadXorLevel<4>(x, t);
+    HadXorLevel<8>(x, t);
+    HadXorLevel<16>(x, t);
 
     // r_scale, then the store and the post-scale. Both half-output inners round
     // FIRST and apply the post scale as an fp16 multiply afterwards
     // (hadamard_inner.cuh:137-146); the float arms multiply in f32.
-    if (live) {
+    uint16_t qs[4] = {0, 0, 0, 0};
+    if (post != nullptr) Unpack4x16(*reinterpret_cast<const uint2*>(post + sbase), qs);
+    if constexpr (OutD == 0) {
+      float o[4];
 #pragma unroll
       for (int j = 0; j < 4; ++j) {
-        const float res = sh[ty][j][t] * r_scale;
-        const int64_t off = base + 4 * t + j;
-        const int64_t soff = sbase + 4 * t + j;
-        if (HalfOut) {
-          uint16_t* o = static_cast<uint16_t*>(out);
+        const float res = x[j] * r_scale;
+        o[j] = post != nullptr ? res * DF16ToF32(qs[j]) : res;
+      }
+      *reinterpret_cast<float4*>(static_cast<float*>(out) + base) =
+          make_float4(o[0], o[1], o[2], o[3]);
+    } else {
+      uint16_t o[4];
+#pragma unroll
+      for (int j = 0; j < 4; ++j) {
+        const float res = x[j] * r_scale;
+        if constexpr (OutD == 1) {
           const uint16_t r = DF32ToF16(res);
-          o[off] = post != nullptr ? MulF16(r, post[soff]) : r;
+          o[j] = post != nullptr ? MulF16(r, qs[j]) : r;
         } else {
-          float* o = static_cast<float*>(out);
-          o[off] = post != nullptr ? res * DF16ToF32(post[soff]) : res;
+          // bf16 destination: one RN round of res*post, bit-identical to the
+          // separate CastBf16K the caller would run on the f32 form.
+          const float r = post != nullptr ? res * DF16ToF32(qs[j]) : res;
+          o[j] = __bfloat16_as_ushort(__float2bfloat16(r));
         }
       }
+      *reinterpret_cast<uint2*>(static_cast<uint16_t*>(out) + base) =
+          make_uint2(o[0] | (static_cast<uint32_t>(o[1]) << 16),
+                     o[2] | (static_cast<uint32_t>(o[3]) << 16));
     }
-    __syncthreads();  // the next `g` overwrites sh
   }
 }
 
-template <bool HalfIn, bool HalfOut>
-void LaunchHad(void* out, const void* in, const uint16_t* pre, const uint16_t* post,
-               float r_scale, int64_t rows, int64_t cols, hipStream_t st) {
+void LaunchHadIO(void* out, const void* in, const uint16_t* pre, const uint16_t* post,
+                 float r_scale, int64_t rows, int64_t cols, hipStream_t st,
+                 int in_dt, int out_dt) {
   const int64_t blocks_per_row = cols / 128;
   const int64_t nblocks = rows * blocks_per_row;
   if (nblocks <= 0) return;
   const int64_t total_groups = (nblocks + 3) / 4;
   const unsigned grid =
       static_cast<unsigned>(total_groups > 65535 ? 65535 : total_groups);
-  HadK<HalfIn, HalfOut><<<grid, dim3(32, 4), 0, st>>>(out, in, pre, post, r_scale, nblocks,
-                                                      blocks_per_row, cols, total_groups);
-  Check(hipGetLastError(), "had_r_128");
+#define VT_HAD_LAUNCH(I_, O_)                                               \
+  if (in_dt == I_ && out_dt == O_) {                                        \
+    HadK<I_, O_><<<grid, dim3(32, 4), 0, st>>>(out, in, pre, post, r_scale, \
+                                             nblocks, blocks_per_row, cols, \
+                                             total_groups);                 \
+    Check(hipGetLastError(), "had_r_128");                                  \
+    return;                                                                 \
+  }
+  // Every instantiated pair — the callers' real dtype set: f32 raw scratch
+  // in/out, f16 a_had, bf16 residual. Anything else (f16->f32 included)
+  // throws below.
+  VT_HAD_LAUNCH(1, 1) VT_HAD_LAUNCH(0, 0) VT_HAD_LAUNCH(0, 1)
+  VT_HAD_LAUNCH(2, 1) VT_HAD_LAUNCH(0, 2)
+#undef VT_HAD_LAUNCH
+  throw std::runtime_error("vt rocm exl3: had_r_128 has no arm for dtype pair (" +
+                           std::to_string(in_dt) + ", " + std::to_string(out_dt) +
+                           ") — 0=f32 1=f16 2=bf16");
 }
 
 // ─── step 2: the tiled GEMM against the decoded trellis ──────────────────────
@@ -319,10 +345,13 @@ void LaunchHad(void* out, const void* in, const uint16_t* pre, const uint16_t* p
 // catch.
 __global__ void Exl3GemmK(float* __restrict__ raw, const uint16_t* __restrict__ ah,
                           const uint16_t* __restrict__ trellis, int64_t m, int64_t k,
-                          int64_t n, int bits, int codebook) {
+                          int64_t n, int bits, int codebook, int half_flag) {
   __shared__ float tile[256];  // 1 KiB
   const int64_t tiles_n = n / 16;
-  const int64_t tile_words = 16 * static_cast<int64_t>(bits);
+  // A frac tile (K+0.5, mul1) is 16*KA+8 uint16 words; the reader switches
+  // with it. `half_flag` is validated on the host (codebook == 2, KA 1..7).
+  const int64_t tile_words =
+      16 * static_cast<int64_t>(bits) + (half_flag ? 8 : 0);
   const int64_t tj = blockIdx.x;
   const int tid = static_cast<int>(threadIdx.x);
   const int64_t row = static_cast<int64_t>(blockIdx.y) * 16 + tid / 16;
@@ -333,7 +362,9 @@ __global__ void Exl3GemmK(float* __restrict__ raw, const uint16_t* __restrict__ 
   for (int64_t ti = 0; ti < k / 16; ++ti) {
     const uint16_t* tp = trellis + (ti * tiles_n + tj) * tile_words;
     __syncthreads();  // the previous iteration's readers are done with `tile`
-    tile[TileRowMajorIndex(tid)] = DecodeCodeword(TileCodeword(tp, bits, tid), codebook);
+    const uint16_t cw = half_flag ? Exl3FracTileCodeword(tp, bits, tid)
+                                  : Exl3TileCodeword(tp, bits, tid);
+    tile[Exl3TileRowMajorIndex(tid)] = Exl3DecodeCodeword(cw, codebook);
     __syncthreads();
     if (live) {
       const uint16_t* arow = ah + row * k + ti * 16;
@@ -361,6 +392,8 @@ __global__ void Exl3GemmK(float* __restrict__ raw, const uint16_t* __restrict__ 
 struct StreamScratch {
   void* buf = nullptr;
   size_t bytes = 0;
+  uint32_t* cnt = nullptr;  // the output fold's per-128-column counters
+  size_t ncnt = 0;
 };
 
 StreamScratch& ScratchFor(hipStream_t s) {
@@ -373,13 +406,40 @@ StreamScratch& ScratchFor(hipStream_t s) {
 float* EnsureRawScratch(size_t need, hipStream_t s) {
   StreamScratch& sc = ScratchFor(s);
   if (need > sc.bytes) {
+    // Stream-ordered free of the superseded buffer: queued behind the work
+    // that still references it, so a grow mid-launch is safe.
+    if (sc.buf != nullptr) Check(hipFreeAsync(sc.buf, s), "raw scratch free");
     Check(hipMallocAsync(&sc.buf, need, s), "raw scratch grow");
     sc.bytes = need;
   }
   return static_cast<float*>(sc.buf);
 }
 
+// Same grow-only, per-stream, never-freed discipline as the raw scratch. The
+// kernels leave every counter zero, so the zeroing memset runs only on growth;
+// a growth inside a capture bakes a memset node that rewrites zeros.
+uint32_t* EnsureFoldCounters(size_t need, hipStream_t s) {
+  StreamScratch& sc = ScratchFor(s);
+  if (need > sc.ncnt) {
+    if (sc.cnt != nullptr)
+      Check(hipFreeAsync(sc.cnt, s), "fold counters free");
+    Check(hipMallocAsync(reinterpret_cast<void**>(&sc.cnt), need * sizeof(uint32_t), s),
+          "fold counters grow");
+    Check(hipMemsetAsync(sc.cnt, 0, need * sizeof(uint32_t), s), "fold counters zero");
+    sc.ncnt = need;
+  }
+  return sc.cnt;
+}
+
 }  // namespace
+
+void Exl3LaunchHadRocm(hipStream_t st, void* out, const void* in, const uint16_t* pre,
+                       const uint16_t* post, float r_scale, int64_t rows, int64_t cols,
+                       int in_dt, int out_dt) {
+  // in_dt/out_dt: 0=f32 1=f16 2=bf16 — the dtype codes HadK templated on.
+  // Every uninstantiated pair (f16->f32 included) throws out of LaunchHadIO.
+  LaunchHadIO(out, in, pre, post, r_scale, rows, cols, st, in_dt, out_dt);
+}
 
 // The fused chain, step for step as Exl3GemmKernelCpu runs it:
 //   1. A_had = had_r_128(A, pre_scale = suh)
@@ -405,29 +465,135 @@ void Exl3GemmKernelRocm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trel
                " is not implemented (0 == 3INST, 1 == MCG, 2 == mul1). Upstream defines "
                "no other value: `decode_3inst<cb>` (codebook.cuh:56-90) has arms for 0, "
                "1 and 2 and falls off the end for anything else.");
+  // HALF-INTEGER rate (BACKEND-ROCM frac rates): K+0.5 is mul1-only, and the
+  // GEMV/m1-fused arms below carry no frac instantiation — a frac tensor must
+  // not fall into an integer-(KA, 2) GEMV arm, which would pass every existing
+  // gate and decode the wrong bitstream. It routes to the dot arm, and past
+  // the dot arm's shape envelope to Exl3GemmK (whose decode reads the frac
+  // windows through Exl3FracTileCodeword).
+  VT_CHECK(!args.half || args.codebook == 2,
+           "vt rocm exl3: a half-integer rate (K+0.5) requires the mul1 codebook (2); "
+           "got codebook " + std::to_string(args.codebook));
 
   hipStream_t st = AsStream(q);
 
-  // 1. the input transform, into the caller's scratch (which may alias A).
-  LaunchHad<true, true>(a_had.data, a.data, suh.Ptr<uint16_t>(), nullptr, kInvSqrt128, m, k,
-                        st);
+  // Spec rocm-exl3-gemv-residual, R2/R3: shapes the fused path cannot run
+  // fast delegate BEFORE the input transform, because the reconstruct arm
+  // runs Hadamard stages of its own. All of them honour VT_EXL3_GEMV=0 (and
+  // force_gemv=0 via the ops layer): mode 0 means the byte-exact
+  // transcription for EVERY shape on this backend.
+  const bool fast_paths = args.force_gemv != 0 &&
+                          (Exl3GemvMode() != 0 || args.force_gemv > 0);
+  // R3: shapes upstream's GEMV envelope cannot express — this checkpoint's
+  // 6 bpw lm_head, uninstantiated (bits, cb) — take the dot arm (fused
+  // decode+dot, capture-safe, all widths) instead of the transcription.
+  // The reconstruct arm stays for mid-m above the chunk cap; routing
+  // m<=8+chunks to recon was tried first and measured ~40 ms/token on the
+  // lm_head (decode to fp16 scratch + hipBLAS is 2.5x the trellis traffic).
+  const bool dot_shape = (k % 128 == 0) && (n % 128 == 0);
+  // The reconstruct arm's Hadamards and hipBLAS GEMM are f16-in, f16/f32-out
+  // only; a bf16 a or c (admitted by ops.cpp for the folded casts) takes the
+  // Exl3GemmK route below, whose Hadamards carry the dtype codes.
+  const bool recon_dtypes = a.dtype == DType::kF16 &&
+                            (c.dtype == DType::kF16 || c.dtype == DType::kF32);
+  // No frac reconstruct arm (spec ## Owed): a half-integer rate must not reach
+  // ReconstructDecodeSliceK, which would decode the frac bitstream as integer
+  // KA. Exl3GemmK decodes it correctly.
+  const bool want_recon = fast_paths && args.force_gemv <= 0 && m > 32 &&
+                          dot_shape && recon_dtypes && !args.half;
+  if (want_recon) {
+    // Mid-m above the chunked cap: B would be re-read per 8-row chunk, so
+    // past 32 rows the one-pass decode + hipBLAS GEMM wins.
+    Tensor w_scratch;  // empty: the arm's persistent per-stream scratch
+    Exl3ReconstructGemmKernelRocm(q, c, a, trellis, suh, svh, a_had, w_scratch, args);
+    return;
+  }
 
-  // 2. the matmul against the decoded trellis, f32 accumulators.
+  // 1. the input transform, into the caller's scratch (which may alias A).
+  // For m == 1 the fused arm is tried BEFORE this launches: it computes a_had
+  // in LDS inside the GEMV kernel (HadBlock128ToH2, bit-identical to
+  // HadK<true,true>) so the launch below is skipped only when it accepted.
   float* raw = EnsureRawScratch(static_cast<size_t>(m) * static_cast<size_t>(n) * sizeof(float),
                                 st);
-  const unsigned gx = static_cast<unsigned>(n / 16);
-  const unsigned gy = static_cast<unsigned>((m + 15) / 16);
-  Exl3GemmK<<<dim3(gx, gy), 256, 0, st>>>(raw, a_had.Ptr<uint16_t>(),
-                                          trellis.Ptr<uint16_t>(), m, k, n, args.bits,
-                                          args.codebook);
-  Check(hipGetLastError(), "exl3_gemm");
+  bool gemv = false;
+  // VT_EXL3_DOT_FIRST=1 is an A/B lever, not a contract: it asks for the dot
+  // kernel BEFORE the m<=8 GEMV so its own numbers (it reads each trellis
+  // word once and carries no prefetch-ring bookkeeping) can be compared
+  // against the emulated-fragment arm on real serving. Default keeps
+  // upstream's order.
+  static const bool kDotFirstEnv =
+      EnvIntStrict("VT_EXL3_DOT_FIRST", 0) != 0;
+  const bool dot_first = fast_paths && kDotFirstEnv;
+  // The fused arm is NOT tried when VT_EXL3_DOT_FIRST is set: that lever asks
+  // for the dot arm ahead of every GEMV variant, and the dot arm consumes the
+  // already-transformed a_had, so it cannot run ahead of the input transform
+  // the way the fused arm does. It also honours the same fast_paths gate as
+  // every fast arm — VT_EXL3_GEMV=0 must still select the transcription.
+  if (m == 1 && fast_paths && !args.half && !(dot_first && dot_shape)) {
+    gemv = Exl3GemvM1FusedTryLaunchRocm(
+        st, a.data, suh.data ? suh.Ptr<uint16_t>() : nullptr, trellis, raw,
+        static_cast<int>(k), static_cast<int>(n), q.device.index, args,
+        a.dtype == DType::kBF16);
+  }
+  if (!gemv) {
+    // bf16 a arrives only on this backend (ops.cpp gates the dtype on ROCm);
+    // the bf16-in arm folds the caller's CastF16 bit-identically.
+    const int a_dt = (a.dtype == DType::kBF16) ? 2 : 1;
+    LaunchHadIO(a_had.data, a.data, suh.Ptr<uint16_t>(), nullptr,
+                kInvSqrt128, m, k, st, a_dt, 1);
+  }
+
+  Exl3GemvOutFold fold;
+  if (m <= kExl3GemvMaxM) {
+    if (dot_first && dot_shape)
+      gemv = Exl3DotTryLaunchRocm(st, a_had, trellis, raw, static_cast<int>(m),
+                                  static_cast<int>(k), static_cast<int>(n),
+                                  q.device.index, args);
+    if (!gemv) {
+      if (m == 1 && c.dtype == DType::kBF16 && svh.data != nullptr) {
+        fold.out = c.data;
+        fold.post = svh.Ptr<uint16_t>();
+        fold.cnt = EnsureFoldCounters(static_cast<size_t>(n / 128), st);
+        fold.r_scale = kInvSqrt128;
+      }
+      gemv = Exl3GemvTryLaunchRocm(st, a_had, trellis, raw, static_cast<int>(m),
+                                   static_cast<int>(k), static_cast<int>(n),
+                                   q.device.index, args, &fold);
+    }
+    if (!gemv && fast_paths && dot_shape)
+      gemv = Exl3DotTryLaunchRocm(st, a_had, trellis, raw, static_cast<int>(m),
+                                  static_cast<int>(k), static_cast<int>(n),
+                                  q.device.index, args);
+  } else if (fast_paths && dot_shape && m <= 32) {
+    gemv = Exl3DotChunkedTryLaunchRocm(st, a_had, trellis, raw, static_cast<int>(m),
+                                       static_cast<int>(k), static_cast<int>(n),
+                                       q.device.index, args);
+  }
+  if (!gemv && args.force_gemv > 0) {
+    throw std::runtime_error(
+        "vt rocm exl3: exl3_gemm was asked to force the m<=8 GEMV arm (force_gemv=1) but "
+        "the arm declined: bits " + std::to_string(args.bits) + " codebook " +
+        std::to_string(args.codebook) + " m " + std::to_string(m) + " k " +
+        std::to_string(k) + " n " + std::to_string(n) +
+        ". Upstream's own direct entry point refuses the same way (exl3_gemv.cu:238).");
+  }
+  if (!gemv) {
+    const unsigned gx = static_cast<unsigned>(n / 16);
+    const unsigned gy = static_cast<unsigned>((m + 15) / 16);
+    const int half_flag = args.half ? 1 : 0;
+    Exl3GemmK<<<dim3(gx, gy), 256, 0, st>>>(raw, a_had.Ptr<uint16_t>(),
+                                           trellis.Ptr<uint16_t>(), m, k, n, args.bits,
+                                           args.codebook, half_flag);
+    Check(hipGetLastError(), "exl3_gemm");
+  }
 
   // 3. the output transform — had_ff for an f32 C, had_fh for an fp16 one, the
-  // same two arms the CPU reference picks between off `c.dtype`.
-  if (c.dtype == DType::kF32)
-    LaunchHad<false, false>(c.data, raw, nullptr, svh.Ptr<uint16_t>(), kInvSqrt128, m, n, st);
-  else
-    LaunchHad<false, true>(c.data, raw, nullptr, svh.Ptr<uint16_t>(), kInvSqrt128, m, n, st);
+  // same two arms the CPU reference picks between off `c.dtype`. Already done
+  // when the m=1 GEMV ran it in its epilogue.
+  if (fold.applied) return;
+  const int c_dt = (c.dtype == DType::kBF16) ? 2 : (c.dtype == DType::kF16 ? 1 : 0);
+  LaunchHadIO(c.data, raw, nullptr, svh.Ptr<uint16_t>(), kInvSqrt128, m, n, st,
+              0, c_dt);
 }
 
 }  // namespace vt::rocm

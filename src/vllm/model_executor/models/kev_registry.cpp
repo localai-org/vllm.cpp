@@ -139,7 +139,8 @@ std::unique_ptr<LoadedModel> LoadKev(
   // convert time (convert-kev.py), so the safetensors shards carry the
   // final merged weights with the original Qwen3.5 tensor-name layout.
   Qwen3_5DenseWeights weights =
-      LoadQwen3_5Dense(*source.safetensors, config, source.load_queue);
+      LoadQwen3_5Dense(*source.safetensors, config, source.load_queue,
+                       source.multimodal);
 
   // Load PointerHead weights from head.safetensors in the same shard list.
   kev::HeadWeights head_weights = LoadHeadWeights(*source.safetensors);

@@ -2,6 +2,7 @@
 // 9-step order + the deferred stubs. This file assembles the ordered pipeline by
 // composing the Task 2/3 vt ops over the [num_reqs, vocab] f32 logits.
 #include "vllm/v1/sample/sampler.h"
+#include "vt/sample_common.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -349,6 +350,22 @@ std::vector<int64_t> Sampler::sample(vt::Queue& q, vt::Tensor& logits,
     VT_CHECK(i >= 0 && static_cast<int64_t>(i) < n,
              "sampler: generator request index out of range");
     seeds[static_cast<size_t>(i)] = static_cast<int64_t>(seed);
+  }
+  // Upstream's q.exponential_() draws a FRESH noise tensor every step; our
+  // ExpNoise hashes (seed, row, col) with no step dimension, so without this
+  // mix the same noise vector applied to every decode step and a token that
+  // won one near-tie won all of them — a sampling repetition-pump that
+  // presents as 'degenerate looping a few tokens in'. Mix the per-request
+  // step index (num_computed_tokens) into the row seed: fresh noise each
+  // step, still deterministic per (seed, step) and batch-independent. Seeded
+  // requests get the same treatment — torch.Generator advances per draw too.
+  const bool have_steps =
+      static_cast<int64_t>(sm.num_computed_tokens.size()) == n;
+  for (int64_t i = 0; i < n; ++i) {
+    const int64_t step = have_steps ? sm.num_computed_tokens[static_cast<size_t>(i)] : 0;
+    seeds[static_cast<size_t>(i)] = static_cast<int64_t>(
+        vt::sample::SplitMix64(static_cast<uint64_t>(seeds[static_cast<size_t>(i)]) +
+                               0x9E3779B97F4A7C15ULL * static_cast<uint64_t>(step)));
   }
   std::vector<int64_t> random_sampled(static_cast<size_t>(n));
   {

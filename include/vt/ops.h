@@ -1031,6 +1031,12 @@ struct Exl3HadArgs {
 struct Exl3GemmArgs {
   int bits = 0;             // K, bits per weight (1..8); 3 for the 3.0bpw artifact
   int codebook = 1;         // cb; 1 == mcg, the only codebook this row decodes
+  // HALF-INTEGER rate (K+0.5), BACKEND-ROCM frac rates: `bits` carries the
+  // integer KA (1..7) and `codebook` MUST be 2 (mul1 — the only codebook the
+  // oracle defines the fractional rates for, `frac.cu`). Per TENSOR, set
+  // alongside `bits`/`codebook` per call, never per model: integer and frac
+  // tensors coexist in one mixed-rate checkpoint.
+  bool half = false;
   int force_shape_idx = 0;  // 0 == let Exl3SelectGemmShape decide (the default)
   // MODEL-DSV4-EXL3 W2c. The m<=8 GEMV arm, mirroring upstream's own `force`
   // parameter (`exl3_gemv.cu:105`, and the direct entry point at `:171-241`
@@ -6040,6 +6046,15 @@ void SharedExpertGate(Queue& q, Tensor& out, const Tensor& sd, const Tensor& gl)
 // a `uint16_t*` converts implicitly, so no call site changed.
 uint16_t Exl3TileCodeword(const void* tile, int bits, int t);
 
+// The HALF-INTEGER rate twin of `Exl3TileCodeword` (BACKEND-ROCM frac rates).
+// `bits` is the integer KA of `K = KA + 0.5`; the tile is `16*KA + 8` uint16
+// words. Position `i`'s 16-bit window ENDS at
+// `S(i) = KA*(i+1) + ((i&15)+1)/2 + 8*(i/16)` ring bits — odd positions carry
+// the extra bit (mask 0xAAAA, period 16) — and the ring is TAIL-BITING mod
+// `tile_bits = 256*KA + 128`, the same wrap the integer read gets from
+// `+256*bits` (`exllamav3_ext/quant/frac.cu`, `exl3_dq.cuh:254-286`).
+uint16_t Exl3FracTileCodeword(const void* tile, int ka, int t);
+
 // The MCG codebook (cb == 1), three instructions (`codebook.cuh:67-75`):
 // `x *= 0xCBAC1FED; x = (x & 0x8fff8fff) ^ 0x3b603b60;` then the two fp16
 // halves summed in fp16. Returns that fp16 value widened to f32.
@@ -6081,13 +6096,16 @@ float Exl3DecodeCodeword(uint16_t codeword, int codebook);
 int Exl3TileRowMajorIndex(int t);
 
 // Decode one packed tile into 256 f32 values in ROW-MAJOR 16x16 order.
-void Exl3DecodeTile(const void* tile, int bits, int codebook, float* out256);
+// `half` selects the half-integer rate (`bits` = KA, mul1 codebook required by
+// the caller's own validation).
+void Exl3DecodeTile(const void* tile, int bits, int codebook, float* out256,
+                    bool half = false);
 
 // `LinearEXL3.get_inner_weight_tensor` (`exl3.py:222-225`): the pre-Hadamard
 // reconstruct. `out` is f32 [k, n] row-major and holds exact fp16 codebook
 // values. `k` and `n` must be multiples of 16.
 void Exl3ReconstructInner(const void* trellis, int64_t k, int64_t n, int bits, int codebook,
-                          float* out);
+                          float* out, bool half = false);
 
 // `LinearEXL3.get_weight_tensor` (`exl3.py:227-237`): the full dequantized
 // weight, f32 [k, n] row-major (k = in_features, both multiples of 128 because
@@ -6103,7 +6121,7 @@ void Exl3ReconstructInner(const void* trellis, int64_t k, int64_t n, int bits, i
 // parity gate is stated against THIS function, not against torch.
 void Exl3DequantLinear(const void* trellis, const void* suh,
                        const void* svh, int64_t k, int64_t n, int bits, int codebook,
-                       float* out);
+                       float* out, bool half = false);
 
 // ─── EXL3 device kernels — MODEL-DSV4-EXL3 W2a / W2b ─────────────────────────
 //
@@ -6244,8 +6262,13 @@ inline constexpr int kExl3GemvMaxM = 8;
 // before any environment read or device query. `has_su_sv` is upstream's own
 // precondition that the call carries suh, A_had and svh: the GEMV kernel does
 // the input and output Hadamards itself and has no arm without them.
+// `exl3_gemv.cu:110-114` plus ONE extension of ours, not upstream's: `half`
+// marks a HALF-INTEGER rate (K+0.5, mul1). A frac tensor reported as bits=KA
+// would pass every upstream test at e.g. (3, 2) and then decode through the
+// INTEGER-3 GEMV arm — silently wrong — so `half` refuses here by name; the
+// frac GEMV arm is owed (BACKEND-ROCM, spec `## Owed`).
 bool Exl3GemvHardEligible(int size_m, int size_k, int size_n, int bits, int codebook,
-                          bool has_su_sv);
+                          bool has_su_sv, bool half = false);
 
 // `exl3_gemv_cfg` (`exl3_gemv.cu:46-72`). Returns -1 (not eligible), 0 (the
 // narrow config: 512 threads, one block per 32 output columns) or 1 (the wide

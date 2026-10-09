@@ -133,6 +133,10 @@ std::vector<uint8_t> RocmGemm(const Exl3Fixture& f, const std::vector<uint16_t>&
   vt::Exl3GemmArgs args;
   args.bits = f.bits;
   args.codebook = codebook;
+  // This suite gates the BYTE-exact transcription. force_gemv = 0 pins step 2
+  // to Exl3GemmK so the m<=8 GEMV arm (rocm_exl3_gemv.hip, its own 6.0e-3 gate
+  // in test_exl3_rocm_gemv.cpp) cannot change the arm under test.
+  args.force_gemv = 0;
   vt::Exl3Gemm(dq, tc, ta, tb, tsuh, tsvh, tah, args);
   cb.Synchronize(dq);
   std::vector<uint8_t> out(cb_bytes, 0);

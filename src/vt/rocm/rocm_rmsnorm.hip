@@ -126,12 +126,36 @@ __global__ void RmsNormRowKernel(Tout* out, const Tin* x, const Tw* w, Tres* res
   Tres* rrow = residual == nullptr ? nullptr : residual + row * h;
 
   __shared__ float partial[kBlock];
+  // One block per row, so a decode row (h=5120) is 20 strided steps per
+  // thread. The stores may alias the next step's loads as far as the compiler
+  // knows, which serialised every step behind a memory round trip (11.7 us on
+  // gfx1100). Each batch issues all its loads first; a thread still owns the
+  // same elements and accumulates them in the same order, so the bits match.
+  constexpr int kBatch = 8;
   float acc = 0.0f;
-  for (int64_t j = threadIdx.x; j < h; j += kBlock) {
+  int64_t j0 = threadIdx.x;
+  for (; j0 + (kBatch - 1) * kBlock < h; j0 += kBatch * kBlock) {
+    float v[kBatch];
+#pragma unroll
+    for (int b = 0; b < kBatch; ++b) v[b] = Load(xrow, j0 + b * kBlock);
+    if (rrow != nullptr) {
+      float r[kBatch];
+#pragma unroll
+      for (int b = 0; b < kBatch; ++b) r[b] = Load(rrow, j0 + b * kBlock);
+#pragma unroll
+      for (int b = 0; b < kBatch; ++b) {
+        v[b] = ResRound<Tres>(v[b] + r[b]);  // new residual stream: f32 add, round to Tres
+        Store(rrow, j0 + b * kBlock, v[b]);  // updated in place
+      }
+    }
+#pragma unroll
+    for (int b = 0; b < kBatch; ++b) acc += v[b] * v[b];
+  }
+  for (int64_t j = j0; j < h; j += kBlock) {
     float v = Load(xrow, j);
     if (rrow != nullptr) {
-      v = ResRound<Tres>(v + Load(rrow, j));  // new residual stream: f32 add, round to Tres
-      Store(rrow, j, v);                      // updated in place
+      v = ResRound<Tres>(v + Load(rrow, j));
+      Store(rrow, j, v);
     }
     acc += v * v;
   }
@@ -142,7 +166,21 @@ __global__ void RmsNormRowKernel(Tout* out, const Tin* x, const Tw* w, Tres* res
     __syncthreads();
   }
   const float inv = 1.0f / sqrtf(partial[0] / static_cast<float>(h) + eps);
-  for (int64_t j = threadIdx.x; j < h; j += kBlock) {
+  j0 = threadIdx.x;
+  for (; j0 + (kBatch - 1) * kBlock < h; j0 += kBatch * kBlock) {
+    float v[kBatch], wv[kBatch];
+#pragma unroll
+    for (int b = 0; b < kBatch; ++b) {
+      v[b] = rrow != nullptr ? Load(rrow, j0 + b * kBlock) : Load(xrow, j0 + b * kBlock);
+      wv[b] = Load(w, j0 + b * kBlock);
+    }
+#pragma unroll
+    for (int b = 0; b < kBatch; ++b) {
+      if (gemma) wv[b] += 1.0f;
+      Store(orow, j0 + b * kBlock, v[b] * inv * wv[b]);
+    }
+  }
+  for (int64_t j = j0; j < h; j += kBlock) {
     const float v = rrow != nullptr ? Load(rrow, j) : Load(xrow, j);
     float wj = Load(w, j);
     if (gemma) wj += 1.0f;

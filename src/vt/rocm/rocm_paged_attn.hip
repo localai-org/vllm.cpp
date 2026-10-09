@@ -6,9 +6,11 @@
 
 #include "rocm_rdna3_attn_decode.h"
 #include "rocm_rdna3_dot2.h"
+#include "rocm_env.h"
+#include "vt/rocm/rocm_device_bind.h"
 // Compile the same rocWMMA BF16 tiles for the admitted RDNA3 and RDNA4 targets.
 // Keep this set aligned with GcnArchNameHasSharedKAttentionWmma at host dispatch.
-#if defined(__gfx1100__) || defined(__gfx1200__) || defined(__gfx1201__)
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1200__) || defined(__gfx1201__)
 #include <rocwmma/rocwmma.hpp>
 
 #include "rocm_rdna3_wmma.h"
@@ -30,6 +32,8 @@
 #include <atomic>
 #include <cstdlib>
 #include <mutex>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace vt::rocm {
@@ -1006,13 +1010,15 @@ __global__ void PagedAttnDecodeGqaF32Q(float* out, const float* query_f32,
                                        int64_t kc_hd, int64_t vc_blk, int64_t vc_pg, int64_t vc_hd,
                                        float scale, float softcap, bool causal, int window_left,
                                        int window_right, float k_scale,
-                                       float v_scale) {
+                                       float v_scale, int num_splits, float* part) {
   constexpr int kEpl = EPL;
   constexpr int d_expect = kEpl * 32;
   const int64_t t = blockIdx.x;
   const int64_t g = blockIdx.y;
   const int warp = static_cast<int>(threadIdx.x) >> 5;
   const int lane = static_cast<int>(threadIdx.x) & 31;
+  const int split = static_cast<int>(blockIdx.z) % num_splits;
+  const int zq = static_cast<int>(blockIdx.z) / num_splits;
   if (g >= num_kv_heads || d != d_expect) return;
 
   int64_t r = -1, q0 = 0, q1 = 0;
@@ -1049,10 +1055,25 @@ __global__ void PagedAttnDecodeGqaF32Q(float* out, const float* query_f32,
     if (jr < jmax) jmax = jr;
   }
   if (jmax > seqlen - 1) jmax = seqlen - 1;
+  // Split-KV: CTA `split` of `num_splits` takes one contiguous chunk of
+  // [jmin, jmax]. The chunk is sized on device from this query's own range, so
+  // the launch shape does not depend on sequence length (graph replay safe);
+  // a chunk past the range leaves the loop empty and writes a neutral partial.
+  if (num_splits > 1) {
+    constexpr int64_t kMinChunk = 8 * NWARPS;
+    const int64_t len = jmax - jmin + 1;
+    int64_t chunk = (len + num_splits - 1) / num_splits;
+    if (chunk < kMinChunk) chunk = kMinChunk;
+    const int64_t js = jmin + static_cast<int64_t>(split) * chunk;
+    const int64_t je = js + chunk - 1;
+    jmin = js;
+    if (je < jmax) jmax = je;
+  }
 
   const int64_t qg_total = hq / num_kv_heads;
-  // blockIdx.z splits a large GQA group into QG-sized tiles (e.g. global QG=8 → two×4).
-  const int64_t h0 = g * qg_total + static_cast<int64_t>(blockIdx.z) * QG;
+  // blockIdx.z / num_splits tiles a large GQA group into QG-sized tiles
+  // (e.g. global QG=8 → two×4).
+  const int64_t h0 = g * qg_total + static_cast<int64_t>(zq) * QG;
   if (h0 + QG > (g + 1) * qg_total) return;
   float q_reg[QG][kEpl];
 #pragma unroll
@@ -1124,19 +1145,89 @@ __global__ void PagedAttnDecodeGqaF32Q(float* out, const float* query_f32,
     float acc[kEpl];
 #pragma unroll
     for (int i = 0; i < kEpl; ++i) acc[i] = 0.f;
+    if (gm != -INFINITY) {
 #pragma unroll
-    for (int w = 0; w < NWARPS; ++w) {
-      const float sc = FastExp(m_sh[w * QG + hh] - gm);
-      gl += l_sh[w * QG + hh] * sc;
-      const float* src = o_sh + (static_cast<size_t>(w) * QG + hh) * d + lane * kEpl;
+      for (int w = 0; w < NWARPS; ++w) {
+        const float sc = FastExp(m_sh[w * QG + hh] - gm);
+        gl += l_sh[w * QG + hh] * sc;
+        const float* src = o_sh + (static_cast<size_t>(w) * QG + hh) * d + lane * kEpl;
 #pragma unroll
-      for (int i = 0; i < kEpl; ++i) acc[i] += sc * src[i];
+        for (int i = 0; i < kEpl; ++i) acc[i] += sc * src[i];
+      }
+    }
+    if (part != nullptr) {
+      // Unnormalised partial [acc(d) | max | sum] for PagedAttnGqaSplitReduceF32.
+      float* pp = part + ((t * hq + (h0 + hh)) * num_splits + split) * (d + 2);
+      StoreRowEplF32<kEpl>(pp, 0, lane, acc);
+      if (lane == 0) {
+        pp[d] = gm;
+        pp[d + 1] = gl;
+      }
+      continue;
     }
     const float inv = (gl > 0.f) ? (1.f / gl) : 0.f;
 #pragma unroll
     for (int i = 0; i < kEpl; ++i) acc[i] *= inv;
     StoreRowEplF32<kEpl>(out, (t * hq + (h0 + hh)) * d, lane, acc);
   }
+}
+
+// Merge of PagedAttnDecodeGqaF32Q's split-KV partials: grid (total_q, hq),
+// one warp. out = sum_s acc_s * e^(m_s - M) / sum_s l_s * e^(m_s - M).
+template <int EPL>
+__global__ void PagedAttnGqaSplitReduceF32(float* out, const float* part, int64_t hq,
+                                           int64_t d, int num_splits) {
+  const int64_t t = blockIdx.x;
+  const int64_t h = blockIdx.y;
+  const int lane = static_cast<int>(threadIdx.x) & 31;
+  if (d != EPL * 32) return;
+  const float* base = part + (t * hq + h) * num_splits * (d + 2);
+  float gm = -INFINITY;
+  for (int s = 0; s < num_splits; ++s) gm = fmaxf(gm, base[s * (d + 2) + d]);
+  float gl = 0.f;
+  float acc[EPL];
+#pragma unroll
+  for (int i = 0; i < EPL; ++i) acc[i] = 0.f;
+  if (gm != -INFINITY) {
+    for (int s = 0; s < num_splits; ++s) {
+      const float* ps = base + s * (d + 2);
+      const float ms = ps[d];
+      if (ms == -INFINITY) continue;
+      const float sc = FastExp(ms - gm);
+      gl += ps[d + 1] * sc;
+#pragma unroll
+      for (int i = 0; i < EPL; ++i) acc[i] += sc * ps[lane * EPL + i];
+    }
+  }
+  const float inv = (gl > 0.f) ? (1.f / gl) : 0.f;
+#pragma unroll
+  for (int i = 0; i < EPL; ++i) acc[i] *= inv;
+  StoreRowEplF32<EPL>(out, (t * hq + h) * d, lane, acc);
+}
+
+// Split-KV workspace for the f32-query GQA arm. Grow-only and never freed: a
+// captured decode graph may have baked the pointer (same rule as
+// EnsureRawScratch in rocm_exl3.hip). Its size depends on total_q, hq,
+// num_splits and d only, never on sequence length.
+float* EnsureGqaSplitScratch(size_t need, hipStream_t s) {
+  static std::mutex mu;
+  static std::unordered_map<hipStream_t, std::pair<void*, size_t>> pools;
+  std::lock_guard<std::mutex> lk(mu);
+  auto& sc = pools[s];
+  if (need > sc.second) {
+    if (StreamIsCapturing(s)) {
+      // A grow inside graph capture would bake a one-shot alloc node whose
+      // freed pointer the replay still dereferences — refuse loudly instead.
+      throw std::runtime_error(
+          "vt rocm paged_attn: gqa split scratch growth under stream capture "
+          "(grow the pool once outside capture, or pre-size num_splits)");
+    }
+    if (sc.first != nullptr)
+      Check(hipFreeAsync(sc.first, s), "gqa split scratch free");
+    Check(hipMallocAsync(&sc.first, need, s), "gqa split scratch grow");
+    sc.second = need;
+  }
+  return static_cast<float*>(sc.first);
 }
 
 // ============================================================================
@@ -2929,6 +3020,35 @@ void PagedAttentionKernelRocm(Queue& q, Tensor& out, const Tensor& query, const 
   
   if (bf16_decode_opt) {
     const int64_t qg = hq / num_kv_heads;
+
+    // Qwen3.5-family heads (hq=16, kv=4 → qg=4, d=256): decode stays on
+    // DecodeOpt above, but prefill falls all the way to the serial
+    // PagedAttnOnline — measured 22-24% of a 2k-token prefill on gfx1101
+    // (rocprofv3, Qwen3.5-9B-EXL3). The QG=2 SharedKWmma arm already z-tiles
+    // the group via blockIdx.z (the qg=8/d=512 case proves it), so qg=4 runs
+    // the same kernel at z=2. Prefill-only; nothing on the decode arm changes.
+    if (decode_gqa && qg == 4 && d == 256 && num_reqs == 1 &&
+        total_q >= 64 && SharedKAttentionWmmaHostOk()) {
+      constexpr int BM = 16, BN = 64;
+      const unsigned tiles = static_cast<unsigned>((total_q + BM - 1) / BM);
+      dim3 grid(tiles, static_cast<unsigned>(num_kv_heads), 2u);
+      dim3 block(static_cast<unsigned>(BM * 32));
+      const size_t smem =
+          sizeof(__hip_bfloat16) *
+          (static_cast<size_t>(BM) * 2 * static_cast<size_t>(d) +
+           static_cast<size_t>(BN) * static_cast<size_t>(d));
+      PagedAttnPrefillSharedKWmma<2, 8, BM, BN, false>
+          <<<grid, block, smem, st>>>(
+              out.Ptr<__hip_bfloat16>(), query.Ptr<__hip_bfloat16>(),
+              k_cache.Ptr<__hip_bfloat16>(), v_cache.Ptr<__hip_bfloat16>(),
+              block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(),
+              query_start_loc.Ptr<int32_t>(), num_reqs, hq, num_kv_heads, d,
+              block_size, bt_row, bt_col, kc_blk, kc_pg, kc_hd, vc_blk, vc_pg,
+              vc_hd, args.scale, args.logits_soft_cap, args.causal,
+              window_left, window_right);
+      Check(hipGetLastError(), "paged_attention prefill_sharedk_wmma qg4 launch");
+      return;
+    }
     // GQA fuse: sliding QG=2. Global QG=8: tile as DecodeGqa QG=2 × z=4
     // (proven kernel; halves K/V reloads vs DecodeOpt's 8×). QG=4/8 CTAs lost A/B.
     if (decode_gqa &&
@@ -3189,71 +3309,131 @@ void PagedAttentionKernelRocm(Queue& q, Tensor& out, const Tensor& query, const 
   // __syncthreads() walk measuring ~803us/call on the RX 7900 XTX (6.1
   // ms/token across the model's full-attention layers). This arm routes that
   // exact dtype combination through the DecodeGqa geometry (QG=4 fused
-  // q-heads per KV group, warp-strided sequence walk). DEFAULT OFF via
-  // VT_ATTN_DECODE_GQA4=1: correctness-complete but the reduction order
-  // differs from PagedAttnOnline's, so greedy anchors can move at exact ties.
-  static const bool decode_gqa4_f32q = [] {
-    const char* e = std::getenv("VT_ATTN_DECODE_GQA4");
-    return e != nullptr && e[0] == '1';
-  }();
+  // q-heads per KV group, warp-strided sequence walk). On by default: the
+  // arm is correctness-complete and the PagedAttnOnline fallback it replaces
+  // is the generic per-context-token walk (~212us/call, ~3.4ms/token across
+  // the 27B's 16 full-attention layers). Reduction order differs from
+  // PagedAttnOnline's, so greedy anchors can move at exact ties; measured
+  // 22.13 -> 26.24 decode tok/s with golden "The capital of France is" ->
+  // " Paris." parity. VT_ATTN_DECODE_GQA4=0 restores the fallback.
+  // default ON; =0 disables
+  static const bool decode_gqa4_f32q = EnvBoolStrict("VT_ATTN_DECODE_GQA4", true);
   if (decode_opt && decode_gqa4_f32q && total_q <= hq &&
       query.dtype == DType::kF32 && out.dtype == DType::kF32 &&
       ((k_cache.dtype == DType::kBF16 && v_cache.dtype == DType::kBF16) ||
        (k_cache.dtype == DType::kI8 && v_cache.dtype == DType::kI8 &&
         args.kv_cache_dtype != Fp8KVCacheDataType::kAuto)) &&
-      (d == 128 || d == 256) && hq == 16 && num_kv_heads == 4) {
+      (d == 128 || d == 256) && num_kv_heads > 0 &&
+      hq % num_kv_heads == 0 &&
+      (hq / num_kv_heads == 4 || hq / num_kv_heads == 6 ||
+       hq / num_kv_heads == 8)) {
     constexpr int kDecWarpsG = 8;
-    constexpr int kQgG = 4;
+    // The kernel tiles a wider GQA group over blockIdx.z in chunks of QG.
+    // qg_total 4 -> QG=4 z=1 (the TG150 arm), 6 -> QG=6 z=1 (Qwen3.5-dense
+    // 27B class: hq=24, kv=4), 8 -> QG=4 z=2.
+    const int64_t qg_total = hq / num_kv_heads;
+    const int qg = qg_total == 4 ? 4 : qg_total == 6 ? 6 : 4;
+    const unsigned z_groups = static_cast<unsigned>(qg_total / qg);
     constexpr int kNwarpsG = kDecWarpsG;
     // EPL = d / 32 lanes: 8 at head_dim 256 (the original TG150 arm), 4 at
     // head_dim 128 (Qwen3-dense class, TG200). One kernel body; it
     // self-guards d != EPL*32, so a wrong pairing exits without reading.
-    const size_t smem = sizeof(float) *
-        (static_cast<size_t>(kNwarpsG) * kQgG * static_cast<size_t>(d) +
-         2 * static_cast<size_t>(kNwarpsG) * kQgG);
-    dim3 grid3(static_cast<unsigned>(total_q), static_cast<unsigned>(num_kv_heads), 1);
+    const int64_t smem_qg =
+        static_cast<int64_t>(kNwarpsG) * qg * (static_cast<int64_t>(d) + 2);
+    const size_t smem = sizeof(float) * static_cast<size_t>(smem_qg);
+    // Split-KV over blockIdx.z (z = z_groups * num_splits): one CTA per KV head
+    // walks the whole context serially, which left 4 CTAs on the GPU for this
+    // model and cost ~5 ms/token at 2k context. Chunks are sized on device, so
+    // short contexts keep all work in split 0. VT_ATTN_GQA4_SPLITS=1 restores
+    // the single-CTA walk.
+    static const int gqa4_splits = [] {
+      const int v = EnvIntStrict("VT_ATTN_GQA4_SPLITS", 16);
+      return v < 1 ? 1 : (v > 64 ? 64 : v);
+    }();
+    const int num_splits = gqa4_splits;
+    float* part = nullptr;
+    if (num_splits > 1) {
+      const size_t need = sizeof(float) * static_cast<size_t>(total_q) *
+                          static_cast<size_t>(hq) * static_cast<size_t>(num_splits) *
+                          static_cast<size_t>(d + 2);
+      part = EnsureGqaSplitScratch(need, st);
+    }
+    dim3 grid3(static_cast<unsigned>(total_q), static_cast<unsigned>(num_kv_heads),
+               z_groups * static_cast<unsigned>(num_splits));
     dim3 block3(static_cast<unsigned>(kNwarpsG * 32));
     const bool gqa4_fp8 = k_cache.dtype == DType::kI8;
+    const float ks = gqa4_fp8 ? args.k_scale : 1.0f;
+    const float vs = gqa4_fp8 ? args.v_scale : 1.0f;
+#define VT_GQA4_LAUNCH(QG_, EPL_, TKV_)                                                  \
+  PagedAttnDecodeGqaF32Q<QG_, EPL_, kDecWarpsG, TKV_><<<grid3, block3, smem, st>>>(      \
+      out.Ptr<float>(), query.Ptr<float>(), k_cache.Ptr<TKV_>(), v_cache.Ptr<TKV_>(),     \
+      block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(), query_start_loc.Ptr<int32_t>(), \
+      num_reqs, hq, num_kv_heads, d, block_size, bt_row, bt_col, kc_blk, kc_pg, kc_hd,     \
+      vc_blk, vc_pg, vc_hd, args.scale, args.logits_soft_cap, args.causal, window_left,    \
+      window_right, ks, vs, num_splits, part)
     if (d == 128) {
       if (gqa4_fp8) {
-        PagedAttnDecodeGqaF32Q<kQgG, 4, kDecWarpsG, uint8_t><<<grid3, block3, smem, st>>>(
-            out.Ptr<float>(), query.Ptr<float>(), k_cache.Ptr<uint8_t>(),
-            v_cache.Ptr<uint8_t>(), block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(),
-            query_start_loc.Ptr<int32_t>(), num_reqs, hq, num_kv_heads, d, block_size,
-            bt_row, bt_col, kc_blk, kc_pg, kc_hd, vc_blk, vc_pg, vc_hd, args.scale,
-            args.logits_soft_cap, args.causal, window_left, window_right,
-            args.k_scale, args.v_scale);
+        if (qg == 6) VT_GQA4_LAUNCH(6, 4, uint8_t); else VT_GQA4_LAUNCH(4, 4, uint8_t);
       } else {
-        PagedAttnDecodeGqaF32Q<kQgG, 4, kDecWarpsG><<<grid3, block3, smem, st>>>(
-            out.Ptr<float>(), query.Ptr<float>(), k_cache.Ptr<__hip_bfloat16>(),
-            v_cache.Ptr<__hip_bfloat16>(), block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(),
-            query_start_loc.Ptr<int32_t>(), num_reqs, hq, num_kv_heads, d, block_size,
-            bt_row, bt_col, kc_blk, kc_pg, kc_hd, vc_blk, vc_pg, vc_hd, args.scale,
-            args.logits_soft_cap, args.causal, window_left, window_right,
-            1.0f, 1.0f);
+        if (qg == 6) VT_GQA4_LAUNCH(6, 4, __hip_bfloat16); else VT_GQA4_LAUNCH(4, 4, __hip_bfloat16);
       }
     } else {
       if (gqa4_fp8) {
-        PagedAttnDecodeGqaF32Q<kQgG, 8, kDecWarpsG, uint8_t><<<grid3, block3, smem, st>>>(
-            out.Ptr<float>(), query.Ptr<float>(), k_cache.Ptr<uint8_t>(),
-            v_cache.Ptr<uint8_t>(), block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(),
-            query_start_loc.Ptr<int32_t>(), num_reqs, hq, num_kv_heads, d, block_size,
-            bt_row, bt_col, kc_blk, kc_pg, kc_hd, vc_blk, vc_pg, vc_hd, args.scale,
-            args.logits_soft_cap, args.causal, window_left, window_right,
-            args.k_scale, args.v_scale);
+        if (qg == 6) VT_GQA4_LAUNCH(6, 8, uint8_t); else VT_GQA4_LAUNCH(4, 8, uint8_t);
       } else {
-        PagedAttnDecodeGqaF32Q<kQgG, 8, kDecWarpsG><<<grid3, block3, smem, st>>>(
-            out.Ptr<float>(), query.Ptr<float>(), k_cache.Ptr<__hip_bfloat16>(),
-            v_cache.Ptr<__hip_bfloat16>(), block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(),
-            query_start_loc.Ptr<int32_t>(), num_reqs, hq, num_kv_heads, d, block_size,
-            bt_row, bt_col, kc_blk, kc_pg, kc_hd, vc_blk, vc_pg, vc_hd, args.scale,
-            args.logits_soft_cap, args.causal, window_left, window_right,
-            1.0f, 1.0f);
+        if (qg == 6) VT_GQA4_LAUNCH(6, 8, __hip_bfloat16); else VT_GQA4_LAUNCH(4, 8, __hip_bfloat16);
       }
     }
+#undef VT_GQA4_LAUNCH
     Check(hipGetLastError(), "paged_attention decode_gqa_f32q launch");
+    if (num_splits > 1) {
+      dim3 gridr(static_cast<unsigned>(total_q), static_cast<unsigned>(hq));
+      if (d == 128)
+        PagedAttnGqaSplitReduceF32<4><<<gridr, 32, 0, st>>>(out.Ptr<float>(), part, hq, d,
+                                                            num_splits);
+      else
+        PagedAttnGqaSplitReduceF32<8><<<gridr, 32, 0, st>>>(out.Ptr<float>(), part, hq, d,
+                                                            num_splits);
+      Check(hipGetLastError(), "paged_attention decode_gqa_f32q split reduce");
+    }
 
     return;
+  }
+
+  // f32-query + bf16-KV prefill fast path (Qwen3.5's served dtype mix:
+  // PagedAttnOnline<float, __hip_bfloat16, float> measured 22-24% of a
+  // 2k-token prefill on gfx1101). Same kernel + z-tiling the fp8 arm uses,
+  // bf16 KV instead of fp8. total_q>=64 mirrors the fp8 admission.
+  static const bool bf16kv_prefill_sharedk =
+      EnvBoolStrict("VT_ATTN_PREFILL_F32Q_B16KV", true);
+  const bool f32q_bf16kv_prefill =
+      bf16kv_prefill_sharedk && query.dtype == DType::kF32 &&
+      out.dtype == DType::kF32 && k_cache.dtype == DType::kBF16 &&
+      v_cache.dtype == DType::kBF16 && d == 256 && total_q >= 64 &&
+      num_reqs == 1;
+  if (f32q_bf16kv_prefill) {
+    const int64_t qg = hq / num_kv_heads;
+    if (qg == 2 || qg == 4 || qg == 8) {
+      constexpr int QG = 2;
+      constexpr int EPL = 8;   // d=256
+      constexpr int BM = 32, BN = 32;
+      const unsigned z_groups = static_cast<unsigned>(qg / QG);
+      const unsigned tiles = static_cast<unsigned>((total_q + BM - 1) / BM);
+      dim3 gridp(tiles, static_cast<unsigned>(num_kv_heads), z_groups);
+      dim3 blockp(static_cast<unsigned>(BM * 32));
+      const size_t smemp = sizeof(__hip_bfloat16) * 2u * BN * d;
+      PagedAttnPrefillSharedK<QG, EPL, BM, BN, __hip_bfloat16, float, float>
+          <<<gridp, blockp, smemp, st>>>(
+              out.Ptr<float>(), query.Ptr<float>(),
+              k_cache.Ptr<__hip_bfloat16>(), v_cache.Ptr<__hip_bfloat16>(),
+              block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(),
+              query_start_loc.Ptr<int32_t>(), num_reqs, hq, num_kv_heads, d,
+              block_size, bt_row, bt_col, kc_blk, kc_pg, kc_hd, vc_blk,
+              vc_pg, vc_hd, args.scale, args.logits_soft_cap, args.causal,
+              window_left, window_right, args.k_scale, args.v_scale);
+      Check(hipGetLastError(), "paged_attention f32q_bf16kv prefill_sharedk launch");
+      return;
+    }
   }
   auto launch = [&](auto q_tag, auto kv_tag, auto o_tag) {
     using TQ = decltype(q_tag);

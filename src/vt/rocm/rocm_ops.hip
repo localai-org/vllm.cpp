@@ -182,6 +182,13 @@ void AttnGateSplitKernelRocm(Queue& q, Tensor& query, Tensor& gate, const Tensor
 void Exl3GemmKernelRocm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis,
                         const Tensor& suh, const Tensor& svh, Tensor& a_had,
                         const Exl3GemmArgs& args);
+// BACKEND-ROCM EXL3 slice B (rocm_exl3_recon.hip, spec rocm-exl3-gemv): the
+// unfused reconstruct+hipBLAS arm of the M > 144 dispatch — registering it is
+// what makes dense_attn_block.h's threshold reachable on ROCm at all.
+void Exl3ReconstructGemmKernelRocm(Queue& q, Tensor& c, const Tensor& a,
+                                   const Tensor& trellis, const Tensor& suh,
+                                   const Tensor& svh, Tensor& a_had,
+                                   Tensor& w_scratch, const Exl3GemmArgs& args);
 // ROCM-FUSED-NORM-ROPE (rocm_mla_fused_norm_rope.hip, #2564): the MLA
 // norm-rope fold. Registering it is what makes `mla_attention.cpp`'s `fused_nr`
 // predicate true on this backend, and that predicate -- not the op call -- is
@@ -370,6 +377,9 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<AttnGateSplitFn>(&AttnGateSplitKernelRocm)));
     RegisterOp(OpId::kExl3Gemm, DeviceType::kROCM,
                reinterpret_cast<void*>(static_cast<Exl3GemmFn>(&Exl3GemmKernelRocm)));
+    RegisterOp(OpId::kExl3ReconstructGemm, DeviceType::kROCM,
+               reinterpret_cast<void*>(
+                   static_cast<Exl3ReconstructGemmFn>(&Exl3ReconstructGemmKernelRocm)));
     RegisterOp(
         OpId::kFusedNormRope, DeviceType::kROCM,
         reinterpret_cast<void*>(static_cast<FusedNormRopeFn>(&FusedNormRopeKernelRocm)));

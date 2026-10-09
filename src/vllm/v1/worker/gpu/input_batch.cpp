@@ -414,6 +414,22 @@ const SamplingMetadata& InputBatch::make_sampling_metadata() const {
     sampling_metadata_cache_ = build_sampling_metadata();
     sampling_metadata_dirty_ = false;
   }
+  // num_computed_tokens advances every decode step and the SAMPLER mixes it
+  // into the Gumbel row seed so the noise is fresh per draw (upstream gets
+  // the same freshness from torch.Generator advancing). That field is the
+  // one per-step-varying member the dirty check above does not cover — a
+  // pure-decode step has no batch mutation, so without this refresh the
+  // sampler saw the admission-time step forever and the noise stayed frozen
+  // (the repetition-pump fix depended on this index advancing). Copy it from
+  // the live cpu array unconditionally; it is a tiny vector and the other
+  // fields keep the cache path.
+  {
+    const int64_t nn = num_reqs();
+    if (static_cast<int64_t>(sampling_metadata_cache_.num_computed_tokens.size()) == nn) {
+      sampling_metadata_cache_.num_computed_tokens.assign(
+          num_computed_tokens_cpu.begin(), num_computed_tokens_cpu.begin() + nn);
+    }
+  }
   return sampling_metadata_cache_;
 }
 
@@ -505,6 +521,13 @@ SamplingMetadata InputBatch::build_sampling_metadata() const {
       md.generators[i] = static_cast<uint64_t>(*seeds[static_cast<size_t>(i)]);
     }
   }
+
+  // num_computed_tokens -> the sampler's per-row step index. It advances by
+  // one per decode step, which is what makes the coordinate-hashed Gumbel
+  // noise fresh per draw instead of frozen across the whole decode (upstream
+  // gets the same freshness from the torch.Generator advancing).
+  md.num_computed_tokens.assign(num_computed_tokens_cpu.begin(),
+                                num_computed_tokens_cpu.begin() + nn);
 
   // ─── ROAD-V1-C7 SAMPLE-CORE / SAMPLE-LOGPROBS / SAMPLE-LOGIT-FILTERS ───────
   // max_num_logprobs (gpu_input_batch.py:950 / :1150-1151): max requested count

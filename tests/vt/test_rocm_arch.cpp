@@ -25,11 +25,12 @@ using vt::rocm::CapabilityFromGcnArch;
 TEST_CASE("SharedK attention WMMA admits measured gfx1100 and retains gfx12") {
   using vt::rocm::GcnArchNameHasSharedKAttentionWmma;
   for (const char* arch : {"gfx1100", "gfx1100:xnack-", "gfx1100:sramecc+:xnack-",
+                           "gfx1101", "gfx1101:xnack-",
                            "gfx1200", "gfx1201", "gfx1201:xnack-"}) {
     CHECK_MESSAGE(GcnArchNameHasSharedKAttentionWmma(arch), arch);
   }
   for (const char* arch : {"", "gfx110", "gfx11000", "gfx1100junk", "foogfx1100",
-                           "gfx1101", "gfx1102", "gfx1103", "gfx1151", "gfx942",
+                           "gfx11010", "gfx1102", "gfx1103", "gfx1151", "gfx942",
                            "gfx1202", "gfx12010"}) {
     CHECK_FALSE_MESSAGE(GcnArchNameHasSharedKAttentionWmma(arch), arch);
   }
@@ -44,12 +45,20 @@ TEST_CASE("SharedK gfx1100 WMMA is enabled by default after full model parity") 
     CHECK_FALSE(SharedKAttentionWmmaEnabled(arch, "0"));
     CHECK(SharedKAttentionWmmaEnabled(arch, "1"));
   }
+  // gfx1101: same gfx11 WMMA family as gfx1100, admitted for prefill only
+  // (GcnArchNameHasGemmaDecodeWmma keeps decode gfx1100-only; the case below
+  // still asserts that).
+  for (const char* arch : {"gfx1101", "gfx1101:xnack-"}) {
+    CHECK(SharedKAttentionWmmaEnabled(arch, nullptr));
+    CHECK_FALSE(SharedKAttentionWmmaEnabled(arch, "0"));
+    CHECK(SharedKAttentionWmmaEnabled(arch, "1"));
+  }
   for (const char* arch : {"gfx1200", "gfx1201", "gfx1201:xnack-"}) {
     CHECK(SharedKAttentionWmmaEnabled(arch, nullptr));
     CHECK_FALSE(SharedKAttentionWmmaEnabled(arch, "0"));
     CHECK(SharedKAttentionWmmaEnabled(arch, "1"));
   }
-  for (const char* arch : {"gfx1101", "gfx1151", "gfx12010", ""}) {
+  for (const char* arch : {"gfx1151", "gfx12010", ""}) {
     CHECK_FALSE(SharedKAttentionWmmaEnabled(arch, nullptr));
     CHECK_FALSE(SharedKAttentionWmmaEnabled(arch, "1"));
   }

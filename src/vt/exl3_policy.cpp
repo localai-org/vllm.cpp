@@ -139,7 +139,14 @@ int Exl3GemmNumSms(int shape_idx, int size_k, int size_n, int device_sms) {
 // ─── W2c: the m<=8 GEMV envelope ─────────────────────────────────────────────
 
 bool Exl3GemvHardEligible(int size_m, int size_k, int size_n, int bits, int codebook,
-                          bool has_su_sv) {
+                          bool has_su_sv, bool half) {
+  // OUR EXTENSION, NOT UPSTREAM'S: a HALF-INTEGER rate (K+0.5, mul1) must not
+  // reach the GEMV. Its Exl3GemmArgs carries bits = KA, and e.g. a KA=3 frac
+  // tensor passes every test below as (3, 2) — an arm that IS instantiated —
+  // and would then decode the frac bitstream through the INTEGER-3 window
+  // arithmetic: silently wrong, the failure class this tree refuses by name.
+  // The frac GEMV arm is owed (BACKEND-ROCM, spec `## Owed`).
+  if (half) return false;
   // exl3_gemv.cu:110-114, in upstream's own order. These are the tests upstream
   // takes BEFORE reading the environment or querying the device, because they
   // are free and they exclude almost every call.

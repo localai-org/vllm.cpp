@@ -140,6 +140,22 @@ Anything that feeds this oracle has to emit exllamav3-native keys.
 measured one. [#1901](https://github.com/mudler/vllm.cpp/issues/1901) still owns
 the half the fleet would not let anyone reach.
 
+**AMD addendum, measured 2026-10-05.** The verdict above is scoped to the
+aarch64 CUDA fleet and to source builds of the `2398c056` pin. On the host's
+RX 7900 XTX (gfx1100) the prebuilt ROCm image
+`exllamav3-rocm:git-679835b7-rocm10.0.0` demonstrably loads and serves an EXL3
+checkpoint that no earlier image can: `orcarouter/OrcaSAQ-2-27B-EXL3-3.21bpw`,
+whose `.trellis` tensors carry per-tensor mixed rates including 120 tensors at
+the half-integer `K = 3.5` (56 uint16 words per tile). Two greedy 256-token
+jobs under `~/gpu-coord` lease produced coherent ChatML output at ~24 tok/s
+(token IDs archived at `.agents/specs/orca_golden_{0,1}.json` for
+`BACKEND-ROCM`'s frac-rate token gate). This image is therefore the gateable
+oracle for half-integer EXL3 rates on ROCm — the `2398c056` pin predates
+`quant/frac.cu` and `dq8_half` entirely (first seen in `679835b7`), so it
+cannot adjudicate that format. `gateable = no` above stands for the
+CUDA-fleet source build; the ROCm image's reach ends at EXL3-format work on
+gfx1100, which is exactly what `quant-exl3-frac-rates` needs.
+
 **The verdict: the pin does not BUILD on this fleet, because exllamav3 at
 `2398c056` is an x86_64 project and every device here is aarch64.** Measured
 inside three `rc` leases on `orin:gpu0` (worker `rc-worker-lnvw6` and boot_id

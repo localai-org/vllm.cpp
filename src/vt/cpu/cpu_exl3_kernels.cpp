@@ -238,7 +238,8 @@ void Exl3GemmKernelCpu(Queue& q, Tensor& c, const Tensor& a, const Tensor& trell
   // two is the one thing this cursor must not lose (#2558).
   const auto* tw = static_cast<const unsigned char*>(trellis.data);
   const int64_t tiles_n = n / 16;
-  const int64_t tile_words = 16 * static_cast<int64_t>(args.bits);
+  const int64_t tile_words =
+      16 * static_cast<int64_t>(args.bits) + (args.half ? 8 : 0);
   const int64_t tile_bytes = tile_words * static_cast<int64_t>(sizeof(uint16_t));
   std::vector<float> raw(static_cast<size_t>(m) * static_cast<size_t>(n), 0.0f);
 
@@ -259,7 +260,8 @@ void Exl3GemmKernelCpu(Queue& q, Tensor& c, const Tensor& a, const Tensor& trell
     float tile[256];
     for (int64_t tj = j0; tj < j1; ++tj) {
       for (int64_t ti = 0; ti < k / 16; ++ti) {
-        Exl3DecodeTile(tw + (ti * tiles_n + tj) * tile_bytes, args.bits, args.codebook, tile);
+        Exl3DecodeTile(tw + (ti * tiles_n + tj) * tile_bytes, args.bits, args.codebook,
+                       tile, args.half);
         for (int64_t r = 0; r < m; ++r) {
           float* orow = &raw[static_cast<size_t>(r * n + tj * 16)];
           for (int rr = 0; rr < 16; ++rr) {

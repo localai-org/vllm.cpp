@@ -73,7 +73,10 @@ struct Exl3Fixture {
   int64_t k = 0;
   int64_t n = 0;
   int bits = 3;
-  std::vector<uint16_t> trellis;  // [k/16, n/16, 16*bits] words
+  // HALF-INTEGER rate (K+0.5, mul1): `bits` carries the integer KA and the
+  // tile is 16*KA+8 words. Set only by `MakeHalfFixture`.
+  bool half = false;
+  std::vector<uint16_t> trellis;  // [k/16, n/16, 16*bits (+8 if half)] words
   std::vector<uint16_t> suh;      // [k] fp16 bits
   std::vector<uint16_t> svh;      // [n] fp16 bits
 };
@@ -97,6 +100,24 @@ inline Exl3Fixture MakeFixture(int64_t k, int64_t n, int bits, uint32_t seed) {
   return f;
 }
 
+// The half-integer twin (BACKEND-ROCM frac rates): `bits` is the integer KA of
+// K = KA + 0.5, every tile is 16*KA+8 uint16 words, and the codebook a caller
+// pairs with it is ALWAYS 2 (mul1) — the random bit stream is a valid frac
+// trellis for the same reason the integer one is: every codeword decodes to a
+// valid fp16 pair under mul1.
+inline Exl3Fixture MakeHalfFixture(int64_t k, int64_t n, int ka, uint32_t seed) {
+  Exl3Fixture f = MakeFixture(k, n, ka, seed);
+  f.half = true;
+  f.trellis.resize(static_cast<size_t>(k / 16 * n / 16 * (16 * ka + 8)));
+  Rng rng;
+  rng.s = seed;
+  for (auto& w : f.trellis) {
+    rng.s = rng.s * 1664525u + 1013904223u;
+    w = static_cast<uint16_t>(rng.s >> 13);
+  }
+  return f;
+}
+
 // The tier-3 REFERENCE: the fused chain evaluated in double.
 //   x_had = (x * suh) @ H128 / sqrt(128)   (blockwise over k)
 //   y_raw = x_had @ W_inner                (W_inner = reconstruct(trellis))
@@ -106,7 +127,7 @@ inline std::vector<double> Exl3ChainF64(const Exl3Fixture& f,
                                         int codebook = 1) {
   const int64_t k = f.k, n = f.n;
   std::vector<float> w_inner(static_cast<size_t>(k * n));
-  vt::Exl3ReconstructInner(f.trellis.data(), k, n, f.bits, codebook, w_inner.data());
+  vt::Exl3ReconstructInner(f.trellis.data(), k, n, f.bits, codebook, w_inner.data(), f.half);
 
   const double inv = 1.0 / std::sqrt(128.0);
   std::vector<double> y(static_cast<size_t>(m * n), 0.0);

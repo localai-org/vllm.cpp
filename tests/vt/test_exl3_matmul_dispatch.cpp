@@ -42,13 +42,15 @@ namespace {
 using exl3_test::Exl3ChainF64;
 using exl3_test::Exl3Fixture;
 using exl3_test::MakeFixture;
+using exl3_test::MakeHalfFixture;
 using exl3_test::Rms;
 using exl3_test::Rng;
 using exl3_test::UlpF16;
 
 vllm::Exl3Weight WrapFixture(const Exl3Fixture& f) {
   vllm::Exl3Weight w;
-  w.codebook = 1;  // the codebook Exl3ChainF64 decodes by default
+  w.codebook = f.half ? 2 : 1;  // the codebook Exl3ChainF64 decodes by default; frac is mul1
+  w.half = f.half;
   const auto bytes_of = [](const std::vector<uint16_t>& v) {
     return vllm::OwnedBytes(std::vector<uint8_t>(
         reinterpret_cast<const uint8_t*>(v.data()),
@@ -58,7 +60,7 @@ vllm::Exl3Weight WrapFixture(const Exl3Fixture& f) {
   w.trellis.rank = 3;
   w.trellis.shape[0] = f.k / 16;
   w.trellis.shape[1] = f.n / 16;
-  w.trellis.shape[2] = 32 * f.bits;
+  w.trellis.shape[2] = 32 * f.bits + (f.half ? 16 : 0);
   w.trellis.bytes = bytes_of(f.trellis);
   w.suh.dtype = vt::DType::kF16;
   w.suh.rank = 1;
@@ -133,6 +135,87 @@ TEST_CASE("exl3 dispatch: M > 144 on a backend with no reconstruct kernel serves
   // The CPU arm's own tier-3 bound (test_exl3_gemm.cpp, spec `## W2 design` §1).
   CHECK(rel_rms <= 1.0e-3);
   CHECK(worst <= 8.0 * UlpF16(rms));
+
+  b.DestroyQueue(q);
+}
+
+// ─── QUANT-EXL3 frac rates: the reconstruct seam refuses half weights ───────
+//
+// `.agents/specs/quant-exl3-frac-rates.md` `## Owed`. On ROCm
+// `kExl3ReconstructGemm` IS registered, so the pre-fix seam
+// (`M > 144 && OpRegistered(...)`) routed a frac tensor (`w.half`, K+0.5 rate)
+// to a reconstruct arm that does not exist and threw — every OrcaSAQ-3.21bpw
+// prefill above 144 tokens crashed. `rocm_exl3.hip` `want_recon` already
+// carries `!args.half`; the decision is split into `Exl3WantsReconstruct` so a
+// host test can pin it, because NO host-reachable device has the op
+// registered to exercise the branch through `Exl3MatmulD` end to end.
+TEST_CASE("exl3 dispatch: a frac weight never routes to the reconstruct gemm") {
+  using vllm::dense_attn::Exl3WantsReconstruct;
+  vllm::Exl3Weight frac;
+  frac.half = true;  // K+0.5 rate, mul1; the helper reads only `half`
+  vllm::Exl3Weight integer;  // default half == false
+
+  // The ROCm prefill shape: op registered, M past the threshold.
+  CHECK_FALSE(Exl3WantsReconstruct(145, frac, /*reconstruct_registered=*/true));
+  CHECK(Exl3WantsReconstruct(145, integer, /*reconstruct_registered=*/true));
+  CHECK(Exl3WantsReconstruct(100000, frac, /*reconstruct_registered=*/true) == false);
+
+  // Threshold polarity and a backend without the op are unchanged.
+  CHECK_FALSE(Exl3WantsReconstruct(144, integer, /*reconstruct_registered=*/true));
+  CHECK_FALSE(Exl3WantsReconstruct(145, integer, /*reconstruct_registered=*/false));
+}
+
+// The same promise end to end through the seam on a host queue: a frac weight
+// at M > 145 serves through `Exl3Gemm` and matches the f64 chain at the mul1
+// codebook. On CPU the op is unregistered, so this cannot catch a
+// registration-only regression — that is the static case's job above.
+TEST_CASE("exl3 dispatch: a frac weight at M > 144 serves through Exl3Gemm on CPU") {
+  vt::Backend& b = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue q = b.CreateQueue();
+  vllm::dense_attn::Dev d{b, q};
+
+  const int64_t m = 145, k = 128, n = 256;
+  const Exl3Fixture f = MakeHalfFixture(k, n, /*ka=*/3, 0x3A7C0DEu);
+  const vllm::Exl3Weight w = WrapFixture(f);
+  REQUIRE(w.half);
+
+  Rng rng;
+  rng.s = 0x0C0FFEEu;
+  std::vector<float> x(static_cast<size_t>(m * k));
+  for (auto& v : x) v = vt::F16ToF32(vt::F32ToF16(rng.next(1.0f)));
+
+  vt::EnableOpProviderCallStats(true);
+  const unsigned long long before =
+      vt::GetOpProviderStats(vt::OpId::kExl3Gemm, vt::DeviceType::kCPU).selections;
+
+  vllm::dense_attn::DBuf xb(d, vt::DType::kF32, {m, k}, x.data());
+  std::vector<float> got(static_cast<size_t>(m * n), 0.0f);
+  std::string refusal;
+  try {
+    vllm::dense_attn::DBuf out = vllm::dense_attn::Exl3MatmulD(d, xb.t(), w, vt::DType::kF32);
+    out.Download(d, got.data());
+  } catch (const std::exception& e) {
+    refusal = e.what();
+  }
+  INFO("Exl3MatmulD refusal: " << refusal);
+  REQUIRE(refusal.empty());
+
+  const unsigned long long after =
+      vt::GetOpProviderStats(vt::OpId::kExl3Gemm, vt::DeviceType::kCPU).selections;
+  vt::EnableOpProviderCallStats(false);
+  CHECK(after > before);
+
+  const std::vector<double> ref = Exl3ChainF64(f, x, m, /*codebook=*/2);
+  const double rms = Rms(ref);
+  REQUIRE(rms > 0.0);
+  double sq = 0.0;
+  for (size_t i = 0; i < ref.size(); ++i) {
+    const double dlt = static_cast<double>(got[i]) - ref[i];
+    sq += dlt * dlt;
+  }
+  const double rel_rms = std::sqrt(sq / static_cast<double>(ref.size())) / rms;
+  MESSAGE("Exl3MatmulD frac M=145 cpu vs f64: rel_rms=", rel_rms);
+  CHECK(rel_rms <= 1.0e-3);
 
   b.DestroyQueue(q);
 }

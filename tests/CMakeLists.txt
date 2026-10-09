@@ -3104,6 +3104,13 @@ endforeach()
 vllm_cpp_set_warnings(test_rocm_f16_device)
 add_test(NAME test_rocm_f16_device COMMAND test_rocm_f16_device)
 set_tests_properties(test_rocm_f16_device PROPERTIES SKIP_RETURN_CODE 77)
+# rocm_f16_codec.h's gfx11 hardware conversions vs the dtype.h transcriptions
+# on every f32 and fp16 bit pattern.
+add_executable(test_rocm_f16_codec vt/test_rocm_f16_codec.hip)
+target_link_libraries(test_rocm_f16_codec PRIVATE vllm::vllm)
+vllm_cpp_set_warnings(test_rocm_f16_codec)
+add_test(NAME test_rocm_f16_codec COMMAND test_rocm_f16_codec)
+set_tests_properties(test_rocm_f16_codec PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(test_rocm_f16_model vllm/test_rocm_f16_model.cpp)
 target_link_libraries(test_rocm_f16_model PRIVATE vllm::vllm)
 vllm_cpp_set_warnings(test_rocm_f16_model)
@@ -3280,6 +3287,17 @@ vllm_cpp_add_test(test_exl3_moe vt/test_exl3_moe.cpp)
 # only under VLLM_CPP_HIP -- its cases skip when no ROCm backend is registered,
 # and a suite that only a HIP build compiles is a suite CI never reads.
 vllm_cpp_add_test(test_exl3_rocm vt/test_exl3_rocm.cpp)
+# BACKEND-ROCM (rocm-exl3-gemv spec): the m<=8 GEMV arm and its dispatch on
+# ROCm. Same always-built rule as its sibling above -- cases skip without a
+# ROCm backend.
+vllm_cpp_add_test(test_exl3_rocm_gemv vt/test_exl3_rocm_gemv.cpp)
+# The same arms with the opt-in fused in-had m=1 arm on: every n >= 12288
+# 4 bpw shape then runs Exl3GemvM1K4Fused instead of GEMV + separate HadK.
+add_test(NAME test_exl3_rocm_gemv_fused COMMAND test_exl3_rocm_gemv)
+set_tests_properties(test_exl3_rocm_gemv_fused PROPERTIES ENVIRONMENT "VT_EXL3_FUSED_HAD=1")
+# Same spec, slice B: the reconstruct+hipBLAS arm (the M>144 dispatch) on ROCm.
+# The always-built rule applies again -- it skips without a ROCm backend.
+vllm_cpp_add_test(test_exl3_rocm_recon vt/test_exl3_rocm_recon.cpp)
 # BACKEND-VULKAN-EXL3 (#2530): the Vulkan arms of the same two ops. Built in
 # EVERY configuration for the same reason as the ROCm sibling above -- its cases
 # skip when no Vulkan backend is registered. UNLIKE that sibling this suite needs
@@ -3702,6 +3720,12 @@ vllm_cpp_add_test(test_ops_fused_norm_rope vt/test_ops_fused_norm_rope.cpp)
 vllm_cpp_add_test(test_compiled_gemma vt/test_compiled_gemma.cpp)
 vllm_cpp_add_test(test_ops_gdn vt/test_ops_gdn.cpp)
 target_include_directories(test_ops_gdn PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# The ROCm decode zsplit arm is a process-once env knob; the default run
+# covers zsplit=4 (and this suite's own setenv'd variants where the knob is
+# per-case). A pinned zsplit=1 run exercises the degenerate single-column
+# split on the fused decode path.
+add_test(NAME test_ops_gdn_rocm_zsplit1 COMMAND test_ops_gdn)
+set_tests_properties(test_ops_gdn_rocm_zsplit1 PROPERTIES ENVIRONMENT "VT_GDN_SCAN_ZSPLIT=1")
 if(VLLM_CPP_TRITON)
   # A separate process guarantees this race test reaches the generated module
   # loaders before another gate-shape GDN case can warm them.

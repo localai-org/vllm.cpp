@@ -5847,16 +5847,34 @@ void Exl3Gemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis, const
            "exl3_gemm: codebook must be 0 (3INST), 1 (mcg) or 2 (mul1); codebook " +
                std::to_string(args.codebook) +
                " is not an arm upstream defines at all (QUANT-EXL3-MUL1, #2495)");
+  // HALF-INTEGER rate (BACKEND-ROCM frac rates): K = KA + 0.5, `bits` = KA, and
+  // the mul1 codebook is the only one the oracle defines the fractional rates
+  // for (`frac.cu`). Anything else refuses here rather than decoding a frac
+  // stream through an integer codebook.
+  VT_CHECK(!args.half || (args.codebook == 2 && args.bits <= 7),
+           "exl3_gemm: a half-integer rate (K+0.5) requires the mul1 codebook (2) and "
+           "KA in [1, 7]; got codebook " + std::to_string(args.codebook) + " bits " +
+               std::to_string(args.bits));
   VT_CHECK(a.rank == 2 && c.rank == 2, "exl3_gemm: A and C must be rank-2");
   // `ldmatrix.sync.aligned.m8n8.x4.shared.b16` + `mma...f16.f16` read fp16
   // fragments (ptx.cuh:52-74,203-212), so A has no dtype freedom at all.
-  VT_CHECK(a.dtype == DType::kF16,
+  // ROCm accepts bf16 too: its input-Hadamard arm folds the caller's CastF16
+  // into the load bit-identically (DF32ToF16(bf16->f32)), so the residual
+  // stream feeds the transform directly. Every other backend needs the f16
+  // staging the caller performs.
+  const bool a_ok = a.dtype == DType::kF16 ||
+                    (q.device.type == DeviceType::kROCM && a.dtype == DType::kBF16);
+  VT_CHECK(a_ok,
            "exl3_gemm: A must be f16 (the tensor-core fragments are fp16); got " +
                std::string(Name(a.dtype)));
   VT_CHECK(a_had.dtype == DType::kF16,
            "exl3_gemm: A_had must be f16 (it holds the transformed A); got " +
                std::string(Name(a_had.dtype)));
-  VT_CHECK(c.dtype == DType::kF16 || c.dtype == DType::kF32,
+  // bf16 C is ROCm-only for the same reason: its output transform folds the
+  // trailing CastBf16 into the store (__float2bfloat16 of the f32 result).
+  const bool c_ok = c.dtype == DType::kF16 || c.dtype == DType::kF32 ||
+                    (q.device.type == DeviceType::kROCM && c.dtype == DType::kBF16);
+  VT_CHECK(c_ok,
            "exl3_gemm: C must be f16 (the default, exl3.py:72) or f32 (upstream's "
            "c_fp32 arm, exl3_gemm.cu:134); got " + std::string(Name(c.dtype)));
   VT_CHECK(trellis.dtype == DType::kI8,
@@ -5877,10 +5895,13 @@ void Exl3Gemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis, const
            "exl3_gemm: k and n must be multiples of 128 (both sides carry a blockwise "
            "Hadamard-128); got k=" + std::to_string(k) + " n=" + std::to_string(n));
   VT_CHECK(trellis.shape[0] == k / 16 && trellis.shape[1] == n / 16 &&
-               trellis.shape[2] == 32 * static_cast<int64_t>(args.bits),
-           "exl3_gemm: trellis shape must be [k/16, n/16, 32*bits] bytes for k=" +
+               trellis.shape[2] ==
+                   32 * static_cast<int64_t>(args.bits) + (args.half ? 16 : 0),
+           "exl3_gemm: trellis shape must be [k/16, n/16, 32*bits] bytes (or 32*KA+16 for "
+           "a half-integer rate) for k=" +
                std::to_string(k) + " n=" + std::to_string(n) +
-               " bits=" + std::to_string(args.bits));
+               " bits=" + std::to_string(args.bits) +
+               (args.half ? " half" : ""));
   VT_CHECK(suh.dtype == DType::kF16 && svh.dtype == DType::kF16,
            "exl3_gemm: suh/svh are fp16 sign+scale vectors (exl3.py:20-91)");
   VT_CHECK(suh.Numel() == k, "exl3_gemm: suh must have k entries");
@@ -5951,6 +5972,15 @@ void CheckExl3ReconstructGemm(const Queue& q, const Tensor& c, const Tensor& a,
   VT_CHECK(trellis.shape[0] == k / 16 && trellis.shape[1] == n / 16 &&
                trellis.shape[2] == 32 * static_cast<int64_t>(args.bits),
            "exl3_reconstruct_gemm: trellis shape must be [k/16, n/16, 32*bits]");
+  // No frac reconstruct arm anywhere (BACKEND-ROCM, spec `## Owed`): a
+  // half-integer rate (K+0.5, mul1) reconstructs through the INTEGER-KA decode
+  // here and would be silently wrong, so it refuses by name. The fused dot arm
+  // and the Exl3GemmK fallback serve these tensors instead.
+  VT_CHECK(!args.half,
+           "exl3_reconstruct_gemm: half-integer rates (K+0.5, mul1) have no reconstruct "
+           "arm; the trellis last dim " + std::to_string(trellis.shape[2]) +
+               " bytes is a frac tile (32*KA+16). This is an unimplemented arm, not an "
+               "invalid tensor (BACKEND-ROCM frac rates, ## Owed).");
   VT_CHECK(suh.dtype == DType::kF16 && svh.dtype == DType::kF16,
            "exl3_reconstruct_gemm: suh/svh must be fp16");
   VT_CHECK(suh.Numel() == k, "exl3_reconstruct_gemm: suh must have k entries");

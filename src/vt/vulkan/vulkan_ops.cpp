@@ -583,6 +583,13 @@ void Exl3GemmKernelVulkan(Queue& q, Tensor& c, const Tensor& a, const Tensor& tr
                " is not implemented (0 == 3INST, 1 == MCG, 2 == mul1). Upstream defines "
                "no other value: `decode_3inst<cb>` (codebook.cuh:56-90) has arms for 0, "
                "1 and 2 and falls off the end for anything else.");
+  // HALF-INTEGER rates (K+0.5, mul1) have no Vulkan arm: the shader's tile
+  // arithmetic is integer-width only, and a frac tensor carried as bits = KA
+  // would decode garbage silently. It refuses by name; the ROCm dot arm and
+  // Exl3GemmK serve these tensors (BACKEND-ROCM frac rates, ## Owed).
+  VT_CHECK(!args.half,
+           "vt vulkan exl3: half-integer rates (K+0.5, mul1) have no Vulkan arm — this "
+           "is an unimplemented arm, not an invalid tensor (BACKEND-ROCM frac rates).");
 
   // 1. the input transform, into the caller's scratch (which may alias A).
   Exl3HadDispatch(a_had.data, a_had.dtype, a.data, a.dtype, &suh, nullptr, q.device,

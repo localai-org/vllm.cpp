@@ -2312,10 +2312,15 @@ bool Exl3GemvTryLaunch(Queue& q, int device, Exl3Cc cc, int num_sms, void** kern
   static_assert(kExl3GemvMaxMDev == kExl3GemvMaxM,
                 "the device and host copies of EXL3_GEMV_MAX_M must agree");
   // exl3_gemv.cu:108-116: the free integer tests first, then the env read.
+  // A HALF-INTEGER rate (K+0.5, mul1) declines first of all: its bits = KA
+  // would pass the integer tests below as e.g. (3, 2) and decode the frac
+  // bitstream through the integer-3 GEMV — silently wrong. No CUDA frac arm
+  // exists (BACKEND-ROCM, spec `## Owed`).
+  if (args.half) return false;
   if (args.force_gemv == 0) return false;
   if (!Exl3GemvArmInstantiated(args.bits, args.codebook)) return false;
   if (!Exl3GemvHardEligible(size_m, size_k, size_n, args.bits, args.codebook,
-                            /*has_su_sv=*/true))
+                            /*has_su_sv=*/true, /*half=*/args.half))
     return false;
   const int mode = args.force_gemv > 0 ? 2 : Exl3GemvMode();
   if (mode == 0) return false;
@@ -2349,6 +2354,16 @@ bool Exl3GemvTryLaunch(Queue& q, int device, Exl3Cc cc, int num_sms, void** kern
 void Exl3GemmKernelCuda(Queue& q, Tensor& c, const Tensor& a, const Tensor& trellis,
                         const Tensor& suh, const Tensor& svh, Tensor& a_had,
                         const Exl3GemmArgs& args) {
+  // The HALF-INTEGER rates (K+0.5, mul1) have NO CUDA arm — every decode arm
+  // below is `template <int BITS>` over integer widths, and a frac tensor
+  // carried as bits = KA would name an existing (KA, cb) instantiation and
+  // decode garbage. It refuses by name, consistent with the repo's
+  // unimplemented-arm rule; the ROCm dot arm and Exl3GemmK fallback serve
+  // these tensors (BACKEND-ROCM frac rates).
+  VT_CHECK(!args.half,
+           "vt cuda exl3: half-integer rates (K+0.5, mul1) have no CUDA arm — the frac "
+           "decode (dq8_half, frac.cu) is ported on ROCm only. This is an unimplemented "
+           "arm, not an invalid tensor (BACKEND-ROCM, ## Owed).");
   if (!Exl3ArmInstantiated(args.bits, args.codebook)) {
     throw std::runtime_error(
         "vt cuda exl3: exl3_gemm is instantiated for (bits, codebook) in "
@@ -2859,6 +2874,12 @@ void Exl3ReconstructGemmKernelCuda(Queue& q, Tensor& c, const Tensor& a,
                                     const Tensor& trellis, const Tensor& suh,
                                     const Tensor& svh, Tensor& a_had,
                                     Tensor& w_scratch, const Exl3GemmArgs& args) {
+  // The shared seam (ops.cpp) already refuses args.half for reconstruct; this
+  // names the CUDA side of the same missing arm so a direct route cannot slip
+  // a frac tensor into the integer-KA decode.
+  VT_CHECK(!args.half,
+           "vt cuda exl3: half-integer rates (K+0.5, mul1) have no CUDA reconstruct arm "
+           "(BACKEND-ROCM, ## Owed).");
   if (!Exl3ArmInstantiated(args.bits, args.codebook)) {
     throw std::runtime_error(
         "vt cuda exl3: reconstruct+cuBLAS is instantiated for (bits, codebook) "

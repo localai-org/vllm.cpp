@@ -22,8 +22,27 @@
 
 namespace vt::rocm {
 
+// gfx11 hardware arms. v_cvt_f32_f16 and v_cvt_f16_f32 (round-to-nearest-even,
+// fp16 denormals kept: the default MODE) equal the transcriptions below on
+// EVERY input bit pattern — test_rocm_f16_codec walks all 2^32 f32 and 2^16
+// fp16 patterns against them. The one difference, the hardware quieting a
+// signalling fp16 NaN (f32 bit 22), is xored back out. Inline asm rather
+// than __float2half: fptrunc(fmul) may select v_fma_mixlo_f16, one rounding
+// instead of two. Constant arguments take the transcription so they fold.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX11__)
+#define VT_ROCM_F16_CODEC_HW 1
+#endif
+
 // `vt::F16ToF32` (dtype.h): fp16 bits -> f32, exact for every input.
 __device__ inline float DF16ToF32(uint16_t h) {
+#if defined(VT_ROCM_F16_CODEC_HW)
+  if (!__builtin_constant_p(h)) {
+    float r;
+    asm("v_cvt_f32_f16 %0, %1" : "=v"(r) : "v"(static_cast<uint32_t>(h)));
+    const uint32_t snan = static_cast<uint32_t>((h & 0x7fffu) - 0x7c01u) < 0x1ffu;
+    return __uint_as_float(__float_as_uint(r) ^ (snan << 22));
+  }
+#endif
   uint32_t sign = static_cast<uint32_t>(h & 0x8000) << 16;
   uint32_t exp = (h >> 10) & 0x1F;
   uint32_t mant = h & 0x3FF;
@@ -56,6 +75,13 @@ __device__ inline uint16_t DF32ToBF16(float f) {
 // overflow-to-infinity arm. The `rem == mid && (half & 1)` tie is what makes it
 // EVEN rather than away-from-zero, and it is the tie the host function takes.
 __device__ inline uint16_t DF32ToF16(float f) {
+#if defined(VT_ROCM_F16_CODEC_HW)
+  if (!__builtin_constant_p(f)) {
+    uint32_t r;
+    asm("v_cvt_f16_f32 %0, %1" : "=v"(r) : "v"(f));
+    return static_cast<uint16_t>(r);
+  }
+#endif
   uint32_t u = __float_as_uint(f);
   uint16_t sign = static_cast<uint16_t>((u >> 16) & 0x8000);
   int32_t exp = static_cast<int32_t>((u >> 23) & 0xFF) - 127 + 15;

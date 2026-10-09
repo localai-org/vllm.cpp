@@ -59,6 +59,17 @@ struct SamplingMetadata {
   // from the map (upstream NOTE at gpu_input_batch.py:251-252).
   std::map<int, uint64_t> generators;
 
+  // Per-request decode step index (num_computed_tokens at sample time).
+  // Upstream's torch.Generator ADVANCES with every draw: the Exp(1) tensor it
+  // fills differs step to step. Our coordinate hash has no such dimension, so
+  // without this field every step reused the identical noise vector and a
+  // token that won one near-tie kept winning all of them (the sampling
+  // repetition-pump seen as 'loops a few tokens in'). The Sampler mixes this
+  // into the per-row seed so each step draws fresh noise; the draw stays
+  // deterministic per (seed, step) and independent of batch composition,
+  // which is exactly the replay property a seeded request promises.
+  std::vector<int64_t> num_computed_tokens;
+
   // None => no logprobs; 0 => sampled-token logprob only; k => top-k; -1 => all.
   std::optional<int> max_num_logprobs;
 

@@ -72,6 +72,14 @@ struct FakeShard {
     Add(proj + ".suh", "F16", {k}, static_cast<size_t>(k) * 2);
     Add(proj + ".svh", "F16", {n}, static_cast<size_t>(n) * 2);
   }
+  // The same, with the trellis last dim given in raw uint16 WORDS — the form a
+  // fractional rate (K+0.5) arrives in, where `words % 16 == 8`.
+  void AddProjectionWords(const std::string& proj, int64_t k, int64_t n, int64_t words) {
+    Add(proj + ".trellis", "I16", {k / 16, n / 16, words},
+        static_cast<size_t>(k / 16) * (n / 16) * static_cast<size_t>(words) * 2);
+    Add(proj + ".suh", "F16", {k}, static_cast<size_t>(k) * 2);
+    Add(proj + ".svh", "F16", {n}, static_cast<size_t>(n) * 2);
+  }
   vllm::TensorResolver Get() const {
     return [this](const std::string& n) -> const StTensor& {
       auto it = t.find(n);
@@ -138,6 +146,59 @@ TEST_CASE("exl3 native loader: a mul1 marker means codebook 2") {
   CHECK(w.Bits() == 4);
   CHECK(w.InFeatures() == 128);
   CHECK(w.OutFeatures() == 128);
+}
+
+TEST_CASE("exl3 native loader: a 56-word mul1 tile is a half-integer rate (K+0.5)") {
+  // BACKEND-ROCM frac rates: `words % 16 == 8` ⇔ K = KA + 0.5 with
+  // KA = (words - 8) / 16 (56 words → KA = 3, i.e. 3.5 bpw), mul1 codebook
+  // only — the `orcarouter/OrcaSAQ-2-27B-EXL3-3.21bpw` tile geometry
+  // (120 tensors at 56 words). The trellis is borrowed at 32*KA+16 BYTES, so
+  // `Bits()` reads last % 32 == 16 as `half` with bits = KA.
+  FakeShard s;
+  s.AddProjectionWords("p", 128, 128, 56);
+  s.Add("p.mul1", "I32", {1}, 4);
+
+  const vllm::Exl3Weight w = LoadExl3(s.Get(), s.Has(), "p");
+  CHECK(w.codebook == 2);
+  CHECK(w.half);
+  CHECK(w.Bits() == 3);
+  CHECK(w.InFeatures() == 128);
+  CHECK(w.OutFeatures() == 128);
+  // The borrowed byte width is the FRAC tile: 16*KA+8 words = 32*KA+16 bytes.
+  CHECK(w.trellis.shape[2] == 32 * 3 + 16);
+}
+
+TEST_CASE("exl3 native loader: a 56-word tile WITHOUT mul1 refuses by name") {
+  // The oracle defines frac rates for the mul1 codebook only (frac.cu); a frac
+  // tensor with no marker would decode through the wrong codebook — the same
+  // silently-wrong failure this suite's header documents — so it refuses.
+  FakeShard s;
+  s.AddProjectionWords("p", 128, 128, 56);
+  std::string what;
+  try {
+    LoadExl3(s.Get(), s.Has(), "p");
+    FAIL("exl3 native loader: frac-rate tile without mul1 did NOT throw");
+  } catch (const std::exception& e) {
+    what = e.what();
+  }
+  INFO("refusal: " << what);
+  CHECK(what.find("mul1") != std::string::npos);
+}
+
+TEST_CASE("exl3 native loader: frac KA outside 1..7 refuses") {
+  // 16*KA+8 words with KA = 8 (136 words) is above the oracle's frac_bpb bound.
+  FakeShard s;
+  s.AddProjectionWords("p", 128, 128, 16 * 8 + 8);
+  s.Add("p.mul1", "I32", {1}, 4);
+  std::string what;
+  try {
+    LoadExl3(s.Get(), s.Has(), "p");
+    FAIL("exl3 native loader: KA = 8 did NOT throw");
+  } catch (const std::exception& e) {
+    what = e.what();
+  }
+  INFO("refusal: " << what);
+  CHECK(what.find("K+0.5") != std::string::npos);
 }
 
 TEST_CASE("exl3 native loader: BOTH markers still REFUSE, and so does a wrong-dtype marker") {

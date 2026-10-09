@@ -5453,3 +5453,320 @@ TEST_CASE("gdn chunked CPU arm splits a sequence across two calls without drift"
 TEST_CASE("gdn chunked flag does not leak out of any case in this binary") {
   CHECK(CurrentChunkedFlag() == std::string(ProcessStartChunkedFlag()));
 }
+
+// ROCm gdn_post_conv: the one-block-per-token kernel (default) must be
+// BYTE-identical to GdnPostConvChunkedK (VT_ROCM_GDN_POSTCONV_ROW=0) on all five
+// outputs. qkv is swept over f32 as well as bf16 because a bf16 store absorbs
+// a 1-ulp reassociation of the q/k norm (see the CUDA token-tile case above).
+namespace {
+
+bool HasRocmPostConv() {
+  try {
+    (void)vt::GetBackend(DeviceType::kROCM);
+    return vt::OpRegistered(vt::OpId::kGdnPostConv, DeviceType::kROCM);
+  } catch (const std::runtime_error&) {
+    return false;
+  }
+}
+
+struct RocmBuf {
+  Backend& b;
+  void* p = nullptr;
+  size_t n = 0;
+  RocmBuf(Backend& backend, Queue& q, size_t bytes, const void* host = nullptr)
+      : b(backend), n(bytes) {
+    p = b.Alloc(n == 0 ? 1 : n);
+    if (host != nullptr) b.Copy(q, p, host, n);
+  }
+  ~RocmBuf() { b.Free(p); }
+  RocmBuf(const RocmBuf&) = delete;
+  RocmBuf& operator=(const RocmBuf&) = delete;
+  Tensor T(DType dt, const std::vector<int64_t>& shape) {
+    return MakeT(p, dt, Device{DeviceType::kROCM, 0}, shape);
+  }
+  std::vector<uint8_t> Get(Queue& q) {
+    std::vector<uint8_t> h(n);
+    b.Copy(q, h.data(), p, n);
+    b.Synchronize(q);
+    return h;
+  }
+};
+
+void RunRocmPostConvRowCase(int64_t t, int64_t hk, int64_t hv, int64_t dk, int64_t dv,
+                            DType qkv_dt, DType conv_dt, DType gate_dt, uint32_t seed) {
+  const int64_t key_dim = hk * dk, value_dim = hv * dv, conv_dim = 2 * key_dim + value_dim;
+  const auto convb = Pack(RandomF32(static_cast<size_t>(t * conv_dim), seed, -1.5f, 1.5f), conv_dt);
+  const auto arawb = Pack(RandomF32(static_cast<size_t>(t * hv), seed + 1, -1.0f, 1.0f), gate_dt);
+  const auto brawb = Pack(RandomF32(static_cast<size_t>(t * hv), seed + 2, -1.0f, 1.0f), gate_dt);
+  const auto alog = RandomF32(static_cast<size_t>(hv), seed + 3, -1.0f, 1.0f);
+  const auto dtb = RandomF32(static_cast<size_t>(hv), seed + 4, -1.0f, 1.0f);
+  const vt::L2NormArgs args{1e-6f};
+
+  Backend& gpu = vt::GetBackend(DeviceType::kROCM);
+  Queue q = gpu.CreateQueue();
+  {
+    RocmBuf dconv(gpu, q, convb.size(), convb.data());
+    RocmBuf daraw(gpu, q, arawb.size(), arawb.data());
+    RocmBuf dbraw(gpu, q, brawb.size(), brawb.data());
+    RocmBuf dalog(gpu, q, alog.size() * 4, alog.data());
+    RocmBuf ddtb(gpu, q, dtb.size() * 4, dtb.data());
+    const size_t es = vt::SizeOf(qkv_dt);
+    auto run = [&](const char* row, std::vector<std::vector<uint8_t>>& out) {
+      ::setenv("VT_ROCM_GDN_POSTCONV_ROW", row, 1);
+      RocmBuf oq(gpu, q, static_cast<size_t>(t * key_dim) * es);
+      RocmBuf ok(gpu, q, static_cast<size_t>(t * key_dim) * es);
+      RocmBuf ov(gpu, q, static_cast<size_t>(t * value_dim) * es);
+      RocmBuf og(gpu, q, static_cast<size_t>(t * hv) * 4);
+      RocmBuf ob(gpu, q, static_cast<size_t>(t * hv) * 4);
+      Tensor tq = oq.T(qkv_dt, {t, hk, dk}), tk = ok.T(qkv_dt, {t, hk, dk});
+      Tensor tv = ov.T(qkv_dt, {t, hv, dv}), tg = og.T(DType::kF32, {t, hv});
+      Tensor tb = ob.T(DType::kF32, {t, hv});
+      vt::GdnPostConv(q, tq, tk, tv, tg, tb, dconv.T(conv_dt, {t, conv_dim}),
+                      daraw.T(gate_dt, {t, hv}), dbraw.T(gate_dt, {t, hv}),
+                      dalog.T(DType::kF32, {hv}), ddtb.T(DType::kF32, {hv}), args);
+      out = {oq.Get(q), ok.Get(q), ov.Get(q), og.Get(q), ob.Get(q)};
+    };
+    std::vector<std::vector<uint8_t>> chunked, row;
+    run("0", chunked);
+    run("1", row);
+    ::unsetenv("VT_ROCM_GDN_POSTCONV_ROW");
+    const char* names[] = {"q", "k", "v", "g", "beta"};
+    for (size_t i = 0; i < 5; ++i) {
+      CAPTURE(names[i]);
+      CHECK(row[i] == chunked[i]);
+      bool nonzero = false;
+      for (uint8_t v : row[i]) nonzero = nonzero || v != 0;
+      CHECK(nonzero);
+    }
+  }
+  gpu.DestroyQueue(q);
+}
+
+}  // namespace
+
+TEST_CASE("ROCm gdn_post_conv row kernel is byte-identical to the chunked kernel") {
+  if (!HasRocmPostConv()) {
+    MESSAGE("no ROCm backend registered; skipping");
+    return;
+  }
+  uint32_t seed = 11300;
+  for (DType qkv : {DType::kF32, DType::kBF16}) {
+    for (DType conv : {DType::kF32, DType::kBF16}) {
+      for (DType gate : {DType::kF32, DType::kBF16}) {
+        CAPTURE(static_cast<int>(qkv));
+        CAPTURE(static_cast<int>(conv));
+        CAPTURE(static_cast<int>(gate));
+        RunRocmPostConvRowCase(1, 16, 48, 128, 128, qkv, conv, gate, seed);       // 27B decode
+        RunRocmPostConvRowCase(67, 16, 48, 128, 128, qkv, conv, gate, seed + 5);  // prefill
+        RunRocmPostConvRowCase(3, 4, 4, 300, 128, qkv, conv, gate, seed + 10);    // dk > 256
+        RunRocmPostConvRowCase(2, 3, 5, 64, 32, qkv, conv, gate, seed + 15);      // hk < warps
+        seed += 20;
+      }
+    }
+  }
+}
+
+// ROCm gdn_prefill: the register-fused scan (GdnScanCoopFusedK, row z-split)
+// serves varlen prefill and must be BYTE-identical to GdnScanCoopK
+// (VT_GDN_SCAN_ZSPLIT_PREFILL=0) on the output AND the final state, at
+// several splits, with a nonzero initial state and multi-sequence batches.
+namespace {
+
+void RunRocmGdnPrefillFusedCase(const std::vector<int32_t>& qsl, int64_t hk, int64_t hv,
+                                int64_t dk, int64_t dv, DType io_dt, uint32_t seed) {
+  const int64_t t = qsl.back();
+  const int64_t n = static_cast<int64_t>(qsl.size()) - 1;
+  // L2-normalized q/k rows keep the delta rule bounded, as vt::L2Norm does
+  // upstream of the scan in the model.
+  auto normed = [&](uint32_t s, int64_t heads, int64_t d) {
+    auto x = RandomF32(static_cast<size_t>(t * heads * d), s, -1.0f, 1.0f);
+    for (int64_t r = 0; r < t * heads; ++r) {
+      double ss = 0.0;
+      for (int64_t j = 0; j < d; ++j) ss += double(x[r * d + j]) * x[r * d + j];
+      const float inv = static_cast<float>(1.0 / std::sqrt(ss + 1e-6));
+      for (int64_t j = 0; j < d; ++j) x[r * d + j] *= inv;
+    }
+    return Pack(x, io_dt);
+  };
+  const auto qb = normed(seed, hk, dk);
+  const auto kb = normed(seed + 1, hk, dk);
+  const auto vb = Pack(RandomF32(static_cast<size_t>(t * hv * dv), seed + 2, -1.0f, 1.0f), io_dt);
+  auto gf = RandomF32(static_cast<size_t>(t * hv), seed + 3, 0.7f, 0.999f);
+  for (float& x : gf) x = std::log(x);
+  const auto betaf = RandomF32(static_cast<size_t>(t * hv), seed + 4, 0.05f, 0.95f);
+  const auto stf = RandomF32(static_cast<size_t>(n * hv * dv * dk), seed + 5, -0.5f, 0.5f);
+  const GdnArgs args{1.0f / std::sqrt(static_cast<float>(dk))};
+
+  Backend& gpu = vt::GetBackend(DeviceType::kROCM);
+  Queue q = gpu.CreateQueue();
+  {
+    RocmBuf dq(gpu, q, qb.size(), qb.data());
+    RocmBuf dk_(gpu, q, kb.size(), kb.data());
+    RocmBuf dv_(gpu, q, vb.size(), vb.data());
+    RocmBuf dg(gpu, q, gf.size() * 4, gf.data());
+    RocmBuf db(gpu, q, betaf.size() * 4, betaf.data());
+    RocmBuf dqsl(gpu, q, qsl.size() * 4, qsl.data());
+    auto run = [&](const char* zsplit, std::vector<uint8_t>& out, std::vector<uint8_t>& st) {
+      ::setenv("VT_GDN_SCAN_ZSPLIT_PREFILL", zsplit, 1);
+      RocmBuf ds(gpu, q, stf.size() * 4, stf.data());
+      RocmBuf dout(gpu, q, static_cast<size_t>(t * hv * dv) * vt::SizeOf(io_dt));
+      Tensor to = dout.T(io_dt, {t, hv, dv});
+      Tensor ts = ds.T(DType::kF32, {n, hv, dv, dk});
+      vt::GdnPrefill(q, to, dq.T(io_dt, {t, hk, dk}), dk_.T(io_dt, {t, hk, dk}),
+                     dv_.T(io_dt, {t, hv, dv}), dg.T(DType::kF32, {t, hv}),
+                     db.T(DType::kF32, {t, hv}), ts, dqsl.T(DType::kI32, {n + 1}), args);
+      out = dout.Get(q);
+      st = ds.Get(q);
+    };
+    std::vector<uint8_t> out_coop, st_coop;
+    run("0", out_coop, st_coop);
+    bool nonzero = false;
+    for (uint8_t b : out_coop) nonzero = nonzero || b != 0;
+    CHECK(nonzero);
+    CHECK(st_coop != std::vector<uint8_t>(st_coop.size(), 0));
+    for (const char* z : {"1", "4", "8", "16"}) {
+      CAPTURE(z);
+      std::vector<uint8_t> out_f, st_f;
+      run(z, out_f, st_f);
+      CHECK(out_f == out_coop);
+      CHECK(st_f == st_coop);
+    }
+    ::unsetenv("VT_GDN_SCAN_ZSPLIT_PREFILL");
+  }
+  gpu.DestroyQueue(q);
+}
+
+}  // namespace
+
+TEST_CASE("ROCm gdn_prefill fused scan is byte-identical to the coop scan") {
+  try {
+    (void)vt::GetBackend(DeviceType::kROCM);
+  } catch (const std::runtime_error&) {
+    MESSAGE("no ROCm backend registered; skipping");
+    return;
+  }
+  if (!vt::OpRegistered(vt::OpId::kGdnPrefill, DeviceType::kROCM)) {
+    MESSAGE("no ROCm gdn_prefill; skipping");
+    return;
+  }
+  uint32_t seed = 12700;
+  for (DType io : {DType::kBF16, DType::kF32}) {
+    CAPTURE(static_cast<int>(io));
+    RunRocmGdnPrefillFusedCase({0, 1}, 16, 48, 128, 128, io, seed);             // t = 1
+    RunRocmGdnPrefillFusedCase({0, 7}, 16, 48, 128, 128, io, seed + 10);        // tiny walk
+    RunRocmGdnPrefillFusedCase({0, 67}, 16, 48, 128, 128, io, seed + 20);
+    RunRocmGdnPrefillFusedCase({0, 3, 8}, 16, 48, 128, 128, io, seed + 30);     // two seqs
+    RunRocmGdnPrefillFusedCase({0, 67, 579, 596}, 16, 48, 128, 128, io, seed + 40);
+    RunRocmGdnPrefillFusedCase({0, 0, 5, 9}, 4, 8, 64, 64, io, seed + 50);      // empty seq, dk 64
+    seed += 100;
+  }
+}
+
+// ROCm gdn_decode: a 32-step chain on ONE live state buffer (the serving
+// shape of decode — state carried forward in-place, n=1). Each step's ROCm
+// output and the final state are compared against the CPU oracle run the
+// same way. A single-step check can pass while the recurrence drifts under
+// compounding; the chain makes that drift visible. The zsplit/cooperate arm
+// selection is a process-once env knob — run this binary with
+// VT_GDN_SCAN_ZSPLIT pinned externally to cover the other arms (ctest entry
+// test_ops_gdn_rocm_zsplit1 does exactly that).
+namespace {
+
+void RunRocmGdnDecodeChainCase(int64_t hk, int64_t hv, int64_t dk, int64_t dv,
+                               int steps, DType io_dt, uint32_t seed) {
+  const GdnArgs args{1.0f / std::sqrt(static_cast<float>(dk))};
+  const size_t st_elems = static_cast<size_t>(hv * dv * dk);
+  std::vector<float> st_cpu =
+      RandomF32(st_elems, seed, -0.25f, 0.25f);
+
+  Backend& gpu = vt::GetBackend(DeviceType::kROCM);
+  Queue rq = gpu.CreateQueue();
+  Backend& cpu = vt::GetBackend(DeviceType::kCPU);
+  Queue cq = cpu.CreateQueue();
+
+  {
+    RocmBuf dst(gpu, rq, st_elems * 4, st_cpu.data());
+    std::vector<uint8_t> all_out(static_cast<size_t>(steps * hv * dv) *
+                                 vt::SizeOf(io_dt));
+    const size_t step_elems = static_cast<size_t>(hv * dv);
+    for (int s = 0; s < steps; ++s) {
+      const uint32_t ss = seed + 16 + static_cast<uint32_t>(s) * 8;
+      // L2-normalized q/k rows, as vt::L2Norm hands them to the scan.
+      auto normed = [&](uint32_t s2, int64_t heads, int64_t d) {
+        auto x = RandomF32(static_cast<size_t>(heads * d), s2, -1.0f, 1.0f);
+        double ss2 = 0.0;
+        for (int64_t j = 0; j < d; ++j) ss2 += double(x[j]) * x[j];
+        const float inv = static_cast<float>(1.0 / std::sqrt(ss2 + 1e-6));
+        for (float& v : x) v *= inv;
+        return Pack(x, io_dt);
+      };
+      const auto qb = normed(ss, hk, dk);
+      const auto kb = normed(ss + 1, hk, dk);
+      const auto vb =
+          Pack(RandomF32(step_elems, ss + 2, -1.0f, 1.0f), io_dt);
+      auto gf = RandomF32(static_cast<size_t>(hv), ss + 3, 0.7f, 0.999f);
+      for (float& x : gf) x = std::log(x);
+      const auto betaf = RandomF32(static_cast<size_t>(hv), ss + 4, 0.05f, 0.95f);
+
+      // CPU oracle leg: decode the same step on the same evolving state.
+      std::vector<uint8_t> out_cpu(step_elems * vt::SizeOf(io_dt));
+      Tensor tqc = MakeT(const_cast<uint8_t*>(qb.data()), io_dt, Cpu(), {1, hk, dk});
+      Tensor tkc = MakeT(const_cast<uint8_t*>(kb.data()), io_dt, Cpu(), {1, hk, dk});
+      Tensor tvc = MakeT(const_cast<uint8_t*>(vb.data()), io_dt, Cpu(), {1, hv, dv});
+      Tensor tgc = MakeT(gf.data(), DType::kF32, Cpu(), {1, hv});
+      Tensor tbc = MakeT(const_cast<float*>(betaf.data()), DType::kF32, Cpu(), {1, hv});
+      Tensor tsc = MakeT(st_cpu.data(), DType::kF32, Cpu(), {1, hv, dv, dk});
+      Tensor toc = MakeT(out_cpu.data(), io_dt, Cpu(), {1, hv, dv});
+      vt::GdnDecode(cq, toc, tqc, tkc, tvc, tgc, tbc, tsc, args);
+
+      // ROCm leg on the persistent device state.
+      RocmBuf dq(gpu, rq, qb.size(), qb.data());
+      RocmBuf dk_(gpu, rq, kb.size(), kb.data());
+      RocmBuf dv_(gpu, rq, vb.size(), vb.data());
+      RocmBuf dg(gpu, rq, gf.size() * 4, gf.data());
+      RocmBuf db(gpu, rq, betaf.size() * 4, betaf.data());
+      RocmBuf dout(gpu, rq, step_elems * vt::SizeOf(io_dt));
+      Tensor tor = dout.T(io_dt, {1, hv, dv});
+      Tensor tsr = dst.T(DType::kF32, {1, hv, dv, dk});
+      vt::GdnDecode(rq, tor, dq.T(io_dt, {1, hk, dk}),
+                    dk_.T(io_dt, {1, hk, dk}), dv_.T(io_dt, {1, hv, dv}),
+                    dg.T(DType::kF32, {1, hv}), db.T(DType::kF32, {1, hv}),
+                    tsr, args);
+      const std::vector<uint8_t> out_r = dout.Get(rq);
+      std::copy(out_r.begin(), out_r.end(),
+                all_out.data() + static_cast<size_t>(s) * step_elems *
+                                     vt::SizeOf(io_dt));
+
+      const float tol = io_dt == DType::kF32 ? 1e-3f : 3e-2f;
+      CAPTURE(s);
+      CheckClose(Unpack(out_r, io_dt), Unpack(out_cpu, io_dt), tol, tol);
+    }
+    const std::vector<float> st_rocm = Unpack(dst.Get(rq), DType::kF32);
+    const float st_tol = io_dt == DType::kF32 ? 1e-3f : 5e-2f;
+    CheckClose(st_rocm, st_cpu, st_tol, st_tol);
+  }
+  cpu.DestroyQueue(cq);
+  gpu.DestroyQueue(rq);
+}
+
+}  // namespace
+
+TEST_CASE("ROCm gdn_decode chained steps match the CPU oracle within the state-drift bound") {
+  try {
+    (void)vt::GetBackend(DeviceType::kROCM);
+  } catch (const std::runtime_error&) {
+    MESSAGE("no ROCm backend registered; skipping");
+    return;
+  }
+  if (!vt::OpRegistered(vt::OpId::kGdnDecode, DeviceType::kROCM)) {
+    MESSAGE("no ROCm gdn_decode; skipping");
+    return;
+  }
+  uint32_t seed = 19600;
+  for (DType io : {DType::kBF16, DType::kF32}) {
+    CAPTURE(static_cast<int>(io));
+    RunRocmGdnDecodeChainCase(4, 8, 128, 128, 32, io, seed);
+    RunRocmGdnDecodeChainCase(2, 4, 64, 64, 33, io, seed + 50);  // dk 64, odd steps
+    seed += 100;
+  }
+}

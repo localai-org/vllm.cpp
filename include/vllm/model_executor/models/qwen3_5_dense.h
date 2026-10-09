@@ -36,6 +36,7 @@
 
 #include "vllm/model_executor/layers/quantization/fp8_block_quant.h"
 #include "vllm/model_executor/models/qwen3_5_weights.h"  // OwnedTensor, Gdn/FullAttn weights, TensorResolver
+#include "vllm/config/multimodal.h"                  // MultiModalConfig (the tower-skip borrow)
 #include "vllm/model_executor/models/qwen3_vl_vision.h"  // MODEL-QWEN35-DENSE-VL-EXL3: the dense arm's tower
 #include "vllm/transformers_utils/hf_config.h"
 #include "vt/device.h"

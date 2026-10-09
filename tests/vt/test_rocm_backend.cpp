@@ -24,9 +24,11 @@
 // skeleton registers, at NMSE <= 5e-4. Run both.
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -727,4 +729,115 @@ TEST_CASE("the reference tier's flush is REACHED through GetOp and not merely ca
   rocm.Free(dw);
   rocm.Free(dout);
   rocm.DestroyQueue(q);
+}
+
+// RmsNormRowKernel's arithmetic, emulated on the host operation for operation:
+// thread t of the 256-thread block accumulates j = t, t+256, ... in order, the
+// shared-memory tree halves 128..1, then out = (v * inv) * w. The device result
+// must match BYTE for BYTE, so any change to which thread owns an element or to
+// the order it is accumulated in fails here, not in a served token.
+namespace {
+
+float RoundBf16(float v) { return vt::BF16ToF32(vt::F32ToBF16(v)); }
+
+void RmsNormRowEmulated(std::vector<float>& out, std::vector<float>& res, const std::vector<float>& x,
+                        const std::vector<float>& w, int64_t rows, int64_t h, float eps, bool gemma,
+                        bool has_res, bool bf16_store) {
+  constexpr int kBlock = 256;
+  for (int64_t r = 0; r < rows; ++r) {
+    float partial[kBlock];
+    for (int t = 0; t < kBlock; ++t) {
+      float acc = 0.0f;
+      for (int64_t j = t; j < h; j += kBlock) {
+        float v = x[r * h + j];
+        if (has_res) {
+          v = v + res[r * h + j];
+          if (bf16_store) v = RoundBf16(v);
+          res[r * h + j] = v;
+        }
+        acc += v * v;
+      }
+      partial[t] = acc;
+    }
+    for (int s = kBlock / 2; s > 0; s /= 2)
+      for (int t = 0; t < s; ++t) partial[t] += partial[t + s];
+    const float inv = 1.0f / std::sqrt(partial[0] / static_cast<float>(h) + eps);
+    for (int64_t j = 0; j < h; ++j) {
+      const float v = has_res ? res[r * h + j] : x[r * h + j];
+      float wj = w[j];
+      if (gemma) wj += 1.0f;
+      const float o = v * inv * wj;
+      out[r * h + j] = bf16_store ? RoundBf16(o) : o;
+    }
+  }
+}
+
+}  // namespace
+
+TEST_CASE("rocm RmsNorm row kernel is byte-identical to its host emulation") {
+  if (NoDevice()) return;
+  Backend& gpu = vt::GetBackend(DeviceType::kROCM);
+  Queue q = gpu.CreateQueue();
+  std::mt19937 rng(0x5EED);
+  std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+  for (const DType dt : {DType::kBF16, DType::kF32}) {
+    const bool bf16 = dt == DType::kBF16;
+    const size_t es = bf16 ? 2 : 4;
+    for (const int64_t h : {int64_t{5120}, int64_t{2051}, int64_t{17408}, int64_t{17}}) {
+      for (const bool has_res : {true, false}) {
+        for (const bool gemma : {false, true}) {
+          CAPTURE(bf16);
+          CAPTURE(h);
+          CAPTURE(has_res);
+          CAPTURE(gemma);
+          const int64_t rows = 3;
+          std::vector<float> x(rows * h), r(rows * h), w(h);
+          for (auto* v : {&x, &r, &w})
+            for (auto& e : *v) e = bf16 ? RoundBf16(dist(rng)) : dist(rng);
+          auto pack = [&](const std::vector<float>& f) {
+            std::vector<uint8_t> b(f.size() * es);
+            for (size_t i = 0; i < f.size(); ++i) {
+              if (bf16) {
+                const uint16_t u = vt::F32ToBF16(f[i]);
+                std::memcpy(b.data() + 2 * i, &u, 2);
+              } else {
+                std::memcpy(b.data() + 4 * i, &f[i], 4);
+              }
+            }
+            return b;
+          };
+          const auto xb = pack(x), rb = pack(r), wb = pack(w);
+          void* dx = gpu.Alloc(xb.size());
+          void* dr = gpu.Alloc(rb.size());
+          void* dw = gpu.Alloc(wb.size());
+          void* dout = gpu.Alloc(xb.size());
+          gpu.Copy(q, dx, xb.data(), xb.size());
+          gpu.Copy(q, dr, rb.data(), rb.size());
+          gpu.Copy(q, dw, wb.data(), wb.size());
+          const Device dev{DeviceType::kROCM, 0};
+          Tensor tx = Tensor::Contiguous(dx, dt, dev, {rows, h});
+          Tensor tr = Tensor::Contiguous(dr, dt, dev, {rows, h});
+          Tensor tw = Tensor::Contiguous(dw, dt, dev, {h});
+          Tensor tout = Tensor::Contiguous(dout, dt, dev, {rows, h});
+          vt::RmsNormArgs args;
+          args.eps = 1e-6f;
+          args.gemma = gemma;
+          vt::RmsNorm(q, tout, tx, tw, args, has_res ? &tr : nullptr);
+          std::vector<uint8_t> got_out(xb.size()), got_res(rb.size());
+          gpu.Copy(q, got_out.data(), dout, got_out.size());
+          gpu.Copy(q, got_res.data(), dr, got_res.size());
+          gpu.Synchronize(q);
+          std::vector<float> want_out(rows * h), want_res = r;
+          RmsNormRowEmulated(want_out, want_res, x, w, rows, h, 1e-6f, gemma, has_res, bf16);
+          CHECK(got_out == pack(want_out));
+          if (has_res) CHECK(got_res == pack(want_res));
+          gpu.Free(dx);
+          gpu.Free(dr);
+          gpu.Free(dw);
+          gpu.Free(dout);
+        }
+      }
+    }
+  }
+  gpu.DestroyQueue(q);
 }

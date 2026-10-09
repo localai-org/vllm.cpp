@@ -1052,3 +1052,103 @@ TEST_CASE("rocm fp8 KV SharedK prefill reaches the fast kernel (exact geometry, 
   gpu.Free(dqsl);
   gpu.DestroyQueue(gq);
 }
+
+// ─── G6b ────────────────────────────────────────────────────────────────────
+// WIDENED-GEOMETRY REACH: the same f32-query GQA arm after the ISSUE-LOCAL
+// widening — hq=24, num_kv_heads=4 (qg_total=6), d=256, f32 q/out, bf16 KV.
+// Qwen3.8-27B-EXL3's full-attention layers run exactly this shape; before the
+// widening they fell to PagedAttnOnline at ~180us/call on gfx1100. The kernel
+// tiles the qg=6 group as QG=6, z=1. CPU oracle is PagedAttnOnline again —
+// the band is the reduction-order band, not byte equality.
+TEST_CASE("rocm GQA4 f32-query decode widened to qg_total=6 (hq=24, kv=4, bf16 KV)") {
+  if (!HasRocm()) {
+    MESSAGE("SKIPPED: no ROCm backend in this build/host — the GQA6 "
+            "widened-geometry reach gate did NOT run");
+    return;
+  }
+  Backend& gpu = vt::GetBackend(DeviceType::kROCM);
+  Queue gq = gpu.CreateQueue();
+  Queue cq{Cpu(), nullptr};
+
+  const int64_t nb = 8, bs = 16, H = 4, D = 256, hq = 24, num_reqs = 1;
+  const size_t cache_elems = static_cast<size_t>(nb * bs * H * D);
+  auto kraw = RandF32(cache_elems, 211);
+  auto vraw = RandF32(cache_elems, 212);
+  std::vector<uint16_t> kc(cache_elems), vc(cache_elems);
+  for (size_t i = 0; i < cache_elems; ++i) {
+    kc[i] = vt::F32ToBF16(kraw[i]);
+    vc[i] = vt::F32ToBF16(vraw[cache_elems - 1 - i]);
+  }
+  std::vector<int32_t> bt = {0, 1, 2, 3, 0, 0, 0, 0};
+  std::vector<int32_t> seq = {53};
+  std::vector<int32_t> qsl = {0, 1};
+
+  void* dkc = gpu.Alloc(cache_elems * 2);
+  void* dvc = gpu.Alloc(cache_elems * 2);
+  void* dbt = gpu.Alloc(bt.size() * sizeof(int32_t));
+  void* dseq = gpu.Alloc(seq.size() * sizeof(int32_t));
+  void* dqsl = gpu.Alloc(qsl.size() * sizeof(int32_t));
+  gpu.Copy(gq, dkc, kc.data(), cache_elems * 2);
+  gpu.Copy(gq, dvc, vc.data(), cache_elems * 2);
+  gpu.Copy(gq, dbt, bt.data(), bt.size() * sizeof(int32_t));
+  gpu.Copy(gq, dseq, seq.data(), seq.size() * sizeof(int32_t));
+  gpu.Copy(gq, dqsl, qsl.data(), qsl.size() * sizeof(int32_t));
+
+  auto qh = RandF32(static_cast<size_t>(hq * D), 213);
+  PagedAttentionArgs args;
+  args.scale = 0.0625f;  // 1/sqrt(256)
+  args.causal = true;
+  args.kv_cache_dtype = Fp8KVCacheDataType::kAuto;
+
+  std::vector<float> cpu_out(static_cast<size_t>(hq * D), 0.0f);
+  Tensor cqt = Host(qh.data(), DType::kF32, {1, hq, D});
+  Tensor cot = Host(cpu_out.data(), DType::kF32, {1, hq, D});
+  Tensor ckc = Host(kc.data(), DType::kBF16, {nb, bs, H, D});
+  Tensor cvc = Host(vc.data(), DType::kBF16, {nb, bs, H, D});
+  Tensor cbt = Host(bt.data(), DType::kI32, {num_reqs, 8});
+  Tensor cseq = Host(seq.data(), DType::kI32, {num_reqs});
+  Tensor cqsl = Host(qsl.data(), DType::kI32, {num_reqs + 1});
+  vt::PagedAttention(cq, cot, cqt, ckc, cvc, cbt, cseq, cqsl, args);
+
+  void* dq = gpu.Alloc(qh.size() * sizeof(float));
+  void* dout = gpu.Alloc(qh.size() * sizeof(float));
+  gpu.Copy(gq, dq, qh.data(), qh.size() * sizeof(float));
+  Tensor gqt = Dev(dq, DType::kF32, {1, hq, D});
+  Tensor got = Dev(dout, DType::kF32, {1, hq, D});
+  Tensor gkc = Dev(dkc, DType::kBF16, {nb, bs, H, D});
+  Tensor gvc = Dev(dvc, DType::kBF16, {nb, bs, H, D});
+  Tensor gbt = Dev(dbt, DType::kI32, {num_reqs, 8});
+  Tensor gseq = Dev(dseq, DType::kI32, {num_reqs});
+  Tensor gqsl = Dev(dqsl, DType::kI32, {num_reqs + 1});
+  vt::PagedAttention(gq, got, gqt, gkc, gvc, gbt, gseq, gqsl, args);
+
+  std::vector<float> gpu_out(qh.size(), 0.0f);
+  gpu.Copy(gq, gpu_out.data(), dout, gpu_out.size() * sizeof(float));
+  gpu.Synchronize(gq);
+
+  double num = 0.0, den = 0.0, worst = 0.0;
+  for (size_t i = 0; i < gpu_out.size(); ++i) {
+    const double d0 = static_cast<double>(gpu_out[i]) - static_cast<double>(cpu_out[i]);
+    num += d0 * d0;
+    den += static_cast<double>(cpu_out[i]) * static_cast<double>(cpu_out[i]);
+    worst = std::max(worst, std::fabs(d0));
+  }
+  CHECK(den > 0.0);
+  const double nmse = den > 0.0 ? num / den : 1.0;
+  CAPTURE(nmse);
+  CAPTURE(worst);
+  CHECK(nmse < 1e-6);
+  CHECK(worst < 1e-3);
+  CHECK(std::any_of(gpu_out.begin(), gpu_out.end(),
+                    [](float v) { return v != 0.0f; }));
+
+  gpu.Free(dq);
+  gpu.Free(dout);
+  gpu.Free(dkc);
+  gpu.Free(dvc);
+  gpu.Free(dbt);
+  gpu.Free(dseq);
+  gpu.Free(dqsl);
+  gpu.DestroyQueue(gq);
+}
+

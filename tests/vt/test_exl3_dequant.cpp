@@ -631,3 +631,146 @@ TEST_CASE("exl3: a codebook upstream does not define is still refused BY NAME") 
   CHECK_THROWS(vt::Exl3DecodeCodeword(0x1234, -1));
   CHECK_THROWS(vt::Exl3DecodeCodeword(0x1234, 255));
 }
+
+// ── HALF-INTEGER rates (K+0.5, mul1) — BACKEND-ROCM frac rates ──────────────
+
+namespace {
+
+// The ENCODE side of the frac format, written from frac.cu's DEFINITION and
+// sharing nothing with the implementation's decode: positions alternate
+// KA / KA+1 bits (mask 0xAAAA — ODD positions carry the extra bit), the whole
+// 256-position tile is one MSB-first bit run of tile_bits = 256*KA+128 bits
+// (tail-biting: position 0 continues from the run's end), and the run is cut
+// into 16-bit words MSB-first. The final SWAP16 over each uint32 pair is
+// pack.cu:56 — the same step the integer packer applies, and the reason the
+// stored int16 array reads back as a big-endian bit stream through a uint32
+// view.
+std::vector<uint16_t> PackFracTile(const std::vector<int>& v, int ka) {
+  const int tile_bits = 256 * ka + 128;
+  std::vector<uint16_t> raw(static_cast<size_t>(tile_bits / 16), 0);
+  int pos = 0;
+  for (int i = 0; i < 256; ++i) {
+    const int width = ka + ((i & 1) ? 1 : 0);
+    for (int b = width - 1; b >= 0; --b) {
+      const int bit = (v[static_cast<size_t>(i)] >> b) & 1;
+      raw[static_cast<size_t>(pos / 16)] |=
+          static_cast<uint16_t>(bit << (15 - (pos % 16)));
+      ++pos;
+    }
+  }
+  std::vector<uint16_t> out(raw.size(), 0);
+  for (size_t i = 0; i + 1 < raw.size(); i += 2) {
+    out[i] = raw[i + 1];
+    out[i + 1] = raw[i];
+  }
+  return out;
+}
+
+// The INDEPENDENT extraction: codeword t is the 16-bit window of ring bits
+// [S(t)-16, S(t)) with S(i) = KA*(i+1) + ((i&15)+1)/2 + 8*(i/16). Each stream
+// bit is read straight off the uint32 view — word p/32, bit 31-(p%32), the
+// big-endian read the SWAP16 produces — one bit at a time. Deliberately NOT
+// the funnel-shift merge the implementation uses: this is the definition
+// spelled plainly, and it wraps the ring with a mod on the BIT index,
+// exercising the tail-bite at every position including t near 0.
+uint16_t IndependentFracCodeword(const std::vector<uint16_t>& tile, int ka, int t) {
+  const int tile_bits = 256 * ka + 128;
+  const int s = ka * (t + 1) + ((t & 15) + 1) / 2 + 8 * (t / 16);
+  uint16_t w = 0;
+  for (int j = 0; j < 16; ++j) {
+    const int p = s - 16 + j;
+    const int pp = p + tile_bits;  // the wrap headroom, then a bit-index mod
+    const int P = (pp % tile_bits) / 32;
+    const int o = pp % 32;
+    const uint32_t word =
+        static_cast<uint32_t>(tile[static_cast<size_t>(2 * P)]) |
+        (static_cast<uint32_t>(tile[static_cast<size_t>(2 * P + 1)]) << 16);
+    const int bit = static_cast<int>((word >> (31 - o)) & 1u);
+    w = static_cast<uint16_t>((w << 1) | bit);
+  }
+  return w;
+}
+
+// codebook.cuh:82-89 (cb == 2), written out rather than called — the same
+// acknowledged double transcription as TestMcgDecode above: the mul1 byte-sum
+// decode cannot gate its own transcription, and the real-checkpoint anchors are
+// what gate both.
+float TestMul1Decode(uint16_t codeword) {
+  const uint32_t x = static_cast<uint32_t>(codeword) * 0x83DCD12Du;
+  const uint32_t byte_sum =
+      (x & 0xffu) + ((x >> 8) & 0xffu) + ((x >> 16) & 0xffu) + ((x >> 24) & 0xffu);
+  const float h = vt::F16ToF32(static_cast<uint16_t>(0x6400u + byte_sum));
+  const float k_inv = vt::F16ToF32(static_cast<uint16_t>(0x1eeeu));
+  const float k_bias = vt::F16ToF32(static_cast<uint16_t>(0xc931u));
+  return vt::F16ToF32(vt::F32ToF16(h * k_inv + k_bias));
+}
+
+}  // namespace
+
+TEST_CASE("exl3: the FRAC window decode reproduces independently packed codewords") {
+  // Every KA the loader accepts, over random tiles: the bit-window arithmetic
+  // and the mul1 decode both gate here, codeword for codeword, against the
+  // independent extraction and the written-out decode. Random bits reach every
+  // position, so the tail-biting wrap (S(t) - 16 negative near ring 0) is
+  // exercised at every t including 0 — the off-by-128 the spec warns about is
+  // a wrong-modulus bug and shows up on the first windows.
+  for (const int ka : {1, 2, 3, 4, 5, 6, 7}) {
+    CAPTURE(ka);
+    for (const uint32_t seed : {0x51ED2A17u, 0xC0FFEEu}) {
+      CAPTURE(seed);
+      // Codewords bounded per position width, so every value is representable.
+      std::vector<int> v(256, 0);
+      uint32_t s = seed;
+      for (int i = 0; i < 256; ++i) {
+        s = s * 1664525u + 1013904223u;
+        const int width = ka + ((i & 1) ? 1 : 0);
+        v[static_cast<size_t>(i)] = static_cast<int>(s >> 16) & ((1 << width) - 1);
+      }
+      const std::vector<uint16_t> tile = PackFracTile(v, ka);
+      REQUIRE(tile.size() == static_cast<size_t>(16 * ka + 8));
+
+      // The scalar reader, codeword for codeword against the extraction.
+      for (int t = 0; t < 256; ++t) {
+        CAPTURE(t);
+        CHECK(vt::Exl3FracTileCodeword(tile.data(), ka, t) == IndependentFracCodeword(tile, ka, t));
+      }
+
+      // The full tile decode against perm + independent extraction + the
+      // written-out mul1 decode, compared as fp16 BIT PATTERNS.
+      std::vector<float> out(256, 0.0f);
+      vt::Exl3DecodeTile(tile.data(), ka, /*codebook=*/2, out.data(), /*half=*/true);
+      const std::vector<int> perm = TensorCorePerm();
+      int mismatch = 0;
+      for (int t = 0; t < 256; ++t) {
+        const float want = TestMul1Decode(IndependentFracCodeword(tile, ka, t));
+        const float got = out[static_cast<size_t>(perm[static_cast<size_t>(t)])];
+        if (vt::F32ToF16(got) != vt::F32ToF16(want)) ++mismatch;
+      }
+      CHECK(mismatch == 0);
+
+      // An integer-rate read of the SAME bytes must NOT agree (the widths
+      // differ; a frac read falling into the integer window arithmetic is the
+      // silent-wrong failure class this suite refuses). Compare only where the
+      // narrower integer tile is even defined: this asserts the readers really
+      // diverge on the first 32*KA bytes.
+      std::vector<uint16_t> as_integer(tile.begin(),
+                                       tile.begin() + static_cast<long>(32 * ka / 2));
+      int int_agree = 0;
+      for (int t = 0; t < 256; ++t) {
+        // The integer read of a truncated tile reads garbage; only the window
+        // positions that stay inside the kept words are compared.
+        if (vt::Exl3TileCodeword(as_integer.data(), ka, t) ==
+            IndependentFracCodeword(tile, ka, t)) {
+          ++int_agree;
+        }
+      }
+      CHECK(int_agree < 256);
+    }
+  }
+}
+
+TEST_CASE("exl3: frac KA outside 1..7 is refused BY NAME") {
+  std::vector<uint16_t> tile(16 * 8 + 8, 0);
+  CHECK_THROWS(vt::Exl3FracTileCodeword(tile.data(), 0, 3));
+  CHECK_THROWS(vt::Exl3FracTileCodeword(tile.data(), 8, 3));
+}

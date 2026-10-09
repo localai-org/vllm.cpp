@@ -645,6 +645,12 @@ struct Exl3Weight {
   // -1 is not a codebook, so anything that forgets to set it refuses at
   // `Exl3DecodeCodeword` by name instead of decoding to plausible garbage.
   int codebook = -1;  // 0 == 3INST, 1 == MCG, 2 == mul1; SET IT EXPLICITLY
+  // HALF-INTEGER RATE (K+0.5), BACKEND-ROCM frac rates. `bits` then carries the
+  // integer KA of `K = KA + 0.5` and the codebook is ALWAYS 2 (mul1) — the
+  // oracle defines the fractional rates for `mul1` only (`frac.cu`), and the
+  // loader refuses anything else by name. `words % 16 == 8` ⇔ `half`, the same
+  // signal `Bits()` reads off the byte width (`last % 32 == 16`).
+  bool half = false;
 
   bool Empty() const { return trellis.Empty(); }
 
@@ -666,8 +672,17 @@ struct Exl3Weight {
              "exl3: trellis must be 3-D [k/16, n/16, 16*bits] (exl3.py:47), got rank " +
                  std::to_string(trellis.rank));
     const int64_t last = trellis.shape[2];
-    VT_CHECK(last > 0 && last % 32 == 0,
-             "exl3: trellis last dim must be 32*bits BYTES (16*bits i16 words on disk), got " +
+    // Two byte widths, and the partition is total. INTEGER rates borrow the
+    // trellis at `32*bits` bytes (`last % 32 == 0`); FRACTIONAL rates
+    // (K = KA + 0.5, mul1) at `32*KA + 16` bytes (`last % 32 == 16`) — the
+    // stored 16*KA+8 uint16 words are held at byte width exactly like the
+    // integer tiles. `last % 32 == 16` with `KA = last / 32` is the same
+    // signal the loader reads off the on-disk word count (`words % 16 == 8`);
+    // for `OrcaSAQ-2-27B-EXL3-3.21bpw` that is 56 words = 112 bytes = 3.5 bpw
+    // (`exllamav3_ext/quant/frac.cu`, `bpb16 = 16*KA + 8` words per tile).
+    VT_CHECK(last > 0 && (last % 32 == 0 || last % 32 == 16),
+             "exl3: trellis last dim must be 32*bits BYTES (16*bits i16 words on disk) or "
+             "32*KA+16 bytes for a half-integer rate (K+0.5, mul1), got " +
                  std::to_string(last));
     const int64_t bits = last / 32;
     VT_CHECK(bits >= 1 && bits <= 8,

@@ -2319,3 +2319,119 @@ TEST_CASE("paged_attention CUDA FA-2 prefill (bf16 q/kv/out) matches f32 ref at 
   MESSAGE("built without VLLM_CPP_FLASH_ATTN; FA-2 prefill parity skipped");
 }
 #endif  // VLLM_CPP_FLASH_ATTN
+
+// ROCm f32-query / bf16-KV decode arm (PagedAttnDecodeGqaF32Q + split-KV
+// reduce) at the Qwen3.8-27B full-attention shape: hq=24, kv=4 (QG=6), d=256.
+// The CUDA parity cases above skip on ROCm, so without this case nothing on the
+// ROCm backend reaches that kernel. Contexts straddle the device-side split
+// chunking (64 positions minimum per split, 16 splits by default).
+namespace {
+
+bool HasRocmBackend() {
+  try {
+    vt::GetBackend(DeviceType::kROCM);
+    return true;
+  } catch (const std::runtime_error&) {
+    return false;
+  }
+}
+
+struct RocmBuf {
+  Backend& b;
+  void* p = nullptr;
+  size_t bytes = 0;
+  Tensor t;
+  RocmBuf(Backend& be, Queue& q, DType dt, const std::vector<int64_t>& shape,
+          const void* host = nullptr)
+      : b(be) {
+    int64_t numel = 1;
+    for (auto s : shape) numel *= s;
+    bytes = static_cast<size_t>(numel) * vt::SizeOf(dt);
+    p = b.Alloc(bytes == 0 ? 1 : bytes);
+    if (host != nullptr) b.Copy(q, p, host, bytes);
+    t.data = p;
+    t.dtype = dt;
+    t.device = Device{DeviceType::kROCM, 0};
+    t.rank = static_cast<int>(shape.size());
+    int64_t stride = 1;
+    for (int i = t.rank - 1; i >= 0; --i) {
+      t.shape[i] = shape[static_cast<size_t>(i)];
+      t.stride[i] = stride;
+      stride *= shape[static_cast<size_t>(i)];
+    }
+  }
+  ~RocmBuf() { b.Free(p); }
+  RocmBuf(const RocmBuf&) = delete;
+  RocmBuf& operator=(const RocmBuf&) = delete;
+};
+
+void CheckRocmF32QGqa(const std::vector<int32_t>& qsl, const std::vector<int32_t>& seq_lens,
+                      uint32_t seed) {
+  const int64_t Hq = 24, Hk = 4, D = 256, block_size = 16;
+  const float scale = std::pow(static_cast<float>(D), -0.5f);
+  const int64_t num_reqs = static_cast<int64_t>(seq_lens.size());
+  const int64_t num_tokens = qsl.back();
+  const int32_t max_seq = *std::max_element(seq_lens.begin(), seq_lens.end());
+  const int64_t max_blocks = (max_seq + block_size - 1) / block_size;
+  const int64_t num_blocks = num_reqs * max_blocks;
+  // Reversed block ids so a request's pages are not contiguous in the pool.
+  std::vector<int32_t> block_table(static_cast<size_t>(num_blocks));
+  for (int64_t i = 0; i < num_blocks; ++i)
+    block_table[static_cast<size_t>(i)] = static_cast<int32_t>(num_blocks - 1 - i);
+  auto q = RandF32(static_cast<size_t>(num_tokens * Hq * D), seed);
+  const size_t kv_n = static_cast<size_t>(num_blocks * block_size * Hk * D);
+  auto kc = RandF32(kv_n, seed + 1);
+  auto vc = RandF32(kv_n, seed + 2);
+  std::vector<uint16_t> kb(kv_n), vb(kv_n);
+  for (size_t i = 0; i < kv_n; ++i) {
+    kb[i] = vt::F32ToBF16(kc[i]);
+    vb[i] = vt::F32ToBF16(vc[i]);
+    kc[i] = vt::BF16ToF32(kb[i]);
+    vc[i] = vt::BF16ToF32(vb[i]);
+  }
+  const std::vector<float> ref = ComposedPagedRef(q, kc, vc, block_table, max_blocks, seq_lens,
+                                                  qsl, Hq, Hk, D, block_size, scale, true);
+
+  Backend& gpu = vt::GetBackend(DeviceType::kROCM);
+  Queue gq = gpu.CreateQueue();
+  {
+    RocmBuf dq(gpu, gq, DType::kF32, {num_tokens, Hq, D}, q.data());
+    RocmBuf dkc(gpu, gq, DType::kBF16, {num_blocks, block_size, Hk, D}, kb.data());
+    RocmBuf dvc(gpu, gq, DType::kBF16, {num_blocks, block_size, Hk, D}, vb.data());
+    RocmBuf dbt(gpu, gq, DType::kI32, {num_reqs, max_blocks}, block_table.data());
+    RocmBuf dsl(gpu, gq, DType::kI32, {num_reqs}, seq_lens.data());
+    RocmBuf dqsl(gpu, gq, DType::kI32, {num_reqs + 1}, qsl.data());
+    RocmBuf dout(gpu, gq, DType::kF32, {num_tokens, Hq, D});
+    vt::PagedAttention(gq, dout.t, dq.t, dkc.t, dvc.t, dbt.t, dsl.t, dqsl.t,
+                       PagedAttentionArgs{scale, true});
+    std::vector<float> got(ref.size(), 0.0f);
+    gpu.Copy(gq, got.data(), dout.p, dout.bytes);
+    gpu.Synchronize(gq);
+    size_t bad = 0;
+    float max_err = 0.0f;
+    for (size_t i = 0; i < ref.size(); ++i) {
+      const float e = std::fabs(got[i] - ref[i]);
+      if (!(e <= 1e-4f * (1.0f + std::fabs(ref[i])))) ++bad;
+      if (!(e <= max_err)) max_err = e;
+    }
+    INFO("seq_lens[0]=" << seq_lens[0] << " reqs=" << num_reqs << " tokens=" << num_tokens
+                        << " max_abs_err=" << max_err);
+    CHECK(bad == 0);
+  }
+  gpu.DestroyQueue(gq);
+}
+
+}  // namespace
+
+TEST_CASE("paged_attention ROCm f32-query GQA decode (hq=24 kv=4 d=256) matches CPU") {
+  if (!HasRocmBackend()) {
+    MESSAGE("no ROCm backend; skipping the f32-query GQA decode parity case");
+    return;
+  }
+  for (int32_t len : {1, 7, 63, 64, 65, 129, 300, 1000, 1024, 1025, 2048, 4097})
+    CheckRocmF32QGqa({0, 1}, {len}, 1000u + static_cast<uint32_t>(len));
+  // Three decodes of very different length in one batch.
+  CheckRocmF32QGqa({0, 1, 2, 3}, {5, 777, 2600}, 77u);
+  // A 6-token prefill chunk on top of 300 context, next to a decode.
+  CheckRocmF32QGqa({0, 6, 7}, {306, 900}, 91u);
+}

@@ -119,6 +119,34 @@ uint16_t Exl3TileCodeword(const void* tile, int bits, int t) {
   return static_cast<uint16_t>((merged >> s0) & 0xffffu);
 }
 
+uint16_t Exl3FracTileCodeword(const void* tile, int ka, int t) {
+  // The half-integer twin (BACKEND-ROCM frac rates), same read shape as
+  // `Exl3TileCodeword` above. The stream convention is IDENTICAL — MSB-first
+  // into 32-bit words, the SWAP16 view of pack.cu — what changes is where each
+  // window ends. Positions alternate KA / KA+1 new state bits with the extra
+  // bit on ODD positions (mask 0xAAAA, period 16 — `frac.cu`), so the window
+  // for position t ends at ring bit
+  //   S(t) = KA*(t+1) + ((t&15)+1)/2 + 8*(t/16)
+  // and the ring is tail-biting mod tile_bits = 256*KA + 128. The
+  // `+ tile_bits` term is the wrap headroom, exactly what `+ 256*bits` is for
+  // the integer read: S(t) - 16 goes negative near ring position 0, and
+  // wrapping by the FRAC ring length (not a copied 256*bits) is what keeps the
+  // first windows reading the tile's tail.
+  VT_CHECK(ka >= 1 && ka <= 7,
+           "exl3: half-integer rate requires KA in [1, 7]; got " + std::to_string(ka));
+  const int tile_bits = 256 * ka + 128;
+  const int words32 = tile_bits / 32;  // 8*KA + 4
+  const int b0 = ka * (t + 1) + ((t & 15) + 1) / 2 + 8 * (t / 16) + tile_bits - 16;
+  const int b1 = b0 + 16;
+  const int i0 = b0 / 32;
+  const int i1 = (b1 - 1) / 32;
+  const int s0 = (i1 + 1) * 32 - b1;
+  const uint32_t a = TileWord32(tile, i0 % words32);
+  const uint32_t b = TileWord32(tile, i1 % words32);
+  const uint64_t merged = (static_cast<uint64_t>(a) << 32) | b;
+  return static_cast<uint16_t>((merged >> s0) & 0xffffu);
+}
+
 float Exl3DecodeMcg(uint16_t codeword) { return Exl3DecodeCodeword(codeword, 1); }
 
 float Exl3DecodeCodeword(uint16_t codeword, int codebook) {
@@ -193,17 +221,18 @@ int Exl3TileRowMajorIndex(int t) {
   return r * 16 + c;
 }
 
-void Exl3DecodeTile(const void* tile, int bits, int codebook, float* out256) {
+void Exl3DecodeTile(const void* tile, int bits, int codebook, float* out256, bool half) {
   VT_CHECK(bits >= 1 && bits <= 8,
            "exl3: bits must be in [1, 8]; got " + std::to_string(bits));
   for (int t = 0; t < 256; ++t) {
-    out256[Exl3TileRowMajorIndex(t)] =
-        Exl3DecodeCodeword(Exl3TileCodeword(tile, bits, t), codebook);
+    const uint16_t cw =
+        half ? Exl3FracTileCodeword(tile, bits, t) : Exl3TileCodeword(tile, bits, t);
+    out256[Exl3TileRowMajorIndex(t)] = Exl3DecodeCodeword(cw, codebook);
   }
 }
 
 void Exl3ReconstructInner(const void* trellis, int64_t k, int64_t n, int bits, int codebook,
-                          float* out) {
+                          float* out, bool half) {
   VT_CHECK(bits >= 1 && bits <= 8,
            "exl3: bits must be in [1, 8]; got " + std::to_string(bits));
   VT_CHECK(k > 0 && k % 16 == 0 && n > 0 && n % 16 == 0,
@@ -211,14 +240,16 @@ void Exl3ReconstructInner(const void* trellis, int64_t k, int64_t n, int bits, i
            "tile is 16x16); got k=" + std::to_string(k) + " n=" + std::to_string(n));
   const int64_t tiles_k = k / 16;
   const int64_t tiles_n = n / 16;
-  // BYTES, not words: `16 * bits` counts int16 words, so the cursor carries the
-  // `sizeof(uint16_t)` the `const uint16_t*` used to supply (#2558).
-  const int64_t tile_bytes = 16 * static_cast<int64_t>(bits) * static_cast<int64_t>(sizeof(uint16_t));
+  // BYTES, not words: `16 * bits` counts int16 words (a frac tile is
+  // `16*bits + 8` of them), so the cursor carries the `sizeof(uint16_t)` the
+  // `const uint16_t*` used to supply (#2558).
+  const int64_t tile_bytes =
+      (16 * static_cast<int64_t>(bits) + (half ? 8 : 0)) * static_cast<int64_t>(sizeof(uint16_t));
   const auto* tw = static_cast<const unsigned char*>(trellis);
   float tile_out[256];
   for (int64_t i = 0; i < tiles_k; ++i) {
     for (int64_t j = 0; j < tiles_n; ++j) {
-      Exl3DecodeTile(tw + (i * tiles_n + j) * tile_bytes, bits, codebook, tile_out);
+      Exl3DecodeTile(tw + (i * tiles_n + j) * tile_bytes, bits, codebook, tile_out, half);
       for (int r = 0; r < 16; ++r) {
         std::memcpy(out + (i * 16 + r) * n + j * 16, tile_out + r * 16,
                     16 * sizeof(float));
@@ -229,13 +260,13 @@ void Exl3ReconstructInner(const void* trellis, int64_t k, int64_t n, int bits, i
 
 void Exl3DequantLinear(const void* trellis, const void* suh,
                        const void* svh, int64_t k, int64_t n, int bits, int codebook,
-                       float* out) {
+                       float* out, bool half) {
   VT_CHECK(k % kHadDim == 0 && n % kHadDim == 0,
            "exl3: both features must be multiples of 128 (each side was "
            "Hadamard-128 transformed at quantization time, "
            "exl3_lib/quantize.py:15); got k=" + std::to_string(k) +
                " n=" + std::to_string(n));
-  Exl3ReconstructInner(trellis, k, n, bits, codebook, out);
+  Exl3ReconstructInner(trellis, k, n, bits, codebook, out, half);
 
   const float scale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(kHadDim)));
 
