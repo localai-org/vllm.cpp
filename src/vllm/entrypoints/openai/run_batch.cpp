@@ -85,7 +85,8 @@ RunBatch::RunBatch(OpenAIServingChat* chat, OpenAIServingModels* models)
     : chat_(chat), models_(models) {}
 
 BatchRequestOutput RunBatch::DispatchChat(const std::string& custom_id,
-                                          const nlohmann::json& body) {
+                                          const nlohmann::json& body,
+                                          const std::string& body_json) {
   // Mirrors run_request(openai_serving_chat.create_chat_completion, ...):
   // check_type_for_url validates the body as a ChatCompletionRequest
   // (run_batch.py:175-176); a validation failure surfaces through
@@ -106,8 +107,11 @@ BatchRequestOutput RunBatch::DispatchChat(const std::string& custom_id,
   }
   // Tool schemas keep the request document's key order (the pinned renderer
   // dumps them into the prompt with sort_keys=False); the nlohmann::json
-  // parse above sorts object keys, so re-read `tools` order-preserving.
-  RestoreToolSchemaOrder(body, request);
+  // parse above sorts object keys, so re-read `tools` order-preserving from
+  // the body's ORIGINAL text. The argument is a string: passing the json
+  // object itself would implicitly convert through get<std::string>() and
+  // throw type_error.302 on every object body (ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN).
+  RestoreToolSchemaOrder(body_json, request);
 
   // check_model (chat_completion/serving.py; api_server.cpp:186-190).
   if (models_ != nullptr && !models_->check_model(request.model)) {
@@ -184,7 +188,16 @@ BatchRequestOutput RunBatch::RunLine(const std::string& request_json) {
            s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
   };
   if (url == "/v1/chat/completions") {
-    return DispatchChat(custom_id, body);
+    // The chat body is the line's top-level "body" member. RestoreToolSchemaOrder
+    // re-reads `tools` from the body's ORIGINAL text order (the pinned
+    // renderer dumps schemas into the prompt with sort_keys=False), and the
+    // nlohmann::json parse above sorted its keys — so re-serialize the body
+    // from an order-preserving parse of the original line text.
+    // ordered_json::dump keeps insertion order, so this text carries the
+    // request document's key order (ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN).
+    const nlohmann::ordered_json ordered_line =
+        nlohmann::ordered_json::parse(request_json);
+    return DispatchChat(custom_id, body, ordered_line.at("body").dump());
   }
   // Registered endpoint keys (run_batch.py:732-777) whose serving handler is not
   // wired here yet -> the "does not support endpoint" error (handler_getter ->
