@@ -103,6 +103,7 @@
 #include <vector>
 
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
+#include "vllm/model_executor/models/kolibri1_numa.h"  // the interleave policy
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"  // DequantRowsBf16
 #include "vllm/model_executor/models/kolibri1_weights.h"      // Fp8BlockWeight
 
@@ -236,6 +237,10 @@ class Cache {
     // its bytes outright, so even the disabled/oversized path allocates per
     // call (a shared member scratch could be clobbered by the next call,
     // which the lease contract forbids).
+    // The decoded block is WEIGHT-ARENA traffic the decode streams: park its
+    // pages interleaved over the NUMA nodes (kolibri1_numa.h) so a multi-node
+    // decode reads them local. Allocation policy only — bytes identical.
+    const kolibri1_numa::PolicyGuard numa_guard;
     auto bytes = std::make_shared<std::vector<uint16_t>>();
     DecodeInto(w, *bytes);
     if (budget_ == 0 || byte_count > budget_) {
