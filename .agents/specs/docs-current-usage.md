@@ -10,8 +10,9 @@ implementation, default, or benchmark result.
 
 | Surface | Binding sources | Planned correction |
 |---|---|---|
-| C ABI | `include/vllm.h`, `src/vllm/c_api.cpp`, audio entrypoints and tests | Current version, diarization calls, ownership, and limits |
+| C ABI | `include/vllm.h`, `src/capi/vllm_c.cpp`, audio entrypoints and tests | Current version, diarization calls, ownership, and limits |
 | Kolibri-1 | Model registration and loader, CLI parser, `.agents/specs/kolibri-1-cpu.md`, `.agents/specs/kolibri-tt.md` | Readable model recipe with checkpoint pin, CPU usage, evidence, and accelerator limits |
+| Build | `CMakeLists.txt` diarization dependency block | Default-on dependency, disable option, and local source override |
 | Public overview | The sources above | Concise news and links in README, feature table, usage guide, and model index |
 
 Read the actual sources before writing each claim. Preserve historical evidence
