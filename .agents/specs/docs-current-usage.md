@@ -40,3 +40,13 @@ Exclude any claim whose implementation or recorded evidence cannot be found.
 ## Owed
 
 - ISSUE-LOCAL-01M4F9SK0DPVRCV7E7SYBCV47K owns this documentation correction.
+- [ISSUE-LOCAL-01M4FA8QB4RE33B14KGHK699S4](../issues/_owed/ISSUE-LOCAL-01M4FA8QB4RE33B14KGHK699S4.md)
+  owns the discovered combined-transcription loading gap. Source evidence:
+  `src/capi/vllm_c.cpp:873-905`, `:1722-1724`, and `:1788-1790`;
+  `CMakeLists.txt:1669-1671` pins parakeet.cpp
+  `394d270fabb1d6125f05c772aa3ca078a574b19d`, whose
+  `src/parakeet_capi.cpp:140-164` loads GGUF and `:1057` rejects a null ASR context.
+  The public HF-directory loader leaves that context null, while combined calls
+  report success with empty output. This CPU-only audit corrects documentation;
+  it performs no audio validation or runtime repair. Resolving this issue requires
+  separately scoped, tested model loading work.

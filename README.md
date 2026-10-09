@@ -43,9 +43,9 @@
   See [defaults and examples](docs/USAGE.md#benchmark-workload-controls) to set the workload explicitly.
 - **2026-10** **Kolibri-1 runs on CPU with its released FP8 checkpoint.** The tokenizer
   accepts the model's vocabulary. See the [recipe and comparison limits](docs/models/kolibri-1.md).
-- **2026-10** **C ABI 30 adds speaker diarization and speaker-attributed transcription.**
-  See the [C API reference](docs/reference/c-api.md#speaker-diarization) for separate model handles,
-  audio formats, and cleanup.
+- **2026-10** **C ABI 30 adds speaker diarization.**
+  See the [C API reference](docs/reference/c-api.md#speaker-diarization) for audio formats, cleanup,
+  and the current combined-transcription limitation.
 - **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
   blocked by missing artifacts, with no speed result. See the
   [measurement instructions and limits](docs/benchmarks/qwen38-tensorfold-gap.md#measurement-tools).
