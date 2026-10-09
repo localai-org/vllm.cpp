@@ -628,6 +628,60 @@ void MoeSiluMulKernel(Queue&, Tensor& out, const Tensor& gate, const Tensor& up)
   CommitDevice2D(out, std::move(dev_y));
 }
 
+// kMoeCombine: the routed-expert weighted sum — gather the per-slot expert
+// outputs, scale each by its router weight, accumulate in f32 in slot order,
+// apply the routed scale once on the finished accumulator, add the optional
+// shared term, ONE output rounding. The CPU oracle is MoeCombineKernel
+// (cpu_ops.cpp); the kolibri1 TT streaming MoE (kolibri1_tt_forward.cpp)
+// is the caller. HOST-STAGED: at decode shapes (T<=8 slots per step, H=2560)
+// the operand bytes are one slot-block download and the f32 scalar loop is
+// the exact CPU accumulation order, so TT and CPU agree by construction —
+// the same host-staged, bit-exact doctrine as kGreedyArgmax and
+// kCausalConv1dFwd. A device-composed tiled path (the BFP8 matmul trick over
+// the slot axis) is the owed follow-up if a prefill-scale T ever streams.
+// Widenings and the output store go through the dtype-erased LoadElemF32 /
+// StoreElemF32 (bf16 -> f32 shift, f32 -> bf16 RNE), the same operations the
+// CPU oracle's LoadF32 / StoreF32 perform.
+void MoeCombineKernel(Queue&, Tensor& out, const Tensor& expert_out,
+                      const Tensor& weights, const Tensor* shared,
+                      float routed_scale) {
+  TT_OP_TRACE("MoeCombine");
+  VT_CHECK(expert_out.rank == 3 && weights.rank == 2 && out.rank == 2,
+           "tenstorrent kMoeCombine: expert_out [T,K,H], weights [T,K], out [T,H]");
+  const int64_t t = out.shape[0], h = out.shape[1], k = weights.shape[1];
+  VT_CHECK(expert_out.shape[0] == t && expert_out.shape[1] == k &&
+               expert_out.shape[2] == h && weights.shape[0] == t,
+           "tenstorrent kMoeCombine: shape mismatch");
+  VT_CHECK(IsFloatDType(expert_out.dtype) &&
+               (out.dtype == DType::kF32 || out.dtype == DType::kBF16),
+           "tenstorrent kMoeCombine: float expert_out, f32/bf16 out");
+  VT_CHECK(weights.dtype == DType::kF32,
+           "tenstorrent kMoeCombine: weights must be f32");
+  VT_CHECK(shared == nullptr || (shared->rank == 2 && shared->shape[0] == t &&
+                                 shared->shape[1] == h &&
+                                 IsFloatDType(shared->dtype)),
+           "tenstorrent kMoeCombine: shared must be float [T,H]");
+  VT_CHECK(expert_out.IsContiguous() && weights.IsContiguous() &&
+               out.IsContiguous() &&
+               (shared == nullptr || shared->IsContiguous()),
+           "tenstorrent kMoeCombine: contiguous required");
+  EnsureHost(expert_out);
+  EnsureHost(weights);
+  if (shared != nullptr) EnsureHost(*shared);
+  for (int64_t row = 0; row < t; ++row) {
+    for (int64_t col = 0; col < h; ++col) {
+      float acc = 0.0f;
+      for (int64_t j = 0; j < k; ++j)
+        acc += weights.Ptr<float>()[row * k + j] *
+               LoadElemF32(expert_out, (row * k + j) * h + col);
+      if (routed_scale != 1.0f) acc *= routed_scale;
+      if (shared != nullptr) acc += LoadElemF32(*shared, row * h + col);
+      StoreElemF32(out, row * h + col, acc);
+    }
+  }
+  CommitHost(out);
+}
+
 // kCastBf16 / kCastF32: elementwise dtype convert via Load/Store (cpu_ops
 // CastBf16Kernel / CastF32Kernel). Qwen3 uses these for K/V cache dtype and
 // the logits / rope-cache paths. Host-staged; bit-exact for supported pairs.
@@ -1476,6 +1530,9 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<SiluAndMulFn>(&SiluAndMulKernel)));
     RegisterOp(OpId::kMoeSiluMul, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<MoeSiluMulFn>(&MoeSiluMulKernel)));
+    RegisterOp(OpId::kMoeCombine, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(
+                   static_cast<MoeCombineFn>(&MoeCombineKernel)));
     RegisterOp(OpId::kCastBf16, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<CastBf16Fn>(&CastBf16Kernel)));
     RegisterOp(OpId::kCastF32, DeviceType::kTENSTORRENT,
