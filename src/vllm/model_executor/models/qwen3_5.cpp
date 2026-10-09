@@ -1806,17 +1806,33 @@ DBuf MatmulBf16D(Dev d, const Tensor& x, const OwnedTensor& w) {
 // flag alone is insufficient: gdn_expand_nk also sets nk=true for the bf16
 // expanded weight, but that weight has ReorderVCols applied and needs NO
 // input permutation. Only the T25 tiled Q5_K path (out_proj_tiled=true) does.
+//
+// `gated_in` is the deferred V-head-PERMUTED activation (MODEL-MM-QWEN4-EXP)
+// and the default bf16 arm MUST consume it: a tiled-order weight paired with
+// the raw grouped-order `gated_bf16` scrambles the V-head pairing. Handing
+// this arm the unpermuted buffer was the 66f2f8c22 regression —
+// test_gdn_v_head_permute read bad=94/96 (worst 0.115234) and
+// test_qwen4_exp_layer_loop's tiled arm 2.09756 against a 0.03 bound, in
+// every build, while the grouped arm stayed green. The T25 branch permutes
+// the RAW activation instead: LoadGdnGguf — the only loader that sets
+// out_proj_tiled — never sets v_head_perm_key_heads, so the two mechanisms
+// cannot co-occur, and the VT_CHECK refuses the combination rather than
+// letting a future loader run the permutation twice.
 static DBuf GdnOutProjMatmul(Dev d, const GdnLayerWeights& w,
-                              const DBuf& gated_bf16,
+                              const Tensor& gated_in, const DBuf& gated_bf16,
                               int64_t T, int64_t Hk, int64_t Hv, int64_t Dv) {
   if (w.out_proj_tiled) {
+    VT_CHECK(w.v_head_perm_key_heads == 0,
+             "gdn: out_proj_tiled (T25 keep-quant) cannot combine with a "
+             "deferred V-head permutation: the runtime input permutation "
+             "would run twice");
     const int64_t value_dim = Hv * Dv;
     const int64_t rpk = Hk > 0 ? Hv / Hk : 1;
     DBuf permuted(d, DType::kBF16, {T, value_dim});
     vt::PermuteVHeads(d.q, permuted.t(), gated_bf16.t(), T, Hk, rpk, Dv);
     return MatmulBf16D(d, permuted.t(), w.out_proj);
   }
-  return MatmulBf16D(d, gated_bf16.t(), w.out_proj);
+  return MatmulBf16D(d, gated_in, w.out_proj);
 }
 
 // A tied BF16 lm_head follows torch Linear's model-dtype output, then the
@@ -4791,8 +4807,8 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   return !w.out_proj_fp8.Empty()
              ? MatmulFp8CutlassD(d, gated_in, w.out_proj_fp8, DType::kBF16)
          : !w.out_proj_fp4.Empty()
-             ? MatmulNvfp4Bf16D(d, gated_bf16.t(), w.out_proj_fp4)
-             : GdnOutProjMatmul(d, w, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
+             ? MatmulNvfp4Bf16D(d, gated_in, w.out_proj_fp4)
+             : GdnOutProjMatmul(d, w, gated_in, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
 }
 
 // PERSISTENT per-step input device buffers (decode host-tax #2): the flattened
@@ -5299,8 +5315,8 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   return !w.out_proj_fp8.Empty()
              ? MatmulFp8CutlassD(d, gated_in, w.out_proj_fp8, DType::kBF16)
          : !w.out_proj_fp4.Empty()
-             ? MatmulNvfp4Bf16D(d, gated_bf16.t(), w.out_proj_fp4)
-             : GdnOutProjMatmul(d, w, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
+             ? MatmulNvfp4Bf16D(d, gated_in, w.out_proj_fp4)
+             : GdnOutProjMatmul(d, w, gated_in, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
 }
 
 // VT_DUMP_ACT stage probe (GDN): dump named intermediates so a layer-level
@@ -5825,8 +5841,8 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   return !w.out_proj_fp8.Empty()
              ? MatmulFp8CutlassD(d, gated_in, w.out_proj_fp8, DType::kBF16)
          : !w.out_proj_fp4.Empty()
-             ? MatmulNvfp4Bf16D(d, gated_bf16.t(), w.out_proj_fp4)
-             : GdnOutProjMatmul(d, w, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
+             ? MatmulNvfp4Bf16D(d, gated_in, w.out_proj_fp4)
+             : GdnOutProjMatmul(d, w, gated_in, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
 }
 
 // --- Dense full_attention block. qwen36-forward-notes.md §5; pinned
