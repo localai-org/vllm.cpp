@@ -695,7 +695,119 @@ std::vector<float> ForwardLastLogits(LoadedModel& model, const HfConfig& config,
   return logits;
 }
 
+int32_t prev_got_dbg = 0;
+
 }  // namespace
+
+// SCRATCH DEBUG (remove before landing): TT vs CPU logits, same registry
+// path, prompt 1 walked one token per step.
+TEST_CASE("SCRATCH dbg TT vs CPU logits") {
+  if (!TenstorrentDevicePresent()) return;
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || *model_dir == '\0') return;
+  const std::string dir = model_dir;
+  const HfConfig config = vllm::LoadHfConfig(dir + "/config.json");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(dir + "/model.safetensors.index.json"));
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items())
+    shard_names.insert(shard.get<std::string>());
+  std::vector<SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(SafetensorsFile::Open(dir + "/" + shard));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+
+  // CPU model + queue.
+  vt::Backend& cpu_be = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue cpu_q = cpu_be.CreateQueue();
+  std::unique_ptr<LoadedModel> cpu_model = ModelRegistry::Load(config, source);
+  ModelRegistry::Prepare(*cpu_model, config, cpu_q);
+  const int64_t num_blocks = 32;
+  const HfConfig* cfg = &config;
+  (void)cfg;
+
+  // CPU KV caches.
+  const Kolibri1Weights& cw = Kolibri1LoadedModelWeights(*cpu_model);
+  const Kolibri1Params& cp = cw.params;
+  std::vector<PagedKvCache> cpu_kv;
+  std::vector<std::vector<uint8_t>> cpu_kv_bytes;
+  for (int64_t l = 0; l < cp.num_hidden_layers; ++l) {
+    cpu_kv_bytes.emplace_back(static_cast<size_t>(
+        num_blocks * 2 * 16 * cp.num_key_value_heads * cp.head_dim *
+        vt::SizeOf(vt::DType::kBF16)));
+    PagedKvCache c;
+    c.data = cpu_kv_bytes.back().data();
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = cp.num_key_value_heads;
+    c.head_size = cp.head_dim;
+    cpu_kv.push_back(c);
+  }
+
+  // TT model + queue.
+  vt::Backend& tt_be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue tt_q = tt_be.CreateQueue();
+  std::unique_ptr<LoadedModel> tt_model = ModelRegistry::Load(config, source);
+  ModelRegistry::Prepare(*tt_model, config, tt_q);
+  const Kolibri1Weights& tw = Kolibri1LoadedModelWeights(*tt_model);
+  const Kolibri1Params& tp = tw.params;
+  std::vector<PagedKvCache> tt_kv;
+  std::vector<std::shared_ptr<void>> tt_keep;
+  for (int64_t l = 0; l < tp.num_hidden_layers; ++l) {
+    void* buf = tt_be.Alloc(cpu_kv_bytes[0].size());
+    tt_keep.emplace_back(buf, [&tt_be](void* p) { tt_be.Free(p); });
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = tp.num_key_value_heads;
+    c.head_size = tp.head_dim;
+    tt_kv.push_back(c);
+  }
+
+  const GateGolden gp = LoadGateGoldens()[0];
+  auto fwd = [&](LoadedModel& m, vt::Queue& q2, vt::Backend& b2,
+                 std::vector<PagedKvCache>& kv, const std::vector<int32_t>& ids,
+                 int64_t ctx) {
+    return ForwardLastLogits(m, config, q2, b2, kv, ids, ctx, num_blocks);
+  };
+  std::vector<int32_t> seq;
+  for (size_t i = 0; i < gp.input_ids.size() + 3; ++i) {
+    if (i < gp.input_ids.size()) {
+      seq.push_back(gp.input_ids[i]);
+    } else {
+      // after the prompt, feed CPU's argmax (keep both on the same context)
+      seq.push_back(0);  // placeholder, replaced below
+      seq.back() = prev_got_dbg;
+    }
+    std::vector<float> lc =
+        fwd(*cpu_model, cpu_q, cpu_be, cpu_kv, {seq.back()},
+            static_cast<int64_t>(seq.size()) - 1);
+    std::vector<float> lt =
+        fwd(*tt_model, tt_q, tt_be, tt_kv, {seq.back()},
+            static_cast<int64_t>(seq.size()) - 1);
+    double ma = 0;
+    size_t amax = 0;
+    for (size_t j = 0; j < lc.size(); ++j) {
+      const double d = std::fabs(static_cast<double>(lc[j]) -
+                                 static_cast<double>(lt[j]));
+      if (d > ma) { ma = d; amax = j; }
+    }
+    int32_t ac = static_cast<int32_t>(
+        std::max_element(lc.begin(), lc.end()) - lc.begin());
+    int32_t at = static_cast<int32_t>(
+        std::max_element(lt.begin(), lt.end()) - lt.begin());
+    MESSAGE("step " << i << " tok " << seq.back() << ": max_abs=" << ma
+                    << " at " << amax << " argmax cpu=" << ac
+                    << " tt=" << at << " logit cpu="
+                    << lc[static_cast<size_t>(ac)] << " tt="
+                    << lt[static_cast<size_t>(at)]);
+    prev_got_dbg = ac;
+  }
+  (void)gp;
+}
 
 TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
           "on the card (W3 methodology, 141/145 in the 2.5-nat band)") {
@@ -772,18 +884,44 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
     // prompts).
     for (auto& kkeep : kv_keep)
       std::memset(kkeep.get(), 0, static_cast<size_t>(kv_bytes));
-    // The W3 chain: greedy from the prompt; each step's forward covers
-    // exactly one new position (incremental decode over the KV cache —
-    // identical math to the CPU row's full recompute, the goldens'
-    // semantics).
-    std::vector<int32_t> seq = gp.input_ids;
+    // The W3 chain: the prompt walks in ONE-TOKEN steps (each forward
+    // covers exactly one new position over the KV cache), then the gate
+    // decodes greedily the same way. Full-recompute and this incremental
+    // walk are identical math (the goldens' semantics,
+    // test_kolibri1_w3.cpp:298-310). The prompt CANNOT prefill in one
+    // step: one whole-prompt routed dispatch streams every selected
+    // expert's slot bytes in a single charge and exceeds the B1 per-step
+    // stream bound (observed: 1242865920 B against 1179936000 B at layer
+    // 15) — the loud refusal is genuine per-step over-capacity, and the
+    // chunked walk is the faithful same-math alternative. (The first
+    // draft of this gate decoded step 0 from a ZEROED KV cache while
+    // claiming ctx_before = len-1 computed positions — attention over no
+    // context, 0/8 hard flips, gate meaningless.)
+    std::vector<int32_t> seq;
+    std::vector<float> logits;
+    int32_t prev_got = -1;
     bool diverged = false;
     for (int32_t step = 0; step < kGateSteps && !diverged; ++step) {
-      const int64_t ctx = static_cast<int64_t>(seq.size()) - 1;
-      const std::vector<float> logits = ForwardLastLogits(
-          *model, config, q, be, kv, {seq.back()}, ctx, num_blocks);
-      const int32_t got = static_cast<int32_t>(
+      // The prompt walk first: one token per step, no comparison.
+      if (static_cast<size_t>(step) < gp.input_ids.size()) {
+        seq.push_back(gp.input_ids[static_cast<size_t>(step)]);
+        ForwardLastLogits(*model, config, q, be, kv, {seq.back()},
+                          static_cast<int64_t>(seq.size()) - 1, num_blocks);
+        continue;
+      }
+      if (step == static_cast<int32_t>(gp.input_ids.size())) {
+        logits = ForwardLastLogits(*model, config, q, be, kv, {seq.back()},
+                                   static_cast<int64_t>(seq.size()) - 1,
+                                   num_blocks);
+      } else {
+        seq.push_back(prev_got);
+        logits = ForwardLastLogits(*model, config, q, be, kv, {seq.back()},
+                                   static_cast<int64_t>(seq.size()) - 1,
+                                   num_blocks);
+      }
+      prev_got = static_cast<int32_t>(
           std::max_element(logits.begin(), logits.end()) - logits.begin());
+      const int32_t got = prev_got;
       const int32_t want = gp.generated_ids[static_cast<size_t>(step)];
       ++argmax_total;
       if (got == want) {
@@ -810,7 +948,6 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
         diverged = true;  // later steps compare different contexts
         break;
       }
-      seq.push_back(got);
     }
   }
 

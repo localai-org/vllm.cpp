@@ -516,7 +516,29 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
     to_norm = ttnn::add(dev_x, dev_r);
     CommitDevice2D(*residual, to_norm);
   }
-  ttnn::Tensor dev_y = ttnn::rms_norm(to_norm, args.eps, dev_w);
+  // F32-SHADOW NORM (pin-forward): the pinned tt-metal's device bf16 rms_norm
+  // is unreliable — with the previous (bf16 TILE in, bf16 out) arm the
+  // kolibri1 TT model's attention output was EXACTLY ZERO at every layer
+  // (the per-head q/k norms are the first bf16 RmsNorm each block computes;
+  // both arms measured on this stack), while the CPU row over identical
+  // inputs produced a live attention stream. The f32 tile arm is the repair:
+  // widen the normalized activation and the affine to FLOAT32 tiles, run
+  // rms_norm there (the CPU oracle's f32 sumsq, matched MORE closely than
+  // the bf16 arm it replaced), and round ONCE through the output store.
+  // Same doctrine as SigmoidGateBf16's f32 shadow. The residual commit above
+  // stays in the tensors' native dtype (the residual is read back in bf16 by
+  // the next block, as before).
+  ttnn::Tensor norm_f32 = NormalizeDevF32Tile(std::move(to_norm),
+                                              static_cast<uint32_t>(rows), d);
+  // The affine rides the staged weight tensor, typecast on device (no host
+  // traffic): the gemma path's baked form is already FLOAT32; the raw path's
+  // EnsureAffine1D form is BF16 TILE.
+  ttnn::Tensor wf32 = args.gemma
+                          ? dev_w
+                          : ttnn::typecast(dev_w, ttnn::DataType::FLOAT32);
+  ttnn::Tensor dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
+  if (out.dtype == DType::kBF16)
+    dev_y = ttnn::typecast(std::move(dev_y), ttnn::DataType::BFLOAT16);
   CommitDevice2D(out, std::move(dev_y));
 }
 

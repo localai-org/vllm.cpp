@@ -485,6 +485,27 @@ anchor remain owed — the gate leg is committed in
 `test_kolibri1_tt_b2ii.cpp` and runs the moment a healthy card window
 opens.
 
+DEVICE HALF UPDATE (2026-10-09 second session, branch
+`row/ci-tt-pin-forward`, PR #3430): the card returned healthy on the
+UPDATED tt-metal stack and the device half ran. The native
+`kMoeCombine` TT kernel landed (bit-exact to the CPU oracle,
+red-first); the token gate's own zero-KV step-0 defect was fixed (the
+W3 walk is one token per step; a whole-prompt prefill also exceeds the
+B1 per-step stream bound — 1242865920 B vs 1179936000 B at layer 15);
+and the pinned tt-metal's broken device bf16 `rms_norm` was repaired by
+the f32-shadow arm (attention had been exactly zero at every layer).
+The gate RAN end to end: with `VT_TT_HOST_FREE_DECODE=0` it reaches
+26/33 compared positions, all 7 flips genuine semantic near-ties just
+past the band (2.69-5.60 nat) — still a FAILING gate (141/145, 0 hard
+required); with host-free ON the device handoff corrupts activations
+(0/8). Evidence and per-flip gaps:
+`docs/bench-evidence/kolibri1-tt-b2ii-20261009.md` section 6; issue
+ISSUE-LOCAL-01M4GPEZ987KVAXCYBFB2EVNT7 Resolution. STILL OWED: the
+host-free device-handoff root cause (device rope / device
+ReshapeAndCache / device residual norm), the `kGdnDecode` wide-range
+drift and the `kMatmulBTQuantGrouped` Q4_K decode envelope miss, the
+141/145 pass, and the bench anchor 109726.
+
 
 ## Git integration
 

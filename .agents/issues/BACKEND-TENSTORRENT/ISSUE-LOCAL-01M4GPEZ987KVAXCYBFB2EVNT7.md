@@ -49,3 +49,36 @@ Host Tenstorrent stack updated (tt-smi 6.7.0, tt-umd 0.9.12, KMD 2.11.1-pre, boa
   cases pass. The native `kMoeCombine` kernel (a weighted expert combine)
   is owed before the 141/145 band can be re-measured. The decode bench
   anchor (109726 with the 101807/109726 chain) is likewise still owed.
+- 2026-10-09 (B2b-ii device half, branch `row/ci-tt-pin-forward`):
+  the native `kMoeCombine` TT kernel landed (host-staged f32 scalar loop,
+  bit-exact to the CPU oracle `cpu_ops.cpp` `MoeCombineKernel`; red-first
+  doctest ran RED at `REQUIRE(OpRegistered(kMoeCombine, kTENSTORRENT))`
+  and GREEN 961/961 after). The token gate then ran for the first time and
+  exposed TWO further defects, both fixed or characterized this session:
+  (1) the gate itself decoded step 0 from a ZEROED KV cache while claiming
+  `ctx_before = len-1` computed positions (0/8 meaningless hard flips) —
+  fixed to the W3 one-token-per-step walk (a whole-prompt prefill step
+  also exceeds the B1 per-step stream bound: 1242865920 B charged against
+  1179936000 B at layer 15; the chunked walk is the same-math
+  alternative); (2) the pinned tt-metal's device bf16 `rms_norm` is
+  broken — with the previous arm the model's attention output was EXACTLY
+  ZERO at every layer — fixed by the f32-shadow norm arm in
+  `tenstorrent_ops.cpp` `RmsNormKernel` (regression test: `kRmsNorm bf16
+  [48,128] per-head arm`). Gate state after both fixes, WITH the host-free
+  decode paths DISABLED (`VT_TT_HOST_FREE_DECODE=0`): 26/33 compared
+  positions match, all 7 flips are genuine near-ties whose nat gaps sit
+  just outside the 2.5 band (2.69-5.60) — still a FAILING gate (141/145,
+  0 hard flips required); with host-free ON the device handoff corrupts
+  activations (0/8, nonsense tokens). OWED: root-cause the host-free
+  device-shadow handoff at this pin (device rope / device
+  ReshapeAndCache / device residual norm are the paths host
+  materialization bypasses); the `kGdnDecode` wide-range state drift
+  (re-confirmed: dot error 0.044 vs a double oracle with an EXACT f32
+  multiply — a reduction-path property; a pairwise reshape-sum experiment
+  made it worse, 0.0195, and was reverted) and the `kMatmulBTQuantGrouped`
+  decode P=1 Q4_K envelope miss (unchanged, 154/1024, worst_rel
+  0.130697; not exercised by the kolibri1 path). Also observed once: the
+  `batched decode RAC is capture-safe` shadow check failed mid-suite
+  (V 109/128) and passed in isolation and on a full-suite re-run — a new
+  intermittent, unowned. The decode bench anchor 109726 remains owed
+  behind the token gate.
