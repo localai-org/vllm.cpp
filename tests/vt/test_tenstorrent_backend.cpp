@@ -737,6 +737,133 @@ TEST_CASE("kTENSTORRENT kMoeSiluMul matches host F32 within BF16 envelope") {
   CHECK(max_abs_diff < 0.05f);
 }
 
+// kMoeCombine: the routed-expert weighted sum (cpu_ops.cpp MoeCombineKernel
+// is the CPU oracle; kolibri1_tt_forward.cpp's streaming MoE is the caller).
+// RED-first for the B2b-ii device half: this case was written and run RED
+// while no TT kernel existed for kMoeCombine — the op refused by name at
+// src/vt/op_provider.cpp Resolve() ("no kernel for op MoeCombine ... and the
+// device memory is not host-addressable"), so REQUIRE(OpRegistered) failed.
+//
+// CONTRACT: f32 accumulation over the top-k slots in index order, one
+// standalone f32 multiply by routed_scale on the finished accumulator, the
+// shared term added after the scale, ONE bf16 output rounding (RNE). The
+// envelope is therefore f32-accumulation exactness + 1 bf16 output ulp
+// (the project's bf16 precedent); a kernel that accumulates in bf16 or
+// rounds twice fails this case.
+TEST_CASE("kTENSTORRENT kMoeCombine matches the CPU reference within the f32-accumulate bf16 envelope") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kMoeCombine, DeviceType::kTENSTORRENT));
+  auto moe_combine = reinterpret_cast<vt::MoeCombineFn>(
+      vt::GetOp(vt::OpId::kMoeCombine, DeviceType::kTENSTORRENT));
+
+  constexpr int64_t T = 5, K = 3, H = 64;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  std::mt19937 rng(20261009);
+  std::uniform_real_distribution<float> val(-3.0f, 3.0f);
+
+  // bf16 expert outputs / shared term (the kolibri1 polarity), f32 weights.
+  std::vector<uint16_t> host_eo(T * K * H), host_sh(T * H);
+  std::vector<float> host_w(T * K), host_eo_f(T * K * H), host_sh_f(T * H);
+  auto bf16 = [](float v) {
+    uint32_t b;
+    std::memcpy(&b, &v, sizeof(b));
+    return static_cast<uint16_t>((b + 0x7fff + ((b >> 16) & 1)) >> 16);  // RNE
+  };
+  auto widen = [](uint16_t b) {
+    float v;
+    const uint32_t bits = static_cast<uint32_t>(b) << 16;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
+  };
+  for (size_t i = 0; i < host_eo.size(); ++i) {
+    host_eo_f[i] = val(rng);
+    host_eo[i] = bf16(host_eo_f[i]);
+  }
+  for (size_t i = 0; i < host_sh.size(); ++i) {
+    host_sh_f[i] = val(rng);
+    host_sh[i] = bf16(host_sh_f[i]);
+  }
+  for (size_t i = 0; i < host_w.size(); ++i) host_w[i] = val(rng);
+
+  for (int arm = 0; arm < 3; ++arm) {
+    // arm 0: shared term, routed_scale 1 (the model call); arm 1: no shared,
+    // non-unit scale (the scale/store ordering); arm 2: shared + f32 out.
+    const bool with_shared = arm != 1;
+    const float scale = arm == 1 ? 0.5f : 1.0f;
+    const vt::DType out_dt = arm == 2 ? vt::DType::kF32 : vt::DType::kBF16;
+
+    void* mem_eo = backend.Alloc(host_eo.size() * sizeof(uint16_t));
+    void* mem_w = backend.Alloc(host_w.size() * sizeof(float));
+    void* mem_sh = backend.Alloc(host_sh.size() * sizeof(uint16_t));
+    void* mem_out =
+        backend.Alloc(static_cast<size_t>(T * H) * (out_dt == vt::DType::kF32 ? 4 : 2));
+    Queue q = backend.CreateQueue();
+    backend.Copy(q, mem_eo, host_eo.data(), host_eo.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_w, host_w.data(), host_w.size() * sizeof(float));
+    if (with_shared)
+      backend.Copy(q, mem_sh, host_sh.data(), host_sh.size() * sizeof(uint16_t));
+
+    // expert_out presents as rank-3 [T,K,H] (the vt::MoeCombine wrapper's shape).
+    Tensor eo = Tensor::Contiguous(mem_eo, vt::DType::kBF16,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {T, K, H});
+    Tensor w = Tensor::Contiguous(mem_w, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {T, K});
+    Tensor sh = Tensor::Contiguous(mem_sh, vt::DType::kBF16,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {T, H});
+    Tensor out = Tensor::Contiguous(
+        mem_out, out_dt, Device{DeviceType::kTENSTORRENT, 0}, {T, H});
+    moe_combine(q, out, eo, w, with_shared ? &sh : nullptr, scale);
+    // Read back through the backend seam (the op may leave out host-current).
+    std::vector<uint8_t> raw(static_cast<size_t>(T * H) *
+                             (out_dt == vt::DType::kF32 ? 4 : 2));
+    std::memcpy(raw.data(), mem_out, raw.size());
+    backend.Free(mem_eo);
+    backend.Free(mem_w);
+    backend.Free(mem_sh);
+    backend.Free(mem_out);
+
+    for (int64_t t = 0; t < T; ++t) {
+      for (int64_t h = 0; h < H; ++h) {
+        // The CPU reference body (cpu_ops.cpp scalar loop), verbatim order:
+        // accumulate f32 over j, scale, add shared, one output store.
+        float acc = 0.0f;
+        for (int64_t j = 0; j < K; ++j)
+          acc += host_w[static_cast<size_t>(t * K + j)] *
+                 widen(host_eo[static_cast<size_t>((t * K + j) * H + h)]);
+        if (scale != 1.0f) acc *= scale;
+        if (with_shared)
+          acc += widen(host_sh[static_cast<size_t>(t * H + h)]);
+        // Widen the stored output back to f32 and measure the gap in bf16
+        // ulps of the reference.
+        double got;
+        if (out_dt == vt::DType::kF32) {
+          got = *reinterpret_cast<const float*>(raw.data() + sizeof(float) *
+                  static_cast<size_t>(t * H + h));
+        } else {
+          uint16_t bits;
+          std::memcpy(&bits,
+                      raw.data() + sizeof(uint16_t) * static_cast<size_t>(t * H + h), 2);
+          got = static_cast<double>(widen(bits));
+        }
+        double ref_b = static_cast<double>(widen(bf16(acc)));  // the one bf16 rounding
+        if (out_dt != vt::DType::kF32) {
+          // The kernel performs the identical f32 computation, so the bf16
+          // output must be EXACTLY the RNE of the f32 accumulator — not merely
+          // within an ulp (a double-round or a bf16 accumulation shows here).
+          CHECK(got == ref_b);
+        }
+        if (out_dt == vt::DType::kF32) {
+          // f32 out: the kernel must store the f32 accumulator itself.
+          CHECK(got == static_cast<double>(acc));
+        }
+      }
+    }
+  }
+}
+
 // Cast pair used by Qwen3 K/V cache dtype and logits paths.
 TEST_CASE("kTENSTORRENT kCastBf16 / kCastF32 round-trip F32 values") {
   if (!TenstorrentPresent()) {
