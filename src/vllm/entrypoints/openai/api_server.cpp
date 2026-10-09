@@ -393,6 +393,11 @@ ApiServer::DispatchResult ApiServer::handle_chat_completions(
     return MakeError(400, "BadRequestError",
                      std::string("Invalid request: ") + e.what());
   }
+  // The pinned renderer serializes tool schemas into the prompt with
+  // sort_keys=False, preserving the request document's key order; the
+  // nlohmann::json parse above sorts object keys (std::map), so re-read
+  // `tools` from an order-preserving parse (no-op without tools).
+  RestoreToolSchemaOrder(request_body, request);
   // SERVE-REQUEST-LENGTH-GUARD (#1541). The measured quantity is the SUM of the
   // message texts, because that is what the chat template concatenates into the
   // one prompt the tokenizer then sees. `content` carries the joined text spans

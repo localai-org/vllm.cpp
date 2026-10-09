@@ -104,6 +104,10 @@ BatchRequestOutput RunBatch::DispatchChat(const std::string& custom_id,
                                 std::string("Invalid request body: ") + e.what(),
                                 "BadRequestError", 400);
   }
+  // Tool schemas keep the request document's key order (the pinned renderer
+  // dumps them into the prompt with sort_keys=False); the nlohmann::json
+  // parse above sorts object keys, so re-read `tools` order-preserving.
+  RestoreToolSchemaOrder(body, request);
 
   // check_model (chat_completion/serving.py; api_server.cpp:186-190).
   if (models_ != nullptr && !models_->check_model(request.model)) {

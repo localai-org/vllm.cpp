@@ -25,20 +25,22 @@ constexpr int kDefaultTopK = 0;
 constexpr double kDefaultMinP = 0.0;
 
 // Read a JSON value that may be absent or explicit null into an optional<T>.
-template <typename T>
-void GetOpt(const nlohmann::json& j, const char* key, std::optional<T>& out) {
+// Templated on the json type so the order-preserving (ordered_json) parse
+// path can reuse the same readers.
+template <typename Json, typename T>
+void GetOpt(const Json& j, const char* key, std::optional<T>& out) {
   auto it = j.find(key);
   if (it != j.end() && !it->is_null()) {
-    out = it->get<T>();
+    out = it->template get<T>();
   }
 }
 
 // Read a scalar with a fallback when the key is absent or null.
-template <typename T>
-void GetOr(const nlohmann::json& j, const char* key, T& out) {
+template <typename Json, typename T>
+void GetOr(const Json& j, const char* key, T& out) {
   auto it = j.find(key);
   if (it != j.end() && !it->is_null()) {
-    out = it->get<T>();
+    out = it->template get<T>();
   }
 }
 
@@ -502,16 +504,39 @@ void from_json(const nlohmann::json& j, ChatMessage& m) {
 
 // Ported from: vllm/entrypoints/openai/chat_completion/protocol.py:165
 // (ChatCompletionToolsParam) + engine/protocol.py:246 (FunctionDefinition).
-void from_json(const nlohmann::json& j, ChatCompletionToolsParam& t) {
+// Templated on the json type: the ordered_json instantiation keeps
+// `parameters` in the request document's key order (see protocol.h).
+template <typename Json>
+void FromJsonToolsParam(const Json& j, ChatCompletionToolsParam& t) {
   GetOr(j, "type", t.type);  // defaults to "function".
   if (auto it = j.find("function"); it != j.end() && it->is_object()) {
-    const nlohmann::json& fn = *it;
+    const Json& fn = *it;
     GetOr(fn, "name", t.function.name);
     GetOpt(fn, "description", t.function.description);
-    // `parameters` is the JSON-Schema object (kept as raw json).
+    // `parameters` is the JSON-Schema object (kept as raw json, order
+    // preserved for the ordered_json parse path).
     if (auto p = fn.find("parameters"); p != fn.end() && !p->is_null()) {
       t.function.parameters = *p;
     }
+  }
+}
+
+void from_json(const nlohmann::json& j, ChatCompletionToolsParam& t) {
+  FromJsonToolsParam(j, t);
+}
+
+void from_json(const nlohmann::ordered_json& j, ChatCompletionToolsParam& t) {
+  FromJsonToolsParam(j, t);
+}
+
+void RestoreToolSchemaOrder(const std::string& request_body,
+                            ChatCompletionRequest& r) {
+  if (!r.tools.has_value() || r.tools->empty()) return;
+  nlohmann::ordered_json ordered_body =
+      nlohmann::ordered_json::parse(request_body);
+  if (auto it = ordered_body.find("tools");
+      it != ordered_body.end() && it->is_array()) {
+    r.tools = it->get<std::vector<ChatCompletionToolsParam>>();
   }
 }
 
