@@ -46,7 +46,14 @@ void Compare(const vt::Tensor& got, const std::vector<float>& expected) {
 }  // namespace
 
 TEST_CASE("linear RoPE matches pinned primary cache and rotation arrays") {
+  // ABSOLUTE at configure time (tests/CMakeLists.txt): __FILE__ is
+  // source-root-RELATIVE under -ffile-prefix-map, so a __FILE__-relative
+  // fixture path would resolve against the process CWD and miss under ctest.
+#ifdef LINEAR_SCALING_ROPE_FIXTURE_FILE
+  const auto path = std::filesystem::path(LINEAR_SCALING_ROPE_FIXTURE_FILE);
+#else
   const auto path = std::filesystem::path(__FILE__).parent_path() / "fixtures/linear_rope.json";
+#endif
   std::ifstream input(path);
   REQUIRE(input.good());
   nlohmann::json fixture;

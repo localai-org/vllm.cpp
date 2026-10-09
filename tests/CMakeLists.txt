@@ -2450,6 +2450,12 @@ vllm_cpp_add_test(test_rotary_embedding
   vllm/model_executor/layers/rotary_embedding/test_rotary_embedding.cpp)
 vllm_cpp_add_test(test_linear_scaling_rope
   vllm/model_executor/layers/rotary_embedding/test_linear_scaling_rope.cpp)
+# The fixture is read through an ABSOLUTE path baked at configure time (the
+# DOTS3_NOTE_CKPT_FIXTURE_DIR convention): __FILE__ is source-root-RELATIVE
+# under -ffile-prefix-map (CMakeLists.txt), so a __FILE__-relative fixture path
+# resolves against the process CWD and ctest's CWD (<build>/tests) misses it.
+target_compile_definitions(test_linear_scaling_rope PRIVATE
+  LINEAR_SCALING_ROPE_FIXTURE_FILE="${CMAKE_CURRENT_SOURCE_DIR}/vllm/model_executor/layers/rotary_embedding/fixtures/linear_rope.json")
 vllm_cpp_add_test(test_pooler
   vllm/model_executor/layers/pooler/test_pooler.cpp)
 vllm_cpp_add_test(test_pooler_heads
