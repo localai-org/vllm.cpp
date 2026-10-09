@@ -43,6 +43,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -54,7 +55,9 @@
 #include <nlohmann/json.hpp>
 
 #include "vllm/config/speculative.h"
+#include "vllm/entrypoints/chat_template.h"
 #include "vllm/entrypoints/model_loader.h"
+#include "vllm/entrypoints/openai/protocol.h"
 #include "vllm/model_executor/models/qwen3_5_weights.h"
 #include "vllm/outputs.h"
 #include "vllm/sampling_params.h"
@@ -166,6 +169,34 @@ struct BenchConfig {
   // and a benchmark client that re-listed the legal names would be a second
   // spelling of that contract, free to drift from it.
   std::string kv_cache_dtype = "auto";
+  // #2759: EOS polarity. `MakeSampling` used to hardcode `sp.ignore_eos = true`,
+  // so no request this harness ever admitted could terminate naturally, and no
+  // report said so. Spelled `--ignore-eos` exactly as vLLM's own benchmark
+  // client (`vllm/benchmarks/serve.py:1757-1762`) and negated as
+  // `--no-ignore-eos` under this tree's own convention (`server_main.cpp`'s
+  // `--no-enable-thinking`). The DEFAULT is true, which is the previous
+  // behavior byte for byte: every landed figure was measured with EOS
+  // suppressed, and flipping the default would change what those numbers mean
+  // without re-measuring one of them.
+  bool ignore_eos = true;
+  // #2759: chat-template polarity. `--skip-chat-template` from
+  // `vllm/benchmarks/datasets/datasets.py:1654-1658`, same negation, same
+  // default-preserving polarity: true sends the raw prompt string, which is
+  // what this harness has always done. The comparator for
+  // `BENCH-QWEN38-27B-SOTA` posts to `/v1/chat/completions`, so its protocol
+  // cannot be matched without the other setting.
+  bool skip_chat_template = true;
+  // #2759: the template SOURCE -- a file path, or the template itself in
+  // single-line form. `vllm/entrypoints/launchers/cli_args.py:80-82` verbatim.
+  // Empty selects the model's own template through `LoadChatTemplateForModel`,
+  // the identical selection path `server_main.cpp` uses.
+  std::string chat_template;
+  // #2759: the SERVER-level `chat_template_kwargs` default, spelled
+  // `--enable-thinking` / `--no-enable-thinking` exactly as `server_main.cpp`
+  // and resolved by the same rule (`DefaultChatTemplateKwargs`). Unset leaves
+  // `enable_thinking` Jinja-undefined, which is NOT the same as false (#1681),
+  // and the comparator sends false.
+  std::optional<bool> enable_thinking;
 };
 
 // ── Per-request timing record (client-side, exactly what serve.py records). ────
@@ -239,6 +270,15 @@ struct BenchResult {
   // fp8 measurement. Reading the spec back means this line cannot drift from
   // the allocation, because it IS the allocation.
   std::string resolved_kv_cache_dtype = "unknown";
+  // #2759: what the run actually did, beside what it was asked to do. The EOS
+  // value is read back out of the `SamplingParams` object `MakeSampling` builds
+  // for an admitted request rather than copied from the config, for the same
+  // reason `resolved_kv_cache_dtype` is read back out of the cache the loader
+  // sized: a report that echoes the request cannot detect a flag that parses
+  // and is then dropped, which is exactly the defect #2759 names.
+  bool resolved_ignore_eos = true;
+  std::string resolved_chat_template = "skipped (raw prompt)";
+  std::string resolved_chat_template_kwargs = "{}";
 };
 
 // KV-FP8 W7 (#2619): name the KV storage dtype of a RESOLVED KV cache config.
@@ -610,16 +650,66 @@ inline SamplingParams MakeSampling(const BenchConfig& cfg, int req_index) {
   SamplingParams sp;
   sp.temperature = cfg.temperature;  // <= 0 => greedy.
   sp.max_tokens = cfg.output_len;
-  // Fixed-length workload: generate EXACTLY output_len tokens (never stop early
-  // on EOS), so throughput/latency are measured on the intended token budget and
-  // match `vllm bench serve --ignore-eos` apples-to-apples. This makes the
-  // harness's documented "greedy => exactly O" contract actually hold.
-  sp.ignore_eos = true;
+  // #2759: the EOS polarity is now a SETTING, and its default is the fixed-length
+  // workload this line used to hardcode: generate EXACTLY output_len tokens
+  // (never stop early on EOS), so throughput/latency are measured on the
+  // intended token budget and match `vllm bench serve --ignore-eos`
+  // apples-to-apples, and the documented "greedy => exactly O" contract holds.
+  // `--no-ignore-eos` gives up that contract deliberately, which is what a
+  // chat-completions comparator's protocol requires
+  // (`vllm/benchmarks/serve.py:1757-1762`, default false upstream).
+  sp.ignore_eos = cfg.ignore_eos;
   sp.output_kind = RequestOutputKind::kDelta;  // observe TTFT/ITL like a client.
   if (cfg.temperature > 0.0) {
     sp.seed = static_cast<int64_t>(cfg.seed + static_cast<uint64_t>(req_index));
   }
   return sp;
+}
+
+// #2759: resolve the chat-template SOURCE the way the server does, and say
+// where it came from. `--chat-template` names a file OR carries the template
+// itself in single-line form (`vllm/entrypoints/launchers/cli_args.py:80-82`);
+// with neither, the model's own template is loaded through
+// `LoadChatTemplateForModel`, the identical selection path `server_main.cpp`
+// uses (tokenizer_config.json first, then a `.gguf`'s `tokenizer.chat_template`
+// metadata).
+//
+// Every failure here THROWS rather than falling back to the role-join prompt
+// the server falls back to. A served model must answer something. A benchmark
+// that silently measured a different prompt shape than the one requested is
+// worse than one that stops, because the number it prints is publishable and
+// wrong.
+inline std::string ResolveBenchChatTemplate(const BenchConfig& cfg,
+                                            std::string& source) {
+  if (!cfg.chat_template.empty()) {
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(cfg.chat_template, ec)) {
+      std::ifstream in(cfg.chat_template, std::ios::binary);
+      if (!in) {
+        throw std::runtime_error("cannot read the chat template file: " +
+                                 cfg.chat_template);
+      }
+      const std::string body((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+      source = "--chat-template file " + cfg.chat_template;
+      return body;
+    }
+    source = "--chat-template literal";
+    return cfg.chat_template;
+  }
+  if (cfg.model_path.empty()) {
+    throw std::runtime_error(
+        "--no-skip-chat-template needs a chat template, and the synthetic "
+        "engine (no --model) ships none: pass --chat-template <file or "
+        "single-line template>, or --model a checkpoint that carries one");
+  }
+  const std::filesystem::path dir(cfg.model_path);
+  std::string template_source;
+  std::string body = vllm::entrypoints::LoadChatTemplateForModel(
+      (dir / "tokenizer_config.json").string(), cfg.model_path,
+      template_source);
+  source = template_source;
+  return body;
 }
 
 // ─────────────────────────────── The harness ──────────────────────────────────
@@ -635,6 +725,15 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
   if (cfg.output_wait == OutputWaitMode::kBlockingC1 && cfg.concurrency != 1) {
     throw std::invalid_argument(
         "benchmark output wait 'blocking-c1' requires --concurrency 1");
+  }
+  // #2759: refuse a flag that would be silently ignored. Accepting
+  // `--chat-template` while the template is skipped would reproduce, inside the
+  // fix, the exact defect the issue names: a setting that parses, is dropped,
+  // and leaves a report that looks like it was honoured.
+  if (cfg.skip_chat_template && !cfg.chat_template.empty()) {
+    throw std::runtime_error(
+        "--chat-template was given but the chat template is skipped; pass "
+        "--no-skip-chat-template to apply it");
   }
 
   std::unique_ptr<vllm::entrypoints::LoadedEngine> loaded;
@@ -715,6 +814,40 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
             cfg.seed + static_cast<uint64_t>(i)));
       }
     }
+  }
+
+  // #2759: the chat-template render, in ONE place and BEFORE any tokenization,
+  // so both admission paths -- the pretokenized default and the
+  // `VT_BENCH_PRETOKENIZE=0` timed-string path -- carry the identical rendered
+  // prompt and the prompt-token accounting reflects it. One user message,
+  // `add_generation_prompt=true`, no tools:
+  // `vllm/benchmarks/datasets/datasets.py:2610-2615` exactly. The
+  // per-request kwargs object is empty because a benchmark has no per-request
+  // kwargs; `enable_thinking` rides the SERVER-level default, which is where
+  // `server_main.cpp` puts it too.
+  std::string resolved_chat_template = "skipped (raw prompt)";
+  const nlohmann::ordered_json chat_template_kwargs =
+      vllm::entrypoints::DefaultChatTemplateKwargs(cfg.enable_thinking);
+  if (!cfg.skip_chat_template) {
+    std::string source;
+    const std::string template_str = ResolveBenchChatTemplate(cfg, source);
+    const tok::Tokenizer& tokenizer = loaded->tokenizer();
+    const std::string bos =
+        tokenizer.BosId() >= 0 ? tokenizer.Decode({tokenizer.BosId()}) : "";
+    const std::string eos =
+        tokenizer.EosId() >= 0 ? tokenizer.Decode({tokenizer.EosId()}) : "";
+    const vllm::entrypoints::openai::ChatPromptFn prompt_fn =
+        vllm::entrypoints::MakeChatTemplatePromptFn(template_str, bos, eos,
+                                                    chat_template_kwargs);
+    for (std::string& prompt : prompts) {
+      prompt = prompt_fn(
+          {vllm::entrypoints::openai::ChatMessage{"user", prompt}},
+          /*add_generation_prompt=*/true, /*tools=*/{},
+          nlohmann::ordered_json::object());
+    }
+    resolved_chat_template = "applied (" +
+                             std::to_string(template_str.size()) +
+                             " chars) from " + source;
   }
 
   vllm::v1::AsyncLLM& engine = loaded->async_engine();
@@ -925,6 +1058,13 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
   // KV-FP8 W7 (#2619): the resolved KV dtype is read back out of the config the
   // loader sized, so the report line IS the allocation (see the field comment).
   res.resolved_kv_cache_dtype = ResolvedKvCacheDTypeName(loaded->kv_cache_config());
+  // #2759: read the EOS setting back out of `MakeSampling`, the one function
+  // both admission paths call to build a request's `SamplingParams`. Reading
+  // `cfg.ignore_eos` here instead would make the report a transcription of the
+  // request and blind to the pass-through being deleted.
+  res.resolved_ignore_eos = MakeSampling(cfg, 0).ignore_eos;
+  res.resolved_chat_template = resolved_chat_template;
+  res.resolved_chat_template_kwargs = chat_template_kwargs.dump();
   res.prompt_token_ids.resize(static_cast<size_t>(cfg.num_prompts));
   res.output_token_ids.resize(static_cast<size_t>(cfg.num_prompts));
   res.completed = done;
@@ -1046,6 +1186,16 @@ inline void PrintReport(const BenchConfig& cfg, const BenchResult& r,
   // fp8 while the first still reads "auto".
   line_s("KV cache dtype (requested):", cfg.kv_cache_dtype.c_str());
   line_s("KV cache dtype (resolved storage):", r.resolved_kv_cache_dtype.c_str());
+  // #2759: a benchmark that does not say whether it stopped on EOS is not
+  // reproducible, and every figure this harness published before now was taken
+  // with EOS suppressed without saying so. Two lines for the same reason the KV
+  // pair above has two: the first is what the operator asked for, the second is
+  // read back out of the `SamplingParams` the admission path builds, and only
+  // the second can disagree with the flag.
+  line_i("Ignore EOS (requested):", cfg.ignore_eos ? 1 : 0);
+  line_i("Ignore EOS (resolved sampling):", r.resolved_ignore_eos ? 1 : 0);
+  line_s("Chat template:", r.resolved_chat_template.c_str());
+  line_s("Chat template kwargs:", r.resolved_chat_template_kwargs.c_str());
   line_i("Maximum concurrent batches:", r.max_concurrent_batches);
   line_i("Successful requests:", r.completed);
   line_i("Maximum request concurrency:", cfg.concurrency);
