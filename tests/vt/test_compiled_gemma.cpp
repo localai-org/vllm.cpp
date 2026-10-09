@@ -21,7 +21,14 @@
 namespace {
 using Json = nlohmann::json;
 using Path = std::filesystem::path;
+// ABSOLUTE at configure time (tests/CMakeLists.txt): __FILE__ is
+// source-root-RELATIVE under -ffile-prefix-map, so a __FILE__-relative fixture
+// path would resolve against the process CWD and miss under ctest.
+#ifdef COMPILED_GEMMA_FIXTURE_DIR
+const Path fixtures = Path(COMPILED_GEMMA_FIXTURE_DIR);
+#else
 const Path fixtures = Path(__FILE__).parent_path() / "fixtures/compiled_gemma";
+#endif
 std::vector<char> Read(const Path& path) {
   std::ifstream f(path, std::ios::binary);
   REQUIRE(f.good());
