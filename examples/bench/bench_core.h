@@ -620,7 +620,14 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
     }
     const int seq_budget = max_prompt + cfg.output_len + 4;
     vllm::entrypoints::EngineParams params;
-    params.block_size = seq_budget;   // unified block (hybrid-KV constraint).
+    // Unified block (hybrid-KV constraint): one block size for the GDN and the
+    // full-attention groups, still one block per sequence. ALIGNED UP to a
+    // multiple of 16 — the kernel block size every registered attention
+    // backend declares (CPU_ATTN and FLASH_ATTN both declare {16}), so
+    // supports_block_size accepts it; the raw seq_budget is arbitrary (e.g.
+    // 36) and was refused out of engine construction ("block_size not
+    // supported") since CPU_ATTN was registered (9ecaf1bb3).
+    params.block_size = (seq_budget + 15) / 16 * 16;
     params.max_model_len = seq_budget;
     params.max_num_seqs = std::max(cfg.concurrency, 1);
     params.num_blocks = std::max(cfg.concurrency * 4, 16);
