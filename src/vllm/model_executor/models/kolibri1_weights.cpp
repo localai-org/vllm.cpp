@@ -18,6 +18,7 @@
 #include <unordered_set>
 
 #include "vllm/model_executor/models/dense_weight_loaders.h"
+#include "vllm/model_executor/models/kolibri1_numa.h"
 
 namespace vllm {
 
@@ -215,6 +216,13 @@ Kolibri1Accounting AccountKolibri1Tensors(
 
 Kolibri1Weights LoadKolibri1Weights(
     const std::vector<SafetensorsFile>& shards, const HfConfig& config) {
+  // The weight bytes are the decode's streaming working set: materialize
+  // them under the NUMA-interleave allocation policy (kolibri1_numa.h) so a
+  // multi-node decode reads them local instead of remote — the in-process
+  // equivalent of the measured `numactl --interleave=all` wrapper
+  // (ISSUE-LOCAL-01M4GQ82X99D6JNBWDPX7ATJPY). Allocation policy only; the
+  // bytes are identical. test_kolibri1_numa pins the policy engagement.
+  const kolibri1_numa::PolicyGuard numa_guard;
   const Kolibri1Params p = ParseKolibri1Params(config);
   CheckQuantConfig(config.raw);
 

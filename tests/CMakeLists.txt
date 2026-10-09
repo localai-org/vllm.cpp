@@ -176,6 +176,16 @@ target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 in-process NUMA interleave
+# (ISSUE-LOCAL-01M4GQ82X99D6JNBWDPX7ATJPY): the mempolicy guard engages
+# (MPOL_INTERLEAVE, VT_KOLIBRI1_NUMA_INTERLEAVE=0 opt-out) and a touched
+# allocation under it spans more than one NUMA node, while the same
+# allocation under default first-touch stays on one — the exact placement
+# the external `numactl --interleave=all` wrapper fixed (+47% decode) and
+# this seam must hold in-process. The file self-gates on __linux__, so a
+# non-Linux configure compiles an empty suite rather than a failing one.
+vllm_cpp_add_test(test_kolibri1_numa vllm/models/test_kolibri1_numa.cpp)
+target_include_directories(test_kolibri1_numa PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1 moe_glue lever (ISSUE-LOCAL-01M4D7FYY1WQZV9PNR6GBWS2R5):
 # the expert-output combine (vt::MoeCombine) is BIT-IDENTICAL to the in-test
 # scalar reference over the real expert geometries (2560-wide hidden,
