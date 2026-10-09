@@ -419,6 +419,39 @@ json ChatBody() {
               {"temperature", 0.0}};
 }
 
+// The ORDER-ASSERTING prompt seam (ISSUE-LOCAL-01M4FR1D7RH7CN5X2R2CAR6N61
+// F1 / ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN): the serving layer hands the
+// prompt fn the parsed `tools`, and the pinned renderer dumps their schemas
+// into the prompt with sort_keys=False — so the schema's key order AT THIS
+// SEAM is the order the prompt carries. The fn records the tools'
+// `parameters` serialized order-preserving (ordered_json::dump keeps
+// insertion order) and returns an in-vocab string for the engine, the same
+// split the api_server capturing seam uses. What it captures is readable;
+// what the engine tokenizes stays encodable.
+struct CapturingToolsPrompt {
+  std::shared_ptr<std::string> rendered = std::make_shared<std::string>();
+  vllm::entrypoints::openai::ChatPromptFn fn;
+
+  CapturingToolsPrompt()
+      : fn([out = rendered](
+               const std::vector<ChatMessage>& messages, bool,
+               const std::vector<ChatCompletionToolsParam>& tools,
+               const nlohmann::ordered_json&) {
+          std::string captured;
+          for (const ChatMessage& m : messages) {
+            if (m.content.has_value()) captured += *m.content;
+          }
+          for (const ChatCompletionToolsParam& t : tools) {
+            if (t.function.parameters.has_value()) {
+              captured += "|";
+              captured += t.function.parameters->dump();
+            }
+          }
+          *out = captured;
+          return std::string("hello");  // in-vocab for the fixture tokenizer
+        }) {}
+};
+
 // One BatchRequestInput JSONL line.
 std::string BatchLine(const std::string& custom_id, const std::string& url,
                       const json& body) {
@@ -616,4 +649,69 @@ TEST_CASE("run_batch: an unknown model yields a 404 ErrorResponse row") {
   REQUIRE(row.error.has_value());
   CHECK(row.error->is_object());  // ErrorResponse object, not a bare string
   CHECK(row.error->at("error").at("code") == 404);
+}
+
+// ─── The batch entry point keeps the request document's tool-schema key order
+// (ISSUE-LOCAL-01M4FR1D7RH7CN5X2R2CAR6N61 F1 +
+// ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN). RunLine parses the line with
+// nlohmann::json, which SORTS object keys, so DispatchChat must re-read
+// `tools` from the body's ORIGINAL text (RestoreToolSchemaOrder) for the
+// schema order to survive into the prompt — the pinned renderer dumps it
+// with sort_keys=False. This case drives RunLine with a RAW line whose nested
+// chat body is NON-alphabetical at every level (built as a raw string:
+// BatchLine() would re-serialize through nlohmann::json and sort the keys,
+// destroying the very order under test). It pins BOTH halves of the seam:
+// (a) an object body dispatches to a 200 row — the committed
+// RestoreToolSchemaOrder(body, request) call passed the json OBJECT where a
+// string is expected and threw json.exception.type_error.302 on every object
+// body; (b) the prompt seam receives the schema in the request document's
+// key order, not the key-sorted form. RED evidence: (a) fails with the
+// throwing call restored; (b) fails under a body.dump() argument — the dump is
+// already key-sorted, so the order restoration reads sorted text and the
+// seam no-ops. ──────────────────────────────────────────────────────────────
+TEST_CASE("run_batch: a tools line keeps the document's schema key order in "
+          "the prompt (ISSUE-LOCAL-01M4FR1D7RH7CN5X2R2CAR6N61,"
+          " ISSUE-LOCAL-01M4FR20MES4HQVBRWJBJ2AVCN)") {
+  const HfConfig c = MakeConfig();
+  const Qwen3_5MoeWeights w = MakeWeights(c);  // named: runner holds a reference
+  Harness h(c, w, Fixture());
+  CapturingToolsPrompt prompt;
+  OpenAIServingChat serving(h.engine, "test-model", prompt.fn);
+  RunBatch runner(&serving);
+
+  // Non-alphabetical at every level: the tool wrapper (type before
+  // function), the function (name/description/parameters), and the parameters
+  // schema (type/properties/required, zeta before alpha).
+  const std::string line =
+      R"({"custom_id":"order-1","method":"POST","url":"/v1/chat/completions",)"
+      R"("body":{"messages":[{"role":"user","content":"hi"}],)"
+      R"("max_completion_tokens":4,"temperature":0.0,)"
+      R"("tools":[{"type":"function","function":{"name":"get_weather",)"
+      R"("description":"Get the weather for a city.",)"
+      R"("parameters":{"type":"object","properties":{)"
+      R"("zeta":{"type":"string"},"alpha":{"type":"string"}},)"
+      R"("required":["zeta","alpha"]}}}]}})";
+
+  // (a) No exception; the object body dispatches to a 200 row.
+  const BatchRequestOutput row = runner.RunLine(line);
+  CHECK(row.custom_id == "order-1");
+  REQUIRE(row.response.has_value());
+  CHECK(row.response->status_code == 200);
+  CHECK_FALSE(row.error.has_value());
+  REQUIRE(row.response->body.has_value());
+  CHECK(row.response->body->contains("choices"));
+
+  // (b) The prompt seam received the schema in the request document's key
+  // order (compact ordered_json dump), not the key-sorted form the
+  // nlohmann::json parse leaves behind without the order-preserving re-read.
+  REQUIRE(prompt.rendered != nullptr);
+  CHECK(prompt.rendered->find(
+            "|{\"type\":\"object\",\"properties\":{\"zeta\":{\"type\":\"string\"},"
+            "\"alpha\":{\"type\":\"string\"}},"
+            "\"required\":[\"zeta\",\"alpha\"]}") != std::string::npos);
+  CHECK(prompt.rendered->find(
+            "|{\"properties\":{\"alpha\":{\"type\":\"string\"},"
+            "\"zeta\":{\"type\":\"string\"}},"
+            "\"required\":[\"zeta\",\"alpha\"],\"type\":\"object\"}") ==
+        std::string::npos);
 }
