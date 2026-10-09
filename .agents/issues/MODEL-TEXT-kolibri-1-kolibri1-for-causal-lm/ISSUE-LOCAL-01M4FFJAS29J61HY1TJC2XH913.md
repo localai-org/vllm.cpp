@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FFJAS29J61HY1TJC2XH913
 Title: NEON paged-attn TU breaks -Werror builds on non-aarch64 (unused Q()/Contig())
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -16,4 +16,4 @@ PR #3425's new tests/vt/test_ops_paged_attn_neon.cpp defines anonymous-namespace
 
 ## Resolution
 
--
+Fixed in d5f1a9c7f (same flow): both helpers marked [[maybe_unused]]; the TU compiles clean under -Wall -Wextra -Werror (verified locally). Non-aarch64 -Werror builds (build-test-cpu, build-newest-gcc) unblocked for PR #3425; main's build lanes recover once this lands.
