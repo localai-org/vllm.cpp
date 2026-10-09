@@ -14,6 +14,7 @@
 //              [--output-len O] [--concurrency C] [--seed S]
 //              [--temperature T] [--output-wait poll|blocking-c1]
 //              [--output-token-ids <json>] [--output-json <json>]
+//              [--kv-cache-dtype auto|bfloat16|fp8|fp8_e4m3]
 //
 // With NO --model it builds a SYNTHETIC tiny CPU engine so the harness runs on
 // the dev box (toy weights => meaningless numbers; the point is the harness).
@@ -50,12 +51,15 @@ void Usage(const char* argv0, std::FILE* out) {
       "          [--output-json <json>]\n"
       "          [--output-wait poll|blocking-c1]\n"
       "          [--speculative-config <json>]\n"
+      "          [--kv-cache-dtype auto|bfloat16|fp8|fp8_e4m3]\n"
       "\n"
       "Throughput/latency benchmark over the vllm.cpp V1 AsyncLLM, mirroring\n"
       "`vllm bench serve` metrics. With no --model, a synthetic CPU engine runs\n"
       "(numbers meaningless; smoke only). Defaults: --num-prompts 8 "
       "--input-len 16\n"
-      "--output-len 16 --concurrency 4 --seed 0 --temperature 0 (greedy).\n",
+      "--output-len 16 --concurrency 4 --seed 0 --temperature 0 (greedy)\n"
+      "--kv-cache-dtype auto. The KV dtype is printed in the report header, so a\n"
+      "published number states the cache it was measured on.\n",
       argv0);
 }
 
@@ -106,6 +110,12 @@ bool ParseArgs(int argc, char** argv, BenchConfig& cfg, int& exit_code) {
       cfg.num_blocks = std::atoi(NextArg(argc, argv, i));
     } else if (flag == "--speculative-config") {
       cfg.speculative_config = NextArg(argc, argv, i);
+    } else if (flag == "--kv-cache-dtype") {
+      // KV-FP8 W7 (#2619). Mirrors server_main.cpp and examples/cli/main.cpp:
+      // take the raw string, validate NOTHING here. `vllm::v1::ParseCacheDType`
+      // owns the accepted set and refuses an unknown name BY NAME; a second
+      // copy of that list in a benchmark client could only ever drift from it.
+      cfg.kv_cache_dtype = NextArg(argc, argv, i);
     } else if (flag == "-h" || flag == "--help") {
       Usage(argv[0], stdout);
       exit_code = 0;
@@ -148,13 +158,14 @@ int main(int argc, char** argv) {
   std::fprintf(stderr,
                "vllm-bench: %s engine | num_prompts=%d input_len=%d "
                "output_len=%d concurrency=%d seed=%llu temp=%.2f dataset=%s "
-               "output_wait=%s\n",
+               "output_wait=%s kv_cache_dtype=%s\n",
                cfg.model_path.empty() ? "SYNTHETIC (no --model)"
                                        : cfg.model_path.c_str(),
                cfg.num_prompts, cfg.input_len, cfg.output_len, cfg.concurrency,
                static_cast<unsigned long long>(cfg.seed), cfg.temperature,
                cfg.dataset_path.empty() ? "generated" : cfg.dataset_path.c_str(),
-               vllm::bench::OutputWaitModeName(cfg.output_wait));
+               vllm::bench::OutputWaitModeName(cfg.output_wait),
+               cfg.kv_cache_dtype.c_str());
 
   try {
     const vllm::bench::BenchResult res = vllm::bench::RunBench(cfg);

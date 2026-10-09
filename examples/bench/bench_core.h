@@ -63,7 +63,9 @@
 #include "vllm/transformers_utils/hf_config.h"
 #include "vllm/v1/engine/async_llm.h"
 #include "vllm/v1/engine/llm_engine.h"
+#include "vllm/v1/kv_cache_interface.h"
 #include "vt/dtype.h"
+#include "vt/fp8_kv.h"
 #include "vt/tensor.h"
 
 namespace vllm::bench {
@@ -156,6 +158,14 @@ struct BenchConfig {
   // (chunked-prefill-bounded) per-step activation. Setting it to just enough for
   // C concurrent (input+output)-long sequences keeps peak RAM bounded.
   int num_blocks = 0;
+  // KV-FP8 W7 (#2619): vLLM's `CacheConfig.cache_dtype` (config/cache.py:19-36,76),
+  // spelled `--kv-cache-dtype` on this harness exactly as on `vllm-server` and
+  // `vllm-cli`. "auto" is the default and is byte-identical to before the flag
+  // existed. The string is passed to the engine VERBATIM: `vllm::v1::
+  // ParseCacheDType` is the one place a CacheDType name is accepted or refused,
+  // and a benchmark client that re-listed the legal names would be a second
+  // spelling of that contract, free to drift from it.
+  std::string kv_cache_dtype = "auto";
 };
 
 // ── Per-request timing record (client-side, exactly what serve.py records). ────
@@ -221,7 +231,38 @@ struct BenchResult {
   bool spec_on = false;
   int64_t spec_proposed = 0;
   int64_t spec_accepted = 0;
+  // KV-FP8 W7 (#2619): the KV storage dtype the loader ACTUALLY sized blocks
+  // from, read back out of `LoadedEngine::kv_cache_config()` rather than echoed
+  // from the flag. The two differ whenever the checkpoint declares
+  // `kv_cache_quant_algo` and no flag was typed -- `FromModelDir` honours the
+  // declaration, so a report that echoed the flag would print "auto" over an
+  // fp8 measurement. Reading the spec back means this line cannot drift from
+  // the allocation, because it IS the allocation.
+  std::string resolved_kv_cache_dtype = "unknown";
 };
+
+// KV-FP8 W7 (#2619): name the KV storage dtype of a RESOLVED KV cache config.
+// `vt::Name` alone would print "i8" for an fp8 page, which is the storage width
+// and not the thing a published number has to state; the fp8 interpretation on
+// the same spec is what says which fp8. Returns "unknown" for a config with no
+// attention group (a pure recurrent model allocates no paged KV).
+inline std::string ResolvedKvCacheDTypeName(const vllm::v1::KVCacheConfig& cfg) {
+  for (const auto& group : cfg.kv_cache_groups) {
+    const auto* attn =
+        dynamic_cast<const vllm::v1::AttentionSpec*>(group.kv_cache_spec.get());
+    if (attn == nullptr) continue;
+    switch (attn->fp8_kind) {
+      case vt::Fp8KVCacheDataType::kFp8E4M3:
+        return "fp8_e4m3 (1-byte pages)";
+      case vt::Fp8KVCacheDataType::kFp8E5M2:
+        return "fp8_e5m2 (1-byte pages)";
+      case vt::Fp8KVCacheDataType::kAuto:
+        break;
+    }
+    return vt::Name(attn->dtype);
+  }
+  return "unknown (no attention KV group)";
+}
 
 // ── numpy-style linear-interpolation percentile (matches np.percentile). ───────
 inline double Percentile(std::vector<double> v, double p) {
@@ -631,6 +672,12 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
     params.max_model_len = seq_budget;
     params.max_num_seqs = std::max(cfg.concurrency, 1);
     params.num_blocks = std::max(cfg.concurrency * 4, 16);
+    // KV-FP8 W7 (#2619): the synthetic arm takes the flag too. Not symmetry --
+    // the synthetic model is a Qwen3.5-MoE, whose attention block W3 routed, so
+    // this is what lets `--kv-cache-dtype fp8` allocate 1-byte pages and decode
+    // through them with no checkpoint and no device. The direct constructor
+    // takes the value verbatim: there is no model directory to resolve against.
+    params.kv_cache_dtype = cfg.kv_cache_dtype;
     HfConfig c = detail::MakeSyntheticConfig(seq_budget);
     vllm::Qwen3_5MoeWeights w = detail::MakeSyntheticWeights(c);
     loaded = std::make_unique<vllm::entrypoints::LoadedEngine>(
@@ -645,6 +692,12 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
     params.num_blocks = cfg.num_blocks > 0
                             ? cfg.num_blocks
                             : std::max(cfg.concurrency * seq_blocks * 2, 256);
+    // KV-FP8 W7 (#2619): `--kv-cache-dtype` reaches the engine. FromModelDir
+    // resolves it against the checkpoint's own `kv_cache_quant_algo` before any
+    // consumer reads it, and an explicit value always wins (torch_utils.py:
+    // 380-381), so the harness hands over the raw string and reads the OUTCOME
+    // back out of kv_cache_config() below.
+    params.kv_cache_dtype = cfg.kv_cache_dtype;
     // Chunked-prefill per-step budget (0 => engine bounded default).
     params.max_num_batched_tokens = cfg.max_num_batched_tokens;
     // Speculative decoding (MTP): OFF unless a config JSON is supplied. When
@@ -869,6 +922,9 @@ inline BenchResult RunBench(const BenchConfig& cfg) {
   res.max_concurrent_batches = loaded->max_concurrent_batches();
   res.output_wait = cfg.output_wait;
   res.blocking_wait_calls = blocking_wait_calls;
+  // KV-FP8 W7 (#2619): the resolved KV dtype is read back out of the config the
+  // loader sized, so the report line IS the allocation (see the field comment).
+  res.resolved_kv_cache_dtype = ResolvedKvCacheDTypeName(loaded->kv_cache_config());
   res.prompt_token_ids.resize(static_cast<size_t>(cfg.num_prompts));
   res.output_token_ids.resize(static_cast<size_t>(cfg.num_prompts));
   res.completed = done;
@@ -965,6 +1021,9 @@ inline void PrintReport(const BenchConfig& cfg, const BenchResult& r,
   auto line_f = [&](const char* label, double v) {
     std::fprintf(out, "%-42s %-12.2f\n", label, v);
   };
+  auto line_s = [&](const char* label, const char* v) {
+    std::fprintf(out, "%-42s %s\n", label, v);
+  };
   auto sep = [&](const char* title) {
     std::fprintf(out, "%.*s %s %.*s\n", 8,
                  "----------------------------------------", title, 8,
@@ -980,6 +1039,13 @@ inline void PrintReport(const BenchConfig& cfg, const BenchResult& r,
          static_cast<long long>(r.blocking_wait_calls));
   line_i("Async scheduling enabled:", r.async_scheduling_enabled ? 1 : 0);
   line_i("Pretokenized prompt admission:", r.pretokenized_admission ? 1 : 0);
+  // KV-FP8 W7 (#2619): a published number states the KV dtype it was measured
+  // on. Two lines, because they answer different questions and can disagree:
+  // the first is what the operator asked for, the second is what the loader
+  // sized -- and a checkpoint declaring kv_cache_quant_algo makes the second
+  // fp8 while the first still reads "auto".
+  line_s("KV cache dtype (requested):", cfg.kv_cache_dtype.c_str());
+  line_s("KV cache dtype (resolved storage):", r.resolved_kv_cache_dtype.c_str());
   line_i("Maximum concurrent batches:", r.max_concurrent_batches);
   line_i("Successful requests:", r.completed);
   line_i("Maximum request concurrency:", cfg.concurrency);
