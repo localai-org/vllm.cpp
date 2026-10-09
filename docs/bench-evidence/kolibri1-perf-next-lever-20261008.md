@@ -10,6 +10,12 @@ No source change was needed for the attribution; the falsification experiment
 lives outside the tree (scratch micro-benchmark, `/tmp/kolibri-micro/`).
 Checkpoint `/mnt/models/Aleph-Alpha/Kolibri-1` (74 GB fp8, 32 shards).
 Issue: ISSUE-LOCAL-01M4EEX40G7NH571CR5GQY4CA1.
+Review repair 2026-10-09 (PR #3423 blocking review, records only, no product
+code, no new performance claim): the whole-run table in §2 is labeled
+WHOLE-RUN and is no longer applied to a decode step; §2b adds the measured
+prefill/decode phase split with separate per-phase counters; the ceiling
+wording is narrowed to the tested candidates everywhere (this file, the spec's
+NEXT-LEVER UNIT paragraph, the issue Resolution, and the PR body).
 
 ## Contention note (recorded honestly)
 
@@ -39,20 +45,29 @@ chains and counters verified per leg).
 | cache OFF #1 | quiet | 69.60 | 18.37 | 51.23 | 1.230 | PASS, chain exact |
 | cache OFF #2 | quiet | 63.79 | 13.72 | 50.07 | 1.258 | PASS, chain exact |
 | 16 GiB (contended, load >100) | — | 48.86 | 15.08 | 33.77 | 1.865 | PASS, chain exact |
+| 16 GiB, profile ON #1 | quiet (load < 1) | 35.79 | 15.93 | 19.87 | **3.171** | PASS, chain exact, counters byte-identical (§2b) |
+| 16 GiB, profile ON #2 | quiet (load < 1) | 35.56 | 15.68 | 19.89 | **3.168** | PASS, chain exact, counters byte-identical (§2b) |
 
 The recorded production figure reproduces: **3.17-3.21 decode tok/s at a
 16 GiB budget**, 2.52× the cache-off baseline (1.24-1.26), matching
-kolibri1-combined-neon-cache-20261008.md (3.06-3.17). Cache counters on both
-16 GiB legs are byte-identical to the record:
+kolibri1-combined-neon-cache-20261008.md (3.06-3.17). Two further legs with
+`VT_KOLIBRI1_PROFILE=1` (the phase-split legs of §2b, 2026-10-09) reproduce
+it at 3.168-3.171. Cache counters on the 16 GiB legs are byte-identical to
+the record:
 `hits=71157 misses=18717 evictions=13264 decode_calls=89874`. The CHAIN is
 byte-identical across the OFF and 16 GiB legs (budget invariance), last token
 109726, alternating 101807/109726.
 
-## 2. The remaining wall, attributed (VT_KOLIBRI1_PROFILE, 8 threads, 16 GiB)
+## 2. The remaining wall, attributed WHOLE-RUN (VT_KOLIBRI1_PROFILE, 8 threads, 16 GiB)
 
-Final report after 60 forwards (includes prefill):
+WHOLE-RUN table — final report after 60 forwards (1 prefill forward + 59
+decode forwards; the prefill is included in every number below). These are
+WHOLE-RUN shares of a 35.24 s denominator and MUST NOT be applied to a single
+decode step: the bench's own timing splits the run into 16.84 s prefill and
+19.65 s decode (§1), and the phase split in §2b shows the two phases have
+different stage mixes. Use §2b for decode-lever decisions.
 
-| stage | s | share of total_forward (35.24 s) |
+| stage | s | share of the WHOLE-RUN total_forward (60 forwards, 35.24 s, prefill included) |
 |---|---|---|
 | linear_gemm | 17.54 | 50% |
 | moe_glue | 15.63 | 44% (NESTED: the routed-expert loop wraps ExpertMlp, so ~6/7 of the expert linear_gemm+dequant time accrues here too — kolibri1_forward.cpp:369-408) |
@@ -69,13 +84,110 @@ dequant_fp8_block work. The separable glue residual (the bf16 gather/scatter
 copies and the per-expert scan, :372-407) is the small remainder. There is no
 unattributed 0.25 s block.
 
-Per decode step at 16 GiB the wall is ~315 ms: ~50% expert/projection GEMV at
-the NEON tier, ~25% cold-miss whole-matrix decodes, ~17% attention, ~4%
-lm_head.
+CORRECTION (2026-10-09 review): an earlier reading of this table applied its
+whole-run shares to a single decode step ("per decode step the wall is ~315
+ms: ~50% GEMV, ~25% cold-miss decodes, ~17% attention"). That attribution
+was wrong: the shares above are whole-run shares over a denominator that is
+~46% prefill (16.84 s of 36.49 s wall, §1). The measured decode-phase shares
+are in §2b and differ materially — cold-miss decodes are ~3% of the decode
+step, not ~26%, and attention is ~30%, not ~17%.
+
+### 2b. Phase split: prefill vs decode (review repair, 2026-10-09)
+
+The profiler accumulates globally and reports every 10 forwards; it cannot
+split by phase by itself. The bench's forward structure is deterministic,
+though: forward #1 is the prefill (t=128), forwards #2..#64 are t=1 decode
+steps, and the reports print at forwards 10/20/30/40/50/60. Therefore
+R60 − R10 is EXACTLY the 50 pure decode forwards #11..#60, and R10 is the
+prefill plus the nine warming decode forwards #2..#10. The decode-phase table
+below is exact; the prefill-phase numbers are DERIVED (R10 minus the nine
+decode forwards costed at the steady-state per-step rate) and carry the bias
+stated with them.
+
+Legs (production config `VLLM_CPP_CPU_THREADS=8
+VT_KOLIBRI1_DEQUANT_CACHE_MB=16384`, profiling ON, 2026-10-09; verified quiet
+before each leg: load < 1, no test/bench/qwen process by exact `comm` name,
+> 200 GB available; both PASS, chain exact — anchor 109726, alternating
+101807/109726; the 60-forward counters are byte-identical to this doc and to
+the historical records: hits=71157 misses=18717 evictions=13264
+decode_calls=89874; the 10-forward counters are identical across both legs;
+max RSS 92.3 GiB both legs):
+
+| leg | wall s | prefill s | decode s | decode tok/s |
+|---|---|---|---|---|
+| profile ON #1 | 35.79 | 15.93 | 19.87 | 3.171 |
+| profile ON #2 | 35.56 | 15.68 | 19.89 | 3.168 |
+
+DECODE-PHASE attribution (EXACT: forwards #11..#60, 50 pure t=1 decode
+forwards = R60 − R10; the legs agree within 0.2 s per stage):
+
+| stage | s (leg #1 / #2) | ms per decode step | share of the decode-phase forward time |
+|---|---|---|---|
+| linear_gemm | 8.92 / 9.08 | 178 / 182 | 59% (the ALU-bound GEMV tier, §3b) |
+| moe_glue | 3.97 / 3.98 | 79 / 80 | 26% (NESTED, same caveat as the whole-run table: the routed-expert loop wraps ExpertMlp, so most of the expert linear_gemm+dequant above accrues here too) |
+| attn_core | 4.09 / 4.08 | 82 / 82 | 27% |
+| attn_rope | 0.50 / 0.50 | 10 / 10 | 3% |
+| lm_head | 0.70 / 0.70 | 14 / 14 | 5% |
+| dequant_fp8_block | 0.49 / 0.41 | 10 / 8 | 3% (steady-state cold misses) |
+| norms | 0.17 / 0.17 | 3 / 3 | 1% |
+| total_forward | 15.12 / 15.18 | 302 / 304 | 100% |
+
+The bench's own decode window is 315.3/315.7 ms per step (19.87/19.89 s over
+63 steps); the ~13 ms difference is the per-step host work outside the
+forward (the logits-row copy and argmax), not a stage.
+
+Decode-phase cache counters (EXACT, same 50 forwards, identical in both
+legs): hits=61717 misses=783 evictions=783 decode_calls=62500 — 15.7 misses
+per decode step at steady state (7.8/step in the last block #51..#60;
+37.2/step in the warmest pure-decode block #11..#20).
+
+PREFILL-PHASE attribution (DERIVED: R10 minus the nine warming decode
+forwards #2..#10 costed at the steady-state per-step rate above; the nine
+warming forwards run ABOVE steady state — the cache is still filling — so
+these prefill numbers are upper bounds, most biased for dequant_fp8_block;
+the bench's own prefill window, 15.93/15.68 s including the one logits-row
+copy, anchors the prefill total):
+
+| stage | s (leg #1 / #2, derived) | reading |
+|---|---|---|
+| linear_gemm | 7.02 / 6.97 | ~44% of the prefill forward |
+| moe_glue | 10.35 / 10.07 | ~62% (NESTED, same caveat) |
+| dequant_fp8_block | 8.11 / 7.84 | ~51% (cold misses: the prefill touches the expert working set first) |
+| attn_core | 0.48 / 0.49 | ~3% |
+| attn_rope | 0.16 / 0.16 | ~1% |
+| lm_head | 0.66 / 0.67 | ~4% |
+| norms | 0.05 / 0.05 | <1% |
+| total_forward | 16.70 / 16.40 (upper bound) | the bench prefill window (15.93 / 15.68 s) is the lower anchor; the gap is the nine warming decode forwards running ~85 ms/step above steady state |
+
+Prefill-phase cache counters, honestly: the cumulative counters cannot be
+split exactly at the prefill boundary (the nine warming decode forwards are
+not steady-state — their hit rate is below steady state, so a linear
+subtraction goes negative). What IS measured: 95.8% of the run's misses
+(17934 of 18717) occur within the first 10 forwards (the prefill plus the
+nine warming decode steps); the pure-decode window #11..#60 accrues only 783.
+The prefill forward accounts for the large majority of the first-10-forward
+misses (its ~16k cache lookups vs ~1250 per decode step — the prefill batches
+128 tokens per expert GEMM, so it looks each expert weight up once, while a
+decode step looks up ~1250), but the exact prefill/decode counter split is
+NOT measurable with this profiler and is not claimed.
+
+What the phase split implies for decode levers: (i) the GEMM family is ~59%
+of the decode step — the TESTED candidates are falsified (§3a, §3b), but
+GEMM scheduling/layout/threading variants are unmeasured and remain open;
+(ii) attention is ~30% of the decode step and NO experiment in this unit
+adjudicated it — the whole-run reading hid this, and it is a named open
+decode lever; (iii) the cache budget's decode benefit is the HIT path (with
+the cache OFF the decode step pays the full per-call re-dequant — measured
+813 ms/step vs 315 with the cache on, §1/§4 — while the steady-state miss
+cost with the cache ON is only ~8-10 ms/step), consistent with the measured
+budget saturation (8→16 GiB only +2-7%); (iv) prefill-path levers are
+unmeasured — the prefill forward is ~44% of the whole-run wall and about
+half of it is cold-miss dequant, so the whole-run table was never decode
+evidence.
 
 ## 3. Lever candidates, adjudicated by measurement
 
-### 3a. FALSIFIED: fp8-direct GEMV (dequantize fp8 weights in-register)
+### 3a. FALSIFIED (tested candidate): fp8-direct GEMV (dequantize fp8 weights in-register)
 
 The idea: at t=1 the GEMV reads the cached bf16 weights (2 B/element); reading
 the resident packed fp8 bytes (1 B/element) and dequantizing in-register
@@ -102,27 +214,51 @@ pipe roof. The fp8 path adds ~6× the arithmetic per element
 it was trying to slip under. Falsified: halving bytes buys nothing on an
 ALU-bound kernel.
 
-### 3b. FALSIFIED: the GEMM inner loop has no bit-exact headroom
+Scope of this falsification: ONE implementation (in-register dequant inside
+`Bt16Neon`'s exact loop shape), TWO real shapes, SINGLE thread. It falsifies
+that implementation in that regime. It does not measure — and does not bound
+— other GEMM scheduling, layout, or threading variants, which remain open
+(AGENTS.md's no-ceiling rule: an apparent limit is an unresolved
+implementation difference until traced).
 
-The same ALU-roof measurement answers the "make linear_gemm faster" family:
-the landed tier already spends the minimum the contract allows (one mul + one
-add per element per lane, `vmulq`+`vaddq`, never `vfmaq`), sits within ~25% of
-the resulting roof, and every faster instruction (fused multiply-add, bf16
-dot) breaks the row's bit-exactness contract. No bit-exact GEMM lever exists.
+### 3b. FALSIFIED (tested candidates): the landed GEMM inner loop has no bit-exact headroom
 
-### 3c. Already optimal: the cold-miss decode path
+The same ALU-roof measurement answers the "make linear_gemm faster" family AS
+TESTED: the landed tier already spends the minimum the contract allows (one
+mul + one add per element per lane, `vmulq`+`vaddq`, never `vfmaq`), sits
+within ~25% of the resulting roof, and every faster instruction (fused
+multiply-add, bf16 dot) breaks the row's bit-exactness contract. No bit-exact
+change to the LANDED inner loop exists. This does not measure GEMM
+scheduling, layout, or threading variants, nor any other kernel — those are
+unmeasured and remain open (AGENTS.md's no-ceiling rule). The decode-phase
+table (§2b) puts linear_gemm at ~59% of the decode step, so those open
+variants are the largest unmeasured decode lever family.
+
+### 3c. MEASURED-AS-IS (tested path): the cold-miss decode path
 
 `DecodeInto` (kolibri1_dequant_cache.h:292-301) already decodes through the
 ONE pool over output rows — the exact uncached kernel, partitioned; a miss
 cannot cost less than the uncached decode it replaces. The eviction policy is
-already LRU with stable-identity keys. The remaining miss cost is the
-working-set physics of the expert distribution, addressable only through the
-budget.
+already LRU with stable-identity keys. This measures the LANDED path against
+the EXISTING uncached decoder; equality with the existing decoder does not
+prove that no decoder improvement exists — decoder variants (pool
+partitioning, decode kernels, prefetch) are unmeasured and remain open. What
+the measurement does establish: on the landed path, the remaining miss cost
+is the working-set physics of the expert distribution, addressable through
+the budget — and, per §2b, it is mostly a prefill/warmup cost (95.8% of
+misses in the first 10 forwards; the steady-state decode miss rate is
+15.7/step).
 
-### 3d. The lever that remains IS the budget policy — a developer decision
+### 3d. The next DECISION is the budget policy — a developer decision (not the only remaining lever)
 
 Per the task brief this is where the unit stops and delivers numbers (§4).
-The cache stays opt-in (default 0) pending the policy choice.
+The cache stays opt-in (default 0) pending the policy choice. The budget is
+the next DECISION because it is a measured policy knob with a delivered
+sensitivity table — not because the lever space is closed. Open and
+unmeasured (§2b, §3a-3c): attention (~30% of the measured decode step, never
+adjudicated), GEMM scheduling/layout/threading variants (~59% of the decode
+step), decoder improvements, and prefill-path levers (the prefill forward is
+~44% of the whole-run wall, about half of it cold-miss dequant).
 
 ## 4. Budget sensitivity (the measured proposal)
 
@@ -176,7 +312,8 @@ Clean-quiet legs (16 GiB budget): T=4 → 29.89 s decode, **2.108 tok/s**
 test (load 134: T=4 1.372, T=8 2.620, T=16 2.195) are DISCARDED as
 contaminated. Conclusion: 8 threads is the current production operating
 point; 4 threads costs ~1.5×; 16 threads gains ~1.2× (3.2 → 3.9 tok/s) —
-the near-linear 8-vs-4 scaling confirms the ALU-bound model (§3b): the GEMV
+the near-linear 8-vs-4 scaling is consistent with the ALU-bound reading of
+the tested GEMM tier (§3b): the GEMV
 scales with SIMD pipes until the cold-miss DRAM decode and the eviction path
 take over. 16 threads is a measured option for latency-sensitive serving at
 +60% RSS-parallel pressure, not a default change; recorded, not chosen.
@@ -204,10 +341,22 @@ that row's obligation.
 
 ## Outcome
 
-The next CPU decode lever does not exist as a bit-exact code change: the GEMM
-tier is at its contract roof (falsified by an 8×-slower bit-exact fp8-direct
-prototype), the miss path is already at the uncached decode's cost, and the
-one open lever is the dequant-cache production budget — a product/policy
-decision that belongs to the developer. This unit delivers the corrected
-attribution, the falsifications with their measurements, and the
-budget-sensitivity table backing a default recommendation.
+What was TESTED is closed: the fp8-direct GEMV candidate (one implementation,
+two shapes, single thread) is bit-exact and 8× slower — the order-preserving
+kernel is ALU-bound, not bandwidth-bound; no bit-exact change to the landed
+GEMM inner loop exists under the row's contract; the landed cold-miss decode
+path already costs the uncached decode it replaces. What remains OPEN and
+unmeasured, per AGENTS.md's no-ceiling rule (an apparent limit is an unresolved
+implementation difference until traced): attention (~30% of the measured
+decode step — the second-largest decode stage, never adjudicated in this
+unit), GEMM scheduling/layout/threading variants (~59% of the decode step),
+decoder improvements, and prefill-path levers (~44% of the whole-run wall).
+The 2026-10-09 review repair adds the measured phase split (§2b): the
+whole-run table is whole-run evidence only; the decode step is ~59%
+linear_gemm / ~30% attention / ~5% lm_head / ~3% steady-state cold misses,
+and the ~26% whole-run cold-miss share is prefill/warmup-concentrated. The
+next DECISION is the dequant-cache production budget — a measured policy knob
+with a delivered sensitivity table, not the only remaining lever — and that
+decision belongs to the developer. This unit delivers the corrected
+attribution, the phase split, the falsifications with their measurements, and
+the budget-sensitivity table backing a default recommendation.
