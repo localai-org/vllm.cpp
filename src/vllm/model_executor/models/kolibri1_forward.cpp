@@ -235,13 +235,21 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   Tensor q3 = Reshape(q.t(), {t, hq, dh});
   Tensor k3 = Reshape(k.t(), {t, hkv, dh});
   Tensor v3 = Reshape(v.t(), {t, hkv, dh});
+  // qn/kn OWN the storage q3/k3 are re-pointed at below: RoPE (:260) and the
+  // KV-cache write both read it, so the DBufs must live in THIS scope, not
+  // the inner one. A DBuf destroyed at a closing brace returns its block to
+  // the DevicePool — freed outright under VT_POOL_BYPASS=1 — while later ops
+  // still read it (ASan/TSan heap-use-after-free,
+  // ISSUE-LOCAL-01M4FK2A9T7BPB0KHPAA8TN1VA). The house pattern for exactly
+  // this norm-then-use structure is kimi_linear_device.cpp:708-717, which
+  // declares its qn/kn in the enclosing scope.
+  DBuf qn(d, DType::kBF16, {t * hq, dh});
+  DBuf kn(d, DType::kBF16, {t * hkv, dh});
   {
     Tensor qh = Reshape(q.t(), {t * hq, dh});
     Tensor kh = Reshape(k.t(), {t * hkv, dh});
     Tensor qw = ResidentWeight(d, w.q_norm);
     Tensor kw = ResidentWeight(d, w.k_norm);
-    DBuf qn(d, DType::kBF16, {t * hq, dh});
-    DBuf kn(d, DType::kBF16, {t * hkv, dh});
     prof::Scope prof("norms");
     vt::RmsNorm(d.q, qn.t(), qh, qw, vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
     vt::RmsNorm(d.q, kn.t(), kh, kw, vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
