@@ -35,6 +35,38 @@ fast-fail (`0xC0000409`), unchanged and already tracked.
 `build-test-vulkan` is green on this head — the earlier grep/log-surface fixes
 hold.
 
+## Resolution status (2026-10-09, branch `row/ci-sanitize-residue-b`)
+
+Four of the tests above were swept as group B of this campaign. Each has a
+canonical local issue and a measured disposition on a clean rebuild in four
+trees (Release, -O0, the address,undefined lane and the thread lane, the two
+sanitizer trees with the exact CI env):
+
+- `test_gdn_v_head_permute` — CLEARED.
+  `ISSUE-LOCAL-01M4FM6MRHMQ68EXKHKYFPX1B4`, fixed in `7aa7ce0f8` (the
+  66f2f8c22 regression fed the GDN bf16 out_proj the unpermuted activation):
+  3/3 cases, 234/234 assertions, rc=0 in all four trees.
+- `test_qwen4_exp_layer_loop` — CLEARED.
+  `ISSUE-LOCAL-01M4FM6YBWTBKRRXWD1A2VXAC4`, the same fix: 14/14 cases,
+  598/598 assertions, rc=0 in all four trees, both arms reading
+  max|diff| = 0.0118021 against the 0.03 bound.
+- `test_deepseek_v4_vision` — CLEARED for the sanitizer lanes.
+  `ISSUE-LOCAL-01M4FM7P1PB3V7A5CDYE7DHX0T`, fixed in `9e5f95b0e` (loud
+  `doctest::skip` under `VT_POOL_BYPASS=1`): 14 passed | 2 skipped,
+  7410/7410 assertions, rc=0 in both sanitizer legs; 16/16, 7420/7420 in the
+  normal lanes.
+- `test_glm4_moe_lite_paged_engine` — CLASSIFIED, stays red by design.
+  `ISSUE-LOCAL-01M4FM7A892A684XF9YKPCMEVE`: the STRICT case compares committed
+  artifacts only and is the deliberately-red gate of
+  `glm4-moe-lite-gate-2839.md` (T2 'Expected RED at 69/128'); it reads 69/128
+  positions and 1/8 prompts in every lane. Not a sanitizer-lane residue and
+  not an over-tight tolerance; the exit remains owned by
+  [#2839](https://github.com/mudler/vllm.cpp/issues/2839) / row
+  `MODEL-TEXT-GLM4-MOE-LITE-GATE-2839`.
+
+The remaining tests in the inventory above belong to other rows and are
+unchanged by this branch.
+
 ## Owed
 
 - [ISSUE-LOCAL-01M448VR4KR8J7N3DA994XZ6PZ](../issues/_owed/ISSUE-LOCAL-01M448VR4KR8J7N3DA994XZ6PZ.md): the residue inventory itself.

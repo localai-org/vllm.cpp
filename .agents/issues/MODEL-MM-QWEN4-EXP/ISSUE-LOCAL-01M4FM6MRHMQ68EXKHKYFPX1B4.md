@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FM6MRHMQ68EXKHKYFPX1B4
 Title: test_gdn_v_head_permute red in EVERY lane: 66f2f8c22 fed the GDN bf16 out_proj the unpermuted activation
 Row: MODEL-MM-QWEN4-EXP
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -52,4 +52,4 @@ B): this test is on the residue list of
 
 ## Resolution
 
--
+Fixed in 7aa7ce0f8 on row/ci-sanitize-residue-b: GdnOutProjMatmul takes gated_in again and the default bf16 arm consumes it; the fp4 arm is restored to gated_in; the T25 out_proj_tiled branch is unchanged and VT_CHECK-guarded against the impossible out_proj_tiled + deferred combination. No assertion weakened or deleted. Verified 2026-10-09 on a clean rebuild (cmake --build) of the changed translation units in four trees: Release /tmp/build-b, -O0 /tmp/build-b-o0, address,undefined /tmp/build-san and thread /tmp/build-tsan (the sanitizer trees with the exact CI env ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 UBSAN_OPTIONS=print_stacktrace=1 VT_POOL_BYPASS=1): test_gdn_v_head_permute 3/3 cases, 234/234 assertions, rc=0 in all four (was rc=1, bad=94/96, worst=0.115234). Family battery green in all four trees: test_qwen4_exp_layer_loop 598/598, test_qwen4_exp_gguf_weights 3098/3098, test_qwen4_exp_forward 429/429, test_qwen4_exp_qsa 7263/7263, test_qwen4_exp_gguf_load_plan 7462/7462, test_qwen3_5_gdn_spec_routing 82/82, test_qwen35_moe_gdn_ba_owner 23/23, test_qwen3_5_gguf_mtp 20/20, test_device_pool 103/103 (54/54 under the bypass). Logs /tmp/rb-test_gdn_v_head_permute.log, /tmp/ro0-test_gdn_v_head_permute.log, /tmp/rsan-test_gdn_v_head_permute.log, /tmp/rtsan-test_gdn_v_head_permute.log.

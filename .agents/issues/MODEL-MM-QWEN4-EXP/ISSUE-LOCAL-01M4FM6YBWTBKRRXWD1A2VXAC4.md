@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FM6YBWTBKRRXWD1A2VXAC4
 Title: test_qwen4_exp_layer_loop tiled arm 2.09756 against a 0.03 bound: the same 66f2f8c22 regression dropped the deferred V-head permutation on the out_proj input
 Row: MODEL-MM-QWEN4-EXP
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -44,4 +44,4 @@ list of `.agents/specs/ci-main-ctest-residue.md`.
 
 ## Resolution
 
--
+Fixed in 7aa7ce0f8 on row/ci-sanitize-residue-b (the shared GDN out-projection repair; this issue is filed in 05c4d27d9): the default bf16 arm consumes gated_in again, restoring the deferred V-head permutation on the out-projection input. Verified 2026-10-09 on a clean rebuild in four trees (Release /tmp/build-b, -O0 /tmp/build-b-o0, address,undefined /tmp/build-san and thread /tmp/build-tsan, the sanitizer trees with the exact CI env ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 UBSAN_OPTIONS=print_stacktrace=1 VT_POOL_BYPASS=1): test_qwen4_exp_layer_loop 14/14 cases, 598/598 assertions, rc=0 in all four, with BOTH arms reading max|diff| = 0.0118021 against the 0.03 bound — byte-identical to the 960dce27f landing measurement; the deferred arm read 2.09756 pre-fix while the grouped arm read 0.0118021. Family battery green in all four trees (counts in the resolution of ISSUE-LOCAL-01M4FM6MRHMQ68EXKHKYFPX1B4). Logs /tmp/rb-test_qwen4_exp_layer_loop.log, /tmp/ro0-test_qwen4_exp_layer_loop.log, /tmp/rsan-test_qwen4_exp_layer_loop.log, /tmp/rtsan-test_qwen4_exp_layer_loop.log.
