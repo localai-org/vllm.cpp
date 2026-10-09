@@ -520,8 +520,9 @@ ONE pull request (developer's standing choice for this row).
   fp8-block + f32 scale is what the loader stores today; dequant-at-load
   vs a CPU fp8-block GEMM arm is decided when the forward consumes it.
 - NUMA interleave row (this spec, the in-process PolicyGuard change): the
-  `kolibri1_weights.cpp` `PolicyGuard` site is pinned only by the A/B bench
-  (deleting it moves the measured decode tok/s); no focused test goes red
-  for that deletion. The dequant-cache guard site IS test-pinned. A
-  loader-level focused test is owed, or this stays bench-pinned with the
-  evidence doc naming it (it does, §Claimed guarantees guarantee 4).
+  loader-level focused test now pins the `kolibri1_weights.cpp` guard site
+  (deleting it turns the loader case of test_kolibri1_numa red); the
+  dequant-cache guard site is pinned by the same file's cache case. Residue:
+  the loader case is model-gated and single-threaded-load only — a loader
+  that materializes on worker threads would need per-thread policy scope,
+  which nothing today exercises.
