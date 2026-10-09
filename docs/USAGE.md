@@ -242,6 +242,12 @@ a silent fallback cannot post a plausible number:
   reports GPU-timestamp time rather than wall clock; see
   [ENVIRONMENT.md](ENVIRONMENT.md) for what each knob does and what it measured.
 
+### Kolibri-1 on CPU
+
+Use the released FP8 safetensors checkpoint with `--device cpu`.
+The [Kolibri-1 recipe](models/kolibri-1.md) lists the recorded revision, shard set,
+command, correctness evidence, and unavailable arms.
+
 ### Quantized checkpoints: which weight forms load
 
 **TQ1_0 and TQ2_0 GGUF files cannot load yet.** The
@@ -1158,8 +1164,9 @@ that invokes `ffmpeg`, path configurable with `--video-ffmpeg`).
 ## Consuming it as a library (C ABI)
 
 Link `libvllm` (static or shared) and include [`include/vllm.h`](../include/vllm.h).
-It exposes a flat, exception-free, llama.cpp-style C ABI (`VLLM_ABI_VERSION 17`,
-35 exported functions) suitable for `dlopen` / FFI / LocalAI integration.
+It exposes a flat, exception-free, llama.cpp-style C ABI for `dlopen`, FFI, and LocalAI integration.
+See the [C API reference](reference/c-api.md) for the current version, ownership rules,
+and [speaker diarization](reference/c-api.md#speaker-diarization).
 
 ```c
 #include "vllm.h"
@@ -1185,7 +1192,8 @@ vllm_engine_free(engine);
 ```
 
 The ABI covers lifecycle, blocking and streaming completion, non-blocking
-concurrent requests, memory helpers, and diagnostics. Later ABI versions add:
+concurrent requests, memory helpers, and diagnostics. The table lists the early ABI additions.
+See [recent additions](reference/c-api.md#recent-abi-additions) for newer controls.
 
 | ABI | Adds |
 |---:|---|

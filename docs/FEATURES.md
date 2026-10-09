@@ -60,7 +60,7 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 | Embeddable behind a C ABI | ✅ | ☐ | ☐ | ✅ |
 | Weight formats | Safetensors + GGUF | Safetensors | Safetensors | GGUF |
 | Correctness gate | token-exact vs vLLM | reference | own | own |
-| Architectures | 44 registered, 27 gated | 130+ | 100+ | 100+ |
+| Architectures | [Registered models and validation limits](#registered-architectures) | 130+ | 100+ | 100+ |
 | Downloadable server binaries | ✅ v0.0.2: eight indexed archives with checksums, provenance, manifests, and SBOMs. Windows ZIP downloads do not exist; native CPU/Vulkan lanes await hosted runtime, dry-run, prerelease, and authenticated audit gates | ✅ wheels/containers | ✅ wheels/containers | ✅ host-specific binaries |
 | Native Windows builds | ◐ CPU/Vulkan: `/MT /W4 /WX`, central `NOMINMAX`, UTF-8, aligned allocation, C++20 `std::numbers` pi, runtime ISA dispatch. Local closure includes the float-domain DeepSeek probe; hosted compile/runtime/release pending | ✅ | ✅ | ✅ |
 
@@ -224,7 +224,7 @@ speed-pending, which [BENCHMARKS.md](BENCHMARKS.md) tracks.
 | `KevModel` | `jaredpalmer/kev-0.8b` (frozen Qwen3.5-0.8B-Base + rank-16 LoRA merged at convert time + PointerHead readout) | PointerHead golden-vector tests (25 cases, 126 assertions) + LoRA-merge + ForwardHidden goldens with perturbation gates vs the kev Python reference `jaredpalmer/kev` @`19dcae9b6e3e1a48200c5825aad9fc200d31e20a` (#3295); `/v1/systemone` dispatch reuses the Laya lane. E2E choice/score/noul through LocalAI `/v1/systemone` PASS. CUDA build verification + GGUF k-quant arm OWED per [spec](../.agents/specs/kev.md) | not measured |
 | `DeepseekV41ForCausalLM` | none loadable yet | **REGISTERED AND VALIDATING; NOT LOADABLE** (W1, 2026-09-13) per [model-matrix](../.agents/model-matrix.md) and [spec](../.agents/specs/deepseek-v4-1-flash.md): the architecture resolves through the registry while the load plan is validated; no token claim | not measured |
 | `MiMoV2ForCausalLM` | `vcruz305/MiMoV2-Flash-RL-EXL3` (EXL3-quantized, not yet loadable end-to-end) | **W1+W2 scaffold + W3 forward pass; NOT GATED.** Registry + config + hybrid KV-cache spec (full-attn 4 KV heads / SWA 8 KV heads, `v_head_dim=128 != head_dim=192`) + bf16/EXL3 dual-path weight loader gated; the device forward computes through all 48 layers (hybrid attention with sink bias, partial RoPE, attention_value_scale; layer 0 dense MLP, layers 1-47 MoE with sigmoid + noaux_tc routing) but no token has been emitted yet — the end-to-end gate (W5) is OWED | not measured |
-| `Kolibri1ForCausalLM` | `Aleph-Alpha/Kolibri-1` @`e52eb462` (78.8 GB: FP8 block-quantized linears with F32 `weight_scale_inv` grids, BF16 experts/shared/head/norms/router; 32 shards, manifest-verified 116,303 tensors) | **W1+W2+W3 landed; token-gated, and the real tokenizer loads (R7).** Registry + config + hybrid KV two-group spec (10 full-attention layers RNoPE — no positional encoding — / 40 sliding layers window 513 with RoPE, per-head qk-norm, head 128, GQA 48/4) + FP8 block-quant loader (dequant-at-load) gated; the CPU forward computes all 50 layers (sandwich norms, sigmoid-logit router top-6 with `expert_bias`, no renorm, ungated shared expert) and is gated against a scalar double-precision transcription of the author plugin's math (1,757 assertions). Token gate LANDED 2026-10-05 (transformers golden run, W3 900/900; HF ids fed directly then). The tokenizer engine refused the checkpoint's `\p{N}{1}` split-regex spelling until R7 (2026-10-08, row/kolibri-r7): it is now recognized as the classic Qwen2 pattern, and our Encode reproduces the HF reference ids on all 8 golden prompts (no-BOS contract gated on a real load). GGUF, CUDA, TT arms OWED; the author plugin ([aleph-alpha-inference](../../.agents/oracles/aleph-alpha-inference.md)) is the primary oracle, gateable=no until served | not measured |
+| `Kolibri1ForCausalLM` | [Aleph-Alpha/Kolibri-1](models/kolibri-1.md), FP8 safetensors | CPU forward and tokenizer run on the released checkpoint. The recorded golden comparison includes near-tie differences. Tenstorrent has a partial forward without routed experts. GGUF and CUDA are unavailable. | Not measured |
 <!-- supported-arch-table:end -->
 
 ### Standalone and non-registered lanes
@@ -287,10 +287,8 @@ Enumerated in `.agents/model-matrix.md`, not registered, no runnable GB10 gate:
 | `MiniMaxM2ForCausalLM` | MiniMax-M2 | ~230B, ~428 GiB bf16, ~4x over the unified pool |
 | `Dots3NoteMTPModel` | dots3-note nextn head (the target arch `Dots3NoteForCausalLM` IS registered; see the supported table above) | W10 owns it and it is deliberately NOT registered: a speculator that cannot propose makes the engine accept a speculative config it then dies on mid-run. The checkpoint ships exactly one nextn layer, and since W5c (#2176) its 19 tensors are a NAMED W10 deferral in the language tower's accounting rather than a refusal, which is what vLLM's own loader does with them. Blocked behind the target row: no oracle runs here, 298.67 GB fp8 against a 122 GiB ceiling, so NO number is claimable on any axis ([spec](../.agents/specs/dots3-note.md), #699) |
 
-27 of the 40 registered text-generation architectures carry a passing
-correctness gate today; the rest are honestly marked scaffold or blocked above.
-(The 44 registered total also covers 3 Parakeet ASR entry points and the
-`LlamaModel` embedding arch, which are not text generation.)
+The architecture table records each model's correctness evidence and remaining gaps.
+The registry also includes transcription, embedding, and decision architectures.
 vLLM registers 130+ text architectures, so this is a curated, gated subset, not
 a breadth claim. The first EMBEDDING architecture is registered and live
 (`LlamaModel`, task=embed, LAST pooling, the as_embedding_model mirror, gated

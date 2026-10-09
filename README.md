@@ -8,7 +8,7 @@
 
 <p align="center">
   <b>Same tokens as vLLM. Same throughput. 140x less to install.</b><br>
-  <sub>Continuous batching, paged KV, 44 registered architectures, CUDA / CPU / Metal / Vulkan. No Python anywhere.</sub>
+  <sub>Continuous batching, paged KV, CUDA / CPU / Metal / Vulkan. No Python anywhere.</sub>
 </p>
 
 <p align="center">
@@ -37,6 +37,11 @@
 
 ## News
 
+- **2026-10** **Kolibri-1 runs on CPU with its released FP8 checkpoint.** The tokenizer
+  accepts the model's vocabulary. See the [recipe and comparison limits](docs/models/kolibri-1.md).
+- **2026-10** **C ABI 30 adds speaker diarization.**
+  See the [C API reference](docs/reference/c-api.md#speaker-diarization) for audio formats, cleanup,
+  and the current combined-transcription limitation.
 - **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
   blocked by missing artifacts, with no speed result. See the
   [measurement instructions and limits](docs/benchmarks/qwen38-tensorfold-gap.md#measurement-tools).
@@ -138,7 +143,8 @@ Where that stands today:
   ahead at all six concurrencies but only c1 outside our noise band. Also **1.18x llama.cpp's
   prefill** on the same GGUF file (denominator SUPERSEDED, see below), and **ahead of MLX-LM on
   prefill** on Apple Silicon. Most other architectures are speed-pending, and say so.
-- **Everything.** 44 registered architectures, 38 tool-parser families, structured output including
+- **Model and API coverage.** [Registered architectures](docs/FEATURES.md#registered-architectures),
+  38 tool-parser families, structured output including
   GBNF, three speculative decoders, image, video, and audio input, music generation, external KV
   offload, Prometheus metrics, and the SGLang knobs, all in a library you can `dlopen`. Multimodal
   HTTP input has CPU tests with synthetic weights on Qwen3-VL and dots3-note. Real-checkpoint
@@ -242,7 +248,7 @@ configs, token-for-token the same output. Switching to it should be boring. Ever
 you get on top, most of it borrowed from whichever engine does it best:
 
 - **One 66 MiB binary instead of a 9.1 GiB install.** A flat, exception-free, llama.cpp-style C ABI
-  ([`include/vllm.h`](include/vllm.h), ABI v26) for C, C++, Go, or Rust. No Python
+  ([`include/vllm.h`](include/vllm.h), ABI v30) for C, C++, Go, or Rust. No Python
   interpreter in the process.
 - **GGUF as a first-class citizen.** Load the same quantized files llama.cpp uses, and on CPU
   **compute directly on the compressed blocks** (Q4_0, Q8_0, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XS,
@@ -311,7 +317,7 @@ InternLM2/3, MiniCPM and MiniCPM3, Yi, OPT, plus Qwen3-VL and Qwen3.6-27B vision
 and Voxtral (audio).
 
 <details>
-<summary><b>The full architecture matrix</b> (44 registered architectures grouped by family)</summary>
+<summary><b>The full architecture matrix</b> (registered architectures grouped by family)</summary>
 
 | Architecture | Example checkpoint | GGUF | Correctness | Speed |
 |---|---|:---:|---|---|
@@ -358,7 +364,7 @@ sampler, no logits); upstream is `vllm-project/vllm-omni`. Five conditioning mod
 Compressed-tensors NVFP4A16 (W4A16) dense weights also load and compute natively
 (RedHatAI/Qwen3-32B-NVFP4A16). Long-context RoPE (YaRN, Llama-3, LongRoPE, dynamic-NTK) and
 sliding-window attention are gated feature-positive. The authoritative per-architecture list, bound
-to the C++ registry (all 44 registered architectures with their tested checkpoint and gate, plus the
+to the C++ registry (registered architectures with their tested checkpoint and gate, plus the
 standalone audio/diffusion lanes and the inventoried-but-blocked archs), is in
 [docs/FEATURES.md](docs/FEATURES.md); family-by-family lifecycle detail, including what is
 hardware-blocked and why, is linked from [Project status](#project-status).
@@ -383,8 +389,9 @@ Per-arch build flags, per-op coverage, and the quantization format table:
 
 ## Build
 
-CMake (>= 3.24) and a C++20 compiler. The core has no ML dependencies, and the tree builds
--Werror-clean on gcc 14.2.
+CMake (>= 3.24) and a C++20 compiler. The text engine uses its own tensor runtime.
+Diarization is enabled by default and builds parakeet.cpp with ggml. See the
+[build options](docs/BUILD.md#speaker-diarization-dependency) to disable it or use a local source tree.
 
 ```sh
 cmake -S . -B build && cmake --build build -j   # CPU: the correctness / CI reference
@@ -453,7 +460,7 @@ behind a model gallery, multi-model serving, the full OpenAI API surface, auth, 
 ## Use it as a library (C API)
 
 Link `libvllm` and include [`include/vllm.h`](include/vllm.h): a flat, exception-free,
-llama.cpp-style C ABI (currently `VLLM_ABI_VERSION 26`) suitable for `dlopen` / FFI. Check the
+llama.cpp-style C ABI (currently `VLLM_ABI_VERSION 30`) suitable for `dlopen` / FFI. Check the
 header for the version that your build provides.
 
 ```c
@@ -540,10 +547,10 @@ from:
 - Kernel work is ported from **CUTLASS**, **FlashInfer**, **Marlin**, and **TRT-LLM** rather than
   reinvented, cited per kernel in the porting inventory.
 
-**A note on ggml:** vllm.cpp does not use ggml. It reads GGUF and follows llama.cpp's C ABI style, but
-tensors, kernels, and dispatch are its own portable `vt::` runtime
-([`include/vt/`](include/vt/)) with no ggml or PyTorch dependency at any point. ggml is a superb piece of engineering and llama.cpp
-built the ecosystem this project plugs into; we needed a different tensor layer, that is all.
+**A note on ggml:** the text engine reads GGUF and follows llama.cpp's C ABI style.
+Its tensors, kernels, and dispatch use the project's portable `vt::` runtime
+([`include/vt/`](include/vt/)), without ggml or PyTorch. The optional diarization dependency,
+parakeet.cpp, uses ggml and is enabled by default.
 
 ## Citation
 
