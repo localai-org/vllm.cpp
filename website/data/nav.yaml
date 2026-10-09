@@ -28,3 +28,7 @@ docs:
     label: SGLang compatibility
   - file: ROCM.md
     label: ROCm backend
+  - file: EXL3_XPU.md
+    label: Experimental EXL3 XPU serving
+  - file: EXL3_TEST_ARTIFACTS.md
+    label: EXL3 external test inputs

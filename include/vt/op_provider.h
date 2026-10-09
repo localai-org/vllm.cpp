@@ -56,12 +56,17 @@
 #pragma once
 
 #include <cstdint>
+#include <initializer_list>
 
 #include "vt/device.h"
 
 namespace vt {
 
 enum class OpId : uint8_t;  // defined in vt/ops.h
+struct Tensor;
+// Opt-in JSONL argument metadata, never tensor contents. Complements provider
+// selection rows in VT_OP_PROVIDER_TRACE; does not count a second selection.
+void TraceOpTensors(OpId op, const Queue& q, std::initializer_list<const Tensor*> tensors);
 
 // Device-neutral capability record. The CUDA tactic registry's `DeviceCaps`
 // (src/vt/cuda/cuda_device_caps.h) is CUDA-shaped — `sm_major`, `sm_minor`,

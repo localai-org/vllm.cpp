@@ -1,0 +1,10 @@
+{
+  "image_token_id": 248056,
+  "vision_start_token_id": 248053,
+  "vision_end_token_id": 248054,
+  "vision_config": {
+    "patch_size": 4,
+    "temporal_patch_size": 2,
+    "spatial_merge_size": 2
+  }
+}

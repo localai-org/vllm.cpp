@@ -39,12 +39,18 @@ dense_attn::DBuf Linear(dense_attn::Dev d, const vt::Tensor& x,
                         const OwnedTensor& bf16_w, const Exl3Weight& exl3_w,
                         vt::DType out_dtype);
 
+// Scoped XPU FP16 SmallM/W8A8; model-owned cache is bound to these immutable
+// sources for its entire lifetime. Returns one [M,sum(N)] contiguous owner.
+dense_attn::DBuf GroupedLinear(dense_attn::Dev d, const vt::Tensor& x,
+                               const std::vector<const Exl3Weight*>& sources,
+                               Exl3GroupedWeight& grouped);
+
 // `layers::MakeMlpGateUpMethod(bf16_gate_up, gate, up, intermediate)->Apply(d, x)`.
-// Returns the bf16 [M, I] SwiGLU activation, which is what the shared
-// `MlpGateUpMethodBase` contract produces on every arm.
+// The EXL3 arm returns [M, I] in d.activation_dtype, or BF16 when unspecified.
 dense_attn::DBuf GateUp(dense_attn::Dev d, const vt::Tensor& x,
                         const OwnedTensor& bf16_gate_up, const Exl3Weight& gate,
-                        const Exl3Weight& up, int64_t intermediate);
+                        const Exl3Weight& up, int64_t intermediate,
+                        Exl3GroupedWeight* grouped = nullptr);
 
 }  // namespace dense_exl3
 }  // namespace vllm

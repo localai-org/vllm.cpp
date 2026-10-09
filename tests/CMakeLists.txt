@@ -1,6 +1,12 @@
 add_library(vllm_test_main STATIC doctest_main.cpp)
 target_include_directories(vllm_test_main SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party)
 
+add_executable(test_vision_prefix_capture v1/worker/gpu/test_vision_prefix_capture.cpp)
+target_include_directories(test_vision_prefix_capture PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_vision_prefix_capture PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_vision_prefix_capture)
+add_test(NAME test_vision_prefix_capture COMMAND test_vision_prefix_capture)
+
 if(UNIX)
   add_test(NAME test_triton_aot_drift_contract
     COMMAND bash "${CMAKE_SOURCE_DIR}/tests/scripts/test_triton_aot_drift.sh")
@@ -9,6 +15,62 @@ endif()
 # CPU-only benchmark-harness contract. The tools deliberately use only the
 # Python standard library; image/model/GPU preflights remain dgx-only.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME test_native_vision_attribution_pins COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_native_vision_attribution_pins.py")
+add_test(NAME test_exl3_http_smoke COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_http_smoke.py")
+add_test(NAME test_b70_inventory COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_inventory.py")
+add_test(NAME test_exl3_projection_extract COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_extract.py")
+add_test(NAME test_exl3_projection_capture COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_capture.py")
+add_test(NAME test_exl3_artifacts COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_artifacts.py")
+add_executable(exl3_external_artifact_probe support/exl3_external_artifact_probe.cpp)
+vllm_cpp_set_warnings(exl3_external_artifact_probe)
+add_test(NAME test_exl3_external_artifacts COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_external_artifacts.py"
+  $<TARGET_FILE:exl3_external_artifact_probe>)
+add_test(NAME test_exl3_projection_compare COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_projection_compare.py")
+add_test(NAME test_exl3_runtime_layout COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_runtime_layout.py")
+add_test(NAME test_exl3_mtp_state_scope COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_exl3_mtp_state_scope.py")
+add_executable(b70_provider_trace_probe
+  vt/b70_provider_trace_probe.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/op_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/dtype.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/cpu/cpu_backend.cpp)
+target_include_directories(b70_provider_trace_probe PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(b70_provider_trace_probe SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+vllm_cpp_set_warnings(b70_provider_trace_probe)
+add_test(NAME test_b70_provider_trace COMMAND ${Python3_EXECUTABLE}
+  "${CMAKE_SOURCE_DIR}/tests/scripts/test_b70_provider_trace.py" $<TARGET_FILE:b70_provider_trace_probe>)
+if(VLLM_CPP_XPU)
+  add_executable(test_xpu_exl3_decode vt/test_xpu_exl3_decode.cpp
+    ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp ${CMAKE_SOURCE_DIR}/src/vt/dtype.cpp
+    ${CMAKE_SOURCE_DIR}/src/vt/cpu/cpu_exl3_dequant.cpp $<TARGET_OBJECTS:vllm_xpu_backend>)
+  target_include_directories(test_xpu_exl3_decode PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(test_xpu_exl3_decode PRIVATE -fsycl -ffp-contract=off)
+  target_link_options(test_xpu_exl3_decode PRIVATE -fsycl)
+  target_link_libraries(test_xpu_exl3_decode PRIVATE vllm_test_main)
+  vllm_cpp_set_warnings(test_xpu_exl3_decode)
+  add_test(NAME test_xpu_exl3_decode COMMAND test_xpu_exl3_decode)
+  # Use the production core: queue destruction also retires oneDNN owners.
+  add_executable(test_xpu_backend vt/test_xpu_backend.cpp)
+  target_link_libraries(test_xpu_backend PRIVATE vllm::vllm)
+  target_include_directories(test_xpu_backend PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(test_xpu_backend PRIVATE -fsycl)
+  target_link_options(test_xpu_backend PRIVATE -fsycl)
+  vllm_cpp_set_warnings(test_xpu_backend)
+  add_test(NAME test_xpu_backend COMMAND test_xpu_backend)
+  set_tests_properties(test_xpu_backend PROPERTIES ENVIRONMENT "VT_XPU_MEMORY_BUDGET_BYTES=8388608")
+  add_test(NAME test_xpu_no_gpu COMMAND test_xpu_backend --expect-no-gpu)
+  set_tests_properties(test_xpu_no_gpu PROPERTIES ENVIRONMENT "ONEAPI_DEVICE_SELECTOR=opencl:cpu")
+endif()
 add_test(NAME test_serve_low_tools
   COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s "${CMAKE_SOURCE_DIR}/tests/tools" -p "test_*.py")
@@ -38,9 +100,179 @@ function(vllm_cpp_add_test name)
   set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
 
+find_package(Threads REQUIRED)
+add_executable(test_shared_ptr_cache vt/test_shared_ptr_cache.cpp)
+target_include_directories(test_shared_ptr_cache PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_shared_ptr_cache PRIVATE vllm_test_main Threads::Threads)
+vllm_cpp_set_warnings(test_shared_ptr_cache)
+add_test(NAME test_shared_ptr_cache COMMAND test_shared_ptr_cache)
+
+vllm_cpp_add_test(test_exl3_w8a8_panel_plan vt/test_exl3_w8a8_panel_plan.cpp)
+if(VLLM_CPP_XPU)
+  vllm_cpp_add_test(test_xpu_ops vt/test_xpu_ops.cpp)
+  vllm_cpp_add_test(test_xpu_graph vt/test_xpu_graph.cpp)
+  vllm_cpp_add_test(test_xpu_sampling vt/test_xpu_sampling.cpp)
+  vllm_cpp_add_test(test_xpu_exl3_mtp vllm/models/test_xpu_exl3_mtp.cpp)
+  vllm_cpp_add_test(test_xpu_async_output vllm/v1/worker/test_xpu_async_output.cpp)
+  vllm_cpp_add_test(test_xpu_exl3 vt/test_xpu_exl3.cpp)
+  vllm_cpp_add_test(test_xpu_exl3_smallm vt/test_xpu_exl3_smallm.cpp)
+  vllm_cpp_add_test(test_xpu_exl3_smallm_teardown vt/test_xpu_exl3_smallm_teardown.cpp)
+  set_tests_properties(test_xpu_exl3_smallm test_xpu_exl3_smallm_teardown
+    PROPERTIES RUN_SERIAL TRUE LABELS "xpu;hermetic")
+  add_executable(test_xpu_exl3_smallm_external vt/test_xpu_exl3_smallm_external.cpp)
+  target_include_directories(test_xpu_exl3_smallm_external PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(TARGET vllm::sanitize_test_shared)
+    target_link_libraries(test_xpu_exl3_smallm_external PRIVATE vllm::sanitize_test_shared vllm_test_main)
+  else()
+    target_link_libraries(test_xpu_exl3_smallm_external PRIVATE vllm::vllm vllm_test_main)
+  endif()
+  vllm_cpp_set_warnings(test_xpu_exl3_smallm_external)
+  # Separate processes preserve each external case's availability/result.
+  # No umbrella CTest can exit77 before reaching an unrelated synthetic case.
+  foreach(entry IN ITEMS
+      "packed|*XPU P6 SmallM:*"
+      "m1_m4|*SmallM: real M1/M4*"
+      "gate_up|*SmallM: real grouped Gate/Up*"
+      "attention|*SmallM: real attention groups*"
+      "head|*SmallM: full 6bpw head*"
+      "swiglu|*XPU EXL3 real Gate/Up SwiGLU:*")
+    string(REPLACE "|" ";" fields "${entry}")
+    list(GET fields 0 name)
+    list(GET fields 1 selector)
+    set(test_name test_xpu_exl3_smallm_external_${name})
+    add_test(NAME ${test_name} COMMAND test_xpu_exl3_smallm_external "--test-case=${selector}")
+    set_tests_properties(${test_name} PROPERTIES
+      SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external")
+    if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
+      set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+    endif()
+  endforeach()
+  vllm_cpp_add_test(test_xpu_exl3_w8a8 vt/test_xpu_exl3_w8a8.cpp)
+  add_executable(test_xpu_exl3_direct_prepare vt/test_xpu_exl3_direct_prepare.cpp)
+  target_include_directories(test_xpu_exl3_direct_prepare PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+  if(TARGET vllm::sanitize_test_shared)
+    target_link_libraries(test_xpu_exl3_direct_prepare PRIVATE vllm::sanitize_test_shared vllm_test_main)
+  else()
+    target_link_libraries(test_xpu_exl3_direct_prepare PRIVATE vllm::vllm vllm_test_main)
+  endif()
+  vllm_cpp_set_warnings(test_xpu_exl3_direct_prepare)
+  target_compile_options(test_xpu_exl3_direct_prepare PRIVATE -fsycl)
+  target_link_options(test_xpu_exl3_direct_prepare PRIVATE -fsycl)
+  add_test(NAME test_xpu_exl3_direct_prepare COMMAND test_xpu_exl3_direct_prepare
+    "--test-case=*F2: direct preparation complete calls*")
+  set_tests_properties(test_xpu_exl3_direct_prepare PROPERTIES
+    SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external")
+  add_test(NAME test_xpu_exl3_direct_prepare_budget COMMAND test_xpu_exl3_direct_prepare
+    "--test-case=*F2: direct preparation budget*")
+  set_tests_properties(test_xpu_exl3_direct_prepare_budget PROPERTIES
+    SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external"
+    ENVIRONMENT "VT_XPU_MEMORY_BUDGET_BYTES=268435456")
+  if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
+    set_tests_properties(test_xpu_exl3_direct_prepare PROPERTIES ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+    set_property(TEST test_xpu_exl3_direct_prepare_budget APPEND PROPERTY ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+  endif()
+  vllm_cpp_add_test(test_xpu_w8a8_workspaces vt/test_xpu_w8a8_workspaces.cpp)
+  target_include_directories(test_xpu_w8a8_workspaces PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(test_xpu_w8a8_workspaces PRIVATE -fsycl)
+  target_link_options(test_xpu_w8a8_workspaces PRIVATE -fsycl)
+  set_tests_properties(test_xpu_w8a8_workspaces PROPERTIES RUN_SERIAL TRUE LABELS "xpu;hermetic")
+  vllm_cpp_add_test(test_xpu_gdn_fp16_variable vt/test_xpu_gdn_fp16_variable.cpp)
+  vllm_cpp_add_test(test_xpu_vision_ops vt/test_xpu_vision_ops.cpp)
+  # N1 diagnostic only: no production dispatch switch, no registered test gate.
+  add_executable(native-layer-norm-boundary-probe tools/native_layer_norm_boundary_probe.cpp)
+  target_link_libraries(native-layer-norm-boundary-probe PRIVATE vllm::vllm)
+  target_include_directories(native-layer-norm-boundary-probe PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(native-layer-norm-boundary-probe PRIVATE -fsycl -save-temps=obj)
+  target_link_options(native-layer-norm-boundary-probe PRIVATE -fsycl)
+  vllm_cpp_set_warnings(native-layer-norm-boundary-probe)
+  target_compile_definitions(test_xpu_vision_ops PRIVATE
+    XPU_VISION_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vt/fixtures/xpu_vision_ops")
+  set_tests_properties(test_xpu_vision_ops PROPERTIES RUN_SERIAL TRUE LABELS "xpu;vision")
+  vllm_cpp_add_test(test_xpu_vision_mtp vt/test_xpu_vision_mtp.cpp)
+  set_tests_properties(test_xpu_vision_mtp PROPERTIES RUN_SERIAL TRUE LABELS "xpu;vision")
+  vllm_cpp_add_test(test_xpu_vision_tower vt/test_xpu_vision_tower.cpp)
+  target_compile_definitions(test_xpu_vision_tower PRIVATE
+    XPU_VISION_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vt/fixtures/xpu_vision_ops")
+  set_tests_properties(test_xpu_vision_tower PROPERTIES RUN_SERIAL TRUE LABELS "xpu;vision")
+  if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
+    set_tests_properties(test_xpu_vision_ops test_xpu_vision_tower test_xpu_vision_mtp PROPERTIES
+      ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+  endif()
+  add_test(NAME test_native_vision_external_artifacts COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tests/scripts/test_native_vision_external_artifacts.py"
+    $<TARGET_FILE:test_xpu_vision_tower>)
+  set_tests_properties(test_native_vision_external_artifacts PROPERTIES
+    RUN_SERIAL TRUE LABELS "host;vision;external-artifact-contract")
+  add_test(NAME test_native_vision_mtp_external_artifacts COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tests/scripts/test_native_vision_mtp_artifacts.py"
+    $<TARGET_FILE:test_xpu_vision_mtp>)
+  set_tests_properties(test_native_vision_mtp_external_artifacts PROPERTIES
+    RUN_SERIAL TRUE LABELS "host;vision;external-artifact-contract")
+  if(VLLM_CPP_IMAGE_CODECS)
+    # Internal isolated phase utility, not a public-ABI example or CTest suite.
+    add_executable(native-vision-bench tools/native_vision_bench.cpp)
+    target_link_libraries(native-vision-bench PRIVATE vllm::vllm)
+    vllm_cpp_set_warnings(native-vision-bench)
+    add_executable(native-vision-compare tools/native_vision_compare.cpp)
+    target_link_libraries(native-vision-compare PRIVATE vllm::vllm)
+    vllm_cpp_set_warnings(native-vision-compare)
+    add_executable(native-vision-first-gdn-compare tools/native_vision_first_gdn_compare.cpp)
+    target_link_libraries(native-vision-first-gdn-compare PRIVATE vllm::vllm)
+    target_include_directories(native-vision-first-gdn-compare PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    vllm_cpp_set_warnings(native-vision-first-gdn-compare)
+    add_executable(native-vision-target-state-compare tools/native_vision_target_state_compare.cpp)
+    target_link_libraries(native-vision-target-state-compare PRIVATE vllm::vllm)
+    vllm_cpp_set_warnings(native-vision-target-state-compare)
+    # Real C-API execution with internal request-boundary profile drains.
+    # Keep one static runtime; no internal symbols enter the public C ABI.
+    add_executable(native-vision-serving-profile tools/native_vision_serving_profile.cpp)
+    target_link_libraries(native-vision-serving-profile PRIVATE vllm::vllm)
+    target_include_directories(native-vision-serving-profile PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+      target_compile_definitions(native-vision-serving-profile PRIVATE VLLM_CPP_XPU_ONEDNN)
+    endif()
+    vllm_cpp_set_warnings(native-vision-serving-profile)
+  endif()
+  target_include_directories(test_xpu_exl3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  vllm_cpp_add_test(test_xpu_exl3_prefill vt/test_xpu_exl3_prefill.cpp)
+  target_include_directories(test_xpu_exl3_prefill PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(test_xpu_exl3_prefill PRIVATE -fsycl)
+  target_link_options(test_xpu_exl3_prefill PRIVATE -fsycl)
+  vllm_cpp_add_test(test_xpu_exl3_checkpoint vt/test_xpu_exl3_checkpoint.cpp)
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+    vllm_cpp_add_test(test_xpu_gptq4 vt/test_xpu_gptq4.cpp)
+    target_include_directories(test_xpu_gptq4 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(test_xpu_gptq4 PRIVATE -fsycl)
+  endif()
+  vllm_cpp_add_test(test_xpu_gdn vt/test_xpu_gdn.cpp)
+  vllm_cpp_add_test(test_xpu_gdn_chunked vt/test_xpu_gdn_chunked.cpp)
+  target_include_directories(test_xpu_gdn_chunked PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  if(VLLM_CPP_XPU_XE2_PREFILL)
+    target_compile_definitions(test_xpu_gdn_chunked PRIVATE VLLM_CPP_XPU_XE2_GDN)
+  endif()
+  vllm_cpp_add_test(test_xpu_attention vt/test_xpu_attention.cpp)
+  vllm_cpp_add_test(test_xpu_attention_fast vt/test_xpu_attention_fast.cpp)
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+    target_compile_definitions(test_xpu_attention_fast PRIVATE VLLM_CPP_XPU_ONEDNN)
+  endif()
+  vllm_cpp_add_test(test_xpu_qwen_exl3_fp16 vllm/models/test_xpu_qwen_exl3_fp16.cpp)
+  vllm_cpp_add_test(test_xpu_platform vllm/platforms/test_xpu_platform.cpp)
+endif()
+
 # The gate on the golden-comparison helper itself (issue #449): a NaN operand
 # must be a FAILURE, never the 0.0 that both historical spellings returned.
 vllm_cpp_add_test(test_max_abs_diff support/test_max_abs_diff.cpp)
+add_executable(test_exl3_autonomous support/test_exl3_autonomous.cpp)
+target_include_directories(test_exl3_autonomous PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test_exl3_autonomous PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_exl3_autonomous)
+add_test(NAME test_exl3_autonomous COMMAND test_exl3_autonomous)
+add_executable(test_gdn_fp16_plan support/test_gdn_fp16_plan.cpp)
+target_include_directories(test_gdn_fp16_plan PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(test_gdn_fp16_plan PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_gdn_fp16_plan)
+add_test(NAME test_gdn_fp16_plan COMMAND test_gdn_fp16_plan)
 # ...and the wrapper must RAISE, not merely return +infinity, so the
 # "these must differ" callers cannot read a NaN as a difference. That case is
 # skipped in the normal run because a raised failure would count as one; here it
@@ -1856,6 +2088,7 @@ vllm_cpp_add_test(test_request vllm/test_request.cpp)
 vllm_cpp_add_test(test_kv_cache_utils vllm/v1/test_kv_cache_utils.cpp)
 # issue #371: the recurrent-state budget (spec widens GDN state by k+1).
 vllm_cpp_add_test(test_kv_state_budget vllm/v1/core/test_kv_state_budget.cpp)
+vllm_cpp_add_test(test_recurrent_prefix_snapshot vllm/v1/core/test_recurrent_prefix_snapshot.cpp)
 # issue #1983: the recurrent-state pool sized by the KV budget, not by
 # --max-num-seqs. Driven from the REAL registry builder, never a hand-built group.
 vllm_cpp_add_test(test_hybrid_kv_budget vllm/v1/core/test_hybrid_kv_budget.cpp)
@@ -1924,14 +2157,19 @@ target_include_directories(test_deepseek_v4_multigroup_kv PRIVATE
 # Multimodal M1 processor-parity gate: C++ Qwen3-VL image pipeline
 # (pixel_values/grid/mm-hash/placeholder-expansion) BIT-identical to the vLLM
 # 0.25.0 oracle fixture (tests/vllm/multimodal/fixtures/qwen3vl).
+vllm_cpp_add_test(test_torchvision_resize vllm/multimodal/test_torchvision_resize.cpp)
+target_compile_definitions(test_torchvision_resize PRIVATE
+  TV_RESIZE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/torchvision_resize")
 vllm_cpp_add_test(test_qwen3vl_processor vllm/multimodal/test_qwen3vl_processor.cpp)
 target_compile_definitions(test_qwen3vl_processor PRIVATE
-  MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl")
+  MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl"
+  TV_RESIZE_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/torchvision_resize")
 # Multimodal M2a vision-tower faithfulness gate: the C++ Qwen3_VisionTransformer
 # forward vs the dumped vLLM 0.25.0 tower reference (patch-embed/block0/merger/
 # DeepStack taps + full [196,10240] output). GPU + VLLM_QWEN3VL_WEIGHTS required,
 # else skipped (scripts/mm/m2a_tower_ref_dump.py + m2a_tower_weight_dump.py).
 vllm_cpp_add_test(test_qwen3vl_tower vllm/multimodal/test_qwen3vl_tower.cpp)
+vllm_cpp_add_test(test_qwen3vl_device_weights vllm/multimodal/test_qwen3vl_device_weights.cpp)
 target_compile_definitions(test_qwen3vl_tower PRIVATE
   MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl"
   TOWER_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl_tower")
@@ -2438,6 +2676,7 @@ set_tests_properties(test_runner_logit_dump_scratch_make PROPERTIES
 set_tests_properties(test_runner_logit_dump PROPERTIES
   FIXTURES_REQUIRED logit_dump_scratch)
 vllm_cpp_add_test(test_common_attn_metadata vllm/v1/attention/test_common_attn_metadata.cpp)
+vllm_cpp_add_test(test_attention_metadata_validation vllm/v1/attention/test_attention_metadata_validation.cpp)
 vllm_cpp_add_test(test_attn_backend_registry vllm/v1/attention/test_attn_backend_registry.cpp)
 vllm_cpp_add_test(test_attn_validate_configuration
   vllm/v1/attention/test_attn_validate_configuration.cpp)
@@ -2607,6 +2846,12 @@ vllm_cpp_add_test(test_beam_search vllm/entrypoints/test_beam_search.cpp)
 # to the existing single-sequence mm processors (CPU, no model weights). Reuses
 # the M1 image (qwen3vl) + A1 audio (whisper_audio) processor-parity fixtures.
 vllm_cpp_add_test(test_chat_mm vllm/entrypoints/openai/test_chat_mm.cpp)
+if(VLLM_CPP_IMAGE_CODECS)
+  vllm_cpp_add_test(test_native_image_codec
+    vllm/entrypoints/openai/test_native_image_codec.cpp)
+  target_compile_definitions(test_native_image_codec PRIVATE
+    IMAGE_CODEC_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/entrypoints/openai/fixtures/native_image_codec")
+endif()
 target_compile_definitions(test_chat_mm PRIVATE
   MM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/qwen3vl"
   MM_AUDIO_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/vllm/multimodal/fixtures/whisper_audio"
@@ -3194,6 +3439,14 @@ vllm_cpp_add_test(test_tensor vt/test_tensor.cpp)
 # — deterministic selection, capability predicates, decline-and-fall-back and the
 # selection stats. Device-independent (registers onto the unused kXPU slots).
 vllm_cpp_add_test(test_op_provider vt/test_op_provider.cpp)
+add_executable(test_copy vt/test_copy.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/copy.cpp ${CMAKE_SOURCE_DIR}/src/vt/tensor.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/op_provider.cpp ${CMAKE_SOURCE_DIR}/src/vt/backend.cpp
+  ${CMAKE_SOURCE_DIR}/src/vt/dtype.cpp)
+target_include_directories(test_copy PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_copy PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_copy)
+add_test(NAME test_copy COMMAND test_copy)
 # S5 portable reference tier (accelerator-seam-audit.md): the unified-memory
 # safety gate, correctness-with-zero-native-kernels via the CPU fallback, and the
 # native-wins / observability contract. Hardware-free — a fake backend on the
@@ -3293,6 +3546,10 @@ vllm_cpp_add_test(test_exl3_vulkan vt/test_exl3_vulkan.cpp)
 vllm_cpp_add_test(test_cast_f16 vt/test_cast_f16.cpp)
 vllm_cpp_add_test(test_exl3_linear_method vllm/model_executor/layers/test_exl3_linear_method.cpp)
 vllm_cpp_add_test(test_exl3_native_loader vllm/model_executor/layers/test_exl3_native_loader.cpp)
+vllm_cpp_add_test(test_exl3_mul1_marker vllm/model_executor/layers/test_exl3_mul1_marker.cpp)
+vllm_cpp_add_test(test_dense_f16_loader vllm/model_executor/layers/test_dense_f16_loader.cpp)
+vllm_cpp_add_test(test_qwen_exl3_precision vllm/models/test_qwen_exl3_precision.cpp)
+vllm_cpp_add_test(test_exl3_draft_head vllm/models/test_exl3_draft_head.cpp)
 vllm_cpp_add_test(test_exl3_checkpoint vllm/model_executor/layers/test_exl3_checkpoint.cpp)
 # The decode against REAL exllamav3 data (#2181): the gate whose absence let a
 # wrong codebook ship.
@@ -4281,6 +4538,12 @@ vllm_cpp_add_test(test_qwen3_5_lm_head_dtypes
 # from a fake platform in the unused kXPU slot.
 vllm_cpp_add_test(test_qwen3_5_dense_load_residency
   vllm/models/test_qwen3_5_dense_load_residency.cpp)
+
+vllm_cpp_add_test(test_gptq4_weight
+  vllm/models/test_gptq4_weight.cpp)
+if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+  target_compile_definitions(test_gptq4_weight PRIVATE VLLM_CPP_TEST_GPTQ4_XPU)
+endif()
 
 # QUANT-QWEN38-27B-NVFP4-ARM W4 (#821, .agents/specs/qwen38-27b-quant-arms.md):
 # the compressed-tensors `mixed-precision` accounting + scheme-resolution gate

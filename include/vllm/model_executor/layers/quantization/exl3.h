@@ -78,23 +78,14 @@ class Exl3LinearMethod : public LinearMethodBase {
 
 // The gate_up half of the MLP, on the shared `MlpGateUpMethodBase` seam.
 //
-// TWO GEMMs, not one, and the reason is the format rather than laziness. The
-// bf16 and NVFP4 arms hold ONE merged `[2I, H]` operand because merging is a
-// row-stack there. A trellis is `[k/16, n/16, 32*bits]`, so joining on the
-// output dim INTERLEAVES per input tile — a real transform, and one that is
-// only valid when no `had_r_128` block straddles two matrices, i.e. when each
-// constituent `n` is a multiple of 128. That holds for this family (Llama-3.2-1B
-// has I = 8192) and the merge is worth doing, but it is a wave with its own
-// gate rather than something to slip into a bring-up: see `## Owed` in
-// `specs/quant-exl3-shared.md`.
-//
-// Routing through the seam is what matters here and is satisfied: the model
-// calls one method and never asks which scheme it bound. The seam is the
-// interface, not the fusion.
+// Scoped XPU FP16 SmallM uses one packed merge when supplied a model-lifetime
+// group owner. Trellis output tiles concatenate separately for each K tile;
+// gate/up keep distinct input transforms. Legacy callers use separate GEMMs.
 class Exl3MlpGateUpMethod : public MlpGateUpMethodBase {
  public:
-  Exl3MlpGateUpMethod(const Exl3Weight* gate, const Exl3Weight* up)
-      : gate_(gate), up_(up) {}
+  Exl3MlpGateUpMethod(const Exl3Weight* gate, const Exl3Weight* up,
+                      Exl3GroupedWeight* grouped = nullptr)
+      : gate_(gate), up_(up), grouped_(grouped) {}
 
   DBuf Apply(Dev d, const vt::Tensor& x) const override {
     const int64_t M = x.shape[0];
@@ -106,12 +97,23 @@ class Exl3MlpGateUpMethod : public MlpGateUpMethodBase {
     // for this shape: SiluAndMul consumes ONE [M, 2I] operand with gate rows
     // first, which is what the MERGED arms hand it, while this one "takes the
     // two separately-produced projections so no concat/copy is needed"
-    // (`ops.h`). Same function -- silu(gate) * up, computed in f32 and rounded
-    // on store -- so choosing it costs nothing and avoids materializing a
-    // [M, 2I] buffer only to read it back.
-    DBuf g = dense_attn::Exl3MatmulD(d, x, *gate_, vt::DType::kBF16);
-    DBuf u = dense_attn::Exl3MatmulD(d, x, *up_, vt::DType::kBF16);
-    DBuf act(d, vt::DType::kBF16, {M, I});
+    // (`ops.h`). The operator rounds SiLU through the gate dtype before
+    // multiplying by up. Preserve the model's explicit activation precision
+    // at both projections and the output; callers without a policy retain
+    // the legacy BF16 behavior.
+    const vt::DType dtype = d.activation_dtype.value_or(vt::DType::kBF16);
+    if (grouped_ && d.q.device.type == vt::DeviceType::kXPU &&
+        dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16) {
+      if (grouped_->Empty())
+        *grouped_ = MergeExl3Weights({gate_, up_}, gate_->name + "+" + up_->name);
+      DBuf gu = dense_attn::Exl3GroupedMatmulD(d, x, *grouped_);
+      DBuf act(d, dtype, {M, I});
+      vt::SiluAndMul(d.q, act.t(), gu.t());
+      return act;
+    }
+    DBuf g = dense_attn::Exl3MatmulD(d, x, *gate_, dtype);
+    DBuf u = dense_attn::Exl3MatmulD(d, x, *up_, dtype);
+    DBuf act(d, dtype, {M, I});
     vt::MoeSiluMul(d.q, act.t(), g.t(), u.t());
     return act;
   }
@@ -121,12 +123,13 @@ class Exl3MlpGateUpMethod : public MlpGateUpMethodBase {
  private:
   const Exl3Weight* gate_;
   const Exl3Weight* up_;
+  Exl3GroupedWeight* grouped_;
 };
 
 inline std::unique_ptr<MlpGateUpMethodBase> MakeMlpGateUpMethod(
     const OwnedTensor& bf16_gate_up, const Exl3Weight& gate, const Exl3Weight& up,
-    int64_t intermediate) {
-  if (!gate.Empty()) return std::make_unique<Exl3MlpGateUpMethod>(&gate, &up);
+    int64_t intermediate, Exl3GroupedWeight* grouped = nullptr) {
+  if (!gate.Empty()) return std::make_unique<Exl3MlpGateUpMethod>(&gate, &up, grouped);
   return std::make_unique<UnquantizedMlpGateUpMethod>(&bf16_gate_up, intermediate);
 }
 

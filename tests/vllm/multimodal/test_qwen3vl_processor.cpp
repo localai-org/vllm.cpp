@@ -8,8 +8,11 @@
 // Upstream oracle: MULTIMODAL_REGISTRY.create_processor(...).apply for
 //   Qwen/Qwen3-VL-4B-Instruct.
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -118,5 +121,102 @@ TEST_CASE("qwen3vl-processor-parity: pixel_values + grid + hash + expansion") {
     CHECK(placeholders[0][1] == static_cast<int>(expected_n));
     CHECK(manifest.at("n_image_tokens").get<int>() ==
           static_cast<int>(expected_n));
+  }
+}
+
+TEST_CASE("native vision processor: tensor resize, per-channel normalize and direct FP16") {
+  const std::string dir = TV_RESIZE_FIXTURE_DIR;
+  const auto manifest = ReadJson(dir + "/manifest.json");
+  for (const auto& fixture : manifest.at("processor_cases")) {
+    INFO(fixture.at("config_file"));
+    auto cfg = vllm::multimodal::LoadQwen3VLProcessorConfig(
+        dir + "/" + fixture.at("config_file").get<std::string>(), dir + "/model-config.json", "generated-native-fixture");
+    cfg.torchvision_bicubic_resize = true;
+    cfg.pixel_dtype = vllm::multimodal::ImagePixelDType::kF16;
+    const int64_t h = fixture.at("input_hw")[0], w = fixture.at("input_hw")[1];
+    std::vector<uint8_t> rgb(static_cast<size_t>(h * w * 3));
+    for (int64_t y = 0; y < h; ++y) {
+      for (int64_t x = 0; x < w; ++x) {
+        const size_t offset = static_cast<size_t>((y * w + x) * 3);
+        rgb[offset] = static_cast<uint8_t>((x * 17 + y * 3) % 256);
+        rgb[offset + 1] = static_cast<uint8_t>((x * 5 + y * 11) % 256);
+        rgb[offset + 2] = static_cast<uint8_t>((x * 7 + y * 19) % 256);
+      }
+    }
+    auto kw = vllm::multimodal::Qwen3VLImageProcessor(cfg).ProcessImage(rgb.data(), h, w);
+    CHECK(kw.pixel_dtype == vllm::multimodal::ImagePixelDType::kF16);
+    CHECK(kw.pixel_values_bf16.empty());
+    CHECK(kw.image_grid_thw == fixture.at("grid").get<std::array<int64_t, 3>>());
+    CHECK(kw.num_patches == fixture.at("patch_shape")[0].get<int64_t>());
+    CHECK(kw.patch_feature_dim == fixture.at("patch_shape")[1].get<int64_t>());
+    const auto f32 = ReadBytes(dir + "/" + fixture.at("files").at("f32").at("file").get<std::string>());
+    const auto f16 = ReadBytes(dir + "/" + fixture.at("files").at("f16").at("file").get<std::string>());
+    REQUIRE(f32.size() == kw.pixel_values_f32.size() * sizeof(float));
+    REQUIRE(f16.size() == kw.pixel_values_f16.size() * sizeof(uint16_t));
+    CHECK(std::memcmp(f32.data(), kw.pixel_values_f32.data(), f32.size()) == 0);
+    CHECK(std::memcmp(f16.data(), kw.pixel_values_f16.data(), f16.size()) == 0);
+    // The serving selection owns only one production tensor; retaining FP32
+    // for comparisons is optional and does not change model input bytes.
+    cfg.retain_pixel_values_f32 = false;
+    auto compact = vllm::multimodal::Qwen3VLImageProcessor(cfg).ProcessImage(rgb.data(), h, w);
+    CHECK(compact.pixel_values_f32.empty());
+    CHECK(compact.pixel_values_bf16.empty());
+    CHECK((compact.pixel_values_f16 == kw.pixel_values_f16));
+    bool differs_from_bf16_intermediate = false;
+    for (size_t i = 0; i < kw.pixel_values_f32.size(); ++i)
+      differs_from_bf16_intermediate |= kw.pixel_values_f16[i] != vt::F32ToF16(vt::BF16ToF32(vt::F32ToBF16(kw.pixel_values_f32[i])));
+    CHECK(differs_from_bf16_intermediate);
+  }
+}
+
+TEST_CASE("native vision processor: smart resize matches reference and invalid geometry is bounded") {
+  const auto manifest = ReadJson(std::string(TV_RESIZE_FIXTURE_DIR) + "/manifest.json");
+  using vllm::multimodal::SmartResize;
+  for (const auto& fixture : manifest.at("smart_resize_cases")) {
+    const auto actual = SmartResize(fixture.at("input_hw")[0], fixture.at("input_hw")[1], 32, 65536, 4194304);
+    CHECK(actual == fixture.at("output_hw").get<std::array<int64_t, 2>>());
+  }
+  CHECK_THROWS_AS(SmartResize(1, 201, 32, 65536, 4194304), std::invalid_argument);
+  CHECK_THROWS_AS(SmartResize(100, 100, 0, 65536, 4194304), std::runtime_error);
+  CHECK_THROWS_AS(SmartResize(100, 100, 32, 100, 0), std::runtime_error);
+  CHECK_THROWS_AS(SmartResize(std::numeric_limits<int64_t>::max(), 100, 32, 65536, 4194304),
+                  std::invalid_argument);
+  const uint8_t rgb[3] = {1, 2, 3};
+  vllm::multimodal::Qwen3VLProcessorConfig cfg;
+  cfg.temporal_patch_size = 0;
+  CHECK_THROWS(vllm::multimodal::Qwen3VLImageProcessor(cfg).ProcessImage(rgb, 1, 1));
+  cfg.temporal_patch_size = 2;
+  CHECK_THROWS(vllm::multimodal::Qwen3VLImageProcessor(cfg).ProcessImage(nullptr, 1, 1));
+}
+
+// Optional larger captures are local generated images, not model weights or
+// public fixtures. A missing directory explicitly skips this capture check.
+TEST_CASE("native vision processor: actual pinned EXL3 worker input captures") {
+  const char* capture_dir = std::getenv("VLLM_NATIVE_VISION_PROCESSOR_CAPTURE_DIR");
+  if (!capture_dir) {
+    MESSAGE("SKIP: VLLM_NATIVE_VISION_PROCESSOR_CAPTURE_DIR is not set");
+    return;
+  }
+  const std::string dir = capture_dir;
+  vllm::multimodal::Qwen3VLProcessorConfig cfg;
+  cfg.max_pixels = 4194304;
+  cfg.torchvision_bicubic_resize = true;
+  cfg.pixel_dtype = vllm::multimodal::ImagePixelDType::kF16;
+  cfg.channel_mean = std::array<double, 3>{0.5, 0.5, 0.5};
+  cfg.channel_std = std::array<double, 3>{0.5, 0.5, 0.5};
+  for (const std::string name : {"aligned", "resize"}) {
+    INFO(name);
+    const int64_t h = name == "aligned" ? 384 : 385;
+    const int64_t w = name == "aligned" ? 512 : 513;
+    const auto rgb = ReadBytes(dir + "/" + name + "-rgb.u8");
+    REQUIRE(rgb.size() == static_cast<size_t>(h * w * 3));
+    const auto kw = vllm::multimodal::Qwen3VLImageProcessor(cfg).ProcessImage(rgb.data(), h, w);
+    const auto f32 = ReadBytes(dir + "/" + name + "-patches.f32");
+    const auto f16 = ReadBytes(dir + "/" + name + "-patches.f16");
+    REQUIRE(f32.size() == kw.pixel_values_f32.size() * sizeof(float));
+    REQUIRE(f16.size() == kw.pixel_values_f16.size() * sizeof(uint16_t));
+    CHECK(std::memcmp(f32.data(), kw.pixel_values_f32.data(), f32.size()) == 0);
+    CHECK(std::memcmp(f16.data(), kw.pixel_values_f16.data(), f16.size()) == 0);
+    CHECK((kw.image_grid_thw == std::array<int64_t, 3>{1, 24, 32}));
   }
 }

@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "vllm/model_executor/models/device_pool.h"       // DevicePool/Pool/ActivePool
@@ -43,6 +44,10 @@ using vt::Tensor;
 struct Dev {
   Backend& b;
   Queue& q;
+  // A loaded model can override the default backend activation precision.
+  std::optional<DType> activation_dtype;
+  Dev(Backend& backend, Queue& queue, std::optional<DType> activation = std::nullopt)
+      : b(backend), q(queue), activation_dtype(activation) {}
 };
 
 // The one rank bound, in one place, because it has TWO callers that must not

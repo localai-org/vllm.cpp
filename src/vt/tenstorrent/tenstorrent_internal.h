@@ -673,7 +673,7 @@ void GdnPostConvKernel(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
                        Tensor& g_out, Tensor& beta_out, const Tensor& conv,
                        const Tensor& araw, const Tensor& braw,
                        const Tensor& a_log, const Tensor& dt_bias,
-                       const L2NormArgs& args);
+                       const GdnPostConvArgs& args);
 void GdnPrefillKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k_in,
                       const Tensor& v_in, const Tensor& g, const Tensor& beta,
                       Tensor& state, const Tensor& qsl, const GdnArgs& args);

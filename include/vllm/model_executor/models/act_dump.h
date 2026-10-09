@@ -80,6 +80,55 @@ inline Where& Current() {
   return w;
 }
 
+// Focused eager diagnostics can observe one forward ordinal. Count every
+// forward in BeginStep, but reject unselected steps before device downloads.
+// This programmatic scope adds no serving knob and restores the prior filter.
+inline int64_t& SelectedStep() {
+  static thread_local int64_t step = -1;
+  return step;
+}
+inline bool StepSelected(int64_t step) {
+  return step >= 0 && (SelectedStep() < 0 || SelectedStep() == step);
+}
+struct StepSelectionScope {
+  explicit StepSelectionScope(int64_t step) : previous_(SelectedStep()) {
+    VT_CHECK(step >= -1, "activation dump selection requires a nonnegative ordinal or -1");
+    SelectedStep() = step;
+  }
+  ~StepSelectionScope() { SelectedStep() = previous_; }
+  StepSelectionScope(const StepSelectionScope&) = delete;
+  StepSelectionScope& operator=(const StepSelectionScope&) = delete;
+ private:
+  int64_t previous_;
+};
+inline const char* ActiveStreamDir() {
+  const char* dir = StreamDir();
+  return dir != nullptr && StepSelected(Current().step) ? dir : nullptr;
+}
+inline int64_t& SelectedStageLayer() {
+  static thread_local int64_t layer = -1;
+  return layer;
+}
+struct StageLayerSelectionScope {
+  explicit StageLayerSelectionScope(int64_t layer) : previous_(SelectedStageLayer()) {
+    VT_CHECK(layer >= -1, "activation substage selection requires a nonnegative layer or -1");
+    SelectedStageLayer() = layer;
+  }
+  ~StageLayerSelectionScope() { SelectedStageLayer() = previous_; }
+  StageLayerSelectionScope(const StageLayerSelectionScope&) = delete;
+  StageLayerSelectionScope& operator=(const StageLayerSelectionScope&) = delete;
+ private:
+  int64_t previous_;
+};
+inline bool StageLayerSelected(int64_t layer) {
+  return SelectedStageLayer() < 0 || SelectedStageLayer() == layer;
+}
+inline const char* ActiveStageDir() {
+  const char* dir = StageDir();
+  return dir != nullptr && StepSelected(Current().step) &&
+      StageLayerSelected(Current().layer) ? dir : nullptr;
+}
+
 inline std::atomic<int64_t> g_step{-1};
 inline std::atomic<int64_t> g_blobs{0};       // whole process
 inline std::atomic<int64_t> g_blobs_step{0};  // reset at each BeginStep
@@ -197,7 +246,7 @@ inline int64_t BeginStep() {
 // probes writing, so the total stayed high while not one hidden state was
 // dumped — which a single total-keyed floor reports as success.
 inline void EndStep(int64_t step, int64_t stream_due, int64_t any_due) {
-  if (step < 0) return;
+  if (!StepSelected(step)) return;
   const int64_t n = g_blobs_step.load(std::memory_order_relaxed);
   const int64_t sn = g_stream_blobs_step.load(std::memory_order_relaxed);
   // `stream_blobs` is printed SEPARATELY from the total, and it is the number a

@@ -235,6 +235,17 @@ def _bash_array(text: str, name: str) -> list[str]:
 
 
 class RatchetTests(unittest.TestCase):
+    def test_serving_row_has_a_runnable_gate_and_an_exact_pin(self):
+        row = "BACKEND-XPU-EXL3-SERVING"
+        verdicts = {r["id"]: r["verdict"] for r in gates.audit()}
+        self.assertEqual(verdicts.get(row), "runnable")
+        self.assertIn(row, gates.RUNNABLE_BASELINE)
+        reduced = set(gates.RUNNABLE_BASELINE) - {row}
+        runnable = {r["id"] for r in gates.audit() if r["verdict"] == "runnable"}
+        self.assertNotEqual(runnable, reduced)
+        self.assertEqual(runnable - reduced, {row})
+        self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
+
     def test_the_container_rows_credit_rests_on_scripts_that_exist(self):
         """Why ENG-RELEASE-CONTAINERS is in the baseline, not merely that it is.
 

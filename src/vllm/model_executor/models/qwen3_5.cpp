@@ -20,17 +20,28 @@
 #include "vllm/model_executor/models/decode_graph_sizes.h"
 #include "vllm/model_executor/models/kv_cache_route.h"  // KV-FP8 W3 store/read route
 #include "vllm/model_executor/models/dense_exl3_linear.h"  // MODEL-QWEN35-EXL3 (#2495): the EXL3 linear seam
+#include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
+#include "vllm/model_executor/models/dense_gptq4_linear.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu.h"
+#endif
 #include "vllm/model_executor/models/dense_fp8_block_gemm.h"  // MODEL-FP8-BLOCK-LINEAR (#1189 M4)
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
 #include "vt/tenstorrent/tenstorrent_device.h"  // DebugDeviceReadbackF32 (TT-only debug seam)
+#include "vt/gdn_fp16_plan.h"
 
 #include "vllm/model_executor/models/act_dump.h"  // ROCM-TIER-DIVERGENCE (#2590)
 #include "vllm/model_executor/models/qwen3_5_dense.h"
+#include "vllm/model_executor/models/qwen3_5_diagnostics.h"
+#include "vllm/model_executor/models/qwen3_5_dense_mm.h"
+#include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5_internal.h"
+#include "vllm/model_executor/models/qwen3_5_gdn_replay.h"
 #include "vllm/model_executor/device_placement.h"
 #include "vllm/model_executor/moe_placement_seam.h"
 #include "vllm/model_executor/models/qwen3_5_gdn_block.h"  // RunGdnBlockPaged (W5b seam, #2110)
+#include "vllm/model_executor/models/qwen3_5_attn_block.h"
 #include "vllm/model_executor/models/qwen3_5_moe_block.h"  // RunMoeBlock (SEAM GAP #2 exposure)
 #include "vllm/model_executor/models/qwen3_5_mrope.h"  // BuildMropeCosSinHost (W5d-2 seam, #2249)
 #include "vllm/model_executor/models/qwen3_5_mtp.h"
@@ -57,12 +68,15 @@
 #include <unordered_map>
 #include <utility>
 #include <optional>
+#include <bit>
 #include <vector>
 
 #include "vllm/model_executor/models/dense_fp8_gemm.h"   // dense_fp8:: FP8 W8A8 seam (#940)
 #include "vllm/model_executor/models/dense_nvfp4_gemm.h"  // dense_nvfp4::MarlinDenseEnabled
 #include "vllm/model_executor/model_loader/nvfp4_dequant.h"
+#include "vllm/v1/attention/metadata_validation.h"
 #include "vt/backend.h"
+#include "vt/paged_attn_route.h"
 #include "vt/breakable_graph.h"  // ENG-CUDAGRAPH-BREAK W4: the shared capture seam
 #include "vt/persistent_step_input.h"  // ENG-CUDAGRAPH-BREAK W4: the persistent step inputs
 #ifdef VT_BENCH_PROFILE_CONTROL
@@ -92,6 +106,38 @@ int64_t Qwen3_5MixedSpecInvocations() {
 }
 void ResetQwen3_5MixedSpecInvocations() {
   g_mixed_spec_invocations.store(0, std::memory_order_relaxed);
+}
+
+std::optional<vt::Tensor> detail::GdnContiguousTokenRowsView(
+    const vt::Tensor& source, const std::vector<int32_t>& indices) {
+  if (source.rank != 2 || !source.data || source.shape[1] <= 0 ||
+      source.stride[1] != 1 || source.stride[0] < source.shape[1] || indices.empty())
+    return std::nullopt;
+  const int64_t first = indices.front();
+  if (first < 0 || first >= source.shape[0] ||
+      indices.size() > size_t(source.shape[0] - first)) return std::nullopt;
+  for (size_t i = 0; i < indices.size(); ++i)
+    if (int64_t(indices[i]) != first + int64_t(i)) return std::nullopt;
+  vt::Tensor view = source;
+  view.data = static_cast<char*>(source.data) +
+      size_t(first) * size_t(source.stride[0]) * vt::SizeOf(source.dtype);
+  view.shape[0] = int64_t(indices.size());
+  return view;
+}
+
+std::optional<std::array<vt::Tensor, 2>> detail::GdnContiguousTokenOutputViews(
+    const vt::Tensor& output, const std::vector<int32_t>& spec_indices,
+    const std::vector<int32_t>& prefill_indices) {
+  if (output.rank != 2 || !output.IsContiguous()) return std::nullopt;
+  auto spec = GdnContiguousTokenRowsView(output, spec_indices);
+  auto prefill = GdnContiguousTokenRowsView(output, prefill_indices);
+  if (!spec || !prefill ||
+      spec->shape[0] + prefill->shape[0] != output.shape[0]) return std::nullopt;
+  if (!((spec_indices.front() == 0 &&
+         int64_t(prefill_indices.front()) == spec->shape[0]) ||
+        (prefill_indices.front() == 0 &&
+         int64_t(spec_indices.front()) == prefill->shape[0]))) return std::nullopt;
+  return std::array<vt::Tensor, 2>{*spec, *prefill};
 }
 
 // GDN-MOE-BF16-OUT (#1168) Edit 2 dropped the `e.dense_model` term. It entered at
@@ -226,6 +272,61 @@ vt::DType detail::GdnOutDType() {
 // Default OFF, so no shipped default and no recorded device measurement moves
 // until that A/B exists. The polarity is opt-IN, unlike `VT_GDN_OUT_BF16`: a
 // leading '1' is the only thing that turns it on.
+detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
+    int64_t requests, int64_t query_rows, int32_t max_seq_len, bool causal,
+    const std::vector<PagedKvCache>& caches) {
+  XpuAttentionGraphPolicy key;
+  key.boundaries = {{requests == 1 && query_rows == 1 &&
+      vt::PagedAttnXpuShortDecodeBound(max_seq_len),
+      vt::PagedAttnXpuLongSplitBound(max_seq_len)}};
+  constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_VERIFY",
+      "VT_XPU_ATTN_SPLIT_EXTENDED", "VT_XPU_ATTN_SPLIT_SPAN",
+      "VT_XPU_ATTN_SPLIT_MAX_PARTS", "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP",
+      "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY"};
+  constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single"};
+  for (size_t i = 0; i < key.settings.size(); ++i) {
+    const char* setting = std::getenv(names[i]);
+    key.settings[i] = setting ? setting : defaults[i];
+  }
+  key.causal = causal;
+  const bool packed_requested = key.settings[0] == "verify" ||
+      (key.settings[0] == "auto" && key.settings[1] == "1");
+  const bool active_page_cap = key.settings[5] == "1" || packed_requested;
+  key.kv.reserve(caches.size());
+  for (const auto& cache : caches) {
+    // KvSlice derives physical K/V strides and offset from these values. Include
+    // every layer and base address: an equal logical shape is not an equal binding.
+    const uint32_t k_scale = std::bit_cast<uint32_t>(cache.k_scale);
+    const uint32_t v_scale = std::bit_cast<uint32_t>(cache.v_scale);
+    key.kv.push_back({reinterpret_cast<uintptr_t>(cache.data), uint64_t(cache.dtype),
+        uint64_t(cache.num_blocks), uint64_t(cache.block_size), uint64_t(cache.num_kv_heads),
+        uint64_t(cache.head_size), uint64_t(cache.head_size_v), uint64_t(cache.fp8_kind),
+        k_scale, v_scale, uint64_t(cache.page_size_bytes),
+        uint64_t(active_page_cap ? vt::PagedAttnXpuActivePages(max_seq_len, cache.block_size) : 0),
+        uint64_t(cache.head_size_v > 0 ? cache.head_size_v : cache.head_size)});
+  }
+  return key;
+}
+
+int32_t detail::XpuBatchedVerifyContextBound(const PagedKvCache& kv, bool fp16,
+    int64_t query_heads, int64_t tokens, const v1::CommonAttentionMetadata& meta) {
+  if (!fp16 || meta.num_reqs < 2 || meta.num_reqs > 4 || tokens != meta.num_reqs * 4 || query_heads != 24 ||
+      !meta.causal || meta.max_query_len != 4 || meta.query_start_loc.size() != size_t(meta.num_reqs + 1) ||
+      kv.dtype != vt::DType::kI8 || kv.fp8_kind != vt::Fp8KVCacheDataType::kFp8E4M3 ||
+      kv.num_kv_heads != 4 || kv.head_size != 256 ||
+      (kv.head_size_v != 0 && kv.head_size_v != 256) ||
+      (kv.block_size != 1600 && kv.block_size != 1664) ||
+      kv.k_scale != 1.0f || kv.v_scale != 1.0f) return meta.max_seq_len;
+  for (int r = 0; r <= meta.num_reqs; ++r)
+    if (meta.query_start_loc[r] != r * 4) return meta.max_seq_len;
+  const char* setting = std::getenv("VT_XPU_ATTENTION");
+  const std::string_view mode = setting ? setting : "auto";
+  const char* verify = std::getenv("VT_XPU_XE2_VERIFY");
+  if (mode != "verify" && !(mode == "auto" && verify && std::string_view(verify) == "1"))
+    return meta.max_seq_len;
+  return vt::PagedAttnXpuPackedVerifyBound(meta.max_seq_len, kv.block_size);
+}
+
 bool detail::ActF32FlagIsOn(const char* env_value) {
   return env_value != nullptr && env_value[0] == '1';
 }
@@ -1055,11 +1156,15 @@ float Silu(float x) { return x / (1.0F + std::exp(-x)); }
 // the sixth recurrence of the class in
 // `.agents/specs/unaligned-safetensors-consumers.md`).
 std::vector<float> WeightF32(const OwnedTensor& w) {
+  VT_CHECK(w.dtype == DType::kBF16 || w.dtype == DType::kF16,
+           "qwen3_5: norm weight upcast requires BF16 or FP16 storage");
   const auto* src = w.bytes.data();
   const int64_t n = w.Numel();
   std::vector<float> out(static_cast<size_t>(n));
   for (int64_t i = 0; i < n; ++i)
-    out[static_cast<size_t>(i)] = vt::BF16ToF32(vt::LoadUnaligned<uint16_t>(src + i * 2));
+    out[static_cast<size_t>(i)] = w.dtype == DType::kF16
+        ? vt::F16ToF32(vt::LoadUnaligned<uint16_t>(src + i * 2))
+        : vt::BF16ToF32(vt::LoadUnaligned<uint16_t>(src + i * 2));
   return out;
 }
 
@@ -1366,6 +1471,22 @@ void ActDumpTensor(Dev d, const char* knob, const std::string& dir,
                      raw.data(), raw.size());
 }
 
+// Bounded eager diagnostics use the same (step,layer) manifest as GDN.
+// Compact through VT Copy so grouped QKV's row-strided views are captured
+// logically, rather than accidentally reading adjacent K/V columns.
+void DumpFullAttnStage(Dev d, const char* stage, const Tensor& tensor) {
+  const char* dir = actdump::ActiveStreamDir();
+  const char* knob = "VT_DUMP_ACT";
+  if (dir == nullptr) { dir = actdump::ActiveStageDir(); knob = "VT_DUMP_ACT_SUB"; }
+  if (dir == nullptr) return;
+  VT_CHECK(tensor.shape[0] > 0, "attention dump requires active rows");
+  DBuf compact(d, tensor.dtype,
+               std::vector<int64_t>(tensor.shape, tensor.shape + tensor.rank));
+  vt::Copy(d.q, compact.t(), tensor);
+  ActDumpTensor(d, knob, dir, (std::string("attn_") + stage).c_str(),
+                compact.t(), tensor.shape[0], tensor.Numel() / tensor.shape[0]);
+}
+
 
 // Both halves of the residual stream at one position. `layer` is -1 for the
 // post-embedding snapshot and the loop index otherwise. Inert unless
@@ -1373,7 +1494,7 @@ void ActDumpTensor(Dev d, const char* knob, const std::string& dir,
 void ActDumpStream(Dev d, int64_t step, int64_t layer, DBuf& hidden, DBuf& res,
                    int64_t T, int64_t H) {
   const char* dir = actdump::StreamDir();
-  if (dir == nullptr || step < 0) return;
+  if (dir == nullptr || !actdump::StepSelected(step)) return;
   const actdump::LayerScope here(step, layer);
   ActDumpTensor(d, "VT_DUMP_ACT", dir, "hidden", hidden.t(), T, H);
   ActDumpTensor(d, "VT_DUMP_ACT", dir, "res", res.t(), T, H);
@@ -1777,7 +1898,9 @@ std::vector<uint16_t> MatmulNvfp4Bf16(Dev d, const std::vector<uint16_t>& x, int
 // and for the same reason: a gate that only reads the parser proves nothing
 // about what the model calls, and this lever is the denominator of the arm's
 // same-binary A/B. This file keeps only the `Dev` adapter.
-DType ActDType(Dev d) { return detail::ActDType(d.q.device.type); }
+DType ActDType(Dev d) {
+  return d.activation_dtype ? *d.activation_dtype : detail::ActDType(d.q.device.type);
+}
 
 DBuf MatmulF32D(Dev d, const Tensor& x, const OwnedTensor& w) {
   const int64_t M = x.shape[0], N = w.nk ? w.shape[0] : w.shape[1];
@@ -1820,8 +1943,8 @@ static DBuf GdnOutProjMatmul(Dev d, const GdnLayerWeights& w,
 }
 
 // A tied BF16 lm_head follows torch Linear's model-dtype output, then the
-// engine exposes f32 logits to the sampler. Explicit 27B heads retain the
-// existing f32-output MatmulF32D path.
+// engine exposes f32 logits to the sampler. Other explicit heads choose their
+// own route in DenseLogitsF32D below.
 DBuf MatmulBf16LogitsF32D(Dev d, const Tensor& x, const OwnedTensor& w) {
   DBuf bf16 = MatmulBf16D(d, x, w);
   DBuf f32(d, DType::kF32, {bf16.t().shape[0], bf16.t().shape[1]});
@@ -2633,7 +2756,8 @@ bool FuseSigmoidGateQuantEnabled();
 // (35B W4A16-Marlin fp4, fp8, bf16) reads a bf16 activation, so keep the standalone
 // SigmoidGateBf16 + the three-way GEMM there.
 DBuf SigmoidGateOProjD(Dev d, const Tensor& attn2d, const Tensor& gate2d,
-                       const FullAttnLayerWeights& w, bool fp4) {
+                       const FullAttnLayerWeights& w, bool fp4,
+                       const Gptq4Weight* gptq_out = nullptr) {
   const int64_t T = attn2d.shape[0], K = attn2d.shape[1];
 #ifdef VT_CUTLASS_NVFP4
   if (fp4 && w.o_proj_fp8.Empty() && FuseSigmoidGateQuantEnabled() &&
@@ -2666,18 +2790,21 @@ DBuf SigmoidGateOProjD(Dev d, const Tensor& attn2d, const Tensor& gate2d,
   // `ActDType`. Every other consumer this row retyped takes `IsOutFloat`, which
   // admits f32; this one does not, and routing an f32 buffer into it aborted 9
   // cases of test_qwen27_paged_forward under VT_ACT_F32=1. Widening the trunk
-  // therefore leaves ONE bf16 rounding on the gated-attention output, which the
-  // spec records as owed: closing it needs an f32-capable gate kernel, not a
-  // dtype change here.
-  DBuf gated(d, DType::kBF16, {T, K});
+  // therefore leaves ONE bf16 rounding on the legacy gated-attention output.
+  // Scoped GPTQ/EXL3 execution keeps the model's f16 activation dtype instead.
+  DBuf gated(d, ActDType(d) == DType::kF16 ? DType::kF16 : DType::kBF16,
+             {T, K});
   vt::SigmoidGateBf16(d.q, gated.t(), attn2d, gate2d);
+  DumpFullAttnStage(d, "gated", gated.t());
+  if (gptq_out != nullptr)
+    return dense_gptq4::Packed(d, gated.t(), *gptq_out,
+                               dense_gptq4::Projection::kAttnOut);
   // MODEL-QWEN35-EXL3 (#2495 item 3): o_proj is a single projection in every
   // arm, so the EXL3 form differs from the bf16 one only in the kernel the
-  // shared linear seam binds. The gated bf16 activation IS the input the
-  // trellis GEMM stages to fp16.
+  // shared linear seam binds. Preserve explicit model precision on output.
   if (w.IsExl3()) {
     return dense_exl3::Linear(d, gated.t(), w.o_proj, w.o_proj_exl3,
-                              DType::kBF16);
+                              d.activation_dtype.value_or(DType::kBF16));
   }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4): exclusive and first, out_dtype bf16 --
   // the same dtype every other arm of this o_proj returns.
@@ -2708,8 +2835,24 @@ struct FullAttnQkvOutput {
 FullAttnQkvOutput ProjectFullAttnQkv(Dev d, const FullAttnLayerWeights& w,
                                      const Tensor& h, int64_t t,
                                      const Tensor* h_fp8,
-                                     bool packed_consumers) {
+                                     bool packed_consumers,
+                                     const Gptq4Weight* gptq_qkv = nullptr,
+                                     int64_t query_gate_width = 0,
+                                     int64_t kv_width = 0) {
   FullAttnQkvOutput out;
+  if (gptq_qkv != nullptr) {
+    VT_CHECK(packed_consumers,
+             "gptq4: merged attention Q/K/V requires native fused preamble");
+    out.packed_owner.emplace(dense_gptq4::AttentionQkv(
+        d, h, *gptq_qkv, query_gate_width, kv_width));
+    Tensor all = out.packed_owner->t();
+    out.qgate = all.Slice(1, 0, query_gate_width);
+    out.key = all.Slice(1, query_gate_width,
+                        query_gate_width + kv_width);
+    out.value = all.Slice(1, query_gate_width + kv_width,
+                          query_gate_width + 2 * kv_width);
+    return out;
+  }
   out.fp4 = !w.q_proj_fp4.Empty();
   const bool fp8 = !w.q_proj_fp8.Empty();
 
@@ -2718,20 +2861,37 @@ FullAttnQkvOutput ProjectFullAttnQkv(Dev d, const FullAttnLayerWeights& w,
   // EMPTY, so a non-empty EXL3 weight IS the scheme -- the same rung order the
   // loader uses, read from the forward's end.
   //
-  // THREE projections, never the merged operand the branches below build. A
-  // trellis is `[k/16, n/16, 32*bits]`, so joining on the output dim
-  // interleaves per input tile rather than row-stacking; that merge is valid
-  // for this family and worth doing, and it is owed its own gate (`## Owed` in
-  // `specs/quant-exl3-shared.md`). `packed_consumers` is therefore never
-  // consulted here, and no `QkvSplit` runs.
-  //
-  // `out_dtype` is bf16 -- upstream's `out_dtype` at this site, the MODEL dtype
-  // every layer inherits -- and NOT the f32 the plain-bf16 arm below happens to
-  // emit. A token gate cannot see a dtype that is too wide.
+  // Scoped FP16 SmallM/W8A8 uses one packed projection with three independent input
+  // transforms. Stride-aware consumers borrow views; other consumers receive
+  // exact native copies. The packed owner stays alive alongside all views.
   if (w.IsExl3()) {
-    out.q_owner.emplace(dense_exl3::Linear(d, h, w.q_proj, w.q_proj_exl3, DType::kBF16));
-    out.k_owner.emplace(dense_exl3::Linear(d, h, w.k_proj, w.k_proj_exl3, DType::kBF16));
-    out.v_owner.emplace(dense_exl3::Linear(d, h, w.v_proj, w.v_proj_exl3, DType::kBF16));
+    const DType dtype = d.activation_dtype.value_or(DType::kBF16);
+    if (d.q.device.type == vt::DeviceType::kXPU && dtype == DType::kF16 &&
+        h.dtype == DType::kF16) {
+      out.packed_owner.emplace(dense_exl3::GroupedLinear(
+          d, h, {&w.q_proj_exl3, &w.k_proj_exl3, &w.v_proj_exl3}, w.qkv_proj_exl3));
+      const Tensor all = out.packed_owner->t();
+      const int64_t qn = w.q_proj_exl3.OutFeatures(), kn = w.k_proj_exl3.OutFeatures();
+      const int64_t vn = w.v_proj_exl3.OutFeatures();
+      out.qgate = all.Slice(1, 0, qn);
+      out.key = all.Slice(1, qn, qn + kn);
+      out.value = all.Slice(1, qn + kn, qn + kn + vn);
+      if (!packed_consumers) {
+        out.q_owner.emplace(d, dtype, std::vector<int64_t>{t, qn});
+        out.k_owner.emplace(d, dtype, std::vector<int64_t>{t, kn});
+        out.v_owner.emplace(d, dtype, std::vector<int64_t>{t, vn});
+        vt::Copy(d.q, out.q_owner->t(), out.qgate);
+        vt::Copy(d.q, out.k_owner->t(), out.key);
+        vt::Copy(d.q, out.v_owner->t(), out.value);
+        out.qgate = out.q_owner->t();
+        out.key = out.k_owner->t();
+        out.value = out.v_owner->t();
+      }
+      return out;
+    }
+    out.q_owner.emplace(dense_exl3::Linear(d, h, w.q_proj, w.q_proj_exl3, dtype));
+    out.k_owner.emplace(dense_exl3::Linear(d, h, w.k_proj, w.k_proj_exl3, dtype));
+    out.v_owner.emplace(dense_exl3::Linear(d, h, w.v_proj, w.v_proj_exl3, dtype));
     out.qgate = out.q_owner->t();
     out.key = out.k_owner->t();
     out.value = out.v_owner->t();
@@ -3293,10 +3453,16 @@ DBuf MatmulNvfp4F32D(Dev d, const Tensor& x, const Nvfp4Weight& w) {
 // exactly one head layout is selected; the bf16 arm keeps both of its shapes.
 DBuf DenseLogitsF32D(Dev d, const Tensor& x, const Qwen3_5DenseWeights& weights) {
   // MODEL-QWEN35-EXL3 (#2495 item 5): a trellis head, kept quantized and read
-  // through the shared linear seam. f32 out, because that is the dtype every
-  // other arm of this function returns and the sampler's contract; the trellis
-  // GEMM writes f32 directly, so nothing is widened on the way.
+  // through the shared linear seam. The FP16 model head rounds before the
+  // sampler widens to F32; requesting F32 from the GEMM would omit that round.
   if (!weights.lm_head_exl3.Empty()) {
+    if (d.activation_dtype == DType::kF16) {
+      DBuf head = dense_exl3::Linear(d, x, weights.lm_head,
+                                     weights.lm_head_exl3, DType::kF16);
+      DBuf logits(d, DType::kF32, {head.t().shape[0], head.t().shape[1]});
+      vt::CastF32(d.q, logits.t(), head.t());
+      return logits;
+    }
     return dense_exl3::Linear(d, x, weights.lm_head, weights.lm_head_exl3,
                               DType::kF32);
   }
@@ -3333,9 +3499,27 @@ DBuf DenseLogitsF32D(Dev d, const Tensor& x, const Qwen3_5DenseWeights& weights)
   // (`logits_processor.py:111-115`) guards its `.to(f32)` weight-cast fallback,
   // a mechanism we do not use.
   //
-  // Elementwise bf16/f16 heads are untouched below, so no safetensors default
-  // and no recorded device measurement on those arms moves.
+  // The GPTQ/XPU FP16 head uses oneDNN's FP16-output GEMM, then widens to the
+  // sampler's FP32 logits. Keep the generic MatmulBT route selectable for a
+  // same-binary comparison; other FP16 heads and BF16 heads retain their route.
   if (vt::IsBlockQuant(lm_head.dtype)) return MatmulF32D(d, x, lm_head);
+  if (lm_head.dtype == DType::kF16) {
+    if (weights.gptq4_checkpoint && d.q.device.type == vt::DeviceType::kXPU) {
+      const char* route = std::getenv("VT_GPTQ4_LM_HEAD_ROUTE");
+      VT_CHECK(route == nullptr || std::strcmp(route, "onednn_f16_cast") == 0 ||
+                   std::strcmp(route, "reference_matmul_bt") == 0,
+               "gptq4: VT_GPTQ4_LM_HEAD_ROUTE must be onednn_f16_cast or reference_matmul_bt");
+      if (route == nullptr || std::strcmp(route, "onednn_f16_cast") == 0) {
+        Tensor resident = ResidentWeight(d, lm_head);
+        DBuf half = dense_gptq4::Dense(d, x, resident,
+                                       dense_gptq4::Projection::kLmHead);
+        DBuf logits(d, DType::kF32, {x.shape[0], resident.shape[0]});
+        vt::CastF32(d.q, logits.t(), half.t());
+        return logits;
+      }
+    }
+    return MatmulF32D(d, x, lm_head);
+  }
   return lm_head.nk ? MatmulBf16LogitsF32D(d, x, lm_head)
                     : MatmulF32D(d, x, lm_head);
 }
@@ -3645,6 +3829,18 @@ DType GdnInDType() {
   return bf16 ? DType::kBF16 : DType::kF32;
 }
 
+// A GPTQ text model carries its own FP16 storage choice. Keep the legacy
+// diagnostic toggles confined to models without that explicit policy.
+DType GdnInputDType(Dev d) {
+  return d.activation_dtype == DType::kF16 ? DType::kF16 : GdnInDType();
+}
+DType GdnActivationDType(Dev d) {
+  return d.activation_dtype == DType::kF16 ? DType::kF16 : GdnActDType();
+}
+DType GdnOutputDType(Dev d) {
+  return d.activation_dtype == DType::kF16 ? DType::kF16 : detail::GdnOutDType();
+}
+
 // PERF-FP8-ALPHA-FOLD / issue #417 — make GdnInDType() REACHABLE on an fp8-tower
 // checkpoint (VT_GDN_FP8_IN_BF16, DEFAULT OFF).
 //
@@ -3758,6 +3954,7 @@ DType ResidualDType(Dev d) {
     const char* e = std::getenv("VT_BF16_RESIDUAL");
     return e == nullptr || e[0] != '0';
   }();
+  if (ActDType(d) == DType::kF16) return DType::kF16;
   if (ActDType(d) == DType::kF32) return DType::kF32;
   return bf16 ? DType::kBF16 : DType::kF32;
 }
@@ -3937,6 +4134,19 @@ GdnBaOutput ProjectGdnBARaw(Dev d, const GdnLayerWeights& weights,
                  weights.in_proj_ba.shape[1] == hidden.shape[1],
              "qwen3_5 merged GDN BA: invalid packed owner");
     Tensor packed_weight = ResidentWeight(d, weights.in_proj_ba);
+    const auto project = [&](const Tensor& weight, DType dtype) {
+      if (d.q.device.type == vt::DeviceType::kXPU && dtype == DType::kF16 &&
+          !weights.in_proj_qkv_exl3.Empty()) {
+        // The original dense BA projection accumulates with oneDNN's FP16
+        // matmul. The generic reduction changes half rounding at gate inputs.
+        VT_CHECK(vt::OpRegistered(vt::OpId::kMatmulDenseF16, d.q.device.type),
+                 "EXL3 FP16 GDN BA requires the native dense FP16 matmul");
+        DBuf result(d, dtype, {hidden.shape[0], weight.shape[0]});
+        vt::MatmulDenseF16(d.q, result.t(), hidden, weight);
+        return result;
+      }
+      return MatmulBTRawD(d, hidden, weight, dtype);
+    };
     if (const char* qdir = std::getenv("VT_DUMP_QKVZ")) {
       static std::atomic<int> baseq{0};
       const int call = baseq.fetch_add(1, std::memory_order_relaxed);
@@ -3952,8 +4162,9 @@ GdnBaOutput ProjectGdnBARaw(Dev d, const GdnLayerWeights& weights,
     }
     if (MergedGdnBaEnabled(d)) {
       out.packed_owner.emplace(
-          MatmulBTRawD(d, hidden, packed_weight,
-                       MergedGdnBaOutputDType(packed_decode)));
+          project(packed_weight,
+                       d.activation_dtype.value_or(
+                           MergedGdnBaOutputDType(packed_decode))));
       Tensor packed = out.packed_owner->t();
       out.b = packed.Slice(1, 0, value_heads);
       out.a = packed.Slice(1, value_heads, 2 * value_heads);
@@ -3973,23 +4184,22 @@ GdnBaOutput ProjectGdnBARaw(Dev d, const GdnLayerWeights& weights,
 
     Tensor b_weight = packed_weight.Slice(0, 0, value_heads);
     Tensor a_weight = packed_weight.Slice(0, value_heads, 2 * value_heads);
-    // HF transformers' nn.Linear outputs the model dtype (BF16) for a/b.
-    // The merged-CUDA arm keeps F32 (FLA's split), but the split arm is
-    // CPU-only and must round to match the reference.
-    const DType ba_dt = GdnInDType();
-    out.b_owner.emplace(MatmulBTRawD(d, hidden, b_weight, ba_dt));
-    out.a_owner.emplace(MatmulBTRawD(d, hidden, a_weight, ba_dt));
+    // Explicit model precision applies to both BA shards. Legacy callers
+    // retain GdnInDType's BF16/F32 diagnostic behavior.
+    const DType ba_dt = d.activation_dtype.value_or(GdnInDType());
+    out.b_owner.emplace(project(b_weight, ba_dt));
+    out.a_owner.emplace(project(a_weight, ba_dt));
   } else {
     VT_CHECK(!weights.in_proj_b.Empty() && !weights.in_proj_a.Empty(),
              "qwen3_5 GDN BA: packed or both split weights are required");
     // HF transformers' nn.Linear outputs BF16 for a/b in BF16 mode.
-    const DType ba_dt = GdnInDType();
-    out.b_owner.emplace(ba_dt == DType::kBF16
-                            ? MatmulBf16D(d, hidden, weights.in_proj_b)
-                            : MatmulF32D(d, hidden, weights.in_proj_b));
-    out.a_owner.emplace(ba_dt == DType::kBF16
-                            ? MatmulBf16D(d, hidden, weights.in_proj_a)
-                            : MatmulF32D(d, hidden, weights.in_proj_a));
+    const DType ba_dt = d.activation_dtype.value_or(GdnInDType());
+    out.b_owner.emplace(ba_dt == DType::kF32
+                            ? MatmulF32D(d, hidden, weights.in_proj_b)
+                            : MatmulBf16D(d, hidden, weights.in_proj_b));
+    out.a_owner.emplace(ba_dt == DType::kF32
+                            ? MatmulF32D(d, hidden, weights.in_proj_a)
+                            : MatmulBf16D(d, hidden, weights.in_proj_a));
   }
   out.b = out.b_owner->t();
   out.a = out.a_owner->t();
@@ -4277,32 +4487,35 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
   // loader rung: an EXL3 load populates NO other in-projection field, so every
   // branch below would fall through to an empty owner and refuse by name.
   //
-  // TWO GEMMs, because the artifact ships two independently quantized
-  // trellises (see `GdnLayerWeights::in_proj_qkv_exl3`). This is not a
-  // regression against vLLM's single merged `in_proj_qkvz` GEMM: there is no
-  // merged trellis operand to issue, and the split native-FP8 arm the 35B runs
-  // already takes this same shape when the merged owner is empty.
-  //
-  // `indt` for mixed and `outdt` for z are the dtypes the SPLIT BF16 arm below
-  // emits, so `VT_GDN_IN_BF16`'s and `VT_GDN_OUT_BF16`'s documented rollbacks
-  // stay honest on this arm too. `dense_exl3::Linear` forwards to
-  // `layers::MakeLinearMethod` -> `Exl3LinearMethod` -> the ONE
-  // `dense_attn::Exl3MatmulD`; no second EXL3 matmul exists.
+  // Scoped FP16 SmallM/W8A8 retains both transforms in a model-owned packed group.
+  // Conv and gated norm already accept its row-strided mixed/Z views.
   if (!w.in_proj_qkv_exl3.Empty()) {
     VT_CHECK(w.in_proj_qkv_exl3.OutFeatures() == conv_dim &&
                  w.in_proj_z_exl3.OutFeatures() == value_dim &&
                  w.in_proj_qkv_exl3.InFeatures() == h.shape[1],
              "qwen3_5 EXL3 GDN qkvz: the trellis geometry and the layer's "
              "conv_dim/value_dim disagree");
-    out.mixed_owner.emplace(
-        dense_exl3::Linear(d, h, w.in_proj_qkv, w.in_proj_qkv_exl3, indt));
-    out.z_owner.emplace(
-        dense_exl3::Linear(d, h, w.in_proj_z, w.in_proj_z_exl3, outdt));
+    if (d.q.device.type == vt::DeviceType::kXPU &&
+        d.activation_dtype == DType::kF16 && h.dtype == DType::kF16 &&
+        indt == DType::kF16 && outdt == DType::kF16) {
+      out.packed_owner.emplace(dense_exl3::GroupedLinear(
+          d, h, {&w.in_proj_qkv_exl3, &w.in_proj_z_exl3}, w.in_proj_qkvz_exl3));
+      const Tensor all = out.packed_owner->t();
+      out.mixed = all.Slice(1, 0, conv_dim);
+      out.z = all.Slice(1, conv_dim, conv_dim + value_dim);
+    } else {
+      out.mixed_owner.emplace(
+          dense_exl3::Linear(d, h, w.in_proj_qkv, w.in_proj_qkv_exl3, indt));
+      out.z_owner.emplace(
+          dense_exl3::Linear(d, h, w.in_proj_z, w.in_proj_z_exl3, outdt));
+      out.mixed = out.mixed_owner->t();
+      out.z = out.z_owner->t();
+    }
     // The same anti-drift guard the merged fp8 arm carries, read off the
     // ALLOCATED buffer rather than off a literal, so it fails whichever side
     // moves. The packed-decode eligibility runs before this function and must
     // have predicted exactly this dtype.
-    VT_CHECK(out.mixed_owner->t().dtype ==
+    VT_CHECK(out.mixed.dtype ==
                  detail::GdnProjectedMixedQkvDType(
                      detail::GdnMixedQkvDTypeInputs{
                          !w.in_proj_qkvz.Empty(), !w.in_proj_qkv_fp8.Empty(),
@@ -4311,8 +4524,6 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
                          /*has_exl3_qkv_owner=*/true}),
              "qwen3_5 EXL3 GDN qkvz: the allocated mixed_qkv dtype and the "
              "packed-decode prediction disagree (GdnProjectedMixedQkvDType)");
-    out.mixed = out.mixed_owner->t();
-    out.z = out.z_owner->t();
     return out;
   }
   if (!w.in_proj_qkvz.Empty()) {
@@ -4623,8 +4834,8 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // for them). mixed_qkv: bf16 output under VT_GDN_IN_BF16 (bf16-weight branch),
   // and on the merged fp8 branch too under VT_GDN_FP8_IN_BF16 (default OFF, see
   // GdnFp8InBf16Enabled). See GdnInDType().
-  const DType indt = GdnInDType();
-  const DType outdt = GdnOutDType();
+  const DType indt = GdnInputDType(d);
+  const DType outdt = GdnOutputDType(d);
   GdnQkvzOutput qkvz =
       ProjectGdnQkvz(d, w, h, conv_dim, value_dim, indt, outdt, h_fp8, Hv);
   Tensor mixed = qkvz.mixed;  // [T,conv_dim], contiguous or row-strided view
@@ -4638,9 +4849,11 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // conv_state + f32-accumulated math unchanged. The conv reads the merged
   // mixed_qkv view's padded row stride directly — no materialization.
   const DType convdt = mixed.dtype;
-  Tensor dcw = convdt == DType::kBF16 ? ResidentWeight(d, w.conv1d_weight, {conv_dim, Kw})
-                                      : ResidentWeightF32(d, w.conv1d_weight, {conv_dim, Kw});
-  DBuf dstate(d, DType::kF32, {1, conv_dim, Kw - 1});
+  Tensor dcw = convdt == DType::kBF16 || convdt == DType::kF16
+                   ? ResidentWeight(d, w.conv1d_weight, {conv_dim, Kw})
+                   : ResidentWeightF32(d, w.conv1d_weight, {conv_dim, Kw});
+  DBuf dstate(d, d.activation_dtype == DType::kF16 ? DType::kF16 : DType::kF32,
+              {1, conv_dim, Kw - 1});
   dstate.Zero(d);
   const int32_t qsl[2] = {0, static_cast<int32_t>(T)};
   const int32_t his[1] = {0};
@@ -4659,7 +4872,7 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // Coupled bf16 (VT_GDN_BF16, default ON): the matmul-input activations q/k/v
   // feed the WMMA chunk trio as native bf16 (halved traffic + bf16 fragments);
   // g/beta/state stay f32 (FLA's split). VT_GDN_BF16=0 keeps f32/TF32.
-  const DType actdt = GdnActDType();
+  const DType actdt = GdnActivationDType(d);
   DBuf vf(d, actdt, {T, Hv, Dv});
   DBuf g(d, DType::kF32, {T, Hv});
   DBuf beta(d, DType::kF32, {T, Hv});
@@ -4683,6 +4896,7 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   DBuf dssm(d, DType::kF32, {1, Hv, Dv, Dk});
   dssm.Zero(d);
   DBuf dcore(d, outdt, {T, Hv, Dv});
+
   const float scale = 1.0F / std::sqrt(SizeF(Dk));
   vt::GdnPrefill(d.q, dcore.t(), dql2.t(), dkl2.t(), vf.t(), g.t(), beta.t(),
                  dssm.t(), dqsl.t(), vt::GdnArgs{scale});
@@ -4772,14 +4986,14 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // MODEL-QWEN35-GDN-EXL3 (#2495 item 4): exclusive and FIRST, for the reason
   // every other arm here is exclusive. An EXL3 load populates none of the
   // fields below, so each would fall through to an empty owner and refuse by
-  // name. bf16 out, as every other arm of this out_proj returns.
+  // name. The output follows explicit model precision, or legacy BF16.
   //
   // The gated-RMSNorm above already wrote `gated_bf16`, so the fp8 fusion
   // branch earlier in this function cannot have fired: it requires
   // `out_proj_fp8`, which an EXL3 load leaves empty.
   if (!w.out_proj_exl3.Empty()) {
     return dense_exl3::Linear(d, gated_in, w.out_proj, w.out_proj_exl3,
-                              DType::kBF16);
+                              d.activation_dtype.value_or(DType::kBF16));
   }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4): exclusive and first; bf16 out, as every
   // other arm of this out_proj returns.
@@ -4846,13 +5060,23 @@ struct StepDevInputs {
   // stub when the toggle is off (has_attn_cos_sin=false).
   DBuf attn_cos_sin;
   bool has_attn_cos_sin = false;
+  // Indices into the step-local RoPE cache. Read-only during capture/replay;
+  // allocating/uploading these per attention layer would invalidate preflight.
+  DBuf attn_cache_rows;
 };
+
+DBuf BuildAttnCacheRows(Dev d, int64_t tokens) {
+  std::vector<int32_t> rows(tokens);
+  std::iota(rows.begin(), rows.end(), 0);
+  return DBuf(d, DType::kI32, {tokens}, rows.data());
+}
 
 StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
                                  const CommonAttentionMetadata& am,
                                  const GDNAttentionMetadata& gm,
                                  int64_t gdn_state_slots) {
   const int64_t T = static_cast<int64_t>(positions.size());
+  v1::ValidateAttentionUploadMetadata(am, T);
   const bool indexed_state_io = IndexedGdnStateIoEnabled(d.q.device);
   VT_CHECK(gm.num_actual_tokens == T,
            "qwen3_5: GDN metadata token count must match step input");
@@ -4903,6 +5127,7 @@ StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
       0,                           // gdn_spec_num_cols
       DBuf(d, DType::kF32, {1}),  // attn cos|sin stub (filled by MaybeBuildAttnCosSin)
       false,
+      BuildAttnCacheRows(d, T),  // immutable step-local RoPE cache rows
   };
   // Full non-spec state indices are shared by decode and mixed-prefill paths.
   // Decode consumes their leading num_decodes rows; indexed W1 gather/scatter
@@ -5008,19 +5233,30 @@ StepDevInputs BuildStepDevInputs(Dev d, const std::vector<int32_t>& positions,
   return s;
 }
 
+vt::RopeArgs FullAttnRopeArgs(Dev d, const HfConfig& cfg) {
+  vt::RopeArgs args{static_cast<float>(cfg.rope_theta), static_cast<int>(cfg.rotary_dim)};
+  args.fp16_intermediates = d.q.device.type == vt::DeviceType::kXPU &&
+      ActDType(d) == DType::kF16 && IsExl3Checkpoint(cfg);
+  // The pinned unscaled cache still has F32 power/reciprocal/angle boundaries.
+  if (args.fp16_intermediates) args.linear_scaling_factor = 1.0f;
+  return args;
+}
+
 // Build the per-step fused-preamble cos|sin cache into `sdi` (once per step,
-// reused by every full-attn layer's fused preamble) when VT_FUSE_ATTN_PREAMBLE is
-// on. No-op otherwise, so the default forward path is byte-identical. Uses the
+// reused by every full-attn layer) when VT_FUSE_ATTN_PREAMBLE is on or the
+// EXL3 FP16 path needs its rounded coefficients. Uses the
 // PERSISTENT sdi.positions device buffer (same source the RopeNeox path reads) so
 // the fill is a single device kernel — eager and graph-replay identical.
 void MaybeBuildAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg, int64_t T,
                           bool fp4_attn = false) {
-  if (!FuseAttnPreambleOn(fp4_attn)) return;
+  const auto rope = FullAttnRopeArgs(d, cfg);
+  if (!FuseAttnPreambleOn(fp4_attn) && !rope.fp16_intermediates) return;
+  // Native EXL3 XPU also consumes this cache in the unfused RoPE path.
+  if (!vt::OpRegistered(vt::OpId::kAttnQkNormRopeGate, d.q.device.type)) return;
   const int rot = static_cast<int>(cfg.rotary_dim);
   if (rot <= 0) return;
   sdi.attn_cos_sin = DBuf(d, DType::kF32, {T, rot});
-  vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), sdi.positions.t(),
-                      vt::RopeArgs{static_cast<float>(cfg.rope_theta), rot});
+  vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), sdi.positions.t(), rope);
   sdi.has_attn_cos_sin = true;
 }
 
@@ -5033,7 +5269,7 @@ void FillAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg) {
   const int rot = static_cast<int>(cfg.rotary_dim);
   if (rot <= 0) return;
   vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), sdi.positions.t(),
-                      vt::RopeArgs{static_cast<float>(cfg.rope_theta), rot});
+                      FullAttnRopeArgs(d, cfg));
 }
 
 // --- Batched PAGED GDN block (M1.8 Task 3). Same conv1d + l2norm + q/k/v/g/beta
@@ -5048,8 +5284,8 @@ void FillAttnCosSin(Dev d, StepDevInputs& sdi, const HfConfig& cfg) {
 // request shares a step with an ordinary prefill request; upstream reclassifies
 // any non-spec DECODE to a prefill whenever a spec row exists (gdn_attn.py:
 // 243-251), so the non-spec side is pure prefill (num_decodes == 0). Split
-// mixed_qkv / a / b by spec_token_indx / non_spec_token_indx into compact
-// per-group buffers (index_select), run the I5a spec recurrence + the prefill
+// mixed_qkv / a / b by spec_token_indx / non_spec_token_indx into per-group
+// inputs (borrow contiguous EXL3 XPU rows or checked index_select), run the I5a spec recurrence + the prefill
 // recurrence independently over the SHARED persistent state, merge the two core
 // outputs back to their original row positions (index_copy), then finish with
 // the shared gated-RMSNorm + out_proj. 1:1 mirror of
@@ -5070,8 +5306,8 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   const int64_t conv_dim = 2 * key_dim + value_dim;
   const float eps = static_cast<float>(cfg.rms_norm_eps);
   const DType convdt = mixed.dtype;
-  const DType outdt = GdnOutDType();
-  const DType actdt = GdnActDType();
+  const DType outdt = GdnOutputDType(d);
+  const DType actdt = GdnActivationDType(d);
   const float scale = 1.0F / std::sqrt(SizeF(Dk));
   g_mixed_spec_invocations.fetch_add(1, std::memory_order_relaxed);
 
@@ -5100,20 +5336,37 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   // ── 1. Split mixed_qkv / a / b by token group (index_select; :1334-1335,
   // :1407-1408). araw/braw may be inner-contiguous row-strided merged views;
   // IndexSelect follows the outer stride and packs each group contiguously. ──
-  DBuf mixed_spec(d, convdt, {ns_tok, conv_dim});
-  DBuf mixed_ns(d, convdt, {nns_tok, conv_dim});
-  vt::IndexSelect(d.q, mixed_spec.t(), mixed, spec_tok);
-  vt::IndexSelect(d.q, mixed_ns.t(), mixed, ns_tok_idx);
-  DBuf a_spec(d, araw.dtype, {ns_tok, Hv});
-  DBuf b_spec(d, braw.dtype, {ns_tok, Hv});
-  DBuf a_ns(d, araw.dtype, {nns_tok, Hv});
-  DBuf b_ns(d, braw.dtype, {nns_tok, Hv});
-  vt::IndexSelect(d.q, a_spec.t(), araw, spec_tok);
-  vt::IndexSelect(d.q, b_spec.t(), braw, spec_tok);
-  vt::IndexSelect(d.q, a_ns.t(), araw, ns_tok_idx);
-  vt::IndexSelect(d.q, b_ns.t(), braw, ns_tok_idx);
+  static const bool token_views = [] {
+    const char* value = std::getenv("VT_XPU_GDN_MIXED_TOKEN_VIEWS");
+    const std::string_view setting = value ? value : "1";
+    VT_CHECK(setting == "0" || setting == "1", "Invalid VT_XPU_GDN_MIXED_TOKEN_VIEWS");
+    return setting == "1";
+  }();
+  const bool borrow_rows = token_views && d.q.device.type == vt::DeviceType::kXPU &&
+      convdt == DType::kF16 && !w.in_proj_qkv_exl3.Empty();
+  // BuildStepDevInputs uploads these same validated host maps once per step.
+  // Projection owners live through this call; conv/post-conv honor dim0
+  // strides and never mutate their inputs. Keep owners for permuted-map or
+  // layout fallbacks and the same-binary rollback.
+  const auto select_rows = [&](const Tensor& source, const Tensor& device_indices,
+                               const std::vector<int32_t>& host_indices, DBuf& owner) {
+    if (borrow_rows)
+      if (auto view = detail::GdnContiguousTokenRowsView(source, host_indices)) return *view;
+    owner = DBuf(d, source.dtype, {int64_t(host_indices.size()), source.shape[1]});
+    vt::IndexSelect(d.q, owner.t(), source, device_indices);
+    return owner.t();
+  };
+  DBuf mixed_spec_owner, mixed_ns_owner, a_spec_owner, b_spec_owner, a_ns_owner, b_ns_owner;
+  const auto& spec_host = *meta.spec_token_indx;
+  const auto& ns_host = *meta.non_spec_token_indx;
+  Tensor mixed_spec = select_rows(mixed, spec_tok, spec_host, mixed_spec_owner);
+  Tensor mixed_ns = select_rows(mixed, ns_tok_idx, ns_host, mixed_ns_owner);
+  Tensor a_spec = select_rows(araw, spec_tok, spec_host, a_spec_owner);
+  Tensor b_spec = select_rows(braw, spec_tok, spec_host, b_spec_owner);
+  Tensor a_ns = select_rows(araw, ns_tok_idx, ns_host, a_ns_owner);
+  Tensor b_ns = select_rows(braw, ns_tok_idx, ns_host, b_ns_owner);
 
-  Tensor dcw = convdt == DType::kBF16
+  Tensor dcw = convdt == DType::kBF16 || convdt == DType::kF16
                    ? ResidentWeight(d, w.conv1d_weight, {conv_dim, Kw})
                    : ResidentWeightF32(d, w.conv1d_weight, {conv_dim, Kw});
   Tensor a_log_dev = ResidentWeight(d, w.a_log, {Hv});
@@ -5125,7 +5378,7 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   DBuf dconv_spec(d, convdt, {ns_tok, conv_dim});
   {
     Tensor conv_cache = state.conv_state;
-    vt::CausalConv1dSpecUpdate(d.q, dconv_spec.t(), mixed_spec.t(), dcw,
+    vt::CausalConv1dSpecUpdate(d.q, dconv_spec.t(), mixed_spec, dcw,
                                /*bias=*/nullptr, conv_cache,
                                sdi.gdn_spec_conv_state_idx.t(),
                                sdi.gdn_num_accepted.t(), sdi.gdn_spec_qsl.t(),
@@ -5141,7 +5394,7 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
                                    &conv_chunk_offsets};
     DBuf dcs(d, DType::kF32, {np, conv_dim, Kw - 1});
     vt::GdnStateGather(d.q, dcs.t(), state.conv_state, sdi.gdn_state_idx.t());
-    vt::CausalConv1dFwd(d.q, dconv_ns.t(), mixed_ns.t(), dcw, nullptr, dcs.t(),
+    vt::CausalConv1dFwd(d.q, dconv_ns.t(), mixed_ns, dcw, nullptr, dcs.t(),
                         sdi.gdn_non_spec_qsl.t(), sdi.gdn_has_initial.t(),
                         conv_args);
     Tensor conv_cache = state.conv_state;
@@ -5170,6 +5423,25 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
 
   DBuf dcore(d, outdt, {T, Hv, Dv});
 
+  static const bool direct_outputs = [] {
+    const char* value = std::getenv("VT_XPU_GDN_MIXED_OUTPUT_VIEWS");
+    const std::string_view setting = value ? value : "1";
+    VT_CHECK(setting == "0" || setting == "1", "Invalid VT_XPU_GDN_MIXED_OUTPUT_VIEWS");
+    return setting == "1";
+  }();
+  std::optional<std::array<Tensor, 2>> core_views;
+  if (direct_outputs && borrow_rows && outdt == DType::kF16)
+    core_views = detail::GdnContiguousTokenOutputViews(
+        Reshape(dcore.t(), {T, Hv * Dv}), spec_host, ns_host);
+  // The checked host maps were uploaded by BuildStepDevInputs. Both intervals
+  // must cover the core exactly, with no overlap. Its owner survives both
+  // unchanged recurrences and the following gated norm/out projection.
+  const auto core_output = [&](size_t group, int64_t rows, DBuf& owner) {
+    if (core_views) return Reshape((*core_views)[group], {rows, Hv, Dv});
+    owner = DBuf(d, outdt, {rows, Hv, Dv});
+    return owner.t();
+  };
+
   // ── 4.1 spec recurrence (fused_sigmoid_gating_delta_rule_update, :1455-1475):
   // k+1 state slots per request, initial state selected by num_accepted. ──
   {
@@ -5178,16 +5450,17 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
     DBuf vf(d, actdt, {ns_tok, Hv, Dv});
     DBuf dg(d, DType::kF32, {ns_tok, Hv});
     DBuf dbeta(d, DType::kF32, {ns_tok, Hv});
-    post_conv(dconv_spec.t(), a_spec.t(), b_spec.t(), ns_tok, dql2, dkl2, vf, dg,
+    post_conv(dconv_spec.t(), a_spec, b_spec, ns_tok, dql2, dkl2, vf, dg,
               dbeta);
-    DBuf dcore_spec(d, outdt, {ns_tok, Hv, Dv});
+    DBuf dcore_spec;
+    Tensor spec_output = core_output(0, ns_tok, dcore_spec);
     Tensor ssm_cache = state.ssm_state;
     Tensor spec_idx_2d =
         Reshape(sdi.gdn_spec_state_idx.t(), {ns, sdi.gdn_spec_num_cols});
-    vt::GdnSpecDecode(d.q, dcore_spec.t(), dql2.t(), dkl2.t(), vf.t(), dg.t(),
+    vt::GdnSpecDecode(d.q, spec_output, dql2.t(), dkl2.t(), vf.t(), dg.t(),
                       dbeta.t(), ssm_cache, sdi.gdn_spec_qsl.t(), spec_idx_2d,
                       sdi.gdn_num_accepted.t(), vt::GdnArgs{scale});
-    vt::IndexCopy(d.q, dcore.t(), dcore_spec.t(), spec_tok);  // :1570
+    if (!core_views) vt::IndexCopy(d.q, dcore.t(), spec_output, spec_tok);  // :1570
   }
 
   // ── 4.2 non-spec prefill recurrence (chunk_gated_delta_rule, :1504-1532):
@@ -5198,20 +5471,21 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
     DBuf vf(d, actdt, {nns_tok, Hv, Dv});
     DBuf dg(d, DType::kF32, {nns_tok, Hv});
     DBuf dbeta(d, DType::kF32, {nns_tok, Hv});
-    post_conv(dconv_ns.t(), a_ns.t(), b_ns.t(), nns_tok, dql2, dkl2, vf, dg,
+    post_conv(dconv_ns.t(), a_ns, b_ns, nns_tok, dql2, dkl2, vf, dg,
               dbeta);
-    DBuf dcore_ns(d, outdt, {nns_tok, Hv, Dv});
+    DBuf dcore_ns;
+    Tensor prefill_output = core_output(1, nns_tok, dcore_ns);
     DBuf dss(d, DType::kF32, {np, Hv, Dv, Dk});
     vt::GdnStateGather(d.q, dss.t(), state.ssm_state,
                        sdi.gdn_prefill_state_idx.t(),
                        &sdi.gdn_prefill_has_initial.t());
     vt::GdnArgs gdn_args{scale};
     gdn_args.query_start_loc_host = meta.prefill_query_start_loc->data();
-    vt::GdnPrefill(d.q, dcore_ns.t(), dql2.t(), dkl2.t(), vf.t(), dg.t(),
+    vt::GdnPrefill(d.q, prefill_output, dql2.t(), dkl2.t(), vf.t(), dg.t(),
                    dbeta.t(), dss.t(), sdi.gdn_prefill_qsl.t(), gdn_args);
     Tensor ssm_cache = state.ssm_state;
     vt::GdnStateScatter(d.q, ssm_cache, dss.t(), sdi.gdn_prefill_state_idx.t());
-    vt::IndexCopy(d.q, dcore.t(), dcore_ns.t(), ns_tok_idx);  // :1571
+    if (!core_views) vt::IndexCopy(d.q, dcore.t(), prefill_output, ns_tok_idx);  // :1571
   }
 
   // ── 5. shared gated-RMSNorm(z) + out_proj over the merged [T,Hv,Dv] core.
@@ -5280,14 +5554,14 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   // MODEL-QWEN35-GDN-EXL3 (#2495 item 4): exclusive and FIRST, for the reason
   // every other arm here is exclusive. An EXL3 load populates none of the
   // fields below, so each would fall through to an empty owner and refuse by
-  // name. bf16 out, as every other arm of this out_proj returns.
+  // name. The output follows explicit model precision, or legacy BF16.
   //
   // The gated-RMSNorm above already wrote `gated_bf16`, so the fp8 fusion
   // branch earlier in this function cannot have fired: it requires
   // `out_proj_fp8`, which an EXL3 load leaves empty.
   if (!w.out_proj_exl3.Empty()) {
     return dense_exl3::Linear(d, gated_in, w.out_proj, w.out_proj_exl3,
-                              DType::kBF16);
+                              d.activation_dtype.value_or(DType::kBF16));
   }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4): exclusive and first; bf16 out, as every
   // other arm of this out_proj returns.
@@ -5312,16 +5586,37 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
 // which is a different quantity on two runs whose forward-call counts differ by
 // one and cannot be joined across two tiers at all.
 void DumpGdnStage(Dev d, const char* stage, const Tensor& t) {
-  const char* dir = actdump::StreamDir();
+  const char* dir = actdump::ActiveStreamDir();
+  const char* knob = "VT_DUMP_ACT";
+  if (dir == nullptr) {
+    // A layer-selected SUB capture also observes the nested GDN boundaries,
+    // without enabling full-model residual-stream downloads.
+    dir = actdump::ActiveStageDir();
+    knob = "VT_DUMP_ACT_SUB";
+  }
   if (dir == nullptr) return;
-  ActDumpTensor(d, "VT_DUMP_ACT", dir, (std::string("gdn_") + stage).c_str(),
-                      t, 1, t.Numel());
+  const int64_t rows = t.shape[0];
+  const int64_t cols = t.Numel() / rows;
+  if (t.stride[0] != cols) {
+    DBuf compact(d, t.dtype, {rows, cols});
+    const size_t row_bytes = static_cast<size_t>(cols) * vt::SizeOf(t.dtype);
+    for (int64_t row = 0; row < rows; ++row)
+      d.b.Copy(d.q, static_cast<char*>(compact.ptr()) + row * row_bytes,
+               static_cast<const char*>(t.data) +
+                   row * t.stride[0] * vt::SizeOf(t.dtype), row_bytes);
+    ActDumpTensor(d, knob, dir,
+                  (std::string("gdn_") + stage).c_str(), compact.t(), rows, cols);
+    return;
+  }
+  ActDumpTensor(d, knob, dir, (std::string("gdn_") + stage).c_str(),
+                t, rows, cols);
 }
 
 DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                    const Tensor& h, const StepDevInputs& sdi,
                    const GDNAttentionMetadata& meta,
-                   const GdnStateCache& state, int64_t T, const Tensor* h_fp8 = nullptr) {
+                   const GdnStateCache& state, int64_t T, const Tensor* h_fp8 = nullptr,
+                   const DenseGptq4LayerWeights* gptq = nullptr) {
   const int64_t Hk = cfg.linear_num_key_heads;
   const int64_t Hv = cfg.linear_num_value_heads;
   const int64_t Dk = cfg.linear_key_head_dim;
@@ -5354,9 +5649,16 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
            "gdn paged: a spec batch must have num_decodes == 0 (upstream "
            "reclassifies non-spec decodes to prefill, gdn_attn.py:243-251)");
   const bool mixed_spec = spec && np > 0;
+  VT_CHECK(gptq == nullptr || !mixed_spec,
+           "gptq4: mixed speculative GDN state routing is not enabled for the text control");
+  if (gptq != nullptr && spec) {
+    VT_CHECK(state.conv_state.dtype == DType::kF16 &&
+                 state.ssm_state.dtype == DType::kF32,
+             "gptq4: speculative GDN requires FP16 conv and FP32 SSM state");
+  }
 
-  const DType indt = GdnInDType();
-  const DType outdt = GdnOutDType();
+  const DType indt = GdnInputDType(d);
+  const DType outdt = GdnOutputDType(d);
   // PERF-27B-GDN-PACKED-REACHABLE (#365). `dtype_compatible` is decided by the
   // ACTIVATION dtypes vt::GdnPackedDecode requires, not by how the GDN weights
   // are stored. `mixed_qkv` has to be PREDICTED because this decision runs
@@ -5377,7 +5679,18 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                                      GdnFp8MergedInProjDType(indt, outdt),
                                      // MODEL-QWEN35-GDN-EXL3 (#2495 item 4).
                                      !w.in_proj_qkv_exl3.Empty()});
-  const bool packed_decode = detail::ShouldUsePackedGdnDecode(
+  // The B70 producer normalizes raw FP16 Conv Q/K inside its FP32 D1
+  // recurrence. Keep its qualified geometry separate from the BF16 selector.
+  const bool fp16_producer_decode = d.q.device.type == vt::DeviceType::kXPU &&
+      d.activation_dtype == DType::kF16 && outdt == DType::kF16 &&
+      state.ssm_state.dtype == DType::kF32 && gptq == nullptr &&
+      !w.in_proj_qkv_exl3.Empty() && !w.in_proj_ba.Empty() && MergedGdnBaEnabled(d) &&
+      PackedGdnDecodeRuntimeEnabled() && sdi.has_gdn_idx &&
+      np == 0 && np_tok == 0 && nd == 1 && nd_tok == 1 && ns == 0 && ns_tok == 0 && T == 1 &&
+      Hk == 16 && Hv == 48 && Dk == 128 && Dv == 128 && Kw == 4;
+  const bool packed_decode = vt::OpRegistered(vt::OpId::kGdnPackedDecode, d.q.device.type) &&
+      (fp16_producer_decode || (d.q.device.type != vt::DeviceType::kXPU &&
+      detail::ShouldUsePackedGdnDecode(
       detail::GdnPackedDecodeEligibility{
           PackedGdnDecodeRuntimeEnabled(),
           vllm::platforms::GetPlatform(d.q.device.type).needs_weight_staging(),
@@ -5399,7 +5712,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
           nd_tok,
           meta.num_spec_decodes,
           meta.num_spec_decode_tokens,
-          T});
+          T})));
 
   // GDN packed-decode geometry diagnostic (default OFF; read ONCE). Gated on the
   // same VT_GDN_DIAG_STEP_LOG toggle as the runner's step log so a c16 packed
@@ -5425,13 +5738,42 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // output under VT_GDN_FP8_IN_BF16 (default OFF, GdnFp8InBf16Enabled) and keeps
   // f32 otherwise. The z gate follows the recurrence-output dtype
   // (VT_GDN_OUT_BF16): the gated-RMSNorm requires gate.dtype == core.dtype.
-  GdnQkvzOutput qkvz =
-      ProjectGdnQkvz(d, w, h, conv_dim, value_dim, indt, outdt, h_fp8, Hv);
+  GdnQkvzOutput qkvz;
+  if (gptq != nullptr) {
+    VT_CHECK(gptq->gdn_qkvz.n == conv_dim + value_dim &&
+                 indt == DType::kF16 && outdt == DType::kF16,
+             "gptq4: merged GDN QKVZ must preserve FP16 geometry and dtype");
+    qkvz.packed_owner.emplace(dense_gptq4::Packed(
+        d, h, gptq->gdn_qkvz, dense_gptq4::Projection::kGdnQkvz));
+    Tensor all = qkvz.packed_owner->t();
+    qkvz.mixed = all.Slice(1, 0, conv_dim);
+    qkvz.z = all.Slice(1, conv_dim, conv_dim + value_dim);
+    DumpGdnStage(d, "qkvz_z", qkvz.z);
+  } else {
+    qkvz = ProjectGdnQkvz(d, w, h, conv_dim, value_dim, indt, outdt,
+                           h_fp8, Hv);
+  }
   Tensor mixed = qkvz.mixed;  // [T,conv_dim], contiguous or row-strided view
   Tensor z = qkvz.z;          // [T,value_dim], contiguous or row-strided view
-  GdnBaOutput ba = ProjectGdnBA(d, w, h, Hv, packed_decode);
+  GdnBaOutput ba;
+  if (gptq != nullptr) {
+    VT_CHECK(w.in_proj_ba.nk && w.in_proj_ba.dtype == DType::kF16 &&
+                 w.in_proj_ba.shape[0] == 2 * Hv,
+             "gptq4: GDN BA must be a merged FP16 [2Hv,H] owner");
+    Tensor ba_weight = ResidentWeight(d, w.in_proj_ba);
+    ba.packed_owner.emplace(dense_gptq4::Dense(
+        d, h, ba_weight, dense_gptq4::Projection::kGdnBa));
+    Tensor both = ba.packed_owner->t();
+    DumpGdnStage(d, "ba", both);
+    ba.b = both.Slice(1, 0, Hv);
+    ba.a = both.Slice(1, Hv, 2 * Hv);
+  } else {
+    ba = ProjectGdnBA(d, w, h, Hv, packed_decode);
+  }
   Tensor braw = ba.b;  // [T,Hv], F32 contiguous or row-strided merged view
   Tensor araw = ba.a;
+  DumpGdnStage(d, "ba_a", araw);
+  DumpGdnStage(d, "ba_b", braw);
 
   // MIXED spec+non-spec batch: split the per-token projections into compact spec
   // / non-spec groups, run each recurrence path, merge back (qwen_gdn_linear_attn
@@ -5448,9 +5790,19 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // f32-accumulated conv math are unchanged. The post-conv split reads dconv's
   // dtype (GdnPostConv/GdnConvSplit are templated on it). The conv reads the
   // merged mixed_qkv view's padded row stride directly — no materialization.
-  const DType convdt = mixed.dtype;
-  Tensor dcw = convdt == DType::kBF16 ? ResidentWeight(d, w.conv1d_weight, {conv_dim, Kw})
-                                      : ResidentWeightF32(d, w.conv1d_weight, {conv_dim, Kw});
+  // The EXL3 prefill producer retains the unrounded FP32 Conv result
+  // through normalization, rounds scaled Q to FP16, and prepares gate prefixes
+  // directly from raw A. Its state remains FP32 across the following decode.
+  const bool fp16_producer_prefill = d.q.device.type == vt::DeviceType::kXPU &&
+      d.activation_dtype == DType::kF16 && mixed.dtype == DType::kF16 && gptq == nullptr &&
+      !w.in_proj_qkv_exl3.Empty() && !spec && np >= 1 && np <= 4 &&
+      np_tok >= np && np_tok <= vt::kGdnFp16MaxTokens &&
+      Hk == 16 && Hv == 48 && Dk == 128 && Dv == 128 && Kw == 4 &&
+      vt::OpRegistered(vt::OpId::kGdnPrefillRawGate, d.q.device.type);
+  const DType convdt = fp16_producer_prefill ? DType::kF32 : mixed.dtype;
+  Tensor dcw = mixed.dtype == DType::kBF16 || mixed.dtype == DType::kF16
+                   ? ResidentWeight(d, w.conv1d_weight, {conv_dim, Kw})
+                   : ResidentWeightF32(d, w.conv1d_weight, {conv_dim, Kw});
   DBuf dconv(d, convdt, {T, conv_dim});
   const int64_t conv_row_elems = conv_dim * (Kw - 1);
   const bool indexed_state_io = sdi.indexed_gdn_state_io;
@@ -5476,6 +5828,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                                conv_cache, sdi.gdn_spec_conv_state_idx.t(),
                                sdi.gdn_num_accepted.t(), sdi.gdn_spec_qsl.t(),
                                vt::CausalConv1dArgs{true});
+    DumpGdnStage(d, "spec_conv", dconv.t());
   } else if (np > 0) {
     // Any prefill: conv over the WHOLE non-spec stream (decodes lead, each with
     // has_initial_state=1). qwen_gdn_linear_attn.py:1360-1375.
@@ -5537,8 +5890,18 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     if (indexed_state_io) {
       Tensor gidx = SubView(sdi.gdn_state_idx.t(), 0, nd);
       Tensor conv_cache = state.conv_state;  // mutable view over the shared buffer
-      vt::CausalConv1dUpdate(d.q, dconv.t(), mixed, dcw, nullptr,
-                             conv_cache, vt::CausalConv1dArgs{true}, &gidx);
+      if (conv_cache.dtype == DType::kF32 || d.b.SupportsCompressedConvState()) {
+        vt::CausalConv1dUpdate(d.q, dconv.t(), mixed, dcw, nullptr,
+                               conv_cache, vt::CausalConv1dArgs{true}, &gidx);
+      } else {
+        // The cache dtype and native in-place update capability are distinct.
+        // Keep the cache contract; compute through the device's F32 working state.
+        DBuf dcs(d, DType::kF32, {nd, conv_dim, Kw - 1});
+        vt::GdnStateGather(d.q, dcs.t(), conv_cache, gidx);
+        vt::CausalConv1dUpdate(d.q, dconv.t(), mixed, dcw, nullptr,
+                               dcs.t(), vt::CausalConv1dArgs{true});
+        vt::GdnStateScatter(d.q, conv_cache, dcs.t(), gidx);
+      }
     } else {
       VT_CHECK(nd_tok == nd,
                "row-copy GDN conv decode requires one token per request");
@@ -5580,19 +5943,42 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     // Coupled bf16 (VT_GDN_BF16, default ON): matmul-input activations q/k/v
     // are bf16 (native WMMA fragments + halved traffic); g/beta and recurrence
     // arithmetic stay f32.
-    const DType actdt = GdnActDType();
+    const DType actdt = GdnActivationDType(d);
     DBuf vf(d, actdt, {T, Hv, Dv});
     DBuf dg(d, DType::kF32, {T, Hv});
     DBuf dbeta(d, DType::kF32, {T, Hv});
     DBuf dql2(d, actdt, {T, Hk, Dk});
     DBuf dkl2(d, actdt, {T, Hk, Dk});
-    if (GlueFuseEnabled()) {
-      vt::GdnPostConv(d.q, dql2.t(), dkl2.t(), vf.t(), dg.t(), dbeta.t(),
-                      dconv.t(), araw, braw, a_log_dev, dt_bias_dev,
-                      vt::L2NormArgs{1e-6F});
+    if (fp16_producer_prefill || GlueFuseEnabled()) {
+      if (fp16_producer_prefill && nd_tok > 0) {
+        // Preserve the existing ordinary decode arithmetic while prefills use
+        // the installed producer's unrounded Conv and scaled-Q convention.
+        // The two groups remain device-side tensor views of one batched step.
+        DBuf decode_conv(d, mixed.dtype, {nd_tok, conv_dim});
+        vt::CastF16(d.q, decode_conv.t(), SubView(dconv.t(), 0, nd_tok));
+        Tensor qd = SubView(dql2.t(), 0, nd_tok), kd = SubView(dkl2.t(), 0, nd_tok),
+               vd = SubView(vf.t(), 0, nd_tok), gd = SubView(dg.t(), 0, nd_tok),
+               bd = SubView(dbeta.t(), 0, nd_tok);
+        vt::GdnPostConv(d.q, qd, kd, vd, gd, bd, decode_conv.t(),
+            araw.Slice(0, 0, nd_tok), braw.Slice(0, 0, nd_tok), a_log_dev, dt_bias_dev,
+            vt::GdnPostConvArgs{1e-6F, false});
+        Tensor qp = SubView(dql2.t(), nd_tok, np_tok), kp = SubView(dkl2.t(), nd_tok, np_tok),
+               vp = SubView(vf.t(), nd_tok, np_tok), gp = SubView(dg.t(), nd_tok, np_tok),
+               bp = SubView(dbeta.t(), nd_tok, np_tok);
+        vt::GdnPostConv(d.q, qp, kp, vp, gp, bp, SubView(dconv.t(), nd_tok, np_tok),
+            araw.Slice(0, nd_tok, nd_tok + np_tok), braw.Slice(0, nd_tok, nd_tok + np_tok), a_log_dev, dt_bias_dev,
+            vt::GdnPostConvArgs{1e-6F, true});
+      } else {
+        vt::GdnPostConv(d.q, dql2.t(), dkl2.t(), vf.t(), dg.t(), dbeta.t(),
+                        dconv.t(), araw, braw, a_log_dev, dt_bias_dev,
+                        vt::GdnPostConvArgs{1e-6F, fp16_producer_prefill});
+      }
       DumpGdnStage(d, "mixed", mixed);
       DumpGdnStage(d, "postconv_q", dql2.t());
+      DumpGdnStage(d, "postconv_k", dkl2.t());
       DumpGdnStage(d, "postconv_v", vf.t());
+      DumpGdnStage(d, "postconv_beta", dbeta.t());
+      DumpGdnStage(d, "postconv_g", dg.t());
       if (const char* td = std::getenv("VT_DUMP_TRUST")) {
         vt::tenstorrent::TrustDump(d.q, td, "pc_q", dql2.t());
         vt::tenstorrent::TrustDump(d.q, td, "pc_v", vf.t());
@@ -5699,8 +6085,14 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       vt::GdnArgs gdn_args{scale};
       gdn_args.query_start_loc_host = p_qsl.data();
       if (indexed_state_io) {
-        vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
-                       dss.t(), sdi.gdn_prefill_qsl.t(), gdn_args);
+        if (fp16_producer_prefill) {
+          vt::GdnPrefillRawGate(d.q, o_pre, q_pre, k_pre, v_pre, araw.Slice(0, nd_tok, nd_tok + np_tok), b_pre,
+              a_log_dev, dt_bias_dev, dss.t(), sdi.gdn_prefill_qsl.t(),
+              vt::GdnArgs{1.0f});
+        } else {
+          vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
+                         dss.t(), sdi.gdn_prefill_qsl.t(), gdn_args);
+        }
         Tensor ssm_cache = state.ssm_state;
         DumpGdnStage(d, "core", o_pre);
         if (const char* td = std::getenv("VT_DUMP_TRUST")) vt::tenstorrent::TrustDump(d.q, td, "core", o_pre);
@@ -5708,8 +6100,13 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                             sdi.gdn_prefill_state_idx.t());
       } else {
         DBuf dpqsl(d, DType::kI32, {np + 1}, p_qsl.data());
-        vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
-                       dss.t(), dpqsl.t(), gdn_args);
+        if (fp16_producer_prefill) {
+          vt::GdnPrefillRawGate(d.q, o_pre, q_pre, k_pre, v_pre, araw.Slice(0, nd_tok, nd_tok + np_tok), b_pre,
+              a_log_dev, dt_bias_dev, dss.t(), dpqsl.t(), vt::GdnArgs{1.0f});
+        } else {
+          vt::GdnPrefill(d.q, o_pre, q_pre, k_pre, v_pre, g_pre, b_pre,
+                         dss.t(), dpqsl.t(), gdn_args);
+        }
         ScatterStateF32(d, state.ssm_state, dss, pidx, ssm_row_elems);
         if (const char* td = std::getenv("VT_DUMP_TRUST")) vt::tenstorrent::TrustDump(d.q, td, "core", o_pre);
       }
@@ -5724,8 +6121,9 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   // The split arm keeps the byte-identical rank-2 [T*Hv, Dv] views; the merged
   // arm passes rank-3 [T,Hv,Dv] so the z gate's padded packed-row stride is
   // representable (same kernel and grid — only the gate addressing changes).
-  Tensor dnw = outdt == DType::kBF16 ? ResidentWeight(d, w.norm_weight, {Dv})
-                                     : ResidentWeightF32(d, w.norm_weight, {Dv});
+  Tensor dnw = outdt == DType::kBF16 || outdt == DType::kF16
+                   ? ResidentWeight(d, w.norm_weight, {Dv})
+                   : ResidentWeightF32(d, w.norm_weight, {Dv});
   const bool sigmoid_gate = GdnSigmoidGate(cfg);
   // A deferred V-head permutation MUST reach the out-projection input, and the
   // arms that quantize straight into the GEMM (`out_proj_fp8`'s fused store,
@@ -5790,7 +6188,10 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
     Tensor gated_f32 = z_strided ? Reshape(dgated.t(), {T, Hv, Dv}) : dgated.t();
     vt::RmsNormGated(d.q, gated_f32, core2, z2, dnw,
                      vt::RmsNormGatedArgs{eps, sigmoid_gate});
-    vt::CastBf16(d.q, gated_bf16.t(), dgated.t());
+    if (gated_bf16.t().dtype == DType::kF16)
+      vt::CastF16(d.q, gated_bf16.t(), dgated.t());
+    else
+      vt::CastBf16(d.q, gated_bf16.t(), dgated.t());
   }
 
   // DEFERRED V-HEAD PERMUTATION on the OUT-PROJECTION INPUT (MODEL-MM-QWEN4-EXP).
@@ -5801,19 +6202,22 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   std::optional<DBuf> gated_perm = PermuteVHeadsIfDeferred(
       d, w, gated_bf16.t(), Hv, /*prefix_elems=*/0, /*inverse=*/true);
   const Tensor gated_in = gated_perm ? gated_perm->t() : gated_bf16.t();
+  if (gptq != nullptr)
+    return dense_gptq4::Packed(d, gated_in, gptq->gdn_out,
+                               dense_gptq4::Projection::kGdnOut);
   // W8A8 cutlass fp8 (35B) when populated, else fp4-resident W4A4 (27B, notes
   // §3.6), else bf16 (default / GGUF).
   // MODEL-QWEN35-GDN-EXL3 (#2495 item 4): exclusive and FIRST, for the reason
   // every other arm here is exclusive. An EXL3 load populates none of the
   // fields below, so each would fall through to an empty owner and refuse by
-  // name. bf16 out, as every other arm of this out_proj returns.
+  // name. The output follows explicit model precision, or legacy BF16.
   //
   // The gated-RMSNorm above already wrote `gated_bf16`, so the fp8 fusion
   // branch earlier in this function cannot have fired: it requires
   // `out_proj_fp8`, which an EXL3 load leaves empty.
   if (!w.out_proj_exl3.Empty()) {
     return dense_exl3::Linear(d, gated_in, w.out_proj, w.out_proj_exl3,
-                              DType::kBF16);
+                              d.activation_dtype.value_or(DType::kBF16));
   }
   // MODEL-FP8-BLOCK-LINEAR (#1189 M4): exclusive and first; bf16 out, as every
   // other arm of this out_proj returns.
@@ -5838,7 +6242,7 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
   const int64_t Hkv = cfg.num_key_value_heads;
   const int64_t Dh = cfg.head_dim;
   const int rot = static_cast<int>(cfg.rotary_dim);
-  const float base = static_cast<float>(cfg.rope_theta);
+  const auto rope = FullAttnRopeArgs(d, cfg);
   const float eps = static_cast<float>(cfg.rms_norm_eps);
 
   const bool fp4_attn = !w.q_proj_fp4.Empty();
@@ -5858,13 +6262,14 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
   // reading a precomputed cos_sin cache; it emits f32 q/k/gate — byte-identical
   // intermediates to the four-op path (value-exact). OFF keeps the exact original
   // AttnGateSplit + RmsNorm(q) + RmsNorm(k) + RopeNeox sequence.
-  DBuf dq3(d, DType::kF32, {T, Hq, Dh});
-  DBuf dk3(d, DType::kF32, {T, Hkv, Dh});
+  const DType attn_dtype = d.activation_dtype.value_or(DType::kF32);
+  DBuf dq3(d, attn_dtype, {T, Hq, Dh});
+  DBuf dk3(d, attn_dtype, {T, Hkv, Dh});
   DBuf gatef(d, DType::kF32, {T, Hq, Dh});
   if (FuseAttnPreambleOn(fp4) && rot > 0 && vt::OpRegistered(vt::OpId::kAttnQkNormRopeGate, d.q.device.type)) {
     DBuf dpos(d, DType::kI32, {T}, positions.data());
     DBuf cos_sin(d, DType::kF32, {T, rot});
-    vt::RopeCosSinCache(d.q, cos_sin.t(), dpos.t(), vt::RopeArgs{base, rot});
+    vt::RopeCosSinCache(d.q, cos_sin.t(), dpos.t(), rope);
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dkw = ResidentWeightF32(d, w.k_norm, {Dh});
     // KERNEL-FUSION-FRAMEWORK W2 — route the fused attn preamble through
@@ -5873,17 +6278,18 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
     // perf-neutral + byte-identical. VT_FUSED_CHAIN_ADOPT=0 restores the hand-call.
     if (FusedChainAdoptEnabled()) {
       vt::FusedChain(d.q, vt::kAttnQkNormRopeGate, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw,
-                     dkw, cos_sin.t(), eps, vt::RopeArgs{base, rot});
+                     dkw, cos_sin.t(), eps, rope);
     } else {
       vt::AttnQkNormRopeGate(d.q, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw, dkw, cos_sin.t(),
-                             vt::RmsNormArgs{eps, true}, vt::RopeArgs{base, rot});
+                             vt::RmsNormArgs{eps, true}, rope);
     }
   } else {
     DBuf qf(d, DType::kF32, {T, Hq, Dh});
     vt::AttnGateSplit(d.q, qf.t(), gatef.t(), qgate);
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dqn2d = Reshape(dq3.t(), {T * Hq, Dh});
-    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, vt::RmsNormArgs{eps, true});
+    const vt::RmsNormArgs qk_norm{eps, true, rope.fp16_intermediates && Dh == 256};
+    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, qk_norm);
     // `RmsNorm` NO LONGER requires `w.dtype == x.dtype`; #2477/#2493 gave the CUDA
     // kernel its own `Tw`, and #2492 did the same for the ROCm and fp8 twins. This
     // selection is therefore a WORK-AROUND FOR A CONSTRAINT THAT NO LONGER EXISTS,
@@ -5897,10 +6303,20 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
                                            : ResidentWeightF32(d, w.k_norm, {Dh});
     Tensor dkn2d = Reshape(dk3.t(), {T * Hkv, Dh});
     vt::RmsNorm(d.q, dkn2d, Reshape(kf, {T * Hkv, Dh}), dkw,
-                vt::RmsNormArgs{eps, true});
+                qk_norm);
     DBuf dpos(d, DType::kI32, {T}, positions.data());
     // A resolved zero rotary width preserves the normalized query/key bytes.
-    if (rot != 0) vt::RopeNeox(d.q, dq3.t(), dk3.t(), dpos.t(), vt::RopeArgs{base, rot});
+    if (rot != 0) {
+      if (rope.fp16_intermediates) {
+        DBuf cos_sin(d, DType::kF32, {T, rot});
+        vt::RopeCosSinCache(d.q, cos_sin.t(), dpos.t(), rope);
+        std::vector<int32_t> rows(T); std::iota(rows.begin(), rows.end(), 0);
+        DBuf cache_rows(d, DType::kI32, {T}, rows.data());
+        vt::RopeFromCache(d.q, dq3.t(), &dk3.t(), cache_rows.t(), cos_sin.t(), rope);
+      } else {
+        vt::RopeNeox(d.q, dq3.t(), dk3.t(), dpos.t(), rope);
+      }
+    }
   }
   Tensor qn3 = dq3.t();
   Tensor kn3 = dk3.t();
@@ -5913,30 +6329,33 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
   v3.shape[2] = Dh;
   v3.stride[1] = Dh;
   v3.stride[2] = 1;
-  // vt::Attention requires q/k/v the same float dtype; qn3/kn3 are f32 after
-  // norm+rope, so upcast a bf16 V (VT_BF16_GEMM_OUT fp4 path) back to f32. This is
-  // the reference (non-paged) path — not perf-critical, so the small cast is fine.
-  std::optional<DBuf> v3f32;
-  if (v3.dtype == DType::kBF16) {
-    v3f32.emplace(d, DType::kF32, std::vector<int64_t>{T, Hkv, Dh});
-    vt::CastF32(d.q, v3f32->t(), v3);
-    v3 = v3f32->t();
+  // Attention requires matching Q/K/V dtype and contiguous values. Scoped
+  // FP16 execution keeps that precision; legacy reference callers retain F32.
+  std::optional<DBuf> v3_contiguous;
+  if (v3.dtype != attn_dtype) {
+    v3_contiguous.emplace(d, attn_dtype, std::vector<int64_t>{T, Hkv, Dh});
+    if (attn_dtype == DType::kF16)
+      vt::CastF16(d.q, v3_contiguous->t(), v3);
+    else
+      vt::CastF32(d.q, v3_contiguous->t(), v3);
+    v3 = v3_contiguous->t();
   } else if (!v3.IsContiguous()) {
     // Merged-QKV packed F32 value view: the token stride spans Q+K+V, but
     // vt::Attention requires contiguous q/k/v. Materialize a dense [T,Hkv,Dh]
     // copy (the reference non-paged path; the paged path instead round-trips
     // through the KV cache). The inner [Hkv,Dh] block is already contiguous, so
     // this is T per-row device copies — not perf-critical for the reference path.
-    v3f32.emplace(d, DType::kF32, std::vector<int64_t>{T, Hkv, Dh});
+    v3_contiguous.emplace(d, attn_dtype, std::vector<int64_t>{T, Hkv, Dh});
     const int64_t inner = Hkv * Dh;
+    const size_t element_bytes = vt::SizeOf(attn_dtype);
     for (int64_t tok = 0; tok < T; ++tok) {
-      d.b.Copy(d.q, v3f32->t().Ptr<float>() + tok * inner,
-               vf.Ptr<float>() + tok * vf.stride[0],
-               static_cast<size_t>(inner) * sizeof(float));
+      d.b.Copy(d.q, v3_contiguous->t().Ptr<uint8_t>() + tok * inner * element_bytes,
+               vf.Ptr<uint8_t>() + tok * vf.stride[0] * element_bytes,
+               static_cast<size_t>(inner) * element_bytes);
     }
-    v3 = v3f32->t();
+    v3 = v3_contiguous->t();
   }
-  DBuf dattn(d, DType::kF32, {T, Hq, Dh});
+  DBuf dattn(d, attn_dtype, {T, Hq, Dh});
   const float scale = 1.0F / std::sqrt(SizeF(Dh));
   // VT-ATTN-NAIVE: the REFERENCE (non-paged) dense arm, as the comment on the V
   // upcast above already says. Production decode runs `FullAttnBlockPaged`, which
@@ -5961,33 +6380,40 @@ DBuf FullAttnBlock(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
 DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cfg,
                         const Tensor& h, const StepDevInputs& sdi,
                         const CommonAttentionMetadata& meta, const PagedKvCache& kv,
-                        int64_t T, const Tensor* h_fp8 = nullptr) {
+                        int64_t T, const Tensor* h_fp8 = nullptr,
+                        const DenseGptq4LayerWeights* gptq = nullptr) {
   const int64_t Hq = cfg.num_attention_heads;
   const int64_t Hkv = cfg.num_key_value_heads;
   const int64_t Dh = cfg.head_dim;
   const int rot = static_cast<int>(cfg.rotary_dim);
-  const float base = static_cast<float>(cfg.rope_theta);
+  const auto rope = FullAttnRopeArgs(d, cfg);
   const float eps = static_cast<float>(cfg.rms_norm_eps);
   // KV-FP8 W3: a third storage dtype joins the two float ones — 1-byte fp8
   // (`vt::DType::kI8`), which `dense_attn::IsFp8KvCache` admits only together
   // with a matching fp8 interpretation, so a bare `kI8` view still fails here.
-  VT_CHECK(kv.dtype == DType::kBF16 || kv.dtype == DType::kF32 ||
+  VT_CHECK(kv.dtype == DType::kBF16 || kv.dtype == DType::kF16 ||
+               kv.dtype == DType::kF32 ||
                dense_attn::IsFp8KvCache(kv),
-           "full-attn paged: KV cache must be bf16, f32, or 1-byte fp8 "
+           "full-attn paged: KV cache must be bf16, f16, f32, or 1-byte fp8 "
            "(--kv-cache-dtype fp8)");
   VT_CHECK(kv.num_kv_heads == Hkv && kv.head_size == Dh,
            "full-attn paged: KV cache head dims mismatch config");
 
   const bool fp4_attn = !w.q_proj_fp4.Empty();
   const bool packed_consumers =
-      FuseAttnPreambleOn(fp4_attn) && sdi.has_attn_cos_sin &&
+      (gptq != nullptr || FuseAttnPreambleOn(fp4_attn)) && sdi.has_attn_cos_sin &&
       vt::OpRegistered(vt::OpId::kAttnQkNormRopeGate, d.q.device.type);
   FullAttnQkvOutput qkv_out =
-      ProjectFullAttnQkv(d, w, h, T, h_fp8, packed_consumers);
+      ProjectFullAttnQkv(d, w, h, T, h_fp8, packed_consumers,
+                         gptq ? &gptq->attn_qkv : nullptr,
+                         2 * Hq * Dh, Hkv * Dh);
   const bool fp4 = qkv_out.fp4;
   Tensor qgate = qkv_out.qgate;
   Tensor kf = qkv_out.key;
   Tensor vf = qkv_out.value;
+  DumpFullAttnStage(d, "qgate", qgate);
+  DumpFullAttnStage(d, "key_raw", kf);
+  DumpFullAttnStage(d, "value", vf);
 
   // Split q|gate + per-head gemma-RMSNorm(q,k) + partial NeoX RoPE + gate
   // passthrough. VT_FUSE_ATTN_PREAMBLE (default OFF) collapses the four ops into
@@ -6040,11 +6466,13 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
       /*decode_r8_on=*/Fa2Decode35BOn(),
       /*spec_decode_on=*/Fa2SpecDecodeOn()};
   const bool fa2_attention = ClassifyDenseFa2(fa2_elig) != DenseFa2Class::kNone;
-  const DType attn_dt = fa2_attention ? DType::kBF16 : DType::kF32;
+  const DType attn_dt = ActDType(d) == DType::kF16
+                            ? DType::kF16
+                            : fa2_attention ? DType::kBF16 : DType::kF32;
   DBuf dq3(d, attn_dt, {T, Hq, Dh});
   DBuf dk3(d, attn_dt, {T, Hkv, Dh});
   DBuf gatef(d, DType::kF32, {T, Hq, Dh});
-  if (FuseAttnPreambleOn(fp4) && sdi.has_attn_cos_sin) {
+  if (packed_consumers) {
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dkw = ResidentWeightF32(d, w.k_norm, {Dh});
     // KERNEL-FUSION-FRAMEWORK W2 — route the fused attn preamble through
@@ -6052,18 +6480,19 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     // vt::AttnQkNormRopeGate launch (perf-neutral + byte-identical). ADOPT=0 rolls back.
     if (FusedChainAdoptEnabled()) {
       vt::FusedChain(d.q, vt::kAttnQkNormRopeGate, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw,
-                     dkw, sdi.attn_cos_sin.t(), eps, vt::RopeArgs{base, rot});
+                     dkw, sdi.attn_cos_sin.t(), eps, rope);
     } else {
       vt::AttnQkNormRopeGate(d.q, dq3.t(), dk3.t(), gatef.t(), qgate, kf, dqw, dkw,
                              sdi.attn_cos_sin.t(), vt::RmsNormArgs{eps, true},
-                             vt::RopeArgs{base, rot});
+                             rope);
     }
   } else {
     DBuf qf(d, DType::kF32, {T, Hq, Dh});
     vt::AttnGateSplit(d.q, qf.t(), gatef.t(), qgate);
     Tensor dqw = ResidentWeightF32(d, w.q_norm, {Dh});
     Tensor dqn2d = Reshape(dq3.t(), {T * Hq, Dh});
-    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, vt::RmsNormArgs{eps, true});
+    const vt::RmsNormArgs qk_norm{eps, true, rope.fp16_intermediates && Dh == 256};
+    vt::RmsNorm(d.q, dqn2d, Reshape(qf.t(), {T * Hq, Dh}), dqw, qk_norm);
     // k-norm weight dtype must equal kf's (RmsNorm requires w.dtype == x.dtype). When
     // kf is bf16 (VT_BF16_GEMM_OUT on the fp4 path) use the raw bf16 on-disk k_norm;
     // otherwise (fp8/35B or toggle off) keep the f32 upcast. bf16 kf · bf16 dkw -> f32.
@@ -6071,9 +6500,18 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
                                            : ResidentWeightF32(d, w.k_norm, {Dh});
     Tensor dkn2d = Reshape(dk3.t(), {T * Hkv, Dh});
     vt::RmsNorm(d.q, dkn2d, Reshape(kf, {T * Hkv, Dh}), dkw,
-                vt::RmsNormArgs{eps, true});
+                qk_norm);
     // Keep negative-width validation in the shared primitive. Only zero is no work.
-    if (rot != 0) vt::RopeNeox(d.q, dq3.t(), dk3.t(), sdi.positions.t(), vt::RopeArgs{base, rot});
+    if (rot != 0) {
+      if (rope.fp16_intermediates) {
+        VT_CHECK(sdi.has_attn_cos_sin, "EXL3 FP16 attention requires its per-step RoPE cache");
+        // The cache contains selected rows for this step, not positions0..P.
+        vt::RopeFromCache(d.q, dq3.t(), &dk3.t(), sdi.attn_cache_rows.t(),
+                          sdi.attn_cos_sin.t(), rope);
+      } else {
+        vt::RopeNeox(d.q, dq3.t(), dk3.t(), sdi.positions.t(), rope);
+      }
+    }
   }
   Tensor qn3 = dq3.t();
   Tensor kn3 = dk3.t();
@@ -6094,32 +6532,48 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   // (Phase 1: f32 query · <cache-dtype> cache, f32-accumulate softmax — the
   // attention kernel converts bf16 cache reads to f32).
   //
-  // KV-FP8 W3 (#1593): the fp8 cache takes the SAME bf16 normalisation, and it
-  // has to. `vt::ReshapeAndCacheFp8` quantizes from ONE source dtype
-  // (`k.dtype == v.dtype`, ops.cpp), and K and V do not arrive in the same one:
-  // K is `attn_dt`, which is f32 for every fp8 cache because `kv.dtype ==
-  // DType::kBF16` is a term of both FA2 eligibility tests above, while V is
-  // whatever the v_proj GEMM emitted — bf16 on the block-wise fp8 arm
-  // (`MatmulFp8BlockScaledD`), bf16 on the NVFP4 arm under the default
-  // `VT_BF16_GEMM_OUT`, and bf16 on ordinary torch safetensors
-  // (`MatmulBf16D`). Only the per-tensor fp8 arm and the transposed
-  // GGUF/synthetic path pair f32 with f32, which is why a CPU gate over
-  // synthetic weights could not see this. bf16 rather than f32 because bf16 is
-  // the dtype upstream quantizes from: its model IS bf16 where
-  // `reshape_and_cache_flash` takes key/value (`cache_kernels.cu:314-401`).
+  // KV-FP8 W3 (#1593): the FP8 store quantizes matching K/V source dtypes.
+  // The GPTQ draft has native FP16 K and V, as does the production FP16 model.
+  // Other arms can produce F32 K and BF16/F32 V; those normalize to BF16
+  // before the FP8 store. The BF16 cache arm follows the same normalization.
   Tensor kw = kn3;
   Tensor vw = v3;
-  DBuf kbf(d, DType::kBF16, {T, Hkv, Dh});
-  DBuf vbf(d, DType::kBF16, {T, Hkv, Dh});
-  if (kv.dtype == DType::kBF16 || dense_attn::IsFp8KvCache(kv)) {
+  DumpFullAttnStage(d, "q_rope", qn3);
+  DumpFullAttnStage(d, "k_rope", kn3);
+  DumpFullAttnStage(d, "gate", gatef.t());
+  const bool fp8_kv = dense_attn::IsFp8KvCache(kv);
+  if (kv.dtype == DType::kF16) {
+    VT_CHECK(kw.dtype == DType::kF16 && vw.dtype == DType::kF16,
+             "gptq4: F16 KV cache requires F16 attention K and V projections");
+  }
+  if (fp8_kv && (kw.dtype == DType::kF16 || vw.dtype == DType::kF16))
+    VT_CHECK(kw.dtype == DType::kF16 && vw.dtype == DType::kF16,
+             "qwen3_5: FP8 KV cache requires matching FP16 K and V");
+  std::optional<DBuf> kf32, vf32;
+  if (kv.dtype == DType::kF32) {
+    if (kw.dtype != DType::kF32) {
+      kf32.emplace(d, DType::kF32, std::vector<int64_t>{T, Hkv, Dh});
+      vt::CastF32(d.q, kf32->t(), kw);
+      kw = kf32->t();
+    }
+    if (vw.dtype != DType::kF32) {
+      vf32.emplace(d, DType::kF32, std::vector<int64_t>{T, Hkv, Dh});
+      vt::CastF32(d.q, vf32->t(), vw);
+      vw = vf32->t();
+    }
+  }
+  std::optional<DBuf> kbf, vbf;
+  if (kv.dtype == DType::kBF16 ||
+      (fp8_kv && kw.dtype != DType::kF16)) {
     // K may already be bf16 (an FA2 preamble emits bf16 k directly —
     // the RN round of the same f32 value this CastBf16 would produce); only
     // down-cast when the preamble/fallback produced f32 K.
     if (kn3.dtype == DType::kBF16) {
       kw = kn3;
     } else {
-      vt::CastBf16(d.q, kbf.t(), kn3);
-      kw = kbf.t();
+      kbf.emplace(d, DType::kBF16, std::vector<int64_t>{T, Hkv, Dh});
+      vt::CastBf16(d.q, kbf->t(), kn3);
+      kw = kbf->t();
     }
     // V may already be bf16 (VT_BF16_GEMM_OUT: the fp4 v_proj GEMM emits bf16
     // directly, removing the cutlass CastBf16ToF32 + this CastBf16 round-trip);
@@ -6127,8 +6581,9 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
     if (v3.dtype == DType::kBF16) {
       vw = v3;
     } else {
-      vt::CastBf16(d.q, vbf.t(), v3);
-      vw = vbf.t();
+      vbf.emplace(d, DType::kBF16, std::vector<int64_t>{T, Hkv, Dh});
+      vt::CastBf16(d.q, vbf->t(), v3);
+      vw = vbf->t();
     }
   }
 
@@ -6158,13 +6613,16 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   // max_seq_len is the FA-2 launcher's host grid bound (same pattern).
   vt::PagedAttentionArgs pa_args{scale, meta.causal};
   pa_args.query_start_loc_host = meta.query_start_loc.data();
-  pa_args.max_seq_len = meta.max_seq_len;
+  pa_args.max_seq_len = d.q.device.type == vt::DeviceType::kXPU
+      ? detail::XpuBatchedVerifyContextBound(kv, ActDType(d) == DType::kF16, Hq, T, meta)
+      : meta.max_seq_len;
   // SPEC-DFLASH2 W10 (#1857): the runner's spec-as-decode classification — a
   // uniform-qlen verify stays on the FA-2 split-KV DECODE lane instead of the
   // num_splits=1 prefill ladder. 0 on every non-verify step (routing unchanged).
   pa_args.uniform_spec_query_len = meta.uniform_spec_query_len;
   dense_attn::ApplyKvCacheQuant(pa_args, kv);
   vt::PagedAttention(d.q, dattn.t(), qn3, k_cache, v_cache, dblk, dsl, dqsl, pa_args);
+  DumpFullAttnStage(d, "core", dattn.t());
 
   // VT_DUMP_ATTN (issue #41, 0.8B ROCm divergence spike W1/W2): dump the
   // full-attn block's internals per full-attn-layer call index (0-based), as
@@ -6197,7 +6655,8 @@ DBuf FullAttnBlockPaged(Dev d, const FullAttnLayerWeights& w, const HfConfig& cf
   // Sigmoid output gate, folded into the o_proj activation quant on the true-W4A4
   // path (§5) — see SigmoidGateOProjD.
   return SigmoidGateOProjD(d, Reshape(dattn.t(), {T, Hq * Dh}),
-                           Reshape(gatef.t(), {T, Hq * Dh}), w, fp4);  // [T,H]
+                           Reshape(gatef.t(), {T, Hq * Dh}), w, fp4,
+                           gptq ? &gptq->attn_out : nullptr);  // [T,H]
 }
 
 // Per-expert silu-mul MLP over the gathered token rows `x` [n, H] bf16 ->
@@ -7915,18 +8374,21 @@ void RunLayer(Dev d, const Qwen3_5MoeLayerWeights& layer, const HfConfig& cfg,
 // gate). h [T,H] bf16 (device) -> DBuf [T,H] bf16 (device). Reused by the dense
 // forward below; the gate/up/down weights are W4A4-materialized-to-bf16 at load.
 DBuf DenseMlpBlock(Dev d, const DenseMlpWeights& w, const HfConfig& cfg,
-                   const Tensor& dh, int64_t T) {
+                   const Tensor& dh, int64_t T,
+                   const DenseGptq4LayerWeights* gptq = nullptr) {
   const int64_t I = cfg.intermediate_size;
+  if (gptq != nullptr)
+    return dense_gptq4::Mlp(d, dh, gptq->mlp_gate_up, gptq->mlp_down, I);
   // MODEL-QWEN35-EXL3 (#2495 item 3). FIRST and exclusive. Routed through the
   // SHARED `layers::MlpGateUpMethodBase` seam AGENTS.md names, exactly as
   // `qwen3.cpp:136-145` does for the Llama/Qwen3 dense MLP -- the model calls
   // one method and never asks which scheme it bound.
   if (w.IsExl3()) {
     DBuf act = dense_exl3::GateUp(d, dh, w.gate_up_proj, w.gate_proj_exl3,
-                                  w.up_proj_exl3, I);
+                                  w.up_proj_exl3, I, &w.gate_up_exl3);
     (void)T;
     return dense_exl3::Linear(d, act.t(), w.down_proj, w.down_proj_exl3,
-                              DType::kBF16);
+                              d.activation_dtype.value_or(DType::kBF16));
   }
   // fp4-resident W4A4 path (real 27B, notes §5 step-6a) when populated; else the
   // bf16 path (synthetic CPU tests). Exactly one representation is filled.
@@ -8207,6 +8669,9 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
                         const PagedKvCache* attn_kv,
                         const GdnStateCache* gdn_state, int64_t T,
                         int64_t layer_index) {
+#ifdef VLLM_CPP_XPU
+  const vt::xpu::ProfileLayerScope profile_layer(layer_index);
+#endif
   const int64_t H = cfg.hidden_size;
   const float eps = static_cast<float>(cfg.rms_norm_eps);
 
@@ -8219,7 +8684,7 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
   // to every dump NESTED inside the mixer, so the GDN stage probes no longer
   // keep a counter of their own.
   const actdump::LayerScope dump_here(actdump::Current().step, layer_index);
-  const char* dump_sub_dir = actdump::StageDir();
+  const char* dump_sub_dir = actdump::ActiveStageDir();
   auto DumpStage = [&](const char* stage, DBuf& buf) {
     if (dump_sub_dir == nullptr) return;
     ActDumpTensor(d, "VT_DUMP_ACT_SUB", dump_sub_dir, stage, buf.t(), T, H);
@@ -8248,12 +8713,15 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
     if (layer.is_linear_attention) {
       VT_CHECK(gdn_state != nullptr,
                "paged dense layer: GDN layer needs a GdnStateCache");
-      return GdnBlockPaged(d, layer.gdn, cfg, dhn.t(), sdi, gdn_meta, *gdn_state, T);
+      return GdnBlockPaged(d, layer.gdn, cfg, dhn.t(), sdi, gdn_meta, *gdn_state,
+                           T, nullptr,
+                           layer.gptq4.Empty() ? nullptr : &layer.gptq4);
     }
     VT_CHECK(attn_kv != nullptr,
              "paged dense layer: full-attn layer needs a PagedKvCache");
     return FullAttnBlockPaged(d, layer.attn, cfg, dhn.t(), sdi, attn_meta,
-                              *attn_kv, T);
+                              *attn_kv, T, nullptr,
+                              layer.gptq4.Empty() ? nullptr : &layer.gptq4);
   }();
   DumpStage("block_out", attn);
 
@@ -8269,7 +8737,8 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
   vt::RmsNorm(d.q, dh2.t(), attn.t(), dw_post, vt::RmsNormArgs{eps, true}, &res.t());
   DumpStage("post_attn_norm", dh2);
 
-  hidden = DenseMlpBlock(d, layer.mlp, cfg, dh2.t(), T);
+  hidden = DenseMlpBlock(d, layer.mlp, cfg, dh2.t(), T,
+                         layer.gptq4.Empty() ? nullptr : &layer.gptq4);
   DumpStage("mlp_out", hidden);
 }
 
@@ -8277,39 +8746,50 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
 // The fc-cat-norm head from qwen3_5_mtp.py:129-140, shared by the standalone
 // (Qwen3_5MTPModel::Forward) and paged (ForwardPaged) drafts so a single copy of
 // the head math feeds both. Produces `h = fc(cat[pre_fc_norm_embedding(embed),
-// pre_fc_norm_hidden(target_hidden)])` as a [T,H] bf16 device buffer; the caller
+// pre_fc_norm_hidden(target_hidden)])` as a [T,H] activation-dtype device buffer; the caller
 // runs the (dense or MoE) decoder layer + final norm over it. `embed_tokens` is
 // the shared target embedding; `target_hidden_states` is the target model's
-// post-final-norm bf16 [T,H] output (the drafter's hidden-state tap).
+// post-final-norm [T,H] output (the drafter's hidden-state tap).
 DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
                    const HfConfig& config, const OwnedTensor& embed_tokens,
                    const std::vector<int32_t>& input_ids,
-                   const Tensor& target_hidden_states, int64_t tokens) {
+                   const Tensor& target_hidden_states, int64_t tokens,
+                   const Tensor* inputs_embeds = nullptr) {
   const int64_t hidden_size = config.hidden_size;
   const int64_t vocab_size = config.vocab_size;
   const float eps = static_cast<float>(config.rms_norm_eps);
+  const DType draft_dtype = ActDType(device);
 
-  Tensor embedding_table = Qwen3_5EmbeddingTable(device.b, device.q, embed_tokens,
-                                                vocab_size, hidden_size);
-  DBuf device_ids(device, DType::kI32, {tokens}, input_ids.data());
-  DBuf embedding(device, DType::kBF16, {tokens, hidden_size});
-  vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
+  DBuf device_ids, embedding;
+  Tensor embedding_view;
+  if (inputs_embeds != nullptr) {
+    // Already merged by the caller from the SAME cached image output; the
+    // draft has no second encoder. Preserve FP16 XPU/BF16 generic storage.
+    embedding_view = *inputs_embeds;
+  } else {
+    Tensor embedding_table = Qwen3_5EmbeddingTable(device.b, device.q, embed_tokens,
+                                                  vocab_size, hidden_size);
+    device_ids = DBuf(device, DType::kI32, {tokens}, input_ids.data());
+    embedding = DBuf(device, draft_dtype, {tokens, hidden_size});
+    vt::Embedding(device.q, embedding.t(), embedding_table, device_ids.t());
+    embedding_view = embedding.t();
+  }
 
   Tensor embedding_norm_weight =
       ResidentWeight(device, weights.pre_fc_norm_embedding, {hidden_size});
   Tensor hidden_norm_weight =
       ResidentWeight(device, weights.pre_fc_norm_hidden, {hidden_size});
-  DBuf embedding_norm(device, DType::kBF16, {tokens, hidden_size});
-  DBuf target_norm(device, DType::kBF16, {tokens, hidden_size});
-  vt::RmsNorm(device.q, embedding_norm.t(), embedding.t(), embedding_norm_weight,
+  DBuf embedding_norm(device, draft_dtype, {tokens, hidden_size});
+  DBuf target_norm(device, draft_dtype, {tokens, hidden_size});
+  vt::RmsNorm(device.q, embedding_norm.t(), embedding_view, embedding_norm_weight,
               vt::RmsNormArgs{eps, true});
   vt::RmsNorm(device.q, target_norm.t(), target_hidden_states, hidden_norm_weight,
               vt::RmsNormArgs{eps, true});
 
   // torch.cat([embedding_norm, target_norm], -1), row by row (portable, exact).
-  DBuf concatenated(device, DType::kBF16, {tokens, 2 * hidden_size});
+  DBuf concatenated(device, draft_dtype, {tokens, 2 * hidden_size});
   const size_t row_bytes =
-      static_cast<size_t>(hidden_size) * vt::SizeOf(DType::kBF16);
+      static_cast<size_t>(hidden_size) * vt::SizeOf(draft_dtype);
   auto* cat = static_cast<uint8_t*>(concatenated.ptr());
   const auto* embed = static_cast<const uint8_t*>(embedding_norm.t().data);
   const auto* target = static_cast<const uint8_t*>(target_norm.t().data);
@@ -8321,13 +8801,17 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
                   row_bytes);
   }
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): the fc-cat projection through the ONE
-  // EXL3 linear seam when the checkpoint quantized it, bf16 out because that is
-  // what `MatmulBf16D` returns and what the decoder layer below consumes. There
+  // EXL3 linear seam when the checkpoint quantized it, in the same activation
+  // dtype that the decoder layer below consumes. There
   // is no second matmul: `dense_exl3::Linear` forwards to
   // `layers::Exl3LinearMethod`, which calls `dense_attn::Exl3MatmulD`.
   if (weights.IsExl3()) {
     return dense_exl3::Linear(device, concatenated.t(), weights.fc,
-                              weights.fc_exl3, DType::kBF16);
+                              weights.fc_exl3, draft_dtype);
+  }
+  if (weights.IsGptq4Draft()) {
+    return dense_gptq4::Packed(device, concatenated.t(), weights.fc_gptq4,
+                               dense_gptq4::Projection::kMtpFc);
   }
   return MatmulBf16D(device, concatenated.t(), weights.fc);
 }
@@ -8369,6 +8853,7 @@ StepDevInputs BuildFullAttnStepDevInputs(Dev d,
                                          const std::vector<int32_t>& positions,
                                          const CommonAttentionMetadata& am) {
   const int64_t T = static_cast<int64_t>(positions.size());
+  v1::ValidateAttentionUploadMetadata(am, T);
   ValidateFullAttnStepMetadata(T, am);
   return StepDevInputs{
       DBuf(d, DType::kI32, {T}, positions.data()),
@@ -8400,12 +8885,13 @@ StepDevInputs BuildFullAttnStepDevInputs(Dev d,
       0,                           // gdn_spec_num_cols
       DBuf(d, DType::kF32, {1}),  // attn cos|sin stub (MaybeBuildAttnCosSin fills)
       false,
+      BuildAttnCacheRows(d, T),  // immutable step-local RoPE cache rows
   };
 }
 
 // ── MTP final-norm + owning return (SPEC-MTP I5c), shared by Forward/ForwardPaged.
 // mtp.norm over the fused residual stream (qwen3_5_mtp.py:163-165), then move the
-// [T,H] bf16 result into a pool-backed owning carrier (the WrapDeviceLogits idiom).
+// [T,H] result into a pool-backed owning carrier (the WrapDeviceLogits idiom).
 Qwen3_5MTPHiddenStates MtpFinalize(Dev device, const Qwen3_5MTPWeights& weights,
                                    const HfConfig& config, DBuf& hidden,
                                    DBuf& residual, int64_t tokens) {
@@ -8413,7 +8899,7 @@ Qwen3_5MTPHiddenStates MtpFinalize(Dev device, const Qwen3_5MTPWeights& weights,
   const float eps = static_cast<float>(config.rms_norm_eps);
   Tensor final_norm_weight =
       ResidentWeight(device, weights.final_norm, {hidden_size});
-  DBuf normalized(device, DType::kBF16, {tokens, hidden_size});
+  DBuf normalized(device, ActDType(device), {tokens, hidden_size});
   vt::RmsNorm(device.q, normalized.t(), hidden.t(), final_norm_weight,
               vt::RmsNormArgs{eps, true}, &residual.t());
   Qwen3_5MTPHiddenStates out;
@@ -8423,6 +8909,8 @@ Qwen3_5MTPHiddenStates MtpFinalize(Dev device, const Qwen3_5MTPWeights& weights,
 }
 
 }  // namespace
+
+static Dev DenseDev(Queue& queue, const Qwen3_5DenseWeights& weights);
 
 // Test-only exposed wrapper over the anon-ns GdnBlockPaged + BuildStepDevInputs
 // (SPEC-MTP I5a). Runs ONE GDN layer's paged forward over one batched step,
@@ -8530,6 +9018,47 @@ std::vector<float> ProjectGdnFp8QkvzForTest(vt::Queue queue,
   return host;
 }
 
+std::vector<uint16_t> ReplayQwen3_5GdnBlockFp16ForDiagnostics(
+    vt::Queue& queue, const GdnLayerWeights& weights, const HfConfig& config,
+    const vt::Tensor& normalized, const GdnStateCache& state,
+    const v1::CommonAttentionMetadata& attention,
+    const v1::GDNAttentionMetadata& gdn, const std::vector<int32_t>& positions,
+    int64_t selected_token_row) {
+  VT_CHECK(queue.device.type == vt::DeviceType::kXPU &&
+               normalized.device == queue.device && normalized.dtype == DType::kF16 &&
+               normalized.rank == 2 && normalized.IsContiguous() &&
+               normalized.shape[1] == config.hidden_size &&
+               normalized.shape[0] > 0 && normalized.shape[0] <= 1600 &&
+               selected_token_row >= 0 && selected_token_row < normalized.shape[0] &&
+               positions.size() == size_t(normalized.shape[0]) &&
+               attention.num_actual_tokens == normalized.shape[0] &&
+               gdn.num_actual_tokens == normalized.shape[0] &&
+               state.conv_state.dtype == DType::kF16 && state.ssm_state.dtype == DType::kF32,
+           "GDN FP16 replay: invalid bounded device inputs");
+  const auto slots = detail::ValidateGdnStateCacheLayout({state});
+  VT_CHECK(state.conv_state.device == queue.device && state.ssm_state.device == queue.device &&
+               state.conv_state.data && state.ssm_state.data &&
+               state.conv_state.IsContiguous() && state.ssm_state.IsContiguous() &&
+               state.conv_state.shape[1] == 2 * config.linear_num_key_heads * config.linear_key_head_dim +
+                                            config.linear_num_value_heads * config.linear_value_head_dim &&
+               state.conv_state.shape[2] >= config.linear_conv_kernel_dim - 1 &&
+               state.ssm_state.shape[1] == config.linear_num_value_heads &&
+               state.ssm_state.shape[2] == config.linear_value_head_dim &&
+               state.ssm_state.shape[3] == config.linear_key_head_dim,
+           "GDN FP16 replay: incompatible persistent state layout/device");
+  detail::ValidateGdnAttentionMetadata(gdn, slots, false);
+  Dev d{vt::GetBackend(queue.device), queue, DType::kF16};
+  auto sdi = BuildStepDevInputs(d, positions, attention, gdn, slots);
+  DBuf output = GdnBlockPaged(d, weights, config, normalized, sdi, gdn, state, normalized.shape[0]);
+  VT_CHECK(output.t().dtype == DType::kF16 && output.t().stride[1] == 1,
+           "GDN FP16 replay: unexpected output row");
+  std::vector<uint16_t> row(config.hidden_size);
+  d.b.Copy(d.q, row.data(), static_cast<const char*>(output.t().data) +
+           selected_token_row * output.t().stride[0] * sizeof(uint16_t), row.size() * sizeof(uint16_t));
+  d.b.Synchronize(d.q); // Private diagnostic observation; no normal caller.
+  return row;
+}
+
 std::vector<float> GdnBlockPagedForTest(vt::Queue queue, const GdnLayerWeights& w,
                                         const HfConfig& cfg,
                                         const std::vector<float>& h_host,
@@ -8632,6 +9161,33 @@ int64_t MoeKqDeviceCalls() { return MoeKqDeviceCallCount(); }
 // shape: build the internal Dev, run the block, release the pooled DBuf into an
 // owning GdnBlockOutput. The Qwen3.5/3.6 forward never calls this — it is a pure
 // ADD, so that path stays byte-identical. See qwen3_5_gdn_block.h.
+FullAttnStepInputs BuildFullAttnStepInputs(
+    vt::Queue& queue, const std::vector<int32_t>& positions,
+    const CommonAttentionMetadata& metadata, const HfConfig& config,
+    std::optional<vt::DType> activation_dtype) {
+  Dev d{vt::GetBackend(queue.device.type), queue, activation_dtype};
+  auto inputs = std::make_shared<StepDevInputs>(
+      BuildFullAttnStepDevInputs(d, positions, metadata));
+  MaybeBuildAttnCosSin(d, *inputs, config, static_cast<int64_t>(positions.size()));
+  return FullAttnStepInputs{inputs};
+}
+
+FullAttnBlockOutput RunFullAttnBlockPaged(
+    vt::Queue& queue, const FullAttnLayerWeights& weights,
+    const HfConfig& config, const vt::Tensor& hidden,
+    const FullAttnStepInputs& step, const CommonAttentionMetadata& metadata,
+    const PagedKvCache& cache, int64_t tokens,
+    std::optional<vt::DType> activation_dtype) {
+  VT_CHECK(step.impl != nullptr, "RunFullAttnBlockPaged: empty step inputs");
+  VT_CHECK(!activation_dtype || hidden.dtype == *activation_dtype,
+           "RunFullAttnBlockPaged: hidden dtype must match model precision");
+  Dev d{vt::GetBackend(queue.device.type), queue, activation_dtype};
+  const auto& inputs = *static_cast<const StepDevInputs*>(step.impl.get());
+  DBuf output = FullAttnBlockPaged(d, weights, config, hidden, inputs,
+                                 metadata, cache, tokens);
+  return FullAttnBlockOutput{output.t(), output.ReleaseShared()};
+}
+
 GdnStepInputs BuildGdnStepInputs(vt::Queue& queue,
                                  const std::vector<int32_t>& positions,
                                  const CommonAttentionMetadata& attn_meta,
@@ -8649,12 +9205,15 @@ GdnBlockOutput RunGdnBlockPaged(vt::Queue& queue, const GdnLayerWeights& weights
                                 const GdnStepInputs& step,
                                 const GDNAttentionMetadata& gdn_meta,
                                 const GdnStateCache& state, int64_t T,
-                                const vt::Tensor* dh_fp8) {
+                                const vt::Tensor* dh_fp8,
+                                std::optional<vt::DType> activation_dtype) {
   VT_CHECK(step.impl != nullptr,
            "RunGdnBlockPaged: the step inputs are empty; build them once per "
            "step with BuildGdnStepInputs and keep the handle alive across the "
            "layer loop");
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  VT_CHECK(!activation_dtype || dh.dtype == *activation_dtype,
+           "RunGdnBlockPaged: hidden dtype must match explicit model precision");
+  Dev d{vt::GetBackend(queue.device.type), queue, activation_dtype};
   const auto& sdi = *static_cast<const StepDevInputs*>(step.impl.get());
   DBuf out = GdnBlockPaged(d, weights, config, dh, sdi, gdn_meta, state, T, dh_fp8);
   GdnBlockOutput r;
@@ -8803,10 +9362,10 @@ static void MaybeCaptureAuxTap(Dev d, int64_t l,
   if (aux_out == nullptr) return;
   for (size_t k = 0; k < aux_layer_ids->size(); ++k) {
     if (static_cast<int64_t>((*aux_layer_ids)[k]) != l) continue;
-    DBuf tmp(d, DType::kBF16, {T, H});
+    DBuf tmp(d, ActDType(d), {T, H});
     Tensor tt = tmp.t();
     vt::Add(d.q, tt, hidden, res);  // bf16 (hidden+res); matches eagle3 aux value
-    const size_t row_bytes = static_cast<size_t>(H) * vt::SizeOf(DType::kBF16);
+    const size_t row_bytes = static_cast<size_t>(H) * vt::SizeOf(ActDType(d));
     const int64_t taps = aux_out->shape[1] / H;
     const size_t dst_pitch = static_cast<size_t>(taps) * row_bytes;
     char* dst0 = static_cast<char*>(aux_out->data) + static_cast<size_t>(k) * row_bytes;
@@ -9510,7 +10069,7 @@ std::vector<float> Qwen3_5DenseModel::ForwardDense(
            "qwen3_5 dense forward: positions length must equal token count");
   VT_CHECK(static_cast<int64_t>(weights.layers.size()) == config.num_hidden_layers,
            "qwen3_5 dense forward: weights.layers size must equal num_hidden_layers");
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   const float eps = static_cast<float>(config.rms_norm_eps);
 
   // Embed: hidden = embed_tokens[token_ids] (bf16, device-resident). res = 0.
@@ -9557,7 +10116,7 @@ std::vector<float> Qwen3_5DenseModel::ForwardDenseHidden(
            "qwen3_5 dense forward hidden: positions length must equal token count");
   VT_CHECK(static_cast<int64_t>(weights.layers.size()) == config.num_hidden_layers,
            "qwen3_5 dense forward hidden: weights.layers size must equal num_hidden_layers");
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   const float eps = static_cast<float>(config.rms_norm_eps);
 
   Tensor dtab =
@@ -9621,7 +10180,7 @@ std::vector<float> Qwen3_5DenseModel::ForwardDenseLastLogits(
   VT_CHECK(static_cast<int64_t>(weights.layers.size()) == config.num_hidden_layers,
            "qwen3_5 dense forward last logits: weights.layers size must equal "
            "num_hidden_layers");
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   const float eps = static_cast<float>(config.rms_norm_eps);
 
   Tensor dtab = Qwen3_5EmbeddingTable(d.b, d.q, weights.embed_tokens, vocab, H);
@@ -9701,11 +10260,13 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::Forward(
   VT_CHECK(target_hidden_states.rank == 2 &&
                target_hidden_states.shape[0] == tokens &&
                target_hidden_states.shape[1] == hidden_size &&
-               target_hidden_states.dtype == DType::kBF16 &&
+               (target_hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 target_hidden_states.dtype == DType::kF16)) &&
                target_hidden_states.IsContiguous() &&
                target_hidden_states.device == queue.device,
            "qwen3_5 MTP forward: target hidden states must be contiguous "
-           "bf16 [T,H] on the queue device");
+           "bf16 or xpu f16 [T,H] on the queue device");
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): ONE precondition, two containers.
   // The trellis stores [K=2H, N=H] where the torch Linear stores [N=H, K=2H],
   // so the same projection is asserted through the orientation its own owner
@@ -9713,7 +10274,10 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::Forward(
   VT_CHECK(weights_->IsExl3()
                ? (weights_->fc_exl3.InFeatures() == 2 * hidden_size &&
                   weights_->fc_exl3.OutFeatures() == hidden_size)
-               : (weights_->fc.rank == 2 && weights_->fc.nk &&
+               : weights_->IsGptq4Draft()
+                 ? (weights_->fc_gptq4.k == 2 * hidden_size &&
+                    weights_->fc_gptq4.n == hidden_size)
+                 : (weights_->fc.rank == 2 && weights_->fc.nk &&
                   weights_->fc.shape[0] == hidden_size &&
                   weights_->fc.shape[1] == 2 * hidden_size),
            "qwen3_5 MTP forward: fc must be raw bf16 [H,2H] or an EXL3 trellis "
@@ -9735,7 +10299,9 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::Forward(
   // overload gains a caller, and adding the guard later with the caller is how
   // this row lost its step boundary the first time.
   const Qwen35ExpertStreamStep expert_stream_step;
-  Dev device{vt::GetBackend(queue.device.type), queue};
+  Dev device{vt::GetBackend(queue.device.type), queue,
+             target_hidden_states.dtype == DType::kF16
+                 ? std::optional<DType>(DType::kF16) : std::nullopt};
 
   // Qwen3_5MultiTokenPredictor.forward head: shared embedding + independent Gemma
   // RMSNorms + cat + fc (extracted into MtpHeadHidden, shared with ForwardPaged).
@@ -9760,7 +10326,8 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
     const std::vector<int32_t>& positions,
     const vt::Tensor& target_hidden_states,
     const v1::CommonAttentionMetadata& attn_meta, PagedKvCache& draft_kv,
-    vt::Queue& queue, int64_t spec_step_idx) const {
+    vt::Queue& queue, int64_t spec_step_idx,
+    const vt::Tensor* inputs_embeds) const {
   const int64_t tokens = static_cast<int64_t>(input_ids.size());
   const int64_t hidden_size = config_->hidden_size;
   const int64_t num_layers = weights_->NumLayers();
@@ -9772,11 +10339,21 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
   VT_CHECK(target_hidden_states.rank == 2 &&
                target_hidden_states.shape[0] == tokens &&
                target_hidden_states.shape[1] == hidden_size &&
-               target_hidden_states.dtype == DType::kBF16 &&
+               (target_hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 target_hidden_states.dtype == DType::kF16)) &&
                target_hidden_states.IsContiguous() &&
                target_hidden_states.device == queue.device,
            "qwen3_5 MTP paged forward: target hidden states must be contiguous "
-           "bf16 [T,H] on the queue device");
+           "bf16 [T,H] or xpu f16 [T,H] on the queue device");
+  if (inputs_embeds != nullptr) {
+    VT_CHECK(inputs_embeds->data != nullptr && inputs_embeds->rank == 2 &&
+                 inputs_embeds->shape[0] == tokens &&
+                 inputs_embeds->shape[1] == hidden_size &&
+                 inputs_embeds->dtype == target_hidden_states.dtype &&
+                 inputs_embeds->device == queue.device && inputs_embeds->IsContiguous(),
+             "qwen3_5 MTP paged forward: merged embeddings must match contiguous target hidden [T,H] dtype/device");
+  }
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): ONE precondition, two containers.
   // The trellis stores [K=2H, N=H] where the torch Linear stores [N=H, K=2H],
   // so the same projection is asserted through the orientation its own owner
@@ -9784,7 +10361,10 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
   VT_CHECK(weights_->IsExl3()
                ? (weights_->fc_exl3.InFeatures() == 2 * hidden_size &&
                   weights_->fc_exl3.OutFeatures() == hidden_size)
-               : (weights_->fc.rank == 2 && weights_->fc.nk &&
+               : weights_->IsGptq4Draft()
+                 ? (weights_->fc_gptq4.k == 2 * hidden_size &&
+                    weights_->fc_gptq4.n == hidden_size)
+                 : (weights_->fc.rank == 2 && weights_->fc.nk &&
                   weights_->fc.shape[0] == hidden_size &&
                   weights_->fc.shape[1] == 2 * hidden_size),
            "qwen3_5 MTP paged forward: fc must be raw bf16 [H,2H] or an EXL3 trellis "
@@ -9797,18 +10377,24 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::ForwardPaged(
 
   // ONE decode step, for the same reason as the unpaged draft forward above.
   const Qwen35ExpertStreamStep expert_stream_step;
-  Dev device{vt::GetBackend(queue.device.type), queue};
+  // The production Python speculator keeps hidden states in the FP16 target
+  // dtype. Its BF16 checkpoint draft weights are quantized at load time, while
+  // the INT4 matmul consumes FP16 activations. Keep the native XPU draft in
+  // FP16 too: no per-token FP16/BF16 bridge is needed at this boundary.
+  Dev device{vt::GetBackend(queue.device.type), queue,
+             target_hidden_states.dtype == DType::kF16
+                 ? std::optional<DType>(DType::kF16) : std::nullopt};
 
   // Same head math as Forward; the difference is the DECODER LAYER, which runs
   // paged (writes/reads the draft KV layer via slot_mapping/block_table).
   DBuf hidden = MtpHeadHidden(device, *weights_, *config_, *embed_tokens_,
-                              input_ids, target_hidden_states, tokens);
+                              input_ids, target_hidden_states, tokens, inputs_embeds);
   DBuf residual(device, ResidualDType(device), {tokens, hidden_size});
   residual.Zero(device);
 
   // Per-step device inputs for the single full-attention layer (no GDN state) +
   // the fused-preamble cos|sin cache (a stub unless VT_FUSE_ATTN_PREAMBLE). The
-  // MTP head is bf16-unquantized, so the fp4 attn preamble default is OFF.
+  // The fused preamble serves both the BF16 and packed GPTQ draft layers.
   StepDevInputs sdi = BuildFullAttnStepDevInputs(device, positions, attn_meta);
   MaybeBuildAttnCosSin(device, sdi, *config_, tokens, /*fp4_attn=*/false);
 
@@ -9842,17 +10428,19 @@ Qwen3_5MTPHiddenStates Qwen3_5MTPModel::GatherHiddenRows(
   const int64_t num_rows = static_cast<int64_t>(rows.size());
   VT_CHECK(num_rows > 0, "qwen3_5 MTP gather: empty row list");
   VT_CHECK(hidden_states.rank == 2 && hidden_states.shape[1] == hidden_size &&
-               hidden_states.dtype == DType::kBF16 &&
+               (hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 hidden_states.dtype == DType::kF16)) &&
                hidden_states.IsContiguous() &&
                hidden_states.device == queue.device,
-           "qwen3_5 MTP gather: hidden states must be contiguous bf16 [T,H] on "
+           "qwen3_5 MTP gather: hidden states must be contiguous bf16 or xpu f16 [T,H] on "
            "the queue device");
   const int64_t tokens = hidden_states.shape[0];
 
   Dev device{vt::GetBackend(queue.device.type), queue};
-  DBuf out(device, DType::kBF16, {num_rows, hidden_size});
+  DBuf out(device, hidden_states.dtype, {num_rows, hidden_size});
   const size_t row_bytes =
-      static_cast<size_t>(hidden_size) * vt::SizeOf(DType::kBF16);
+      static_cast<size_t>(hidden_size) * vt::SizeOf(hidden_states.dtype);
   auto* dst = static_cast<uint8_t*>(out.ptr());
   const auto* src = static_cast<const uint8_t*>(hidden_states.data);
   for (int64_t i = 0; i < num_rows; ++i) {
@@ -9873,12 +10461,43 @@ ForwardLogits Qwen3_5MTPModel::ComputeLogits(
   const int64_t hidden_size = config_->hidden_size;
   VT_CHECK(hidden_states.rank == 2 &&
                hidden_states.shape[1] == hidden_size &&
-               hidden_states.dtype == DType::kBF16 &&
+               (hidden_states.dtype == DType::kBF16 ||
+                (queue.device.type == vt::DeviceType::kXPU &&
+                 hidden_states.dtype == DType::kF16)) &&
                hidden_states.IsContiguous() &&
                hidden_states.device == queue.device,
-           "qwen3_5 MTP logits: hidden states must be contiguous bf16 [T,H] "
+           "qwen3_5 MTP logits: hidden states must be contiguous bf16 or xpu f16 [T,H] "
            "on the queue device");
-  Dev device{vt::GetBackend(queue.device.type), queue};
+  Dev device{vt::GetBackend(queue.device.type), queue,
+             hidden_states.dtype == DType::kF16
+                 ? std::optional<DType>(DType::kF16) : std::nullopt};
+  if (weights_->IsExl3() && queue.device.type == vt::DeviceType::kXPU) {
+    const auto& compact = weights_->draft_head_exl3;
+    VT_CHECK(hidden_states.dtype == DType::kF16 && !compact.Empty() &&
+                 compact.target_vocab == config_->vocab_size &&
+                 compact.weight.InFeatures() == hidden_size &&
+                 compact.weight.OutFeatures() == 65536,
+             "EXL3 MTP: requires FP16 hidden and the exact compact draft head");
+    DBuf half = dense_exl3::Linear(device, hidden_states, OwnedTensor{},
+                                   compact.weight, DType::kF16);
+    DBuf logits(device, DType::kF32, {hidden_states.shape[0], 65536});
+    vt::CastF32(device.q, logits.t(), half.t());
+    // The eager completion boundary retains the half output through its cast.
+    device.b.Synchronize(device.q);
+    return WrapDeviceLogits(device, std::move(logits), 65536);
+  }
+  if (weights_->IsGptq4Draft()) {
+    VT_CHECK(weights_->draft_lm_head_gptq4.k == hidden_size &&
+                 weights_->draft_lm_head_gptq4.n == config_->vocab_size,
+             "qwen3_5 MTP: packed draft head geometry mismatch");
+    DBuf half = dense_gptq4::Packed(
+        device, hidden_states, weights_->draft_lm_head_gptq4,
+        dense_gptq4::Projection::kMtpHead);
+    DBuf logits(device, DType::kF32,
+                {hidden_states.shape[0], config_->vocab_size});
+    vt::CastF32(device.q, logits.t(), half.t());
+    return WrapDeviceLogits(device, std::move(logits), config_->vocab_size);
+  }
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5). The arms are ordered
   // `exl3 -> fp4 -> bf16`, which is `DenseLogitsF32D`'s order and
   // `DflashLogitsF32D`'s, so the three readers of ONE target head cannot
@@ -9894,6 +10513,33 @@ ForwardLogits Qwen3_5MTPModel::ComputeLogits(
                  ? MatmulNvfp4F32D(device, hidden_states, *lm_head_fp4_)
                  : MatmulF32D(device, hidden_states, *lm_head_));
   return WrapDeviceLogits(device, std::move(logits), config_->vocab_size);
+}
+
+std::vector<int32_t> Qwen3_5MTPModel::SelectDraftTokens(
+    const ForwardLogits& logits, vt::Queue& queue) const {
+  VT_CHECK(logits.on_device() && logits.rows > 0 &&
+               logits.device_tensor.device == queue.device,
+           "MTP selection: expected owned device logits on the queue");
+  Dev device{vt::GetBackend(queue.device.type), queue};
+  if (weights_->IsExl3() && queue.device.type == vt::DeviceType::kXPU) {
+    const auto& compact = weights_->draft_head_exl3;
+    VT_CHECK(!compact.Empty() && logits.vocab == 65536,
+             "EXL3 MTP selection: expected compact logits and validated token map");
+    Tensor map = ResidentWeight(device, compact.token_ids);
+    DBuf chosen(device, DType::kI32, {logits.rows});
+    vt::MappedGreedyArgmax(queue, chosen.t(), logits.device_tensor, map, compact.target_vocab);
+    std::vector<int32_t> ids(static_cast<size_t>(logits.rows));
+    chosen.Download(device, ids.data());  // synchronizes before releasing consumers
+    for (const auto id : ids)
+      VT_CHECK(id >= 0 && id < compact.target_vocab,
+               "EXL3 MTP selection: invalid map or nonfinite draft logits");
+    return ids;
+  }
+  DBuf chosen(device, DType::kI64, {logits.rows});
+  vt::GreedyArgmax(queue, chosen.t(), logits.device_tensor);
+  std::vector<int64_t> wide(static_cast<size_t>(logits.rows));
+  chosen.Download(device, wide.data());
+  return std::vector<int32_t>(wide.begin(), wide.end());
 }
 
 std::vector<float> Qwen3_5MTPModel::ForwardLogitsHost(
@@ -9937,6 +10583,22 @@ static void CheckDensePagedForward(const std::vector<int32_t>& token_ids,
            "qwen3_5 dense paged forward: attn_kv count must equal full-attn layers");
   VT_CHECK(static_cast<int64_t>(gdn_state.size()) == n_gdn,
            "qwen3_5 dense paged forward: gdn_state count must equal GDN layers");
+  if (weights.gptq4_checkpoint ||
+      (weights.exl3_checkpoint && weights.precision.activation == DType::kF16)) {
+    if (!attn_kv.empty())
+      v1::ValidateAttentionPageSlots(attn_meta, positions,
+                                     attn_kv.front().block_size,
+                                     attn_kv.front().num_blocks);
+    for (const auto& cache : attn_kv)
+      VT_CHECK(cache.dtype == DType::kF16 || cache.dtype == DType::kF32 ||
+                   (dense_attn::IsFp8KvCache(cache) &&
+                    cache.fp8_kind == vt::Fp8KVCacheDataType::kFp8E4M3),
+               "dense FP16: full-attention KV cache must use FP16, explicit FP32, or E4M3 FP8 storage");
+    for (const auto& cache : gdn_state)
+      VT_CHECK(cache.conv_state.dtype == weights.precision.gdn_conv_state &&
+                   cache.ssm_state.dtype == weights.precision.gdn_recurrent_state,
+               "dense FP16: GDN convolution state must be FP16 and recurrence state FP32");
+  }
   const int64_t state_slots =
       detail::ValidateGdnStateCacheLayout(gdn_state);
   if (n_gdn > 0) {
@@ -9966,6 +10628,81 @@ static void DenseEmbedInto(Dev d, DBuf& hidden,
   DBuf dids(d, DType::kI32, {T}, token_ids.data());
   ApplyDeviceTokenIdsOverride(d, dids, T);
   vt::Embedding(d.q, hidden.t(), dtab, dids.t());
+}
+
+static Dev DenseDev(Queue& queue, const Qwen3_5DenseWeights& weights) {
+  Dev d{vt::GetBackend(queue.device.type), queue};
+  if (weights.gptq4_checkpoint ||
+      (weights.exl3_checkpoint && weights.precision.activation == DType::kF16)) {
+    VT_CHECK(queue.device.type == vt::DeviceType::kXPU &&
+                 weights.precision.activation == DType::kF16,
+             "dense: scoped FP16 execution requires XPU");
+    d.activation_dtype = weights.precision.activation;
+  }
+  return d;
+}
+
+MmForwardBuffers Qwen3_5DenseEmbedMultimodal(
+    const Qwen3_5DenseWeights& weights, const HfConfig& config,
+    vt::Queue& queue, const MmEmbedInputs& inputs) {
+  VT_CHECK(queue.device.type == vt::DeviceType::kXPU && weights.exl3_checkpoint &&
+               weights.precision.activation == DType::kF16 && IsExl3Checkpoint(config),
+           "qwen3_5 dense MM embed: native EXL3 XPU FP16 required");
+  VT_CHECK(inputs.token_ids && inputs.is_mm_embed && inputs.mm_embeds &&
+               inputs.mrope_positions,
+           "qwen3_5 dense MM embed: all runner input channels required");
+  const auto& ids = *inputs.token_ids;
+  const auto& mask = *inputs.is_mm_embed;
+  const auto& slices = *inputs.mm_embeds;
+  const int64_t t = static_cast<int64_t>(ids.size()), h = config.hidden_size;
+  VT_CHECK(t > 0 && t <= std::numeric_limits<int32_t>::max() && h > 0 &&
+               static_cast<int64_t>(mask.size()) == t &&
+               static_cast<int64_t>(inputs.mrope_positions->size()) == 3*t,
+           "qwen3_5 dense MM embed: nonempty T-token mask and [3,T] positions required");
+  VT_CHECK(!inputs.host_token_ids_stale || inputs.device_token_ids != nullptr,
+           "qwen3_5 dense MM embed: stale host IDs require authoritative device IDs");
+  std::vector<int32_t> rows;
+  for (int64_t row=0;row<t;++row)
+    if (mask[row]) rows.push_back(static_cast<int32_t>(row));
+  int64_t source_rows = 0;
+  for (const auto& slice : slices) {
+    VT_CHECK(slice.rank == 2 && slice.shape[0] >= 0 && slice.shape[0] <= t-source_rows &&
+                 slice.shape[1] == h && slice.dtype == DType::kF16 &&
+                 slice.IsContiguous() && slice.device == queue.device &&
+                 (slice.shape[0] == 0 || slice.data != nullptr),
+             "qwen3_5 dense MM embed: contiguous device FP16 visual rows [N,H] required");
+    source_rows += slice.shape[0];
+  }
+  VT_CHECK(source_rows == static_cast<int64_t>(rows.size()),
+           "qwen3_5 dense MM embed: visual rows must balance the placeholder mask");
+  Dev d = DenseDev(queue,weights);
+  DBuf merged(d,DType::kF16,{t,h});
+  {
+    const detail::DeviceTokenIdsScope device_ids(inputs.device_token_ids,t);
+    DenseEmbedInto(d,merged,ids,weights,config);
+  }
+  // The runner mask supplies validated destination rows in ascending order.
+  // Coalesce contiguous runs into device copies: no index-validation readback
+  // or CPU materialization of image/embedding values is needed for the merge.
+  size_t offset = 0;
+  for (const auto& slice : slices) {
+    int64_t source = 0;
+    while (source < slice.shape[0]) {
+      int64_t end = source+1;
+      while (end < slice.shape[0] && rows[offset+end] == rows[offset+end-1]+1) ++end;
+      d.b.Copy(queue,static_cast<uint16_t*>(merged.ptr())+int64_t(rows[offset+source])*h,
+               static_cast<const uint16_t*>(slice.data)+source*h,
+               static_cast<size_t>(end-source)*h*sizeof(uint16_t));
+      source=end;
+    }
+    offset += static_cast<size_t>(slice.shape[0]);
+  }
+  DBuf positions(d,DType::kI32,{3,t},inputs.mrope_positions->data());
+  MmForwardBuffers result;
+  result.mm.inputs_embeds=merged.t(); result.mm.positions3=positions.t();
+  result.storage.push_back(merged.ReleaseShared());
+  result.storage.push_back(positions.ReleaseShared());
+  return result;
 }
 
 // TT-27B-STEP-DECOMPOSE (VT_TT_STEP_PHASES): the dense captured step's host
@@ -10054,7 +10791,8 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
                                const std::vector<int32_t>* aux_layer_ids = nullptr,
                                const Tensor* aux_out = nullptr,
                                bool return_hidden = false,
-                               StepDevInputs* persistent_sdi = nullptr) {
+                               StepDevInputs* persistent_sdi = nullptr,
+                               const Tensor* device_mrope_positions = nullptr) {
   const int64_t T = hidden_in.shape[0];
   const int64_t H = config.hidden_size;
   if (std::getenv("VT_TT_ALLOC_TRACE") != nullptr)
@@ -10065,8 +10803,10 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
   // Working copy of the embedded hidden (device->device; captured). RunDenseLayer
   // Paged reassigns `hidden` per layer, so this must NOT alias the persistent buf.
   DBuf hidden(d, ActDType(d), {T, H});
+  VT_CHECK(hidden_in.dtype == ActDType(d),
+           "qwen3_5 dense: embedded hidden dtype must match model activation dtype");
   d.b.Copy(d.q, hidden.ptr(), hidden_in.data,
-           static_cast<size_t>(T) * static_cast<size_t>(H) * vt::SizeOf(DType::kBF16));
+           static_cast<size_t>(T) * static_cast<size_t>(H) * vt::SizeOf(ActDType(d)));
 
   DBuf res(d, ResidualDType(d), {T, H});
   res.Zero(d);
@@ -10098,7 +10838,24 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
   // would build. FuseAttnPreamble is default-ON (VT_FUSE_ATTN_PREAMBLE) so
   // AttnQkNormRopeGate reads this per-token cache; sdi.positions is unused for rope
   // then. mrope_cos_sin==nullptr (every text caller) ⇒ byte-identical to before.
-  if (persistent_sdi != nullptr) {
+  if (device_mrope_positions != nullptr) {
+    VT_CHECK(mrope_cos_sin == nullptr,
+             "qwen3_5 dense: device M-RoPE and host cache are mutually exclusive");
+    auto rope = FullAttnRopeArgs(d, config);
+    const auto& sections = config.rope_parameters.mrope_section;
+    VT_CHECK(sections.size() == 3,
+             "qwen3_5 dense: device M-RoPE requires three sections");
+    std::copy(sections.begin(), sections.end(), rope.mrope_section.begin());
+    rope.mrope_interleaved = config.rope_parameters.mrope_interleaved;
+    if (persistent_sdi == nullptr)
+      sdi.attn_cos_sin = DBuf(d, DType::kF32, {T, config.rotary_dim});
+    else
+      VT_CHECK(sdi.has_attn_cos_sin && sdi.attn_cos_sin.t().shape[0] == T &&
+                   sdi.attn_cos_sin.t().shape[1] == config.rotary_dim,
+               "qwen3_5 dense: persistent device M-RoPE cache required");
+    vt::RopeCosSinCache(d.q, sdi.attn_cos_sin.t(), *device_mrope_positions, rope);
+    sdi.has_attn_cos_sin = true;
+  } else if (persistent_sdi != nullptr) {
     // Option A: the persistent cos|sin buffer was allocated pre-capture; re-fill only
     // (captured) so every replay re-derives rope from the freshly-staged positions.
     // The MRoPE VL path never drives the decode graph (persistent_sdi is nullptr
@@ -10237,11 +10994,11 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
   // caller — only ForwardDeviceTap passes a buffer). See the 35B ForwardLayers tap.
   if (hidden_tap != nullptr) {
     VT_CHECK(hidden_tap->shape[0] == T && hidden_tap->shape[1] == H &&
-                 hidden_tap->dtype == DType::kBF16,
-             "qwen3_5 dense: hidden tap buffer must be bf16 [T,H]");
+                 hidden_tap->dtype == ActDType(d),
+             "qwen3_5 dense: hidden tap buffer must match activation dtype [T,H]");
     d.b.Copy(d.q, hidden_tap->data, dnorm.t().data,
              static_cast<size_t>(T) * static_cast<size_t>(H) *
-                 vt::SizeOf(DType::kBF16));
+                 vt::SizeOf(ActDType(d)));
   }
 
   // MODEL-KEV Phase 3: the pooling tail — stop after the final GemmaRMSNorm
@@ -10252,11 +11009,12 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
     const bool do_gather = !logits_indices.empty() &&
                            static_cast<int64_t>(logits_indices.size()) < T;
     Tensor src = dnorm.t();
+    std::optional<DBuf> gathered;
     if (do_gather) {
       const int64_t n_out = static_cast<int64_t>(logits_indices.size());
-      DBuf dgather(d, DType::kBF16, {n_out, H});
-      GatherRows(d, dgather.ptr(), dnorm.t(), logits_indices, H);
-      src = dgather.t();
+      gathered.emplace(d, ActDType(d), std::vector<int64_t>{n_out, H});
+      GatherRows(d, gathered->ptr(), dnorm.t(), logits_indices, H);
+      src = gathered->t();
     }
     const int64_t n_out = src.shape[0];
     DBuf dhid(d, DType::kF32, {n_out, H});
@@ -10271,7 +11029,7 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
                          static_cast<int64_t>(logits_indices.size()) < T;
   if (do_gather) {
     const int64_t n_out = static_cast<int64_t>(logits_indices.size());
-    DBuf dgather(d, DType::kBF16, {n_out, H});
+    DBuf dgather(d, ActDType(d), {n_out, H});
     GatherRows(d, dgather.ptr(), dnorm.t(), logits_indices, H);
     return DenseLogitsF32D(d, dgather.t(), weights);
   }
@@ -10297,6 +11055,87 @@ static std::vector<int32_t> LastTokenLogitsIndices(
     indices[static_cast<size_t>(i)] = am.query_start_loc[static_cast<size_t>(i) + 1] - 1;
   }
   return indices;
+}
+
+static void ValidateDenseMultimodalForward(const ModelForwardInput& input,
+                                          const Qwen3_5DenseWeights& weights) {
+  VT_CHECK(input.mm.has_value(), "qwen3_5 dense MM: multimodal inputs required");
+  VT_CHECK(input.queue.device.type == vt::DeviceType::kXPU &&
+               weights.exl3_checkpoint && weights.precision.activation == DType::kF16 &&
+               IsExl3Checkpoint(input.config),
+           "qwen3_5 dense MM: native EXL3 XPU FP16 required");
+  VT_CHECK(input.num_reqs >= 1 && input.num_reqs <= kNativeQwen3_5MaxConcurrentRequests &&
+               input.attn_meta.num_reqs == input.num_reqs &&
+               (input.num_speculative_tokens == 0 ||
+                (input.num_speculative_tokens >= 1 && input.num_speculative_tokens <= 3 &&
+                 input.hidden_tap != nullptr)) &&
+               input.aux_tap == nullptr,
+           "qwen3_5 dense MM: C1-C4 target-only or MTP1-3 hidden tap required");
+  const auto& mm = *input.mm;
+  const auto& cfg = input.config;
+  const int64_t t = static_cast<int64_t>(input.token_ids.size());
+  const auto& embeds = mm.inputs_embeds;
+  const auto& positions = mm.positions3;
+  VT_CHECK(embeds.data != nullptr && embeds.rank == 2 && embeds.shape[0] == t &&
+               embeds.shape[1] == cfg.hidden_size && embeds.dtype == DType::kF16 &&
+               embeds.IsContiguous() && embeds.device == input.queue.device,
+           "qwen3_5 dense MM: contiguous device FP16 embeddings [T,H] required");
+  VT_CHECK(positions.data != nullptr && positions.rank == 2 && positions.shape[0] == 3 &&
+               positions.shape[1] == t && positions.IsContiguous() &&
+               (positions.dtype == DType::kI32 || positions.dtype == DType::kI64) &&
+               positions.device == input.queue.device,
+           "qwen3_5 dense MM: contiguous device integer positions [3,T] required");
+  VT_CHECK(mm.deepstack.data == nullptr && mm.deepstack_levels == 0 &&
+               mm.ple_token_ids.data == nullptr,
+           "qwen3_5 dense MM: this tower has no DeepStack or PLE inputs");
+  const auto& sections = cfg.rope_parameters.mrope_section;
+  VT_CHECK(cfg.rotary_dim > 0 && cfg.rotary_dim <= cfg.head_dim &&
+               cfg.rotary_dim % 2 == 0 && sections.size() == 3 &&
+               sections[0] >= 0 && sections[1] >= 0 && sections[2] >= 0 &&
+               int64_t(sections[0]) + sections[1] + sections[2] == cfg.rotary_dim / 2,
+           "qwen3_5 dense MM: M-RoPE sections must cover rotary_dim/2");
+  VT_CHECK(std::isfinite(cfg.rope_theta) && cfg.rope_theta > 0 &&
+               cfg.rope_theta <= std::numeric_limits<float>::max(),
+           "qwen3_5 dense MM: finite positive FP32 RoPE base required");
+  // Validate multimodal metadata before persistent writes. Cache addressing uses the
+  // runner's 1-D logical positions, never the compressed image coordinates.
+  CheckDensePagedForward(input.token_ids, input.positions, input.attn_meta,
+                         input.gdn_meta, input.attn_kv, input.gdn_state, weights, cfg);
+}
+
+ForwardLogits Qwen3_5DenseForwardEmbeddings(const ModelForwardInput& input,
+                                          const Qwen3_5DenseWeights& weights) {
+  ValidateDenseMultimodalForward(input, weights);
+  const auto& mm = *input.mm;
+  const auto& cfg = input.config;
+  const int64_t t = static_cast<int64_t>(input.token_ids.size());
+  const auto& embeds = mm.inputs_embeds;
+  const auto& positions = mm.positions3;
+  Dev d = DenseDev(input.queue, weights);
+  DBuf tap;
+  Tensor tap_view;
+  if (input.hidden_tap != nullptr) {
+    tap = DBuf(d,DType::kF16,{t,cfg.hidden_size});
+    tap_view = tap.t();
+  }
+  DBuf logits = DenseForwardLayers(
+      d,embeds,input.positions,input.attn_meta,input.gdn_meta,input.attn_kv,
+      input.gdn_state,weights,cfg,input.logits_indices,
+      input.hidden_tap ? &tap_view : nullptr,/*host_mrope=*/nullptr,
+      /*aux_layer_ids=*/nullptr,/*aux_out=*/nullptr,/*return_hidden=*/false,
+      /*persistent_sdi=*/nullptr,&positions);
+  if (input.hidden_tap != nullptr) {
+    input.hidden_tap->producer_ready_event.reset();
+    input.hidden_tap->tensor = tap.t();
+    input.hidden_tap->storage = tap.ReleaseShared();
+  }
+  if (input.gather_logits || input.hidden_tap != nullptr)
+    return WrapDeviceLogits(d,std::move(logits),cfg.vocab_size);
+  ForwardLogits result;
+  result.rows = logits.t().shape[0]; result.vocab = cfg.vocab_size;
+  result.host.resize(static_cast<size_t>(result.rows) * cfg.vocab_size);
+  logits.Download(d,result.host.data());
+  return result;
 }
 
 // Full eager dense paged forward body: embed (host token_ids) then the capturable
@@ -10342,7 +11181,7 @@ std::vector<float> Qwen3_5DenseModel::Forward(
     const std::vector<GdnStateCache>& gdn_state,
     const Qwen3_5DenseWeights& weights, const HfConfig& config,
     vt::Queue& queue, const std::vector<int32_t>& logits_indices) {
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   DBuf dlogits = DenseForwardBody(d, token_ids, positions, attn_meta, gdn_meta,
                                   attn_kv, gdn_state, weights, config,
                                   logits_indices);
@@ -10364,7 +11203,7 @@ ForwardLogits Qwen3_5DenseModel::ForwardHidden(
   // mirroring Qwen3DenseModel::ForwardHidden (qwen3.cpp:570-592). The
   // [n_out, H] f32 rows are downloaded to the host carrier for the kev
   // PointerHead readout, whose ops are host-side.
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   DBuf dhidden = DenseForwardBody(d, token_ids, positions, attn_meta, gdn_meta,
                                   attn_kv, gdn_state, weights, config,
                                   logits_indices, /*hidden_tap=*/nullptr,
@@ -10911,7 +11750,7 @@ ForwardLogits Qwen3_5DenseModel::ForwardDevice(
     const std::vector<GdnStateCache>& gdn_state,
     const Qwen3_5DenseWeights& weights, const HfConfig& config,
     vt::Queue& queue, const std::vector<int32_t>& logits_indices) {
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   DBuf dlogits = DenseForwardBody(d, token_ids, positions, attn_meta, gdn_meta,
                                   attn_kv, gdn_state, weights, config,
                                   logits_indices);
@@ -10926,15 +11765,16 @@ ForwardLogits Qwen3_5DenseModel::ForwardDeviceTap(
     const Qwen3_5DenseWeights& weights, const HfConfig& config, vt::Queue& queue,
     Qwen3_5MTPHiddenStates* hidden_out,
     const std::vector<int32_t>& logits_indices) {
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   const int64_t T = static_cast<int64_t>(token_ids.size());
   const int64_t H = config.hidden_size;
-  DBuf tap(d, DType::kBF16, {T, H});
+  DBuf tap(d, ActDType(d), {T, H});
   const Tensor tap_view = tap.t();
   DBuf dlogits = DenseForwardBody(d, token_ids, positions, attn_meta, gdn_meta,
                                   attn_kv, gdn_state, weights, config,
                                   logits_indices, &tap_view);
   if (hidden_out != nullptr) {
+    hidden_out->producer_ready_event.reset();
     hidden_out->tensor = tap.t();
     hidden_out->storage = tap.ReleaseShared();
   }
@@ -10948,7 +11788,7 @@ ForwardLogits Qwen3_5DenseModel::ForwardDeviceMultiTap(
     const std::vector<GdnStateCache>& gdn_state,
     const Qwen3_5DenseWeights& weights, const HfConfig& config, vt::Queue& queue,
     Qwen3_5AuxTaps* aux_out, const std::vector<int32_t>& logits_indices) {
-  Dev d{vt::GetBackend(queue.device.type), queue};
+  Dev d = DenseDev(queue, weights);
   const int64_t T = static_cast<int64_t>(token_ids.size());
   const int64_t H = config.hidden_size;
   if (aux_out == nullptr) {
@@ -10957,7 +11797,7 @@ ForwardLogits Qwen3_5DenseModel::ForwardDeviceMultiTap(
   }
   ValidateAuxTapLayerIds(aux_out->layer_ids, config.num_hidden_layers);
   const int64_t taps = static_cast<int64_t>(aux_out->layer_ids.size());
-  DBuf aux(d, DType::kBF16, {T, H * taps});
+  DBuf aux(d, ActDType(d), {T, H * taps});
   const Tensor aux_view = aux.t();
   DBuf dlogits = DenseForwardBody(d, token_ids, positions, attn_meta, gdn_meta,
                                   attn_kv, gdn_state, weights, config,
@@ -11089,11 +11929,13 @@ struct DecodeGraphSlotKey {
   int64_t size = 0;       // S, the captured token count
   int64_t query_len = 1;  // the uniform query length the graph was captured for
   bool spec = false;      // the step carried spec-decode segmentation
+  bool multimodal = false; // separate input/rotation ownership from text graphs
 };
 inline bool operator<(const DecodeGraphSlotKey& a, const DecodeGraphSlotKey& b) {
   if (a.size != b.size) return a.size < b.size;
   if (a.query_len != b.query_len) return a.query_len < b.query_len;
-  return static_cast<int>(a.spec) < static_cast<int>(b.spec);
+  if (a.spec != b.spec) return static_cast<int>(a.spec) < static_cast<int>(b.spec);
+  return static_cast<int>(a.multimodal) < static_cast<int>(b.multimodal);
 }
 
 // The bound on how many DISTINCT speculative query lengths one driver captures.
@@ -11354,6 +12196,10 @@ static DevicePool& PersistentDecodeInputPool(vt::Backend& b) {
   return table.For(b);
 }
 
+DevicePool& Qwen3_5PersistentDecodePoolForDiagnostics(vt::Backend& b) {
+  return PersistentDecodeInputPool(b);
+}
+
 // Option A per-step input staging: copy the slot's refreshed host inputs into its
 // pinned buffers (host memcpy), then enqueue the true-async H2D pinned->persistent
 // device buffers on the main queue. This is the H2D moved OUT of the captured replay.
@@ -11484,7 +12330,8 @@ struct Qwen3_5DecodeGraph::Impl {
               !vllm::platforms::GetPlatform(queue.device.type)
                    .static_graph_requires_opt_in(config.architectures) &&
               b.SupportsGraphCapture();
-    dbuf = enabled && DecodeGraphDoubleBufferEnabled();
+    dbuf = enabled && (DecodeGraphDoubleBufferEnabled() ||
+        vllm::platforms::GetPlatform(queue.device.type).static_graph_requires_persistent_inputs());
     poison = enabled && std::getenv("VT_ASYNC_EXECUTOR_POISON") != nullptr;
   }
   ~Impl() {
@@ -12184,7 +13031,8 @@ struct Qwen3_5DenseDecodeGraph::Impl {
               !vllm::platforms::GetPlatform(queue.device.type)
                    .static_graph_requires_opt_in(config.architectures) &&
               b.SupportsGraphCapture();
-    dbuf = enabled && DecodeGraphDoubleBufferEnabled();
+    dbuf = enabled && (DecodeGraphDoubleBufferEnabled() ||
+        vllm::platforms::GetPlatform(queue.device.type).static_graph_requires_persistent_inputs());
     poison = enabled && std::getenv("VT_ASYNC_EXECUTOR_POISON") != nullptr;
   }
   ~Impl() {
@@ -12193,6 +13041,10 @@ struct Qwen3_5DenseDecodeGraph::Impl {
                            "replays across %zu captured size(s)\n",
                    static_cast<long long>(replays), slots.size());
     Backend& b = vt::GetBackend(queue.device.type);
+    bool leased_outputs = false;
+    for (const auto& kv : slots)
+      for (const auto& s : kv.second.slot) leased_outputs |= bool(s.mtp_hidden);
+    if (leased_outputs) b.Synchronize(queue);
     for (auto& kv : slots)
       for (auto& s : kv.second.slot) {
         // No DestroyGraph: every segment handle belongs to the slot's
@@ -12214,8 +13066,10 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     std::vector<int32_t> positions;   // [S]
     v1::CommonAttentionMetadata attn_meta;
     v1::GDNAttentionMetadata gdn_meta;
-    std::unique_ptr<DBuf> hidden;     // [S,H] bf16 persistent embed target
-    std::unique_ptr<DBuf> logits;     // [S,vocab] f32 held graph output
+    std::unique_ptr<DBuf> hidden;     // [S,H] persistent embedding target
+    std::unique_ptr<DBuf> mrope_positions; // [3,S] I32, graph-owned MM input
+    std::shared_ptr<DBuf> logits;     // [S,vocab] f32 held graph output
+    std::shared_ptr<DBuf> mtp_hidden;  // [S,H] normalized leased output
     // SPEC-DSPARK W8 (#442): the DFlash/DSpark verify must ALSO emit the
     // [S, H*taps] aux hidden capture the drafter conditions on. That is exactly
     // why the verify never reached this graph: ForwardDeviceMultiTap returns
@@ -12230,6 +13084,7 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     // hand. `vt::BreakableGraph` is non-copyable and is constructed in place.
     vt::BreakableGraph graph;
     int fa_cols = -1;                 // captured block-table column count
+    std::optional<detail::XpuAttentionGraphPolicy> xpu_attention_policy;
     bool warm = false;
     // tt-27b-region-capture: a named per-region over-budget DECLINE (see the
     // census below) is sticky for this size — an over-budget layer's command
@@ -12360,10 +13215,13 @@ struct Qwen3_5DenseDecodeGraph::Impl {
   struct SlotRing {
     SizeSlot slot[2];
     int next = 0;
+    uint64_t last_used = 0;
   };
   std::map<DecodeGraphSlotKey, SlotRing> slots;  // (S, q, spec) -> parity ring
   int64_t replays = 0;                // total replays (diagnostics)
   bool any_captured = false;          // diagnostics: at least one live graph
+  bool native_mm_seen = false;
+  uint64_t use_clock = 0;
 };
 
 Qwen3_5DenseDecodeGraph::Qwen3_5DenseDecodeGraph(const Qwen3_5DenseWeights& weights,
@@ -12374,7 +13232,12 @@ Qwen3_5DenseDecodeGraph::Qwen3_5DenseDecodeGraph(const Qwen3_5DenseWeights& weig
 
 Qwen3_5DenseDecodeGraph::~Qwen3_5DenseDecodeGraph() = default;
 
-bool Qwen3_5DenseDecodeGraph::captured() const { return impl_->any_captured; }
+bool Qwen3_5DenseDecodeGraph::captured() const {
+  for (const auto& kv : impl_->slots)
+    for (const auto& slot : kv.second.slot)
+      if (slot.graph.captured()) return true;
+  return false;
+}
 int64_t Qwen3_5DenseDecodeGraph::replay_count() const { return impl_->replays; }
 
 ForwardLogits Qwen3_5DenseDecodeGraph::Step(
@@ -12382,7 +13245,27 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     const v1::CommonAttentionMetadata& attn_meta,
     const v1::GDNAttentionMetadata& gdn_meta,
     const std::vector<PagedKvCache>& attn_kv,
-    const std::vector<GdnStateCache>& gdn_state, Qwen3_5AuxTaps* aux_out) {
+    const std::vector<GdnStateCache>& gdn_state, Qwen3_5AuxTaps* aux_out,
+    Qwen3_5MTPHiddenStates* hidden_out, const ModelForwardInput* multimodal_input) {
+  const MultiModalForwardInput* mm = nullptr;
+  if (multimodal_input) {
+    ValidateDenseMultimodalForward(*multimodal_input, impl_->weights);
+    VT_CHECK(multimodal_input->token_ids == token_ids && multimodal_input->positions == positions &&
+                 &multimodal_input->attn_meta == &attn_meta && &multimodal_input->gdn_meta == &gdn_meta &&
+                 &multimodal_input->attn_kv == &attn_kv && &multimodal_input->gdn_state == &gdn_state &&
+                 multimodal_input->hidden_tap == hidden_out &&
+                 multimodal_input->queue.id == impl_->queue.id &&
+                 multimodal_input->config.hidden_size == impl_->config.hidden_size &&
+                 multimodal_input->config.rotary_dim == impl_->config.rotary_dim &&
+                 multimodal_input->config.rope_theta == impl_->config.rope_theta &&
+                 multimodal_input->config.rope_parameters.mrope_section == impl_->config.rope_parameters.mrope_section &&
+                 multimodal_input->config.rope_parameters.mrope_interleaved == impl_->config.rope_parameters.mrope_interleaved,
+             "dense graph: multimodal input must describe this exact forward");
+    mm = &*multimodal_input->mm;
+    impl_->native_mm_seen = true;
+  }
+  VT_CHECK(hidden_out == nullptr || aux_out == nullptr,
+           "dense graph: MTP hidden and auxiliary taps are mutually exclusive");
   CheckDensePagedForward(token_ids, positions, attn_meta, gdn_meta, attn_kv,
                          gdn_state, impl_->weights, impl_->config);
   const int64_t B = static_cast<int64_t>(token_ids.size());
@@ -12390,7 +13273,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   if (has_gdn) detail::ValidateGdnDecodeGraphState(gdn_meta, gdn_state, B);
   else ValidateFullAttnStepMetadata(B, attn_meta);
   Backend& b = vt::GetBackend(impl_->queue.device.type);
-  Dev d{b, impl_->queue};
+  Dev d = DenseDev(impl_->queue, impl_->weights);
   // TT-27B-STEP-DECOMPOSE (VT_TT_STEP_PHASES): the step phase clock. `on` is
   // a getenv compare and every bracket below is `sph.on ? now : t0` — zero
   // cost with the knob unset, on every backend.
@@ -12491,7 +13374,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // question out of the spec path. The shape count stays bounded by max_num_seqs
   // because num_reqs is.
   const bool spec_step = has_gdn && gdn_meta.num_spec_decodes > 0;
-  const int64_t S = spec_step ? B : PadToCaptureSize(B, impl_->max_num_reqs);
+  const int64_t S = (mm || spec_step || hidden_out != nullptr)
+                        ? B : PadToCaptureSize(B, impl_->max_num_reqs);
   if (sph.on) sph.S = S;
   // ENG-CUDAGRAPH-BREAK W6 (#1374): this step's uniform query length, and the
   // ring key built from it. `Q == 0` means the batch does not divide evenly into
@@ -12499,7 +13383,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   const int64_t Q = (attn_meta.num_reqs > 0 && B % attn_meta.num_reqs == 0)
                         ? B / attn_meta.num_reqs
                         : 0;
-  const DecodeGraphSlotKey key{S, Q, spec_step};
+  const DecodeGraphSlotKey key{S, Q, spec_step, mm != nullptr};
   // A q > 1 batch that carries NO spec segmentation is refused rather than
   // captured, and this is a TIGHTENING that arrived with the widening. `S` for a
   // non-spec step is `PadToCaptureSize(B)` and `BuildPaddedDecode` rewrites the
@@ -12510,8 +13394,17 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   const bool qlen_capped = DecodeGraphQueryLenCapped(impl_->slots, key);
   if (qlen_capped) v1::NoteDecodeGraphQueryLenDecline();
   if (!impl_->enabled || S < 0 || !servable_shape || qlen_capped ||
+      (mm && mm->positions3.dtype != DType::kI32) ||
       (has_gdn && !detail::CanUseGdnDecodeGraphSize(
           B, S, IndexedGdnStateIoEnabled(impl_->queue.device)))) {
+    if (multimodal_input)
+      return Qwen3_5DenseForwardEmbeddings(*multimodal_input, impl_->weights);
+    if (hidden_out != nullptr) {
+      return Qwen3_5DenseModel::ForwardDeviceTap(
+          token_ids, positions, attn_meta, gdn_meta, attn_kv, gdn_state,
+          impl_->weights, impl_->config, impl_->queue, hidden_out,
+          spec_step ? std::vector<int32_t>{} : LastTokenLogitsIndices(attn_meta, B));
+    }
     if (aux_out != nullptr && !aux_out->layer_ids.empty()) {
       // The graph cannot serve this batch (disabled / unsupported size), so fall
       // back to the EAGER multi-tap forward, which fills aux_out itself. Without
@@ -12544,8 +13437,37 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // this step's slot from the size's parity ring (alternating), and host-wait its
   // previous replay before Refresh touches its persistent host inputs (hazard-C).
   // OFF: always slot[0], no wait — byte-identical to the single-slot driver.
+  // Native image/text transitions add another family of captured shapes. Keep
+  // at most three parity rings (six graphs on the qualified XPU provider),
+  // below its eight-live-graph limit. Retire the least recently used whole
+  // shape only at a new-shape boundary; text-only drivers keep their policy.
   const bool new_shape = impl_->slots.find(key) == impl_->slots.end();
+  if (impl_->native_mm_seen && impl_->queue.device.type == vt::DeviceType::kXPU &&
+      new_shape && impl_->slots.size() >= 3) {
+    b.Synchronize(impl_->queue);
+    while (impl_->slots.size() >= 3) {
+      auto victim = std::min_element(impl_->slots.begin(), impl_->slots.end(),
+          [](const auto& a, const auto& other) {
+            return a.second.last_used < other.second.last_used;
+          });
+      for (auto& old : victim->second.slot) {
+        old.graph.Reset();
+        Pool(b).UnpinForGraph(b, old.pinned);
+        old.pinned.clear();
+        old.pin.Free();
+        if (old.reuse_event.handle != nullptr) b.DestroyEvent(old.reuse_event);
+      }
+      if (const char* trace=std::getenv("VT_NATIVE_VISION_TRACE"); trace && trace[0]=='2') {
+        const auto record=nlohmann::json{{"tokens",victim->first.size},
+            {"query_len",victim->first.query_len},
+            {"multimodal",victim->first.multimodal}}.dump();
+        std::fprintf(stderr,"NATIVE_VISION_GRAPH_EVICT %s\n",record.c_str());
+      }
+      impl_->slots.erase(victim);
+    }
+  }
   Impl::SlotRing& ring = impl_->slots[key];
+  ring.last_used = ++impl_->use_clock;
   // W6: a distinct captured shape is the observable the widening is measured by.
   // Without it a two-shape driver and a one-shape driver are indistinguishable
   // from outside, which is how #1020 stayed silent.
@@ -12572,6 +13494,55 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     b.RecordEvent(s.reuse_event, impl_->queue);
   };
 
+  // A retained output lease makes its buffers immutable. A mode change or
+  // live lease retires the graph before replacing a destination it baked.
+  if ((bool(s.mtp_hidden) != (hidden_out != nullptr)) ||
+      (s.mtp_hidden && (s.mtp_hidden.use_count() > 1 ||
+                       (s.logits && s.logits.use_count() > 1)))) {
+    b.Synchronize(impl_->queue);
+    s.graph.Reset();
+    Pool(b).UnpinForGraph(b, s.pinned);
+    s.pinned.clear();
+    s.warm = false;
+    s.mtp_hidden.reset();
+    s.logits.reset();
+  }
+  if (hidden_out != nullptr && !s.mtp_hidden) {
+    s.mtp_hidden = std::make_shared<DBuf>(d, ActDType(d),
+                                        std::vector<int64_t>{S, H});
+  }
+  Tensor mtp_view{};
+  const Tensor* mtp_arg = nullptr;
+  if (s.mtp_hidden) { mtp_view = s.mtp_hidden->t(); mtp_arg = &mtp_view; }
+
+  // Paired outputs own one immutable, one-shot producer completion event.
+  // Holding either output retains both buffers beyond graph/cache retirement.
+  struct OutputLease {
+    std::shared_ptr<DBuf> hidden, logits;
+    Backend* backend;
+    vt::Event ready;
+    OutputLease(std::shared_ptr<DBuf> h, std::shared_ptr<DBuf> l,
+                Backend& b, vt::Queue& q)
+        : hidden(std::move(h)), logits(std::move(l)), backend(&b),
+          ready(b.CreateEvent(/*blocking=*/true)) { b.RecordEvent(ready, q); }
+    ~OutputLease() {
+      if (ready.handle != nullptr) backend->SynchronizeEvent(ready);
+      backend->DestroyEvent(ready);
+    }
+  };
+  const auto publish_mtp = [&] {
+    ForwardLogits fl = ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
+    if (hidden_out != nullptr) {
+      auto lease = std::make_shared<OutputLease>(s.mtp_hidden, s.logits, b, impl_->queue);
+      hidden_out->tensor = s.mtp_hidden->t();
+      hidden_out->storage = std::shared_ptr<void>(lease, s.mtp_hidden->ptr());
+      hidden_out->producer_ready_event = std::shared_ptr<vt::Event>(lease, &lease->ready);
+      fl.device_storage = std::shared_ptr<void>(lease, s.logits->ptr());
+      fl.non_owning_view = false;
+    }
+    return fl;
+  };
+
   // SPEC-DSPARK W8 (#442): size this slot's PERSISTENT aux buffer and invalidate a
   // graph captured for a different tap count. Only the EXACT-shape case (S == B,
   // which is what a spec batch takes) is served: the aux contract is [T, H*taps]
@@ -12591,7 +13562,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.aux_taps = aux_taps;
   }
   if (aux_taps > 0 && (s.aux == nullptr || s.aux->t().shape[0] != S)) {
-    s.aux = std::make_unique<DBuf>(d, DType::kBF16,
+    s.aux = std::make_unique<DBuf>(d, ActDType(d),
                                    std::vector<int64_t>{S, H * aux_taps});
   }
   Tensor aux_view{};
@@ -12642,8 +13613,19 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   const bool gdn_idx_changed =
       d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
       s.gdn_idx != pgm.non_spec_state_indices_tensor;
+  // Device lengths cannot refresh host dispatch/partitioning baked into a
+  // graph. Retire at the short-decode, long Split-K and active-page boundaries.
+  // Page changes conservatively retire even when a workspace cap has already
+  // saturated the partition count; no device metadata download is needed.
+  detail::XpuAttentionGraphPolicy attention_policy;
+  if (d.q.device.type == vt::DeviceType::kXPU)
+    attention_policy = detail::BuildXpuAttentionGraphPolicy(
+        pam.num_reqs, Q, pam.max_seq_len, pam.causal, attn_kv);
+  const bool attention_policy_changed = s.xpu_attention_policy &&
+      *s.xpu_attention_policy != attention_policy;
   s.Refresh(ptok, ppos, pam, pgm);
   s.fa_cols = cols;
+  s.xpu_attention_policy = std::move(attention_policy);
   bool seq_continuation = true;  // no seq_lens -> no boundary to detect
   // TT-27B-STEP-DECOMPOSE: the per-step TT refresh block is the "warmup
   // passes" phase — every Warm* call the captured arm makes per step is
@@ -12745,7 +13727,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   }
   const bool tt_boundary =
       d.q.device.type == vt::DeviceType::kTENSTORRENT && !seq_continuation;
-  if (((cols_changed || tt_boundary || gdn_idx_changed) && s.graph.captured()) ||
+  if (((cols_changed || attention_policy_changed || tt_boundary ||
+        gdn_idx_changed) && s.graph.captured()) ||
       (conv_shadow_stale && (s.graph.captured() || s.warm)) ||
       (gdn_idx_changed && s.warm)) {
     s.graph.Reset();
@@ -12760,6 +13743,20 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.pin.Free();
     s.dev.reset();
   }
+
+  if (mm && !s.mrope_positions) {
+    ActivePoolScope persistent_scope(&PersistentDecodeInputPool(d.b));
+    s.mrope_positions = std::make_unique<DBuf>(d, DType::kI32,
+                                              std::vector<int64_t>{3, S});
+  }
+  const auto stage_embedding = [&] {
+    if (mm) {
+      b.Copy(impl_->queue, s.hidden->ptr(), mm->inputs_embeds.data, mm->inputs_embeds.Bytes());
+      b.Copy(impl_->queue, s.mrope_positions->ptr(), mm->positions3.data, mm->positions3.Bytes());
+    } else {
+      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+    }
+  };
 
   // Fast path: this size's graph is captured. Embed OUTSIDE the graph into the
   // persistent hidden buffer, stage this step's inputs into the persistent device
@@ -12805,7 +13802,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       vt::tenstorrent::WarmDecodeIds(
           s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
     } else {
-      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+      stage_embedding();
     }
     if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te0, StepPhaseClk::now());
     if (dbuf) {
@@ -12834,7 +13831,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++impl_->replays;
     publish_aux();
     tap_emit("replay", s.logits->ptr());
-    return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
+    return publish_mtp();
   }
 
   // Warm: the pool + residency were warmed for this size by the previous (eager)
@@ -12926,6 +13923,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
                                          gdn_state_slots)
                     : BuildFullAttnStepDevInputs(d, s.positions, s.attn_meta));
         MaybeBuildAttnCosSin(d, *s.dev, impl_->config, S, fp4_attn);
+        if (mm && !s.dev->has_attn_cos_sin) {
+          s.dev->attn_cos_sin = DBuf(d, DType::kF32, {S, impl_->config.rotary_dim});
+          s.dev->has_attn_cos_sin = true;
+        }
       }
       const bool has_idx = s.dev->has_gdn_idx &&
                            s.gdn_meta.non_spec_state_indices_tensor.has_value();
@@ -12957,7 +13958,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
           s.hidden->ptr(), S, H, dtab.data, vocab, H,
           static_cast<int64_t>(s.token_ids.size()));
     } else {
-      DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+      stage_embedding();
     }
     if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te1, StepPhaseClk::now());
     // ENG-CUDAGRAPH-BREAK W4 (#1307): the capture is the SHARED SEAM's, not this
@@ -13024,9 +14025,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       }
       lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                               s.gdn_meta, attn_kv, gdn_state, impl_->weights,
-                              impl_->config, {}, nullptr, nullptr,
+                              impl_->config, {}, mtp_arg, nullptr,
                               aux_ids_arg, aux_out_arg, /*return_hidden=*/false,
-                              dbuf ? s.dev.get() : nullptr);
+                              dbuf ? s.dev.get() : nullptr,
+                              mm ? &s.mrope_positions->t() : nullptr);
       // R2 (the qwen3.cpp:1054-1061 port): advance cur_pos on-device
       // (plus_one) INSIDE the captured trace, at the END of the body — after
       // every cur_pos read in the layers' RAC/PA. cur_pos/update_idxs are
@@ -13092,6 +14094,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         vt::tenstorrent::StepPhaseNoteLaunch("eager");
         StepPhaseEmit(sph, "capture-eager");
       }
+      if (hidden_out != nullptr) {
+        s.logits = std::make_shared<DBuf>(std::move(*lg));
+        return publish_mtp();
+      }
       ForwardLogits drained = WrapDeviceLogits(d, std::move(*lg), vocab);
       if (drained.rows != B) {
         drained.rows = B;
@@ -13131,7 +14137,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         sph.on ? StepPhaseClk::now() : sph.t0;
     if (s.pinned.empty()) s.pinned = Pool(b).PinForGraph(b, s.demand);
     if (sph.on) sph.pin_ms = StepPhaseMsOf(sph_tpin0, StepPhaseClk::now());
-    s.logits = std::make_unique<DBuf>(std::move(*lg));
+    s.logits = std::make_shared<DBuf>(std::move(*lg));
     impl_->any_captured = true;
     if (std::getenv("VT_DECODE_GRAPH_STATS") != nullptr)
       std::fprintf(stderr, "[DenseDecodeGraph] captured Qwen3.5 dense decode graph "
@@ -13150,17 +14156,17 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++impl_->replays;
     publish_aux();
     tap_emit("capture", s.logits->ptr());
-    return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
+    return publish_mtp();
   }
 
   // Cold size: run one EAGER step (pre-warms the DevicePool + resident weights /
   // fp4-GEMM StreamScratch pools for this size) and defer capture to the next
   // same-size step. This is a real decode step (its padded output's real rows are
   // used). (Re)allocate the persistent hidden buffer to this size.
-  s.hidden = std::make_unique<DBuf>(d, DType::kBF16, std::vector<int64_t>{S, H});
+  s.hidden = std::make_unique<DBuf>(d, ActDType(d), std::vector<int64_t>{S, H});
   const StepPhaseClk::time_point sph_te2 =
       sph.on ? StepPhaseClk::now() : sph.t0;
-  DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
+  stage_embedding();
   if (sph.on) sph.embed_ms = StepPhaseMsOf(sph_te2, StepPhaseClk::now());
   // W2 (capture-warmup redesign): NO snapshot/restore around the warmup.
   // The restore 2ed5e912e4 added traded semantic correctness for program-
@@ -13181,8 +14187,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       sph.on ? StepPhaseClk::now() : sph.t0;
   DBuf lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                                s.gdn_meta, attn_kv, gdn_state, impl_->weights,
-                               impl_->config, {}, nullptr, nullptr, aux_ids_arg,
-                               aux_out_arg);
+                               impl_->config, {}, mtp_arg, nullptr, aux_ids_arg,
+                               aux_out_arg, /*return_hidden=*/false,
+                               /*persistent_sdi=*/nullptr,
+                               mm ? &s.mrope_positions->t() : nullptr);
   if (sph.on) {
     sph.body_ms = StepPhaseMsOf(sph_tb1, StepPhaseClk::now());
     // The cold step's eager forward: the first blocking read after this stamp
@@ -13199,6 +14207,10 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   publish_aux();
   record_staged();
   // lg is [S,vocab]; hand ownership out but expose only the first B (real) rows.
+  if (hidden_out != nullptr) {
+    s.logits = std::make_shared<DBuf>(std::move(lg));
+    return publish_mtp();
+  }
   ForwardLogits fl = WrapDeviceLogits(d, std::move(lg), vocab);
   if (fl.rows != B) {
     fl.rows = B;

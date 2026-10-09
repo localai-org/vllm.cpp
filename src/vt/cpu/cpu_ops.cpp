@@ -1735,10 +1735,12 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
         }
         StoreF32(out, (lo + t) * c_dim + c, args.silu_activation ? Silu(acc) : acc);
       }
-      // New row = old_state[off+1 .. off+(state_len-seqlen)] ++ x[lo..hi-1]
+      // Effective row = old_state[off+1 .. off+(width-1)] ++ x[lo..hi-1].
+      // causal_conv1d.py:845,1221 shrinks the logical state width for a short
+      // query; physical spare taps must not displace the newly valid history.
       // (:889-908 `new_conv_state = where(mask, conv_state, loaded_x)` with the
       // IS_SPEC_DECODING source offset `off + idx_tokens + 1`).
-      const int64_t keep = state_len - seqlen;
+      const int64_t keep = width - 1;
       for (int64_t j = 0; j < keep; ++j) {
         const int64_t src = off + j + 1;
         next[static_cast<size_t>(j)] = src < state_len ? srow[src] : 0.0f;
@@ -1746,7 +1748,7 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
       for (int64_t t = 0; t < seqlen; ++t) {
         next[static_cast<size_t>(keep + t)] = LoadF32(x, (lo + t) * x_rs + c);
       }
-      for (int64_t j = 0; j < state_len; ++j) srow[j] = next[static_cast<size_t>(j)];
+      for (int64_t j = 0; j < keep + seqlen; ++j) srow[j] = next[static_cast<size_t>(j)];
     }
   });
 }
@@ -4237,7 +4239,7 @@ void QkvSplitKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, const T
 void GdnPostConvKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, Tensor& g_out,
                        Tensor& beta_out, const Tensor& conv, const Tensor& araw,
                        const Tensor& braw, const Tensor& a_log, const Tensor& dt_bias,
-                       const L2NormArgs& args) {
+                       const GdnPostConvArgs& args) {
   const int64_t t = conv.shape[0];
   const int64_t hk = q_out.shape[1], dk = q_out.shape[2];
   const int64_t hv = v_out.shape[1], dv = v_out.shape[2];

@@ -1,0 +1,86 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "source_sha256": "22f02a1ee1faba276a93243d23ecada1094484e39e5bde79452d8a44f32238ba",
+  "scope": "executed CPU request M-RoPE for six actual native HTTP boundary prompts; no weights/worker/GPU",
+  "encoding": "row-major 3xT signed int32 little-endian, SHA-256",
+  "cases": [
+    {
+      "offset": 1599,
+      "prompt_tokens": 1840,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "fd136907bdbfb85e85e972c81c8e46d406efc7e539d6c020f2e586ebbb527257",
+      "positions_sha256": "9798d64d04fa930be54a0637cd934b4abaf2684672dbf89181afaefe3900328d"
+    },
+    {
+      "offset": 1600,
+      "prompt_tokens": 1841,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "bc3f7b938c10a07615af4e96acd32b285aeb21dfe2491e3ad9cfb4cb26325e96",
+      "positions_sha256": "c2e7d1e3a73b293b0d8856a14b0a7964ab93941d24e0f491d8e619a5400479b3"
+    },
+    {
+      "offset": 1601,
+      "prompt_tokens": 1842,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "881c3093a9b7dd95378320c87468e322af93fa315ca32c9fdae4385ef2809d0f",
+      "positions_sha256": "e05334c619714a52f75473f0af3696393cee29b4898beec1c55f94c29efa11dc"
+    },
+    {
+      "offset": 4095,
+      "prompt_tokens": 4336,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "21be70bf0f1abf5d1434581f1e72331b78d7e9e967192d1251d9866706e7b7f8",
+      "positions_sha256": "6f176c3dfb935e7c85aae1ae0454f5b7b1c0fb79eb2407559b212c2dd2b6da45"
+    },
+    {
+      "offset": 4096,
+      "prompt_tokens": 4337,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "caf49258ed64fb37195d08cb9907a656d3d340b12efdfd008c49937293c3a385",
+      "positions_sha256": "ae0c7f36239be41c79af8a4081acc9d270800c4dfc060b655e9b66a3e75347b0"
+    },
+    {
+      "offset": 4097,
+      "prompt_tokens": 4338,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "7341065dff56d65f4cbcc1352f5e0eeba2da801f9de00a5c54107d62b9688848",
+      "positions_sha256": "70cbb7520626e1ba9a78dad5df971a56d708856862a27086988cc3aae9acd965"
+    }
+  ]
+}

@@ -569,15 +569,15 @@ void AsyncLLM::RunOutputHandler() {
       engine_core_.abort_requests_async(processed.reqs_to_abort);
 
       // async_llm.py:697-702 — fold this step's SchedulerStats + IterationStats
-      // into the registry. Upstream records whenever a logger exists; every
-      // EngineCoreOutputs our proc queues came from a map entry that exists
-      // only when `outputs` is non-empty (core.cpp:91-94), so this is also the
-      // sync site's `len(outputs.outputs) > 0` guard (llm_engine.py:321-323).
+      // into the registry. A stats-only prefix lookup from a tokenless prefill
+      // chunk must also reach the logger; its empty IterationStats contributes
+      // no token or completion timing sample.
       //
       // Deliberately OUTSIDE output_processor_mutex_: the logger's own mutex is
       // then a leaf lock that can never take part in a cycle with the
       // output-processor lock or a collector's condition variable.
-      if (logger != nullptr && !outputs.outputs.empty()) {
+      if (logger != nullptr &&
+          (!outputs.outputs.empty() || outputs.scheduler_stats.prefix_cache_stats.queries > 0)) {
         logger->Record(outputs.scheduler_stats, iteration_stats);
       }
     }

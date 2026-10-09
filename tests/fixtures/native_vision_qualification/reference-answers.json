@@ -1,0 +1,98 @@
+{
+  "status": "PASS",
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "manifest_sha256": "d609b62093a7e5fae74d22f14fb7d78549633ee96a2768860a7b7f6df35610fd",
+  "cases": [
+    {
+      "name": "nova-shapes",
+      "reference_text": "{\n  \"heading\": \"NOVA 582\",\n  \"left\": \"orange circle\",\n  \"right\": \"purple triangle\"\n}",
+      "score": {
+        "pass": true,
+        "facts": {
+          "heading": "NOVA 582",
+          "left": "orange circle",
+          "right": "purple triangle"
+        },
+        "errors": []
+      },
+      "completion_tokens": 35,
+      "finish_reason": "stop"
+    },
+    {
+      "name": "backup-dialog",
+      "reference_text": "{\n  \"title\": \"Backup completed\",\n  \"file_count\": \"18\",\n  \"button\": \"Close\"\n}",
+      "score": {
+        "pass": true,
+        "facts": {
+          "title": "Backup completed",
+          "file_count": "18",
+          "button": "Close"
+        },
+        "errors": []
+      },
+      "completion_tokens": 31,
+      "finish_reason": "stop"
+    },
+    {
+      "name": "warehouse-table",
+      "reference_text": "```json\n{\n  \"title\": \"Warehouse Stock\",\n  \"marker_units\": \"9\",\n  \"largest_item\": \"Notebooks\"\n}\n```",
+      "score": {
+        "pass": true,
+        "facts": {
+          "title": "Warehouse Stock",
+          "marker_units": "9",
+          "largest_item": "Notebooks"
+        },
+        "errors": []
+      },
+      "completion_tokens": 38,
+      "finish_reason": "stop"
+    },
+    {
+      "name": "field-day-portrait",
+      "reference_text": "```json\n{\n  \"event\": \"FIELD DAY\",\n  \"date\": \"14 MAY 2027\",\n  \"location\": \"CEDAR PARK\"\n}\n```",
+      "score": {
+        "pass": true,
+        "facts": {
+          "event": "FIELD DAY",
+          "date": "14 MAY 2027",
+          "location": "CEDAR PARK"
+        },
+        "errors": []
+      },
+      "completion_tokens": 43,
+      "finish_reason": "stop"
+    },
+    {
+      "name": "invoice-unaligned",
+      "reference_text": "```json\n{\n    \"invoice_id\": \"AQ-417\",\n    \"amount\": \"$86.50\",\n    \"due_date\": \"09 JUN 2027\"\n}\n```",
+      "score": {
+        "pass": true,
+        "facts": {
+          "invoice_id": "AQ-417",
+          "amount": "$86.50",
+          "due_date": "09 JUN 2027"
+        },
+        "errors": []
+      },
+      "completion_tokens": 50,
+      "finish_reason": "stop"
+    },
+    {
+      "name": "shape-counting",
+      "reference_text": "{\n  \"top_triangles\": \"3\",\n  \"bottom_circles\": \"2\",\n  \"bottom_color\": \"blue\"\n}",
+      "score": {
+        "pass": true,
+        "facts": {
+          "top_triangles": "3",
+          "bottom_circles": "2",
+          "bottom_color": "blue"
+        },
+        "errors": []
+      },
+      "completion_tokens": 33,
+      "finish_reason": "stop"
+    }
+  ],
+  "scope": "six actual reference answers inspected/scored before native inference; not tensor or speed parity"
+}

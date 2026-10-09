@@ -1,0 +1,251 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "device": "Intel(R) Arc(TM) Pro B70 Graphics",
+  "class": "vllm.model_executor.layers.attention.mm_encoder_attention.MMEncoderAttention",
+  "selected_method": "MMEncoderAttention.forward_xpu",
+  "backend": "AttentionBackendEnum.FLASH_ATTN",
+  "fp8_enabled": false,
+  "contract": {
+    "relative": 0.001,
+    "absolute": 0.001,
+    "rule": "per-element absolute + relative*abs(reference)",
+    "origin": "test_xpu_attention.cpp: XPU unpaged attention FP16 output"
+  },
+  "cases": [
+    {
+      "shape": [
+        1,
+        16,
+        72
+      ],
+      "scale": 0.11785113019775792,
+      "causal": false,
+      "files": {
+        "q": {
+          "file": "attention-0-q.bin",
+          "shape": [
+            1,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "4823ed33d3362dad953798b07e3b9c57428a4ee683987ed0e42e0ec17ce04b1d"
+        },
+        "k": {
+          "file": "attention-0-k.bin",
+          "shape": [
+            1,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "e377518be8cb5e3ce1cfd0734db54a36fbb11e6f7ae94146708cf1fa4e1c20d6"
+        },
+        "v": {
+          "file": "attention-0-v.bin",
+          "shape": [
+            1,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "efb96c9db43517125c768e6a132df2204f3eb61e25d65461118b0de52d67d838"
+        },
+        "expected": {
+          "file": "attention-0-expected.bin",
+          "shape": [
+            1,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "efb96c9db43517125c768e6a132df2204f3eb61e25d65461118b0de52d67d838"
+        }
+      },
+      "repeat_exact": true,
+      "first_call_seconds": 0.001947372998984065
+    },
+    {
+      "shape": [
+        5,
+        16,
+        72
+      ],
+      "scale": 0.11785113019775792,
+      "causal": false,
+      "files": {
+        "q": {
+          "file": "attention-1-q.bin",
+          "shape": [
+            5,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "6e780a4554c1a717ab94edac9e35b99fee3f70ed4d9fcb8b4bc23cdbd7cfd826"
+        },
+        "k": {
+          "file": "attention-1-k.bin",
+          "shape": [
+            5,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "c55dfbd2bd41f29a9826e7072da388efa6d31f0f9d834e04e175427a9b0f3179"
+        },
+        "v": {
+          "file": "attention-1-v.bin",
+          "shape": [
+            5,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "912d8e295dc615c90b5eb239dc7886df99c6d772b78d93bedfdfa10ec108736c"
+        },
+        "expected": {
+          "file": "attention-1-expected.bin",
+          "shape": [
+            5,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "b68229e094cdf831981025dfdcbcbdb5e84ca834d7c1a7dd616e40955930beaf"
+        }
+      },
+      "repeat_exact": true,
+      "first_call_seconds": 0.00012375100050121546
+    },
+    {
+      "shape": [
+        37,
+        16,
+        72
+      ],
+      "scale": 0.11785113019775792,
+      "causal": false,
+      "files": {
+        "q": {
+          "file": "attention-2-q.bin",
+          "shape": [
+            37,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "c379b52c4ad363a36e838b7ee68a077fa9e243d882d0e66a26c989ad9388b093"
+        },
+        "k": {
+          "file": "attention-2-k.bin",
+          "shape": [
+            37,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "8f333dd087ebb69f8f3d83eb71e28a738fbb6698a3e50d155c0fb6d7c1932192"
+        },
+        "v": {
+          "file": "attention-2-v.bin",
+          "shape": [
+            37,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "e0ddbbbd9bc3db70083cecf1467523e795a1e0984507d960a9991ea7da941dd9"
+        },
+        "expected": {
+          "file": "attention-2-expected.bin",
+          "shape": [
+            37,
+            16,
+            72
+          ],
+          "dtype": "torch.float16",
+          "sha256": "d422f308ee1d345bdb60b9160d020e034cfe962349ef2d41dae529844e4972ea"
+        }
+      },
+      "repeat_exact": true,
+      "first_call_seconds": 0.00011868000001413748
+    }
+  ],
+  "routes": [
+    {
+      "operator": "_vllm_fa2_C.varlen_fwd",
+      "q_shape": [
+        1,
+        16,
+        72
+      ],
+      "dtype": "torch.float16",
+      "device": "xpu:0",
+      "causal": false,
+      "returned": true
+    },
+    {
+      "operator": "_vllm_fa2_C.varlen_fwd",
+      "q_shape": [
+        1,
+        16,
+        72
+      ],
+      "dtype": "torch.float16",
+      "device": "xpu:0",
+      "causal": false,
+      "returned": true
+    },
+    {
+      "operator": "_vllm_fa2_C.varlen_fwd",
+      "q_shape": [
+        5,
+        16,
+        72
+      ],
+      "dtype": "torch.float16",
+      "device": "xpu:0",
+      "causal": false,
+      "returned": true
+    },
+    {
+      "operator": "_vllm_fa2_C.varlen_fwd",
+      "q_shape": [
+        5,
+        16,
+        72
+      ],
+      "dtype": "torch.float16",
+      "device": "xpu:0",
+      "causal": false,
+      "returned": true
+    },
+    {
+      "operator": "_vllm_fa2_C.varlen_fwd",
+      "q_shape": [
+        37,
+        16,
+        72
+      ],
+      "dtype": "torch.float16",
+      "device": "xpu:0",
+      "causal": false,
+      "returned": true
+    },
+    {
+      "operator": "_vllm_fa2_C.varlen_fwd",
+      "q_shape": [
+        37,
+        16,
+        72
+      ],
+      "dtype": "torch.float16",
+      "device": "xpu:0",
+      "causal": false,
+      "returned": true
+    }
+  ]
+}

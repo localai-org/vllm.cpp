@@ -1,0 +1,653 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "publication/contribution-lifecycle-rebase.json",
+      "sha256": "9bd4b385d35116652d59b6f77edab519d611d615bc917b1775fa822b0fcd1c2f",
+      "bytes": 14454
+    },
+    {
+      "artifact_id": "publication/contribution-lifecycle-rebase-resource.json",
+      "sha256": "67fd6da603ad6add929498e07276a54f4288157ed1b220908fdc2ba21e78d984",
+      "bytes": 4220
+    },
+    {
+      "artifact_id": "publication/contribution-lifecycle-rebase.log",
+      "sha256": "eaf5f4a2cb09f63c76dcfc8cc5c6eabf2ce7afb299bc203cb27724ff7e8b7bb9",
+      "bytes": 854
+    },
+    {
+      "artifact_id": "publication/contribution-lifecycle-rebase-exit.json",
+      "sha256": "1373e73058501e5d0fdec0bab406479acafd64824d39f90a6be02b82c2f5c31c",
+      "bytes": 49
+    },
+    {
+      "artifact_id": "publication/contribution-lifecycle-rebase-command.json",
+      "sha256": "895dfb7c75d05f682768570a20d63ba3653a1af69dbed58d21c674a2ac8f66c8",
+      "bytes": 2395
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "result": {
+      "cancelled_id": "cancel",
+      "depth": 3,
+      "graph_requested": true,
+      "graph_stats": {
+        "captures": 4,
+        "replays": 16
+      },
+      "replacement_alone_ids": [11,353,2688,264,220,17,15,4514,6086,8330,440,264,3712,314,48840,13,353],
+      "replacement_reused_cancelled_state_base": true,
+      "requests": {
+        "early-eos": {
+          "finish_reason": "stop",
+          "ids": [271,16,17,13,248044],
+          "text": "\n\n12."
+        },
+        "long": {
+          "finish_reason": "length",
+          "ids": [271,248068,198,760,1156,6587,264,2716,3255,883,264,37550,8996,264,2438,46299,28428,264,11012,14367,13,6558,728,1683,883,1204,310,1236,411,27687,13,271,40,1318,310,5471,60482,5229,25,279,37550,12752,914,1066,381,264,18268,9572],
+          "text": "\n\n<think>\nThe user wants a short story about a fox finding a red umbrella beside a quiet river. Let me think about how to make this compelling.\n\nI want to avoid clichés: the fox shouldn't just be a cute animal"
+        },
+        "medium": {
+          "finish_reason": "length",
+          "ids": [271,1206,1423,279,2702,1324,314,39666,10462,11,29283,279,1324],
+          "text": "\n\nTo find the total number of tomato plants, multiply the number"
+        },
+        "replacement": {
+          "finish_reason": "length",
+          "ids": [11,353,2688,264,220,17,15,4514,6086,8330,440,264,3712,314,48840,13,353],
+          "text": ", I'm a 20-year-old male with a history of asthma. I"
+        }
+      },
+      "sentinel_layers": [0,47],
+      "sentinel_tail_checked": true,
+      "standalone_steps": [
+        {
+          "captures": 4,
+          "positions": [0],
+          "producer_event": true,
+          "replays": 6,
+          "step": 0
+        },
+        {
+          "captures": 4,
+          "positions": [1,2,3,4],
+          "producer_event": true,
+          "replays": 7,
+          "step": 1
+        },
+        {
+          "captures": 4,
+          "positions": [2,3,4,5],
+          "producer_event": true,
+          "replays": 8,
+          "step": 2
+        },
+        {
+          "captures": 4,
+          "positions": [5,6,7,8],
+          "producer_event": true,
+          "replays": 9,
+          "step": 3
+        },
+        {
+          "captures": 4,
+          "positions": [9,10,11,12],
+          "producer_event": true,
+          "replays": 10,
+          "step": 4
+        },
+        {
+          "captures": 4,
+          "positions": [11,12,13,14],
+          "producer_event": true,
+          "replays": 11,
+          "step": 5
+        },
+        {
+          "captures": 4,
+          "positions": [15,16,17,18],
+          "producer_event": true,
+          "replays": 12,
+          "step": 6
+        }
+      ],
+      "steps": [
+        {
+          "drafts_per_req": [],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 17,
+          "logical_logit_rows": 1,
+          "num_reqs": 1,
+          "prefills": 1,
+          "previous_accepted_tokens": [],
+          "qsl": [0,17],
+          "requests": ["long"],
+          "seq_lens": [17],
+          "spec_decodes": 0,
+          "state_bases": {
+            "long": 0
+          }
+        },
+        {
+          "drafts_per_req": [3,0,0,0],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 54,
+          "logical_logit_rows": 7,
+          "num_reqs": 4,
+          "prefills": 3,
+          "previous_accepted_tokens": [1],
+          "qsl": [0,4,15,41,54],
+          "requests": ["long","early-eos","medium","cancel"],
+          "seq_lens": [21,11,26,13],
+          "spec_decodes": 1,
+          "state_bases": {
+            "cancel": 12,
+            "early-eos": 4,
+            "long": 0,
+            "medium": 8
+          }
+        },
+        {
+          "drafts_per_req": [3,3,3,3],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 16,
+          "logical_logit_rows": 16,
+          "num_reqs": 4,
+          "prefills": 0,
+          "previous_accepted_tokens": [1,1,1,1],
+          "qsl": [0,4,8,12,16],
+          "requests": ["long","early-eos","medium","cancel"],
+          "seq_lens": [22,15,30,17],
+          "spec_decodes": 4,
+          "state_bases": {
+            "cancel": 12,
+            "early-eos": 4,
+            "long": 0,
+            "medium": 8
+          }
+        },
+        {
+          "drafts_per_req": [3,3,3,0],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 13,
+          "logical_logit_rows": 13,
+          "num_reqs": 4,
+          "prefills": 1,
+          "previous_accepted_tokens": [4,3,2],
+          "qsl": [0,4,8,12,13],
+          "requests": ["long","early-eos","medium","replacement"],
+          "seq_lens": [26,18,32,1],
+          "spec_decodes": 3,
+          "state_bases": {
+            "early-eos": 4,
+            "long": 0,
+            "medium": 8,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3,3,3],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 12,
+          "logical_logit_rows": 12,
+          "num_reqs": 3,
+          "prefills": 0,
+          "previous_accepted_tokens": [4,1,4],
+          "qsl": [0,4,8,12],
+          "requests": ["long","replacement","medium"],
+          "seq_lens": [30,5,36],
+          "spec_decodes": 3,
+          "state_bases": {
+            "long": 0,
+            "medium": 8,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3,3,3],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 12,
+          "logical_logit_rows": 12,
+          "num_reqs": 3,
+          "prefills": 0,
+          "previous_accepted_tokens": [4,1,4],
+          "qsl": [0,4,8,12],
+          "requests": ["long","replacement","medium"],
+          "seq_lens": [34,6,40],
+          "spec_decodes": 3,
+          "state_bases": {
+            "long": 0,
+            "medium": 8,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3,3],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 8,
+          "logical_logit_rows": 8,
+          "num_reqs": 2,
+          "prefills": 0,
+          "previous_accepted_tokens": [4,3],
+          "qsl": [0,4,8],
+          "requests": ["long","replacement"],
+          "seq_lens": [38,9],
+          "spec_decodes": 2,
+          "state_bases": {
+            "long": 0,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3,3],
+          "graph_stats": {
+            "captures": 0,
+            "replays": 0
+          },
+          "logical_forward_tokens": 8,
+          "logical_logit_rows": 8,
+          "num_reqs": 2,
+          "prefills": 0,
+          "previous_accepted_tokens": [4,4],
+          "qsl": [0,4,8],
+          "requests": ["long","replacement"],
+          "seq_lens": [42,13],
+          "spec_decodes": 2,
+          "state_bases": {
+            "long": 0,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3,3],
+          "graph_stats": {
+            "captures": 1,
+            "replays": 1
+          },
+          "logical_forward_tokens": 8,
+          "logical_logit_rows": 8,
+          "num_reqs": 2,
+          "prefills": 0,
+          "previous_accepted_tokens": [4,2],
+          "qsl": [0,4,8],
+          "requests": ["long","replacement"],
+          "seq_lens": [46,15],
+          "spec_decodes": 2,
+          "state_bases": {
+            "long": 0,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3,3],
+          "graph_stats": {
+            "captures": 2,
+            "replays": 2
+          },
+          "logical_forward_tokens": 8,
+          "logical_logit_rows": 8,
+          "num_reqs": 2,
+          "prefills": 0,
+          "previous_accepted_tokens": [4,4],
+          "qsl": [0,4,8],
+          "requests": ["long","replacement"],
+          "seq_lens": [50,19],
+          "spec_decodes": 2,
+          "state_bases": {
+            "long": 0,
+            "replacement": 12
+          }
+        },
+        {
+          "drafts_per_req": [3],
+          "graph_stats": {
+            "captures": 2,
+            "replays": 2
+          },
+          "logical_forward_tokens": 4,
+          "logical_logit_rows": 4,
+          "num_reqs": 1,
+          "prefills": 0,
+          "previous_accepted_tokens": [3],
+          "qsl": [0,4],
+          "requests": ["long"],
+          "seq_lens": [53],
+          "spec_decodes": 1,
+          "state_bases": {
+            "long": 0
+          }
+        },
+        {
+          "drafts_per_req": [3],
+          "graph_stats": {
+            "captures": 2,
+            "replays": 2
+          },
+          "logical_forward_tokens": 4,
+          "logical_logit_rows": 4,
+          "num_reqs": 1,
+          "prefills": 0,
+          "previous_accepted_tokens": [4],
+          "qsl": [0,4],
+          "requests": ["long"],
+          "seq_lens": [57],
+          "spec_decodes": 1,
+          "state_bases": {
+            "long": 0
+          }
+        },
+        {
+          "drafts_per_req": [3],
+          "graph_stats": {
+            "captures": 3,
+            "replays": 3
+          },
+          "logical_forward_tokens": 4,
+          "logical_logit_rows": 4,
+          "num_reqs": 1,
+          "prefills": 0,
+          "previous_accepted_tokens": [2],
+          "qsl": [0,4],
+          "requests": ["long"],
+          "seq_lens": [59],
+          "spec_decodes": 1,
+          "state_bases": {
+            "long": 0
+          }
+        },
+        {
+          "drafts_per_req": [3],
+          "graph_stats": {
+            "captures": 4,
+            "replays": 4
+          },
+          "logical_forward_tokens": 4,
+          "logical_logit_rows": 4,
+          "num_reqs": 1,
+          "prefills": 0,
+          "previous_accepted_tokens": [3],
+          "qsl": [0,4],
+          "requests": ["long"],
+          "seq_lens": [62],
+          "spec_decodes": 1,
+          "state_bases": {
+            "long": 0
+          }
+        },
+        {
+          "drafts_per_req": [3],
+          "graph_stats": {
+            "captures": 4,
+            "replays": 5
+          },
+          "logical_forward_tokens": 4,
+          "logical_logit_rows": 4,
+          "num_reqs": 1,
+          "prefills": 0,
+          "previous_accepted_tokens": [2],
+          "qsl": [0,4],
+          "requests": ["long"],
+          "seq_lens": [64],
+          "spec_decodes": 1,
+          "state_bases": {
+            "long": 0
+          }
+        },
+        {
+          "drafts_per_req": [3],
+          "graph_stats": {
+            "captures": 4,
+            "replays": 6
+          },
+          "logical_forward_tokens": 4,
+          "logical_logit_rows": 4,
+          "num_reqs": 1,
+          "prefills": 0,
+          "previous_accepted_tokens": [3],
+          "qsl": [0,4],
+          "requests": ["long"],
+          "seq_lens": [67],
+          "spec_decodes": 1,
+          "state_bases": {
+            "long": 0
+          }
+        }
+      ],
+      "transition_ids": [271,1206,1423,279,2702,1324,314,39666,10462,11,29283,279],
+      "transition_steps": [
+        {
+          "captures": 4,
+          "positions": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25],
+          "producer_event": false,
+          "replays": 12,
+          "step": 0
+        },
+        {
+          "captures": 4,
+          "positions": [26,27,28,29],
+          "producer_event": true,
+          "replays": 13,
+          "step": 1
+        },
+        {
+          "captures": 4,
+          "positions": [28,29,30,31],
+          "producer_event": true,
+          "replays": 14,
+          "step": 2
+        },
+        {
+          "captures": 4,
+          "positions": [32,33,34,35],
+          "producer_event": true,
+          "replays": 15,
+          "step": 3
+        },
+        {
+          "captures": 4,
+          "positions": [36,37,38,39],
+          "producer_event": true,
+          "replays": 16,
+          "step": 4
+        }
+      ],
+      "witnessed_graph_eager_graph": true,
+      "witnessed_mixed_prefill_spec": true,
+      "witnessed_ordered_1_4_2_1": true
+    },
+    "resource": {
+      "schema": "b70-exl3-worker-resource-v1",
+      "command": ["/build/tests/test_xpu_exl3_mtp","--test-case=*R08 lifecycle*"],
+      "worker_pid": 9,
+      "worker_executable": "/build/tests/test_xpu_exl3_mtp",
+      "worker_executable_sha256": "933b5263b3c2a8b3b91b2249fecaa089f76c9ccdb33f195d0fd6dd25c612fcef",
+      "worker_exit_code": 0,
+      "worker_wall_s": 18.954356443999814,
+      "cgroup_root": "/sys/fs/cgroup",
+      "cgroup_membership": "0::/",
+      "before": {
+        "memory.current": {
+          "raw": "9244672"
+        },
+        "memory.peak": {
+          "raw": "9244672"
+        },
+        "memory.max": {
+          "raw": "25769803776"
+        },
+        "memory.high": {
+          "raw": "max"
+        },
+        "memory.events": {
+          "raw": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "counters": {
+            "low": 0,
+            "high": 0,
+            "max": 0,
+            "oom": 0,
+            "oom_kill": 0,
+            "oom_group_kill": 0,
+            "sock_throttled": 0
+          }
+        },
+        "memory.swap.current": {
+          "raw": "0"
+        },
+        "memory.swap.peak": {
+          "raw": "0"
+        },
+        "memory.swap.max": {
+          "raw": "0"
+        },
+        "memory.swap.events": {
+          "raw": "high 0\nmax 0\nfail 0",
+          "counters": {
+            "high": 0,
+            "max": 0,
+            "fail": 0
+          }
+        },
+        "cpu.max": {
+          "raw": "200000 100000"
+        },
+        "cpu.stat": {
+          "raw": "usage_usec 46080\nuser_usec 29717\nsystem_usec 16362\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "counters": {
+            "usage_usec": 46080,
+            "user_usec": 29717,
+            "system_usec": 16362,
+            "nice_usec": 0,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 0,
+            "nr_throttled": 0,
+            "throttled_usec": 0,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          }
+        }
+      },
+      "after": {
+        "memory.current": {
+          "raw": "18980864"
+        },
+        "memory.peak": {
+          "raw": "4159565824"
+        },
+        "memory.max": {
+          "raw": "25769803776"
+        },
+        "memory.high": {
+          "raw": "max"
+        },
+        "memory.events": {
+          "raw": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "counters": {
+            "low": 0,
+            "high": 0,
+            "max": 0,
+            "oom": 0,
+            "oom_kill": 0,
+            "oom_group_kill": 0,
+            "sock_throttled": 0
+          }
+        },
+        "memory.swap.current": {
+          "raw": "0"
+        },
+        "memory.swap.peak": {
+          "raw": "0"
+        },
+        "memory.swap.max": {
+          "raw": "0"
+        },
+        "memory.swap.events": {
+          "raw": "high 0\nmax 0\nfail 0",
+          "counters": {
+            "high": 0,
+            "max": 0,
+            "fail": 0
+          }
+        },
+        "cpu.max": {
+          "raw": "200000 100000"
+        },
+        "cpu.stat": {
+          "raw": "usage_usec 18712022\nuser_usec 17775397\nsystem_usec 936624\nnice_usec 0\ncore_sched.force_idle_usec 0\nnr_periods 190\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "counters": {
+            "usage_usec": 18712022,
+            "user_usec": 17775397,
+            "system_usec": 936624,
+            "nice_usec": 0,
+            "core_sched.force_idle_usec": 0,
+            "nr_periods": 190,
+            "nr_throttled": 0,
+            "throttled_usec": 0,
+            "nr_bursts": 0,
+            "burst_usec": 0
+          }
+        }
+      },
+      "counter_deltas": {
+        "memory.events": {
+          "low": 0,
+          "high": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_kill": 0,
+          "oom_group_kill": 0,
+          "sock_throttled": 0
+        },
+        "memory.swap.events": {
+          "high": 0,
+          "max": 0,
+          "fail": 0
+        },
+        "cpu.stat": {
+          "usage_usec": 18665942,
+          "user_usec": 17745680,
+          "system_usec": 920262,
+          "nice_usec": 0,
+          "core_sched.force_idle_usec": 0,
+          "nr_periods": 190,
+          "nr_throttled": 0,
+          "throttled_usec": 0,
+          "nr_bursts": 0,
+          "burst_usec": 0
+        }
+      },
+      "child_major_fault_delta": 31,
+      "children_peak_rss_bytes": 13517844480,
+      "scope": "One worker; cgroup values include this wrapper and any other members. Peaks are lifetime cgroup/process peaks, not interval-exclusive. Missing counters are unavailable. Wall time includes worker startup; this is not a warmed serving score. No inference arithmetic is changed."
+    },
+    "exit": {
+      "exit_code": 0,
+      "elapsed_s": 19.14185255199982
+    },
+    "log": "engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement\n[doctest] doctest version is \"2.5.2\"\n[doctest] run with \"--help\" for options\n[vllm] kv-cache: XPU Qwen hybrid attention page 32 -> 1600 tokens (Mamba page 3268608 B, attention token 2048 B, MTP depth 3)\nvllm.cpp: WARNING using KV cache scaling factor 1.0 for fp8. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.\nvllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)\n===============================================================================\n[doctest] test cases:   1 |   1 passed | 0 failed | 12 skipped\n[doctest] assertions: 483 | 483 passed | 0 failed |\n[doctest] Status: SUCCESS!\n",
+    "command": ["docker","run","-v","<PUBLICATION_RECEIPTS>:/receipts","-v","<UNCHANGED_CONTROL>:/control:ro","-e","VT_B70_EXL3_MODEL=/model","-e","VT_B70_EXL3_ENGINE_OUTPUT=/receipts/contribution-lifecycle-rebase.json","-e","VT_B70_EXL3_ENGINE_DEPTH=3","-e","VT_B70_EXL3_ENGINE_GRAPH=1","-e","VT_B70_EXL3_SERVING_WORKLOAD=/receipts/sentinel-workload.json","-e","VT_B70_EXL3_SERVING_CASE=plan-a-c1-p4096-o256","-e","VT_B70_EXL3_SERVING_WARMUP=1","--device","/dev/dri","-e","EXL3_DRAFT_VOCAB=/subset.json","-e","VT_ASYNC_SCHED=0","-e","VT_ASYNC_RUNNER=0","-e","VT_XPU_GRAPH=1","-e","VLLM_CPP_CUDAGRAPH=1","-e","VLLM_CPP_DENSE_DECODE_GRAPH=1","-e","VT_XPU_ATTENTION=auto","-e","VT_XPU_XE2_VERIFY=1","-e","VT_XPU_PROFILE=0","-e","VT_XPU_HOST_PROFILE=0","-e","VT_XPU_GDN_MIXED_TOKEN_VIEWS=1","-e","VT_XPU_SILU_FP16_TABLE=1","-e","VT_XPU_SILU_FP16_TYPED=1","-e","VT_XPU_W8A8_MODEL_MAP=1","-e","VT_XPU_W8A8_PREPARE=1","-e","VT_XPU_SMALLM_MODEL_MAP=1","-e","VT_XPU_GDN_GATED_SILU_TABLE=1","-v","<MODEL>:/model:ro","-v","<EXL3_DONOR>/models/qwen3.8-27b-exl3-4.00bpw/draft_vocab.json:/subset.json:ro","--name","b70-plan-a-contribution-lifecycle-rebase","--rm","--pull=never","--network","none","--entrypoint","/bin/bash","--memory","24g","--memory-swap","24g","--cpus","2","-e","LD_LIBRARY_PATH=/opt/intel/oneapi/compiler/2026.1/lib:/onednn/lib:/opt/ucx/lib:/opt/venv/lib:/usr/local/lib","-v","<PR_SOURCE>:/work:ro","-v","<XPU_BUILD>:/build","-v","<ONEDNN>:/onednn:ro","-v","<SYCL_TLA>:/tla:ro","sha256:ae6950731b3c031f812a95c0eb615a572239426440bf67fd1b3c9c9cbfce9eca","-lc","python3 /receipts/resource-runner.py --out /receipts/contribution-lifecycle-rebase-resource.json -- /build/tests/test_xpu_exl3_mtp --test-case='*R08 lifecycle*'"]
+  }
+}

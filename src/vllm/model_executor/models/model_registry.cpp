@@ -866,7 +866,47 @@ MmForwardBuffers ModelRegistry::EmbedMm(LoadedModel& model,
             "the consuming hook is owed by the row that ports '" +
             arch + "'. #1305, #2496, #2544, #2710, #2730");
   }
-  return factory.embed_mm(model, config, queue, inputs);
+  if (inputs.mm_lifetimes != nullptr) {
+    VT_CHECK(inputs.mm_embeds != nullptr &&
+                 inputs.mm_lifetimes->size() == inputs.mm_embeds->size(),
+             "multimodal embed: one lifetime per source slice required");
+    // Validate the explicit parent relationship, not raw allocation identity.
+    // A live owner accompanies every native row slice across cache eviction.
+    for (size_t i=0;i<inputs.mm_lifetimes->size();++i) {
+      const auto& owner=(*inputs.mm_lifetimes)[i];
+      if (!owner) continue;  // Existing synchronous encoders have no event owner.
+      const auto& parent=owner->tensor(); const auto& slice=(*inputs.mm_embeds)[i];
+      VT_CHECK(parent.rank==2 && parent.shape[0]>0 && parent.shape[1]>0 &&
+                   parent.IsContiguous() && slice.rank==2 && slice.shape[0]>=0 &&
+                   slice.shape[0]<=parent.shape[0] && slice.shape[1]==parent.shape[1] &&
+                   slice.dtype==parent.dtype && slice.device==parent.device && slice.IsContiguous(),
+               "multimodal embed: source slice must match its live encoder parent");
+      const auto start=reinterpret_cast<uintptr_t>(parent.data);
+      const auto address=reinterpret_cast<uintptr_t>(slice.data);
+      VT_CHECK(parent.data && slice.data && address>=start &&
+                   address-start<=parent.Bytes() &&
+                   slice.Bytes()<=parent.Bytes()-(address-start) &&
+                   (address-start)%(parent.shape[1]*vt::SizeOf(parent.dtype))==0,
+               "multimodal embed: source slice lies outside its live encoder parent");
+    }
+    for (const auto& owner : *inputs.mm_lifetimes) if (owner) owner->WaitOn(queue);
+  }
+  const auto record_uses=[&] {
+    if (inputs.mm_lifetimes)
+      for (const auto& owner : *inputs.mm_lifetimes) if (owner) owner->RecordUse(queue);
+  };
+  MmForwardBuffers result;
+  try {
+    result=factory.embed_mm(model, config, queue, inputs);
+  } catch (...) {
+    // A failing hook may already have submitted a source read. The caller's
+    // owners remain alive until their recorded consumer events complete.
+    record_uses(); throw;
+  }
+  record_uses();
+  if (inputs.mm_lifetimes)
+    for (const auto& owner : *inputs.mm_lifetimes) if (owner) result.storage.push_back(owner);
+  return result;
 }
 
 MropePromptPositions ModelRegistry::MropePromptPositionsFor(

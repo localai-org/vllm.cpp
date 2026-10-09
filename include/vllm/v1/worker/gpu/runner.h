@@ -91,6 +91,7 @@ class KVConnector;  // KV-EXTERNAL-CACHE: worker-side store/load seam (fwd-decl)
 }  // namespace vllm::v1::kv_offload
 
 namespace vllm::v1 {
+struct RejectionSamplerOutput;
 
 // Decode-first reorder (utils.py::reorder_batch_to_split_decodes_and_prefills @
 // e24d1b24, T0 subset). Reorders `input_batch`'s active [0, num_reqs) requests so
@@ -361,6 +362,13 @@ class GPUModelRunner final : public ModelRunnerBase {
   }
   const GDNAttentionMetadata& last_gdn_meta() const {
     return exec_state_.gdn_meta;
+  }
+  // Read-only output inspection. Copy the carrier to retain an owning output
+  // across execute_model; the reference itself is step-local. These accessors
+  // do not wait for GPU work or extend a non-owning logits view.
+  const ForwardLogits& last_forward_logits() const { return exec_state_.logits; }
+  const Qwen3_5MTPHiddenStates& last_spec_hidden() const {
+    return exec_state_.spec_hidden;
   }
   // SPEC-MTP I5d acceptance telemetry accessors (the gate reads these).
   int64_t spec_drafts_proposed() const { return spec_drafts_proposed_; }
@@ -797,6 +805,7 @@ class GPUModelRunner final : public ModelRunnerBase {
     // Borrowed views into `encoder_cache_` entries, in the order their `true`
     // positions appear in `is_mm_embed`. Valid only while this step runs.
     std::vector<vt::Tensor> mm_embeds;
+    std::vector<std::shared_ptr<MmEncoderLifetime>> mm_lifetimes;
     // [total_num_scheduled_tokens]; `char` because std::vector<bool> has no
     // contiguous buffer to hand a model.
     std::vector<char> is_mm_embed;
@@ -816,9 +825,11 @@ class GPUModelRunner final : public ModelRunnerBase {
   void execute_mm_encoder(const SchedulerOutput& scheduler_output);
   // `_gather_mm_embeddings` (gpu_model_runner.py:3220, grep -c == 1).
   MmGather gather_mm_embeddings(const SchedulerOutput& scheduler_output,
-                                int total_num_scheduled_tokens);
+                                int total_num_scheduled_tokens,
+                                int draft_lookahead = 0);
   // `_calc_mrope_positions` (gpu_model_runner.py:2748, grep -c == 1): [3, T]
-  // row-major. The prompt part is SLICED from the per-request array; the
+  // row-major. Image prompt coordinates are SLICED from the per-request array;
+  // text prompt rows in a mixed batch use ordinary token positions. The
   // completion part is SYNTHESISED as `context_len + i + delta` on all three
   // axes, which is why one int per request carries M-RoPE across every decode
   // step (gpu_model_runner.py:2786, grep -c == 1).
@@ -881,6 +892,10 @@ class GPUModelRunner final : public ModelRunnerBase {
   // Flattened-token bound for one step; sizes the W4 device input_ids mirror.
   int max_num_batched_tokens_ = 0;
   int64_t gdn_state_slots_ = 0;
+  std::shared_ptr<RecurrentPrefixSnapshotIndex> recurrent_prefix_snapshots_;
+  int64_t prefix_snapshot_base_ = 0;
+  void copy_recurrent_state_slot(int64_t source, int64_t destination);
+  void publish_recurrent_prefixes(const StepInputs& step);
   // Compact GDN state-slot allocator: request identity (req_id) -> slot in
   // [0, gdn_state_slots_); free list of unused slots. Keyed on the sequence, not
   // the mamba pool block-id (see remap_gdn_state_slots for why block-id keying
@@ -1106,7 +1121,8 @@ class GPUModelRunner final : public ModelRunnerBase {
   // #2534: the final-logit dump (VT_DUMP_LOGITS). Called from BOTH sampling
   // paths, because the production default takes the device-resident branch of
   // sample_tokens_async and not sample_tokens.
-  void dump_step_logits(const vt::Tensor& logits);
+  void dump_step_logits(const vt::Tensor& logits,
+                        const RejectionSamplerOutput* verification = nullptr);
 
   vt::Tensor assemble_sample_logits(
       const std::optional<GrammarOutput>& grammar_output,
@@ -1519,10 +1535,18 @@ class GPUModelRunner final : public ModelRunnerBase {
     CommonAttentionMetadata attn_meta;
     GDNAttentionMetadata gdn_meta;
     std::vector<std::string> req_ids;  // dense order (== input_batch order)
+    // Per-request expanded verify row counts, retained until sampling. The
+    // grammar mask uses sizes only; async draft values may be filled later.
+    std::map<std::string, std::vector<int32_t>> scheduled_spec_decode_tokens;
     // SPEC-MTP I5d: the target's post-final-norm [T,H] hidden tap captured this
     // step (ModelForwardInput::hidden_tap output), consumed by propose_drafts to
     // run the MTP drafter. Empty (null storage) unless spec is on.
     Qwen3_5MTPHiddenStates spec_hidden;
+    // Borrowed shifted visual slices retain their encoder parents until the
+    // post-sampling draft merge/proposal has completed. Gather before request
+    // progress advances, merge after shift/splice knows the sampled token.
+    std::optional<MmGather> spec_mm_gather;
+    std::vector<int32_t> spec_mm_positions;
     // SPEC-DFLASH D5: the target's D1 MULTI-tap captured this step
     // (ModelForwardInput::aux_tap output) — the residual stream at the draft's
     // target_layer_ids as [T, H×taps] bf16, consumed by propose_drafts_dflash.

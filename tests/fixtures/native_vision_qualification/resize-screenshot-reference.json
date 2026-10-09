@@ -1,0 +1,51 @@
+{
+  "status": "PASS",
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "manifest_sha256": "a88a4b1dcf1063af2fad009ec0de23f96c73db12a9219dead13c6aa50dc97b46",
+  "scope": "one derived resize-required screenshot; actual oracle tower geometry and named facts, not held-out or numerical parity",
+  "actual_tower_input": {
+    "grid_thw": [
+      1,
+      40,
+      54
+    ],
+    "pixels_shape": [
+      2160,
+      1536
+    ],
+    "pixels_dtype": "torch.float16",
+    "device": "xpu:0"
+  },
+  "processed_size_wh": [
+    864,
+    640
+  ],
+  "runtime": {
+    "torch": "2.13.0+xpu",
+    "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+    "torchvision": "0.28.0+xpu",
+    "transformers": "5.16.1",
+    "vllm": "0.30.0"
+  },
+  "config_sha256": "dab9abc478e1b1b928ef354f27a26fc90e8191a4a3ce5f3d19aa21558216b267",
+  "actual_capture_sha256": "42850e8b6c682b0d38dfb38166fc87427684d1f1fc410fa07d82754bc5345429",
+  "cases": [
+    {
+      "name": "backup-dialog-resize",
+      "image_sha256": "fe17c140c8289a6652144f428bf8e2ea6f39f003a0f3b03c5eb21a3e2664993a",
+      "reference_text": "{\n  \"title\": \"Backup completed\",\n  \"file_count\": \"18\",\n  \"button\": \"Close\"\n}",
+      "score": {
+        "pass": true,
+        "facts": {
+          "title": "Backup completed",
+          "file_count": "18",
+          "button": "Close"
+        },
+        "errors": []
+      },
+      "completion_tokens": 31,
+      "finish_reason": "stop",
+      "stop_reason": null
+    }
+  ]
+}

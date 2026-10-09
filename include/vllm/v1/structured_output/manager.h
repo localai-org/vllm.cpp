@@ -22,9 +22,8 @@
 //   - Parallel bitmask fill: upstream has an executor_for_fillmask fast path for
 //     >128 structured reqs (__init__.py:236-262); T0 uses only the serial
 //     fallback (__init__.py:263-294) — the ThreadPool is deferred.
-//   - Spec-decode / diffusion multi-row bitmask: scheduled_spec_decode_tokens is
-//     always empty at T0 (num_speculative_tokens == 0), so the per-req token_iter
-//     reduces to a single {-1} placeholder row (__init__.py:276-294).
+//   - Diffusion multi-row bitmask is deferred. Spec-decode fills each draft
+//     position and the bonus row, temporarily advancing and restoring the FSM.
 //   - Reasoning/thinking gating: should_advance / should_fill_bitmask return the
 //     no-reasoner branch (reasoner_cls is null at T0) — see their bodies.
 #ifndef VLLM_V1_STRUCTURED_OUTPUT_MANAGER_H_
@@ -60,7 +59,7 @@ class StructuredOutputManager {
   // reach the manager).
   StructuredOutputManager() = default;
 
-  // max_num_seqs sizes the once-allocated bitmask (upstream
+  // max_num_seqs sizes the initial bitmask (upstream
   // vllm_config.scheduler_config.max_num_seqs). backend_factory builds the
   // backend lazily (see BackendFactory).
   StructuredOutputManager(int max_num_seqs, BackendFactory backend_factory);
@@ -73,11 +72,11 @@ class StructuredOutputManager {
   void grammar_init(Request& request);
 
   // grammar_bitmask (__init__.py:204-303): fill a batched
-  // [num_structured_reqs, ceil(vocab/32)] int32 bitmask, one row per id in
-  // structured_output_request_ids (in that order). A live grammar fills its row
+  // [sum(1 + drafts per structured req), ceil(vocab/32)] int32 bitmask,
+  // in structured_output_request_ids order. A live grammar fills its row
   // via fill_bitmask; a terminated / should-not-fill grammar's row is set to -1
   // (all tokens allowed). Returns nullopt when there are no structured reqs.
-  // (Parallel-fill fast path + spec-decode multi-row deferred — see the header.)
+  // (Parallel-fill fast path deferred — see the header.)
   std::optional<TokenBitmask> grammar_bitmask(
       const std::map<std::string, std::unique_ptr<Request>>& requests,
       const std::vector<std::string>& structured_output_request_ids,
@@ -115,10 +114,9 @@ class StructuredOutputManager {
   // The single owned backend, built lazily on first grammar (__init__.py:40).
   std::unique_ptr<StructuredOutputBackend> backend_;
   BackendFactory backend_factory_;
-  // Sizes the once-allocated bitmask (upstream scheduler_config.max_num_seqs).
+  // Initial row capacity (upstream scheduler_config.max_num_seqs).
   int max_num_seqs_ = 0;
-  // The reused bitmask, allocated once on first grammar_bitmask (__init__.py:58,
-  // 217-226).
+  // The reused bitmask grows when expanded speculative rows need more capacity.
   std::optional<TokenBitmask> grammar_bitmask_;
   // _full_mask = -1: every bit set => every token allowed (__init__.py:59).
   static constexpr int32_t kFullMask = -1;

@@ -351,6 +351,19 @@ vt::Queue SelectQueueForModel(std::string_view architecture,
 vt::DeviceType ResolveModelDeviceType(std::string_view architecture,
                                       vllm::Device device);
 
+// Clamp enabled native EXL3 XPU image serving before runner/state allocation.
+// Extra clients wait in the existing scheduler; other engine scopes pass through.
+int ResolveNativeQwen3_5MaxNumSeqs(
+    int resolved, const HfConfig& config, std::string_view architecture,
+    vt::DeviceType device, const vllm::MultiModalConfig& multimodal);
+
+// Adjust only the enabled native EXL3 Qwen3.5 image encoder. Capacity is
+// bookkeeping for lazily resident outputs; it does not allocate the cache.
+void ConfigureNativeQwen3_5EncoderBudget(
+    vllm::SchedulerConfig& scheduler, const HfConfig& config,
+    std::string_view architecture, vt::DeviceType device,
+    const vllm::MultiModalConfig& multimodal);
+
 // Owns the full V1 engine stack (config + weights + tokenizer + Scheduler +
 // runner -> Executor -> EngineCore; Input/OutputProcessor -> LLMEngine) for a
 // registered model. The concrete weights/forward are held behind LoadedModel;
@@ -723,9 +736,9 @@ class LoadedEngine {
                // report the skip even if the loader had stopped honouring it.
                bool mmproj_tower_skipped = false);
 
-  static vllm::SchedulerConfig MakeSchedulerConfig(
+  vllm::SchedulerConfig MakeSchedulerConfig(
       int max_model_len, int max_num_seqs, int max_num_batched_tokens,
-      vllm::SchedulerPolicy policy = vllm::SchedulerPolicy::kFCFS);
+      vllm::SchedulerPolicy policy = vllm::SchedulerPolicy::kFCFS) const;
   // Construct the concrete scheduler for the resolved mode: an AsyncScheduler
   // (async scheduling ON) or the synchronous Scheduler. Mirrors upstream
   // get_scheduler_cls (scheduler.py:180-189) selecting AsyncScheduler when
@@ -826,6 +839,13 @@ class LoadedEngine {
   // the engine-core draft pull all read it. nullopt ⇒ every spec path is inert
   // and the engine is byte-identical to the pre-spec engine.
   std::optional<vllm::SpeculativeConfig> resolved_spec_config_;
+  // The selected main queue is owned by this engine, while runner/model state
+  // borrows it. Declared before those owners so destruction releases it last,
+  // including on a partially constructed engine.
+  struct MainQueueOwner {
+    vt::Queue queue{};
+    ~MainQueueOwner();
+  } main_queue_owner_;
   // Concrete weights and model-specific runtime state behind the central
   // registry contract. Declared before runner_ so its borrow remains live.
   //

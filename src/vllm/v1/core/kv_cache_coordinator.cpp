@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/core/kv_cache_coordinator.py @ e24d1b24
 // See include/vllm/v1/core/kv_cache_coordinator.h for the scope / deferred list
 // and the CROSS-GROUP find_longest_cache_hit algorithm this task turns on.
@@ -147,6 +148,15 @@ KVCacheCoordinator::KVCacheCoordinator(KVCacheConfig kv_cache_config,
       eagle_group_ids.insert(static_cast<int>(i));
     }
   }
+  // Shared EXL3 MTP KV uses the target group's physical page identities.
+  // Draft prefill shifts input IDs by one, so the final draft KV of a hashed
+  // page depends on the next token. Apply the existing last-hit-page drop
+  // before choosing the joint attention/recurrent restore boundary.
+  // Keep the target layer-name discriminator unchanged: is_eagle_group also
+  // identifies draft-only storage during layer-name expansion.
+  if (this->kv_cache_config.mtp_draft_shares_target_pages) {
+    eagle_group_ids.insert(0);
+  }
   // Conservatively fall back to flag all groups when no group is flagged.
   if (use_eagle && eagle_group_ids.empty()) {
     for (std::size_t i = 0; i < this->kv_cache_config.kv_cache_groups.size();
@@ -161,6 +171,8 @@ KVCacheCoordinator::KVCacheCoordinator(KVCacheConfig kv_cache_config,
         this->kv_cache_config.kv_cache_groups[i].kv_cache_spec,
         max_num_batched_tokens_, max_model_len, block_pool, enable_caching,
         static_cast<int>(i), scheduler_block_size));
+    if (auto* mamba = dynamic_cast<MambaManager*>(single_type_managers.back().get()))
+      mamba->prefix_snapshots = this->kv_cache_config.recurrent_prefix_snapshots;
   }
 
   // retention_interval stays nullopt (dense caching); env read deferred.

@@ -2126,6 +2126,7 @@ int VllmServerMain(int argc, char** argv) {
     // DeepSeek-V4's is, because it spells every image position
     // `vocab_size + type` -- would otherwise have to guess it.
     mm_ctx.config = &loaded->config();
+    mm_ctx.device = loaded->runner().device();
     // The `--mmproj` second file, so a factory can refuse a tower-free load at
     // INSTALL rather than inside the engine's busy loop.
     mm_ctx.mmproj_path = args.mmproj_path;

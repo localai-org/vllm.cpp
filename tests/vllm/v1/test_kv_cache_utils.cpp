@@ -807,6 +807,54 @@ TEST_CASE("get_request_block_hasher matches hash_request_tokens (byte-exact)") {
   CHECK(no_hash.block_hashes.empty());
 }
 
+TEST_CASE("R09 MTP prefix hash preserves shifted boundary identity") {
+  using vllm::v1::get_request_block_hasher;
+  using vllm::v1::Request;
+  init_none_hash(sha256_cbor, "seed42");
+  const auto ordinary = get_request_block_hasher(4, sha256_cbor);
+  const auto shifted = get_request_block_hasher(4, sha256_cbor, true);
+  Request base("base", {1, 2, 3, 4, 5, 6, 7, 8}, {}, 0, shifted);
+  Request next_changed("next", {1, 2, 3, 4, 9, 6, 7, 8}, {}, 0, shifted);
+  Request later_changed("later", {1, 2, 3, 4, 5, 9, 7, 8}, {}, 0, shifted);
+  Request old("ordinary", {1, 2, 3, 4, 5, 6, 7, 8}, {}, 0, ordinary);
+  REQUIRE(base.block_hashes.size() == 1);
+  REQUIRE(next_changed.block_hashes.size() == 1);
+  REQUIRE(later_changed.block_hashes.size() == 1);
+  CHECK(base.block_hashes != next_changed.block_hashes);
+  CHECK(base.block_hashes == later_changed.block_hashes);
+  CHECK(old.block_hashes.size() == 2);
+  CHECK(base.block_hashes[0] != old.block_hashes[0]);
+  CHECK(old.block_hashes == hash_request_tokens(sha256_cbor, 4, {1, 2, 3, 4, 5, 6, 7, 8}));
+  // Cold construction and incremental output append yield identical keys.
+  Request growing("growing", {1, 2, 3, 4}, {}, 0, shifted);
+  CHECK(growing.block_hashes.empty());
+  growing.AppendOutputToken(5);
+  CHECK(growing.block_hashes == base.block_hashes);
+  growing.AppendOutputToken(std::vector<int32_t>{6, 7, 8});
+  CHECK(growing.block_hashes == base.block_hashes);
+  growing.AppendOutputToken(9);
+  Request whole("whole", {1, 2, 3, 4, 5, 6, 7, 8, 9}, {}, 0, shifted);
+  REQUIRE(growing.block_hashes.size() == 2);
+  CHECK(growing.block_hashes == whole.block_hashes);
+  CHECK(growing.block_hashes[0] == base.block_hashes[0]);
+  growing.AppendOutputToken(10);
+  CHECK(growing.block_hashes == whole.block_hashes);
+  // Salt and LoRA still separate otherwise-compatible target/draft contexts.
+  Request salted("salted", {1, 2, 3, 4, 5, 6, 7, 8}, {}, 0);
+  salted.cache_salt = "other-checkpoint-context";
+  salted.lora_name = "adapter";
+  const auto salted_hashes = shifted(salted);
+  CHECK(salted_hashes.size() == 1);
+  CHECK(salted_hashes != base.block_hashes);
+  // One-token pages exercise the same next-token dependency at every position.
+  Request one("one", {1}, {}, 0, get_request_block_hasher(1, sha256_cbor, true));
+  CHECK(one.block_hashes.empty());
+  one.AppendOutputToken(2);
+  CHECK(one.block_hashes.size() == 1);
+  one.AppendOutputToken(3);
+  CHECK(one.block_hashes.size() == 2);
+}
+
 TEST_CASE("unify_hybrid_kv_cache_specs converts sliding storage to full") {
   auto full = std::make_shared<FullAttentionSpec>(
       /*block_size=*/16, /*num_kv_heads=*/2, /*head_size=*/64,

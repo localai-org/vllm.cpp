@@ -1,0 +1,692 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "plan-a/http-prefix-mtp3-v1-result.json",
+      "sha256": "223a0998d484add6239b11949b10e747882e8d6157630f150412de15ff049af2",
+      "bytes": 67080
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "mode": "mtp3",
+    "url": "http://127.0.0.1:18371",
+    "checks": [
+      {
+        "name": "model-identification",
+        "models": {
+          "data": [
+            {
+              "created": 1791319876,
+              "id": "plan-a-exl3",
+              "object": "model",
+              "owned_by": "vllm"
+            }
+          ],
+          "object": "list"
+        }
+      },
+      {
+        "name": "nonstream-stream-token-accounting",
+        "baseline": {
+          "response": {
+            "choices": [
+              {
+                "finish_reason": "length",
+                "index": 0,
+                "logprobs": {
+                  "text_offset": [0,2,14,27,39,53,66,77,89,101,113,127,140,152,166,179,193,206,219,231,244,257,268,283,298,313,328,343,355,370,385,400],
+                  "token_logprobs": [-0.6153602600097656,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                  "tokens": ["\n\n","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248045","token_id:248046","token_id:198","token_id:248045","token_id:248045","token_id:248046","token_id:198"],
+                  "top_logprobs": [
+                    {
+                      "\n\n": -0.6153602600097656
+                    },
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "prompt_logprobs": null,
+                "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n"
+              }
+            ],
+            "created": 1791319876,
+            "id": "cmpl-0",
+            "model": "plan-a-exl3",
+            "object": "text_completion",
+            "usage": {
+              "completion_tokens": 32,
+              "prompt_tokens": 18,
+              "total_tokens": 50
+            }
+          },
+          "wall_s": 12.268186389999755
+        },
+        "stream": {
+          "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n",
+          "tokens": [],
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 18,
+            "total_tokens": 50
+          },
+          "sse_chunks": 17,
+          "first_s": 0.11565612300000794,
+          "wall_s": 0.8783122210006695
+        }
+      },
+      {
+        "name": "2-concurrent-short-requests",
+        "wave": [
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,2,14,27,39,53,66,77,89,101,113,127,140,152,166,179,193,206,219,231,244,257,268,283,298,313,328,343,355,370,385,400],
+                    "token_logprobs": [-0.6153602600097656,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["\n\n","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248045","token_id:248046","token_id:198","token_id:248045","token_id:248045","token_id:248046","token_id:198"],
+                    "top_logprobs": [
+                      {
+                        "\n\n": -0.6153602600097656
+                      },
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n"
+                }
+              ],
+              "created": 1791319891,
+              "id": "cmpl-5",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 1.189516967999225
+          },
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,12,24,37,49,63,76,87,99,111,123,137,150,162,176,189,203,216,229,241,254,267,280,291,306,321,336,351,363,375,388,400],
+                    "token_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["token_id:271","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:2542","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248068","token_id:198","token_id:760","token_id:1156","token_id:369","token_id:9859"],
+                    "top_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total sum.<think>\nThe user is asking"
+                }
+              ],
+              "created": 1791319891,
+              "id": "cmpl-6",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 1.1893490759994165
+          }
+        ],
+        "same_greedy_text_and_usage_as_isolated": true
+      },
+      {
+        "name": "3-concurrent-short-requests",
+        "wave": [
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,12,24,37,49,63,76,87,99,111,123,137,150,162,176,189,203,216,229,241,254,267,278,293,308,323,338,353,365,380,395,410],
+                    "token_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["token_id:271","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248045","token_id:248046","token_id:198","token_id:248045","token_id:248045","token_id:248046","token_id:198"],
+                    "top_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n"
+                }
+              ],
+              "created": 1791319893,
+              "id": "cmpl-7",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 4.353207598000154
+          },
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,2,14,27,39,53,66,77,89,101,113,127,140,152,166,179,193,206,219,231,244,257,270,281,296,311,326,341,353,365,378,390],
+                    "token_logprobs": [-0.34551048278808594,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["\n\n","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:2542","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248068","token_id:198","token_id:760","token_id:1156","token_id:369","token_id:9859"],
+                    "top_logprobs": [
+                      {
+                        "\n\n": -0.34551048278808594
+                      },
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total sum.<think>\nThe user is asking"
+                }
+              ],
+              "created": 1791319893,
+              "id": "cmpl-8",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 4.251686231000349
+          },
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,2,15,28,42,53,65,78,91,103,117,130,141,154,166,178,192,206,218,232,245,259,271,284,297,309,322,335,348,361,373,385],
+                    "token_logprobs": [-0.6050758361816406,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["\n\n","token_id:1835","token_id:1122","token_id:11234","token_id:13","token_id:271","token_id:3833","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:13","token_id:1061","token_id:369","token_id:264","token_id:15346","token_id:16988","token_id:314","token_id:33633","token_id:1332","token_id:33041","token_id:264","token_id:3074","token_id:4821","token_id:440","token_id:2361","token_id:3074","token_id:4821","token_id:2961","token_id:303","token_id:264","token_id:2702"],
+                    "top_logprobs": [
+                      {
+                        "\n\n": -0.6050758361816406
+                      },
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\nRequest charlie.\n\nOne plus one equals two. This is a fundamental principle of arithmetic where combining a single unit with another single unit results in a total"
+                }
+              ],
+              "created": 1791319893,
+              "id": "cmpl-9",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 19,
+                "total_tokens": 51
+              }
+            },
+            "wall_s": 4.127844448999895
+          }
+        ],
+        "same_greedy_text_and_usage_as_isolated": true
+      },
+      {
+        "name": "4-concurrent-short-requests",
+        "wave": [
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,2,14,27,39,53,66,77,89,101,113,127,140,152,166,179,193,206,219,231,244,257,268,283,298,313,328,343,355,370,385,400],
+                    "token_logprobs": [-0.6153602600097656,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["\n\n","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248045","token_id:248046","token_id:198","token_id:248045","token_id:248045","token_id:248046","token_id:198"],
+                    "top_logprobs": [
+                      {
+                        "\n\n": -0.6153602600097656
+                      },
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n"
+                }
+              ],
+              "created": 1791319897,
+              "id": "cmpl-10",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 1.4595804939999653
+          },
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,12,24,37,49,63,76,87,99,111,123,137,150,162,176,189,203,216,229,241,254,267,280,291,306,321,336,351,363,375,388,400],
+                    "token_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["token_id:271","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:2542","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248068","token_id:198","token_id:760","token_id:1156","token_id:369","token_id:9859"],
+                    "top_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total sum.<think>\nThe user is asking"
+                }
+              ],
+              "created": 1791319897,
+              "id": "cmpl-11",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 1.4593345809989842
+          },
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,12,25,38,52,63,75,88,101,113,127,140,151,164,176,188,202,216,228,242,255,269,281,294,307,319,332,345,358,371,383,395],
+                    "token_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["token_id:271","token_id:1835","token_id:1122","token_id:11234","token_id:13","token_id:271","token_id:3833","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:13","token_id:1061","token_id:369","token_id:264","token_id:15346","token_id:16988","token_id:314","token_id:33633","token_id:1332","token_id:33041","token_id:264","token_id:3074","token_id:4821","token_id:440","token_id:2361","token_id:3074","token_id:4821","token_id:2961","token_id:303","token_id:264","token_id:2702"],
+                    "top_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\nRequest charlie.\n\nOne plus one equals two. This is a fundamental principle of arithmetic where combining a single unit with another single unit results in a total"
+                }
+              ],
+              "created": 1791319897,
+              "id": "cmpl-12",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 19,
+                "total_tokens": 51
+              }
+            },
+            "wall_s": 1.3344734700003755
+          },
+          {
+            "response": {
+              "choices": [
+                {
+                  "finish_reason": "length",
+                  "index": 0,
+                  "logprobs": {
+                    "text_offset": [0,12,26,37,49,61,73,87,100,112,126,139,152,165,177,191,202,217,232,243,258,270,285,300,312,324,337,349,362,374,386,399],
+                    "token_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                    "tokens": ["token_id:271","token_id:19186","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:3074","token_id:7896","token_id:303","token_id:33633","token_id:13","token_id:248044","token_id:248045","token_id:13","token_id:248046","token_id:198","token_id:248045","token_id:248068","token_id:198","token_id:760","token_id:1156","token_id:369","token_id:9859","token_id:728","token_id:310","token_id:2962","token_id:264"],
+                    "top_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+                  },
+                  "prompt_logprobs": null,
+                  "text": "\n\ntwo, which is the fundamental result of combining two single units in arithmetic..\n<think>\nThe user is asking me to continue a"
+                }
+              ],
+              "created": 1791319897,
+              "id": "cmpl-13",
+              "model": "plan-a-exl3",
+              "object": "text_completion",
+              "usage": {
+                "completion_tokens": 32,
+                "prompt_tokens": 18,
+                "total_tokens": 50
+              }
+            },
+            "wall_s": 1.3981907550005417
+          }
+        ],
+        "same_greedy_text_and_usage_as_isolated": true
+      },
+      {
+        "name": "cancellation-and-freed-slot-reuse",
+        "cancellation": {
+          "closed_after_first_text": true,
+          "first_s": 0.08660136299840815,
+          "generated_token_count": "unavailable before terminal usage"
+        },
+        "reuse": {
+          "response": {
+            "choices": [
+              {
+                "finish_reason": "length",
+                "index": 0,
+                "logprobs": {
+                  "text_offset": [0,12,24,37,49,63,76,87,99,111,123,137,150,162,176,189,203,216,229,241,254,267,278,293,308,323,338,353,365,380,395,410],
+                  "token_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                  "tokens": ["token_id:271","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248045","token_id:248046","token_id:198","token_id:248045","token_id:248045","token_id:248046","token_id:198"],
+                  "top_logprobs": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
+                },
+                "prompt_logprobs": null,
+                "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n"
+              }
+            ],
+            "created": 1791319899,
+            "id": "cmpl-15",
+            "model": "plan-a-exl3",
+            "object": "text_completion",
+            "usage": {
+              "completion_tokens": 32,
+              "prompt_tokens": 18,
+              "total_tokens": 50
+            }
+          },
+          "wall_s": 1.0103903119997995
+        }
+      },
+      {
+        "name": "eos-stop",
+        "eos_id": 248044,
+        "result": {
+          "response": {
+            "choices": [
+              {
+                "finish_reason": "stop",
+                "index": 0,
+                "logprobs": {
+                  "text_offset": [0],
+                  "token_logprobs": [-8.937837600708008],
+                  "tokens": ["<|endoftext|>"],
+                  "top_logprobs": [
+                    {
+                      "<|endoftext|>": -8.937837600708008
+                    }
+                  ]
+                },
+                "prompt_logprobs": null,
+                "text": ""
+              }
+            ],
+            "created": 1791319900,
+            "id": "cmpl-16",
+            "model": "plan-a-exl3",
+            "object": "text_completion",
+            "usage": {
+              "completion_tokens": 1,
+              "prompt_tokens": 5,
+              "total_tokens": 6
+            }
+          },
+          "wall_s": 0.08428720499978226
+        }
+      },
+      {
+        "name": "eos-slot-reuse",
+        "result": {
+          "response": {
+            "choices": [
+              {
+                "finish_reason": "length",
+                "index": 0,
+                "logprobs": {
+                  "text_offset": [0,2,14,27,39,53,66,77,89,101,113,127,140,152,166,179,193,206,219,231,244,257,268,283,298,313,328,343,355,370,385,400],
+                  "token_logprobs": [-0.6153602600097656,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+                  "tokens": ["\n\n","token_id:588","token_id:5346","token_id:799","token_id:16327","token_id:1330","token_id:11","token_id:864","token_id:369","token_id:279","token_id:15346","token_id:1067","token_id:314","token_id:33041","token_id:1330","token_id:12103","token_id:7896","token_id:1083","token_id:264","token_id:3074","token_id:2702","token_id:13","token_id:248044","token_id:248045","token_id:248045","token_id:248045","token_id:248046","token_id:198","token_id:248045","token_id:248045","token_id:248046","token_id:198"],
+                  "top_logprobs": [
+                    {
+                      "\n\n": -0.6153602600097656
+                    },
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "prompt_logprobs": null,
+                "text": "\n\none plus one equals two, which is the fundamental result of combining two distinct units into a single total.\n\n"
+              }
+            ],
+            "created": 1791319900,
+            "id": "cmpl-17",
+            "model": "plan-a-exl3",
+            "object": "text_completion",
+            "usage": {
+              "completion_tokens": 32,
+              "prompt_tokens": 18,
+              "total_tokens": 50
+            }
+          },
+          "wall_s": 0.8707864990010421
+        }
+      },
+      {
+        "name": "chat-template-real-model",
+        "tokenization": {
+          "count": 21,
+          "max_model_len": 262144,
+          "token_strs": null,
+          "tokens": [248045,846,198,3710,369,799,5346,799,30,17308,25899,13,248046,198,248045,74455,198,248068,271,248069,271]
+        },
+        "response": {
+          "choices": [
+            {
+              "finish_reason": "length",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "Two.\n\nuser\n\n\nassistant\n<think>\nThe user sent an empty message. I",
+                "role": "assistant"
+              }
+            }
+          ],
+          "created": 1791319901,
+          "id": "chatcmpl-0",
+          "model": "plan-a-exl3",
+          "object": "chat.completion",
+          "prompt_logprobs": null,
+          "usage": {
+            "completion_tokens": 32,
+            "prompt_tokens": 21,
+            "total_tokens": 53
+          }
+        }
+      }
+    ],
+    "scope": "Bounded HTTP function checks; no Python-reference or maximum-context qualification.",
+    "status": "FAIL",
+    "error": "AssertionError({'before': {'vllm:num_requests_running': 0.0, 'vllm:num_requests_waiting': 0.0, 'vllm:num_requests_waiting_by_reason': 0.0, 'vllm:kv_cache_usage_perc': 0.0, 'vllm:prefix_cache_queries_total': 326.0, 'vllm:prefix_cache_hits_total': 0.0, 'vllm:num_preemptions_total': 0.0, 'vllm:prompt_tokens_total': 326.0, 'vllm:prompt_tokens_cached_total': 0.0, 'vllm:generation_tokens_total': 547.0, 'vllm:request_success_total': 18.0, 'vllm:request_prompt_tokens_bucket': 253.0, 'vllm:request_prompt_tokens_sum': 317.0, 'vllm:request_prompt_tokens_count': 18.0, 'vllm:request_generation_tokens_bucket': 239.0, 'vllm:request_generation_tokens_sum': 545.0, 'vllm:request_generation_tokens_count': 18.0, 'vllm:iteration_tokens_total_bucket': 2259.0, 'vllm:iteration_tokens_total_sum': 873.0, 'vllm:iteration_tokens_total_count': 173.0, 'vllm:request_max_num_generation_tokens_bucket': 0.0, 'vllm:request_max_num_generation_tokens_sum': 0.0, 'vllm:request_max_num_generation_tokens_count': 0.0, 'vllm:request_params_n_bucket': 0.0, 'vllm:request_params_n_sum': 0.0, 'vllm:request_params_n_count': 0.0, 'vllm:request_params_max_tokens_bucket': 235.0, 'vllm:request_params_max_tokens_sum': 560.0, 'vllm:request_params_max_tokens_count': 18.0, 'vllm:time_to_first_token_seconds_bucket': 259.0, 'vllm:time_to_first_token_seconds_sum': 23.57562494, 'vllm:time_to_first_token_seconds_count': 19.0, 'vllm:inter_token_latency_seconds_bucket': 4013.0, 'vllm:inter_token_latency_seconds_sum': 15.573615687, 'vllm:inter_token_latency_seconds_count': 238.0, 'vllm:request_time_per_output_token_seconds_bucket': 333.0, 'vllm:request_time_per_output_token_seconds_sum': 0.500784016032, 'vllm:request_time_per_output_token_seconds_count': 18.0, 'vllm:e2e_request_latency_seconds_bucket': 322.0, 'vllm:e2e_request_latency_seconds_sum': 39.013782478, 'vllm:e2e_request_latency_seconds_count': 18.0, 'vllm:request_queue_time_seconds_bucket': 396.0, 'vllm:request_queue_time_seconds_sum': 2.6629997592e-05, 'vllm:request_queue_time_seconds_count': 18.0, 'vllm:request_inference_time_seconds_bucket': 326.0, 'vllm:request_inference_time_seconds_sum': 35.315041782, 'vllm:request_inference_time_seconds_count': 18.0, 'vllm:request_prefill_time_seconds_bucket': 373.0, 'vllm:request_prefill_time_seconds_sum': 19.790737285, 'vllm:request_prefill_time_seconds_count': 18.0, 'vllm:request_decode_time_seconds_bucket': 347.0, 'vllm:request_decode_time_seconds_sum': 15.524304497, 'vllm:request_decode_time_seconds_count': 18.0, 'vllm:spec_decode_num_drafts_total': 239.0, 'vllm:spec_decode_num_draft_tokens_total': 717.0, 'vllm:spec_decode_num_accepted_tokens_total': 327.0, 'vllm:spec_decode_num_accepted_tokens_per_pos_total': 327.0}, 'cold': {'vllm:num_requests_running': 0.0, 'vllm:num_requests_waiting': 0.0, 'vllm:num_requests_waiting_by_reason': 0.0, 'vllm:kv_cache_usage_perc': 0.0, 'vllm:prefix_cache_queries_total': 326.0, 'vllm:prefix_cache_hits_total': 0.0, 'vllm:num_preemptions_total': 0.0, 'vllm:prompt_tokens_total': 4422.0, 'vllm:prompt_tokens_cached_total': 0.0, 'vllm:generation_tokens_total': 611.0, 'vllm:request_success_total': 19.0, 'vllm:request_prompt_tokens_bucket': 260.0, 'vllm:request_prompt_tokens_sum': 4413.0, 'vllm:request_prompt_tokens_count': 19.0, 'vllm:request_generation_tokens_bucket': 251.0, 'vllm:request_generation_tokens_sum': 609.0, 'vllm:request_generation_tokens_count': 19.0, 'vllm:iteration_tokens_total_bucket': 2634.0, 'vllm:iteration_tokens_total_sum': 5033.0, 'vllm:iteration_tokens_total_count': 202.0, 'vllm:request_max_num_generation_tokens_bucket': 0.0, 'vllm:request_max_num_generation_tokens_sum': 0.0, 'vllm:request_max_num_generation_tokens_count': 0.0, 'vllm:request_params_n_bucket': 0.0, 'vllm:request_params_n_sum': 0.0, 'vllm:request_params_n_count': 0.0, 'vllm:request_params_max_tokens_bucket': 247.0, 'vllm:request_params_max_tokens_sum': 624.0, 'vllm:request_params_max_tokens_count': 19.0, 'vllm:time_to_first_token_seconds_bucket': 269.0, 'vllm:time_to_first_token_seconds_sum': 28.299344133, 'vllm:time_to_first_token_seconds_count': 20.0, 'vllm:inter_token_latency_seconds_bucket': 4489.0, 'vllm:inter_token_latency_seconds_sum': 17.088231461, 'vllm:inter_token_latency_seconds_count': 266.0, 'vllm:request_time_per_output_token_seconds_bucket': 352.0, 'vllm:request_time_per_output_token_seconds_sum': 0.524825536255, 'vllm:request_time_per_output_token_seconds_count': 19.0, 'vllm:e2e_request_latency_seconds_bucket': 336.0, 'vllm:e2e_request_latency_seconds_sum': 45.252117445, 'vllm:e2e_request_latency_seconds_count': 19.0, 'vllm:request_queue_time_seconds_bucket': 418.0, 'vllm:request_queue_time_seconds_sum': 2.75799975498e-05, 'vllm:request_queue_time_seconds_count': 19.0, 'vllm:request_inference_time_seconds_bucket': 340.0, 'vllm:request_inference_time_seconds_sum': 41.553365558, 'vllm:request_inference_time_seconds_count': 19.0, 'vllm:request_prefill_time_seconds_bucket': 388.0, 'vllm:request_prefill_time_seconds_sum': 24.514445287, 'vllm:request_prefill_time_seconds_count': 19.0, 'vllm:request_decode_time_seconds_bucket': 364.0, 'vllm:request_decode_time_seconds_sum': 17.038920271, 'vllm:request_decode_time_seconds_count': 19.0, 'vllm:spec_decode_num_drafts_total': 267.0, 'vllm:spec_decode_num_draft_tokens_total': 801.0, 'vllm:spec_decode_num_accepted_tokens_total': 364.0, 'vllm:spec_decode_num_accepted_tokens_per_pos_total': 364.0}, 'warm': {'vllm:num_requests_running': 0.0, 'vllm:num_requests_waiting': 0.0, 'vllm:num_requests_waiting_by_reason': 0.0, 'vllm:kv_cache_usage_perc': 0.0, 'vllm:prefix_cache_queries_total': 326.0, 'vllm:prefix_cache_hits_total': 0.0, 'vllm:num_preemptions_total': 0.0, 'vllm:prompt_tokens_total': 8518.0, 'vllm:prompt_tokens_cached_total': 0.0, 'vllm:generation_tokens_total': 675.0, 'vllm:request_success_total': 20.0, 'vllm:request_prompt_tokens_bucket': 267.0, 'vllm:request_prompt_tokens_sum': 8509.0, 'vllm:request_prompt_tokens_count': 20.0, 'vllm:request_generation_tokens_bucket': 263.0, 'vllm:request_generation_tokens_sum': 673.0, 'vllm:request_generation_tokens_count': 20.0, 'vllm:iteration_tokens_total_bucket': 3009.0, 'vllm:iteration_tokens_total_sum': 9193.0, 'vllm:iteration_tokens_total_count': 231.0, 'vllm:request_max_num_generation_tokens_bucket': 0.0, 'vllm:request_max_num_generation_tokens_sum': 0.0, 'vllm:request_max_num_generation_tokens_count': 0.0, 'vllm:request_params_n_bucket': 0.0, 'vllm:request_params_n_sum': 0.0, 'vllm:request_params_n_count': 0.0, 'vllm:request_params_max_tokens_bucket': 259.0, 'vllm:request_params_max_tokens_sum': 688.0, 'vllm:request_params_max_tokens_count': 20.0, 'vllm:time_to_first_token_seconds_bucket': 280.0, 'vllm:time_to_first_token_seconds_sum': 29.745401833, 'vllm:time_to_first_token_seconds_count': 21.0, 'vllm:inter_token_latency_seconds_bucket': 4965.0, 'vllm:inter_token_latency_seconds_sum': 18.589564396, 'vllm:inter_token_latency_seconds_count': 294.0, 'vllm:request_time_per_output_token_seconds_bucket': 371.0, 'vllm:request_time_per_output_token_seconds_sum': 0.548656217762, 'vllm:request_time_per_output_token_seconds_count': 20.0, 'vllm:e2e_request_latency_seconds_bucket': 351.0, 'vllm:e2e_request_latency_seconds_sum': 48.19950808, 'vllm:e2e_request_latency_seconds_count': 20.0, 'vllm:request_queue_time_seconds_bucket': 440.0, 'vllm:request_queue_time_seconds_sum': 2.81299980998e-05, 'vllm:request_queue_time_seconds_count': 20.0, 'vllm:request_inference_time_seconds_bucket': 355.0, 'vllm:request_inference_time_seconds_sum': 44.500744312, 'vllm:request_inference_time_seconds_count': 20.0, 'vllm:request_prefill_time_seconds_bucket': 406.0, 'vllm:request_prefill_time_seconds_sum': 25.960491106, 'vllm:request_prefill_time_seconds_count': 20.0, 'vllm:request_decode_time_seconds_bucket': 381.0, 'vllm:request_decode_time_seconds_sum': 18.540253206, 'vllm:request_decode_time_seconds_count': 20.0, 'vllm:spec_decode_num_drafts_total': 295.0, 'vllm:spec_decode_num_draft_tokens_total': 885.0, 'vllm:spec_decode_num_accepted_tokens_total': 401.0, 'vllm:spec_decode_num_accepted_tokens_per_pos_total': 401.0}})"
+  }
+}

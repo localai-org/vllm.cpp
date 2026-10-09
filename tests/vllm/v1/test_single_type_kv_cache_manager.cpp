@@ -131,6 +131,63 @@ struct BlockStore {
 // FullAttentionManager
 // ---------------------------------------------------------------------------
 
+TEST_CASE("R11 MTP shifted boundary: cache waits for the next committed token") {
+  init_none_hash(sha256_cbor);
+  for (bool recurrent : {false, true}) {
+    CAPTURE(recurrent);
+    BlockPool pool(100, true, 4);
+    std::unique_ptr<vllm::v1::SingleTypeKVCacheManager> manager;
+    if (recurrent)
+      manager = std::make_unique<MambaManager>(MakeMambaSpec(4), pool, true, 0, 4);
+    else
+      manager = std::make_unique<FullAttentionManager>(MakeFullSpec(4), pool, true, 0, 4);
+    Request req("shifted", {1, 2, 3, 4, 5, 6, 7, 8}, {}, 0,
+                get_request_block_hasher(4, sha256_cbor, true));
+    REQUIRE(req.block_hashes.size() == 1);
+    const auto blocks = manager->allocate_new_blocks(req.request_id, 8, 8);
+    REQUIRE(blocks.size() == 2);
+    manager->cache_blocks(req, 8);
+    CHECK(manager->num_cached_block.at(req.request_id) == 1);
+    CHECK(blocks[0]->block_hash().has_value());
+    CHECK_FALSE(blocks[1]->block_hash().has_value());
+    // Retrying before the lookahead becomes committed must not publish/reset it.
+    manager->cache_blocks(req, 8);
+    CHECK(manager->num_cached_block.at(req.request_id) == 1);
+    req.AppendOutputToken(9);
+    REQUIRE(req.block_hashes.size() == 2);
+    manager->cache_blocks(req, 8);
+    CHECK(manager->num_cached_block.at(req.request_id) == 2);
+    REQUIRE(blocks[1]->block_hash().has_value());
+    CHECK(*blocks[1]->block_hash() == make_block_hash_with_group_id(req.block_hashes[1], 0));
+    manager->cache_blocks(req, 8);
+    CHECK(manager->num_cached_block.at(req.request_id) == 2);
+    manager->free(req.request_id);
+  }
+  // Ordinary hashes still publish the exact full boundary immediately.
+  BlockPool pool(100, true, 4);
+  FullAttentionManager ordinary(MakeFullSpec(4), pool, true, 0, 4);
+  Request req = MakeRequest("ordinary", Iota(8), 4);
+  ordinary.allocate_new_blocks(req.request_id, 8, 8);
+  ordinary.cache_blocks(req, 8);
+  CHECK(ordinary.num_cached_block.at(req.request_id) == 2);
+}
+
+TEST_CASE("R11 MTP shifted boundary: invalid publication fails before cache mutation") {
+  init_none_hash(sha256_cbor);
+  BlockPool pool(100, true, 4);
+  Request req("missing", {1, 2, 3, 4}, {}, 0,
+              get_request_block_hasher(4, sha256_cbor, true));
+  const auto blocks = pool.get_new_blocks(1);
+  CHECK_THROWS_AS(pool.cache_full_blocks(req, blocks, 0, 1, 4, 0), std::runtime_error);
+  CHECK_FALSE(blocks[0]->block_hash().has_value());
+  CHECK(pool.cached_block_hash_to_block.empty());
+  req.AppendOutputToken(5);
+  REQUIRE(req.block_hashes.size() == 1);
+  CHECK_THROWS_AS(pool.cache_full_blocks(req, {}, 0, 1, 4, 0), std::runtime_error);
+  CHECK(pool.cached_block_hash_to_block.empty());
+  pool.free_blocks(blocks);
+}
+
 TEST_CASE(
     "FullAttentionManager: allocate_new_blocks reduces pool free count and "
     "records req_to_blocks") {
@@ -923,6 +980,18 @@ TEST_CASE("MambaManager: find_longest_cache_hit keeps only the rightmost state")
     auto computed =
         mgr.find_longest_cache_hit(bh, 6, {0}, pool, *spec, false, 2)[0];
     CHECK(computed.empty());
+  }
+  SUBCASE("PR11 draft drop excludes the final recurrent snapshot") {
+    MockCache(pool, "h0", &pool.blocks[10]);
+    MockCache(pool, "h1", &pool.blocks[11]);
+    MockCache(pool, "h2", &pool.blocks[12]);
+    const auto computed = mgr.find_longest_cache_hit(bh, 6, {0}, pool, *spec, true, 2)[0];
+    REQUIRE(computed.size() == 2);
+    CHECK(computed[0] == pool.null_block);
+    CHECK(computed[1] == &pool.blocks[11]);
+    CHECK(mgr.find_longest_cache_hit(bh, 2, {0}, pool, *spec, true, 2)[0].empty());
+    // Published pages are read-only throughout the search.
+    CHECK(pool.get_cached_block("h2", {0}).value()[0] == &pool.blocks[12]);
   }
 }
 

@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // See include/vllm/entrypoints/model_loader.h. ORIGINAL packaging helper — the
 // shared model-load + engine-stack wiring behind both the OpenAI server and the
 // C ABI. Mirrors the M1.8 LLMEngine __init__ (vllm/v1/engine/llm_engine.py @
@@ -8,13 +9,16 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -46,6 +50,10 @@
 #include "vllm/model_executor/models/qwen3_5_gguf_weights.h"
 #include "vllm/model_executor/models/qwen3_gguf_weights.h"  // qwen3 (dense) GGUF arm
 #include "vllm/model_executor/models/qwen3_5_mtp.h"  // SPEC-MTP I5d-pre draft load
+#include "vllm/model_executor/models/qwen3_5_weights.h"
+#include "vllm/model_executor/models/qwen3_5_dense_mm.h"
+#include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
+#include "vllm/multimodal/qwen3vl_processor.h"
 #include "vllm/model_executor/models/qwen3_5_common.h"  // SPEC-MTP I5d KV widening
 #include "vllm/model_executor/models/qwen3_dflash.h"  // SPEC-DFLASH D5 draft load
 #include "vllm/transformers_utils/hf_cache.h"  // ENG-HF-MODEL-DOWNLOAD (#1280)
@@ -1440,9 +1448,64 @@ bool LoadedEngine::EnsureNoneHash() {
   return true;
 }
 
+namespace {
+bool NativeQwen3_5ImagesEnabled(const HfConfig& config,
+                               std::string_view architecture,
+                               const vllm::MultiModalConfig& multimodal) {
+  return architecture == "Qwen3_5ForConditionalGeneration" &&
+         IsExl3Checkpoint(config) && multimodal.GetLimitPerPrompt("image") > 0;
+}
+}  // namespace
+
+int ResolveNativeQwen3_5MaxNumSeqs(
+    int resolved, const HfConfig& config, std::string_view architecture,
+    vt::DeviceType device, const vllm::MultiModalConfig& multimodal) {
+  if (device != vt::DeviceType::kXPU ||
+      !NativeQwen3_5ImagesEnabled(config, architecture, multimodal)) return resolved;
+  if (resolved <= 0)
+    throw std::runtime_error("native Qwen3.5 image concurrency must be positive");
+  if (resolved > kNativeQwen3_5MaxConcurrentRequests) {
+    std::cerr << "INFO native Qwen3.5 image admission: reduced max_num_seqs from "
+              << resolved << " to " << kNativeQwen3_5MaxConcurrentRequests
+              << ". Extra clients queue within the C1-C4 native image envelope.\n";
+    return kNativeQwen3_5MaxConcurrentRequests;
+  }
+  return resolved;
+}
+
+void ConfigureNativeQwen3_5EncoderBudget(
+    vllm::SchedulerConfig& scheduler, const HfConfig& config,
+    std::string_view architecture, vt::DeviceType device,
+    const vllm::MultiModalConfig& multimodal_config) {
+  if (device != vt::DeviceType::kXPU ||
+      !NativeQwen3_5ImagesEnabled(config, architecture, multimodal_config)) return;
+  const auto tower = Qwen3_5DenseVisionConfig(config);
+  if (tower.patch_size <= 0 || tower.patch_size > 64 ||
+      tower.spatial_merge_size <= 0 || tower.spatial_merge_size > 128 ||
+      scheduler.max_num_seqs <= 0) {
+    throw std::runtime_error("native Qwen3.5 encoder budget: unsupported geometry or concurrency");
+  }
+  const int64_t patch_area = int64_t{tower.patch_size} * tower.patch_size;
+  const int64_t merge_area = int64_t{tower.spatial_merge_size} * tower.spatial_merge_size;
+  const int64_t rows = std::min(multimodal::kNativeQwen3_5MaxImagePixels / patch_area,
+                                multimodal::kNativeQwen3_5MaxImagePatches) / merge_area;
+  // Two images is the native serving envelope. Reserve all admitted requests'
+  // outputs independently of decoder chunking, so one item's bidirectional
+  // encoder cannot become permanently unschedulable at a 1600-token budget.
+  const int64_t images = std::min(2, multimodal_config.GetLimitPerPrompt("image"));
+  const int64_t compute = rows * images;
+  const int64_t capacity = compute * scheduler.max_num_seqs;
+  if (rows <= 0 || images <= 0 || capacity > std::numeric_limits<int>::max())
+    throw std::runtime_error("native Qwen3.5 encoder budget exceeds supported capacity");
+  scheduler.max_num_encoder_input_tokens = std::max(
+      scheduler.max_num_encoder_input_tokens, static_cast<int>(compute));
+  scheduler.encoder_cache_size = std::max(
+      scheduler.encoder_cache_size, static_cast<int>(capacity));
+}
+
 vllm::SchedulerConfig LoadedEngine::MakeSchedulerConfig(
     int max_model_len, int max_num_seqs, int max_num_batched_tokens,
-    vllm::SchedulerPolicy policy) {
+    vllm::SchedulerPolicy policy) const {
   vllm::SchedulerConfig cfg;
   cfg.max_num_seqs = max_num_seqs;
   // Bounded per-step budget (chunked prefill). See ResolveMaxNumBatchedTokens.
@@ -1452,6 +1515,9 @@ vllm::SchedulerConfig LoadedEngine::MakeSchedulerConfig(
   cfg.watermark = 0.0;
   // Scheduling policy (fcfs default; kPriority selects the priority queue).
   cfg.policy = policy;
+  ConfigureNativeQwen3_5EncoderBudget(
+      cfg, config_, model_->registration().architecture, runner_.device().type,
+      mm_config_);
   return cfg;
 }
 
@@ -1759,7 +1825,8 @@ vllm::v1::KVCacheConfig LoadedEngine::MakeKVCacheMaybeSpec(
     // the widened spec KV directly (extra GDN k+1 state slots + widened conv row
     // + the `fa_draft` full-attn group). MakeQwen3_5KVCacheSpec(num_spec>0).
     kv = vllm::MakeQwen3_5KVCacheSpec(config, block_size, num_blocks,
-                                      spec->ResolvedNumSpeculativeTokens());
+                                      spec->ResolvedNumSpeculativeTokens(),
+                                      /*share_mtp_pages=*/spec->method == "mtp");
   } else {
     kv = ModelRegistry::MakeKVCache(model, config, block_size, num_blocks);
   }
@@ -1880,13 +1947,22 @@ vllm::v1::KVCacheConfig LoadedEngine::MakeKVCacheResolved(
   // in half the bytes rather than twice the pool.
   ApplyResolvedCacheDType(params, probe);
   const int resolved = ResolveNumBlocks(params, probe);
+  auto with_recurrent_prefix = [&](vllm::v1::KVCacheConfig result) {
+    if (model.registration().architecture == "Qwen3_5ForConditionalGeneration" &&
+        ResolveEnablePrefixCaching(params, model.registration().info)) {
+      VT_CHECK(!spec.has_value() || spec->method == "mtp",
+               "Qwen recurrent prefix speculation requires the native MTP state protocol");
+      result.recurrent_prefix_snapshots = std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(4, block_size);
+    }
+    return result;
+  };
   if (resolved == probe_blocks) {
-    return probe;
+    return with_recurrent_prefix(std::move(probe));
   }
   vllm::v1::KVCacheConfig sized =
       MakeKVCacheMaybeSpec(model, config, block_size, resolved, spec);
   ApplyResolvedCacheDType(params, sized);
-  return sized;
+  return with_recurrent_prefix(std::move(sized));
 }
 
 // Upstream's `logger.warning_once` for the defaulted-scale case
@@ -2164,6 +2240,48 @@ static std::unique_ptr<DflashDraft> BindSharedEmbed(
   return draft;
 }
 
+// XPU FlashAttention starts with a 64-token block. Python then grows its
+// attention page until it can hold one Qwen Mamba state page. Derive the same
+// size from the resolved KV dtype and speculative depth, before sizing the
+// pool or constructing the runner. A larger caller override is retained.
+static int ResolvePythonXpuHybridBlockSize(
+    const LoadedModel& model, const HfConfig& config,
+    const EngineParams& params,
+    const std::optional<vllm::SpeculativeConfig>& spec) {
+  const int requested = params.block_size > 0 ? params.block_size : 32;
+  const int base = ModelRegistry::ResolveKVBlockSize(model.registration(), requested);
+  if (model.registration().architecture != "Qwen3_5ForConditionalGeneration" ||
+      params.device == vllm::Device::kCPU ||
+      vllm::platforms::CurrentPlatform().device_type() != vt::DeviceType::kXPU) {
+    return base;
+  }
+  constexpr int kXpuAttentionAlignment = 64;
+  const int depth = spec.has_value() ? spec->ResolvedNumSpeculativeTokens() : 0;
+  auto probe = vllm::MakeQwen3_5KVCacheSpec(
+      config, kXpuAttentionAlignment, /*num_blocks=*/1, depth);
+  const auto dtype = vllm::v1::ParseCacheDType(
+      params.kv_cache_dtype, vllm::v1::ResolveKvCacheDType());
+  vllm::v1::ApplyCacheDType(probe, dtype, /*k_scale=*/1.0F, /*v_scale=*/1.0F);
+  const auto geometry = vllm::v1::ComputeHybridKvBudget(
+      probe, kXpuAttentionAlignment);
+  VT_CHECK(geometry.unified_block_tokens > 0 &&
+               geometry.unified_block_tokens <= INT_MAX,
+           "Qwen XPU hybrid attention page does not fit in int");
+  const int resolved = std::max(base, static_cast<int>(geometry.unified_block_tokens));
+  if (resolved != base) {
+    std::cerr << "[vllm] kv-cache: XPU Qwen hybrid attention page " << base
+              << " -> " << resolved << " tokens (Mamba page "
+              << geometry.mamba_page_bytes << " B, attention token "
+              << geometry.attn_bytes_per_token << " B, MTP depth " << depth
+              << ")\n";
+  }
+  return resolved;
+}
+
+LoadedEngine::MainQueueOwner::~MainQueueOwner() {
+  if (queue.handle != nullptr) vt::DestroyQueue(queue);
+}
+
 LoadedEngine::LoadedEngine(HfConfig config, Qwen3_5MoeWeights weights,
                            tok::Tokenizer tokenizer, const EngineParams& params,
                            std::optional<Qwen3_5MTPWeights> mtp_weights)
@@ -2229,11 +2347,11 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // (num_blocks override > kv_cache_memory_bytes > util fallback) against the
       // model's own per-block byte geometry. FIRST, because max_model_len_ is
       // resolved against this pool.
-      // Resolved ONCE, against the model's declared floor, before anything reads
-      // it. `ResolveKVBlockSize` is idempotent, so the funnel below re-resolving
-      // it is a guarantee for direct callers rather than a second policy.
-      block_size_(ModelRegistry::ResolveKVBlockSize(
-          model_->registration(), params.block_size > 0 ? params.block_size : 32)),
+      // Resolved ONCE before anything reads it. On XPU Qwen, the hybrid page
+      // grows to the Python Mamba/attention geometry; the registry floor still
+      // applies. The funnel below re-resolves only for direct callers.
+      block_size_(ResolvePythonXpuHybridBlockSize(
+          *model_, config_, params, resolved_spec_config_)),
       kv_cfg_(MakeKVCacheResolved(*model_, config_, block_size_, params,
                                   resolved_spec_config_)),
       // The serving length, checked (pinned) or auto-fitted (unpinned) against
@@ -2242,9 +2360,19 @@ LoadedEngine::LoadedEngine(HfConfig config,
                                         ModelRegistry::IsDenseModel(*model_))),
       // The serving concurrency, clamped to the recurrent-state budget the KV
       // pool affords. See ResolveMaxNumSeqs (issue #1983).
-      max_num_seqs_(ResolveMaxNumSeqs(
-          params, kv_cfg_,
-          model_->registration().factory->serves_one_sequence_per_step)),
+      max_num_seqs_([&] {
+        const int resolved = ResolveMaxNumSeqs(
+            params, kv_cfg_,
+            model_->registration().factory->serves_one_sequence_per_step);
+        const auto architecture = model_->registration().architecture;
+        if (!NativeQwen3_5ImagesEnabled(config_, architecture, mm_config_))
+          return resolved;
+        const auto device = preselected_queue != nullptr
+            ? preselected_queue->device.type
+            : ResolveModelDeviceType(architecture, params.device);
+        return ResolveNativeQwen3_5MaxNumSeqs(
+            resolved, config_, architecture, device, mm_config_);
+      }()),
       max_num_batched_tokens_(ResolveMaxNumBatchedTokens(
           params, max_model_len_, ModelRegistry::IsDenseModel(*model_))),
       prefix_caching_enabled_(ResolveEnablePrefixCaching(
@@ -2274,10 +2402,15 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // is allocated by the runner from kv_cfg_ (empty vector here), so the loop
       // reaches it via runner-owned storage. nullopt/null on the default path.
       runner_(config_, *model_, kv_cfg_,
-              preselected_queue != nullptr
-                  ? *preselected_queue
-                  : SelectQueueForModel(model_->registration().architecture,
-                                        params.device),
+              [&] {
+                main_queue_owner_.queue = preselected_queue != nullptr
+                    ? *preselected_queue
+                    : SelectQueueForModel(model_->registration().architecture, params.device);
+                // Ownership transfers immediately. The loader's exception
+                // guard must not destroy it a second time if runner init fails.
+                if (preselected_queue != nullptr) *preselected_queue = {};
+                return main_queue_owner_.queue;
+              }(),
               /*max_num_reqs=*/max_num_seqs_,
               max_model_len_,
               /*max_num_batched_tokens=*/max_num_batched_tokens_,
@@ -2321,9 +2454,14 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // core.py:134). Wired into the scheduler + engine cores below so
       // response_format / C-ABI structured constraints gate decoding.
       structured_output_manager_(
-          max_num_seqs_,
-          vllm::v1::MakeNativeBackendFactory(
-              tokenizer_, static_cast<int>(config_.vocab_size))),
+          max_num_seqs_, [this] {
+            // The factory runs lazily, after input_processor_ is constructed.
+            // Use its resolved model EOS set, not only tokenizer.json's EOS:
+            // chat/generation EOS ids must be valid grammar stop tokens too.
+            return std::make_unique<vllm::v1::NativeStructuredOutputBackend>(
+                tokenizer_, static_cast<int>(config_.vocab_size),
+                input_processor_.eos_token_ids());
+          }),
       // AsyncScheduler when the flip resolved ON, else the synchronous Scheduler.
       scheduler_(MakeScheduler(
           async_scheduling_enabled_,
@@ -2352,7 +2490,9 @@ LoadedEngine::LoadedEngine(HfConfig config,
       // size while the pool pages smaller produces hashes no lookup can hit.
       block_hasher_(prefix_caching_enabled_
                         ? vllm::v1::get_request_block_hasher(
-                              hash_block_size_, vllm::v1::sha256_cbor)
+                              hash_block_size_, vllm::v1::sha256_cbor,
+                              resolved_spec_config_.has_value() &&
+                                  resolved_spec_config_->method == "mtp")
                         : nullptr),
       engine_(input_processor_, engine_core_, output_processor_, block_hasher_) {
   (void)hash_ready_;
@@ -3452,7 +3592,47 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     const Qwen3_5MTPKind kind = registration.factory->is_dense_model
                                     ? Qwen3_5MTPKind::kDense
                                     : Qwen3_5MTPKind::kMoe;
-    loaded.AttachMtpDraftWeights(vllm::LoadQwen3_5MTP(*shards, config, kind));
+    const vt::DeviceType draft_device =
+        ResolveModelDeviceType(registration.architecture, params.device);
+    Qwen3_5MTPWeights draft =
+        vllm::LoadQwen3_5MTP(*shards, config, kind, draft_device);
+    if (draft.IsExl3() && kind == Qwen3_5MTPKind::kDense &&
+        draft_device == vt::DeviceType::kXPU) {
+      const char* path = std::getenv("EXL3_DRAFT_VOCAB");
+      VT_CHECK(path != nullptr && path[0] != '\0',
+               "EXL3 MTP requires EXL3_DRAFT_VOCAB pointing to the pinned 65536-token subset");
+      std::ifstream input(path, std::ios::binary);
+      VT_CHECK(input.good(), "EXL3 MTP: cannot read draft vocabulary");
+      const std::string bytes((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+      const std::string hash = v1::sha256_bytes(bytes);
+      constexpr uint8_t expected[] = {
+          0xb4,0xea,0xdc,0x08,0x80,0x59,0x19,0x09,0x83,0xfe,0x04,0x98,0xaf,0x11,0x86,0x4f,
+          0x5a,0xaa,0x2e,0xaf,0x2e,0xc5,0x8a,0xe9,0x86,0x4f,0x07,0x15,0x63,0x4d,0x31,0x3d};
+      VT_CHECK(hash.size() == sizeof(expected) &&
+                   std::memcmp(hash.data(), expected, sizeof(expected)) == 0,
+               "EXL3 MTP: draft subset differs from the pinned production artifact");
+      draft.draft_head_exl3 =
+          LoadExl3DraftHead(*shards, nlohmann::json::parse(bytes), config.vocab_size);
+    }
+    const bool gptq4 = config.raw.contains("quantization_config") &&
+        config.raw.at("quantization_config").is_object() &&
+        config.raw.at("quantization_config").value("quant_method", std::string()) ==
+            "gptq";
+    if (gptq4 && kind == Qwen3_5MTPKind::kDense &&
+        draft_device == vt::DeviceType::kXPU) {
+      const StTensor* head = nullptr;
+      for (const SafetensorsFile& shard : *shards) {
+        if (std::find(shard.Names().begin(), shard.Names().end(),
+                      "lm_head.weight") != shard.Names().end()) {
+          VT_CHECK(head == nullptr, "qwen3_5 MTP: duplicate lm_head.weight");
+          head = &shard.Get("lm_head.weight");
+        }
+      }
+      VT_CHECK(head != nullptr, "qwen3_5 MTP: missing FP16 target lm_head.weight");
+      PackQwen3_5MTPGptqDraft(draft, *head);
+    }
+    loaded.AttachMtpDraftWeights(std::move(draft));
   };
 
   // SPEC-DFLASH D5: when a dflash config is set, load the SEPARATE z-lab draft

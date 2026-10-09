@@ -1,0 +1,121 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "device": "Intel(R) Arc(TM) Pro B70 Graphics",
+  "operator": "torch.split(...,dim=-1), contiguous output bytes",
+  "cases": [
+    {
+      "dtype": "float16",
+      "rows": 5,
+      "widths": [
+        19,
+        31,
+        13
+      ],
+      "files": {
+        "input": {
+          "file": "qkv-0-input.bin",
+          "sha256": "96b2b35f93b410169df99a8e06441ebaf3c3e23fa408fb32382e4783d0050aab"
+        },
+        "q": {
+          "file": "qkv-0-q.bin",
+          "sha256": "78fa45cd7ae9668808a828ccb74893fbf4474687e5dc8f15e05585cf8e401a07"
+        },
+        "k": {
+          "file": "qkv-0-k.bin",
+          "sha256": "ddb2a98700daad9f6e2045a4a25f86b7cc0622dd2219c09c263ed72a58a38385"
+        },
+        "v": {
+          "file": "qkv-0-v.bin",
+          "sha256": "5289d2cfa3eeefd20cb3b4f8331358d87fd355e26f0bd62c0eaca12f665d5998"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "dtype": "bfloat16",
+      "rows": 3,
+      "widths": [
+        3,
+        7,
+        7
+      ],
+      "files": {
+        "input": {
+          "file": "qkv-1-input.bin",
+          "sha256": "952d9760e55605f9d0264e46e8237d7c22580e6b0fab637ffc61c3a629681b1f"
+        },
+        "q": {
+          "file": "qkv-1-q.bin",
+          "sha256": "c3a5f8fca2908c0b770d6791f784dbd6a64e220c95c30da09b160b16aab1458d"
+        },
+        "k": {
+          "file": "qkv-1-k.bin",
+          "sha256": "2fab4b9dd31a3070c4b67d43081a69e9e7ecd86b917bcb7a4ead113f271661f8"
+        },
+        "v": {
+          "file": "qkv-1-v.bin",
+          "sha256": "96a2128375c6aa9113eed8bb4b78cb7fb55bdb511fff3ed7447c8c5b0afb528b"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "dtype": "float32",
+      "rows": 7,
+      "widths": [
+        5,
+        11,
+        3
+      ],
+      "files": {
+        "input": {
+          "file": "qkv-2-input.bin",
+          "sha256": "9d7646b38e4aec34bb5987dc2c283b2d0a6fe0fb76594df386e40edf9d977767"
+        },
+        "q": {
+          "file": "qkv-2-q.bin",
+          "sha256": "f950a028716c87326a19619cc4cffc259414144144265de4c0bf362f0323e127"
+        },
+        "k": {
+          "file": "qkv-2-k.bin",
+          "sha256": "698b45885ea4a00e57cd6a853fd0a05bf71dc16a8864959533d3b2070d5035c7"
+        },
+        "v": {
+          "file": "qkv-2-v.bin",
+          "sha256": "00911cb8cfe68af9953ad83ed0e9de47bbb69f6aa2a7c73defe65ad52c3afbc3"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "dtype": "float16",
+      "rows": 3,
+      "widths": [
+        1152,
+        1152,
+        1152
+      ],
+      "files": {
+        "input": {
+          "file": "qkv-3-input.bin",
+          "sha256": "65e7a417fe3e83032a85de0a1de070d12b5e3d7c57c30b57affafee6c32c9fb0"
+        },
+        "q": {
+          "file": "qkv-3-q.bin",
+          "sha256": "fec1f91fd9ce0f6bb4134b658e05e6cf533c460b6a298f3cc31c5a7d3a5248e3"
+        },
+        "k": {
+          "file": "qkv-3-k.bin",
+          "sha256": "fec1f91fd9ce0f6bb4134b658e05e6cf533c460b6a298f3cc31c5a7d3a5248e3"
+        },
+        "v": {
+          "file": "qkv-3-v.bin",
+          "sha256": "fec1f91fd9ce0f6bb4134b658e05e6cf533c460b6a298f3cc31c5a7d3a5248e3"
+        }
+      },
+      "repeat_exact": true
+    }
+  ]
+}

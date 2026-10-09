@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "vllm/v1/core/kv_cache_utils.h"
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 #include "vllm/v1/kv_cache_interface.h"
 #include "vt/dtype.h"
 
@@ -88,6 +89,14 @@ TEST_CASE("max_num_seqs scales the state linearly") {
   const int64_t one = recurrent_state_bytes(Qwen27bConfig(15), 1);
   const int64_t many = recurrent_state_bytes(Qwen27bConfig(15), 32);
   CHECK(many == one * 32);
+}
+
+TEST_CASE("PR11 recurrent prefix snapshots reserve additional state memory") {
+  auto config = Qwen27bConfig(0);
+  const auto working = recurrent_state_bytes(config, 4);
+  config.recurrent_prefix_snapshots = std::make_shared<RecurrentPrefixSnapshotIndex>(4, 16);
+  CHECK(recurrent_state_bytes(config, 4) == 2 * working);
+  CHECK_THROWS_AS(check_enough_state_memory(working, recurrent_state_bytes(config, 4), 4, 0), std::invalid_argument);
 }
 
 TEST_CASE("a state budget that does not fit is REFUSED, not clamped") {

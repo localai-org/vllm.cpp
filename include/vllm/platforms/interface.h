@@ -342,6 +342,9 @@ class Platform {
   // from supports_graph_capture() (the backend-level capability); this is the
   // platform POLICY gate, mirroring upstream.
   virtual bool support_static_graph_mode() const { return false; }
+  // Some graph backends require metadata uploads outside the recorded region.
+  virtual bool static_graph_requires_persistent_inputs() const { return false; }
+  virtual int max_static_graph_batch_size() const { return 64; }
 
   // Model-specific admission can be narrower than the platform-wide default.
   virtual bool support_static_graph_for_model(const std::vector<std::string>& /*architectures*/,

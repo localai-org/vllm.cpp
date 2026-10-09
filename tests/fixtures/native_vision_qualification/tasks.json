@@ -1,0 +1,157 @@
+{
+  "scope": "six authored held-out image tasks frozen before native inference",
+  "generation": {
+    "pillow": "12.3.0",
+    "font_sha256": "6038a160b491e121c1f12c7bccb4a9c8730296e3adc1086a059404ed84b7451c"
+  },
+  "tasks": [
+    {
+      "name": "nova-shapes",
+      "file": "nova-shapes.png",
+      "category": "identifier/spatial",
+      "held_out": true,
+      "size": [
+        640,
+        448
+      ],
+      "media_type": "image/png",
+      "sha256": "ab0e24ab30489433d8001168e25e5ad6cd266b501ae5dfe7f6c24098b6960b72",
+      "prompt": "Read the heading exactly and identify the color and shape on each side. Respond only with a JSON object containing these string fields: heading, left, right. Do not add explanation or other fields.",
+      "expected": {
+        "heading": [
+          "NOVA 582"
+        ],
+        "left": [
+          "orange circle"
+        ],
+        "right": [
+          "purple triangle"
+        ]
+      }
+    },
+    {
+      "name": "backup-dialog",
+      "file": "backup-dialog.png",
+      "category": "screenshot/dialog",
+      "held_out": true,
+      "size": [
+        640,
+        480
+      ],
+      "media_type": "image/png",
+      "sha256": "64b9a4d32165f433c348e1ac5f811d4f436dba31436d10b104f86335c605eed3",
+      "prompt": "What completion message, saved-file count, and button label are shown in the dialog? Respond only with a JSON object containing these string fields: title, file_count, button. Do not add explanation or other fields.",
+      "expected": {
+        "title": [
+          "Backup completed"
+        ],
+        "file_count": [
+          "18"
+        ],
+        "button": [
+          "Close"
+        ]
+      }
+    },
+    {
+      "name": "warehouse-table",
+      "file": "warehouse-table.png",
+      "category": "table",
+      "held_out": true,
+      "size": [
+        736,
+        512
+      ],
+      "media_type": "image/png",
+      "sha256": "3badb1f8251e3853a5a3c1f90492c3f82c4cf7d0068499582b73b52547f53575",
+      "prompt": "Read the table title. How many units of Markers are listed, and which item has the most units? Respond only with a JSON object containing these string fields: title, marker_units, largest_item. Do not add explanation or other fields.",
+      "expected": {
+        "title": [
+          "Warehouse Stock"
+        ],
+        "marker_units": [
+          "9"
+        ],
+        "largest_item": [
+          "Notebooks"
+        ]
+      }
+    },
+    {
+      "name": "field-day-portrait",
+      "file": "field-day-portrait.png",
+      "category": "portrait/poster",
+      "held_out": true,
+      "size": [
+        512,
+        768
+      ],
+      "media_type": "image/png",
+      "sha256": "a521bd3fa7a0c449d4aa57321f8b3ef01f80e08dba97838a179d7ef135700743",
+      "prompt": "Read the event name, date, and location from the poster. Respond only with a JSON object containing these string fields: event, date, location. Do not add explanation or other fields.",
+      "expected": {
+        "event": [
+          "FIELD DAY"
+        ],
+        "date": [
+          "14 MAY 2027"
+        ],
+        "location": [
+          "CEDAR PARK"
+        ]
+      }
+    },
+    {
+      "name": "invoice-unaligned",
+      "file": "invoice-unaligned.jpg",
+      "category": "document/jpeg/resize",
+      "held_out": true,
+      "size": [
+        641,
+        801
+      ],
+      "media_type": "image/jpeg",
+      "sha256": "bbd2d803b4883eed2d1d9e23798dc2e6353e7c90d385e9f387d4bcbbc747be59",
+      "prompt": "Read the invoice identifier, total amount, and due date. Respond only with a JSON object containing these string fields: invoice_id, amount, due_date. Do not add explanation or other fields.",
+      "expected": {
+        "invoice_id": [
+          "AQ-417"
+        ],
+        "amount": [
+          "$86.50",
+          "86.50"
+        ],
+        "due_date": [
+          "09 JUN 2027",
+          "9 JUN 2027",
+          "09 JUNE 2027",
+          "9 JUNE 2027"
+        ]
+      }
+    },
+    {
+      "name": "shape-counting",
+      "file": "shape-counting.png",
+      "category": "counting/spatial",
+      "held_out": true,
+      "size": [
+        640,
+        448
+      ],
+      "media_type": "image/png",
+      "sha256": "884e0803a5611122b0678d4632c062738ffdcb23dd5e0a0f220ec56ec81268c9",
+      "prompt": "Count the triangles in the top row and circles in the bottom row. Identify the color of the bottom-row shapes. Respond only with a JSON object containing these string fields: top_triangles, bottom_circles, bottom_color. Do not add explanation or other fields.",
+      "expected": {
+        "top_triangles": [
+          "3"
+        ],
+        "bottom_circles": [
+          "2"
+        ],
+        "bottom_color": [
+          "blue"
+        ]
+      }
+    }
+  ]
+}

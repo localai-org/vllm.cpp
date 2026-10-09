@@ -1,0 +1,25 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "publication/upstream-compatibility.json",
+      "sha256": "a636137ae09aba582c4c0c77a3269c385e9e2944ae28029df3bd43fd50531b38",
+      "bytes": 477
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "base": "452617154b8231a0fea4b5331b246427d96622b8",
+    "head": "11cb381f61b37c9aba88ca63d8f60180e4cf5ef2",
+    "checks": {
+      "two_bound_index_fields": true,
+      "two_refreshes": true,
+      "two_TT_only_comparisons": true,
+      "dense_attention_and_tt_guard": true,
+      "dense_warm_guard": true
+    },
+    "merge_tree_exit": 0,
+    "upstream_runtime_test": "UNAVAILABLE: no Tenstorrent device",
+    "source_sha256": "b84295507dc8ac4c124bb0b7b8b94e2a081fd7aaceb6fd7e86a35c5b9bafae43"
+  }
+}

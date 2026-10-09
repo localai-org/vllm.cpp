@@ -61,6 +61,10 @@ namespace vllm::v1 {
 //   num_rejected         [num_reqs] i32 — I3 RejectionSampler output
 //   max_num_reqs         CUDA-graph request-count padding bound (>= num_reqs)
 //
+// Optional prefill_inputs_embeds is the already shift-spliced [T,H] draft
+// embedding batch. Its owner must survive the entire call. Later generated
+// draft decode rows still use ordinary token lookup; draft RoPE stays 1-D.
+//
 // num_reqs is target_attn_meta.num_reqs; T is target_input_ids.size(). Returns
 // draft_tokens [num_reqs] (draft_tokens[:num_reqs, :1] flattened for k=1).
 std::vector<int32_t> MtpProposePrefill(
@@ -74,7 +78,7 @@ std::vector<int32_t> MtpProposePrefill(
     const std::vector<int32_t>& next_prefill_tokens,
     const std::vector<int32_t>& num_sampled,
     const std::vector<int32_t>& num_rejected, int max_num_reqs,
-    vt::Queue& queue);
+    vt::Queue& queue, const vt::Tensor* prefill_inputs_embeds = nullptr);
 
 // The FULL greedy MTP propose at any depth (SPEC-MTP-K-GT-1, issue #81) —
 // upstream `AutoRegressiveSpeculator.propose` (:129-274 @ 555967922) end to end:
@@ -170,7 +174,7 @@ MtpDraftProposal MtpProposeDrafts(
     const std::vector<int32_t>& num_sampled,
     const std::vector<int32_t>& num_rejected, int max_num_reqs,
     int num_speculative_tokens, int max_model_len, int block_size,
-    vt::Queue& queue);
+    vt::Queue& queue, const vt::Tensor* prefill_inputs_embeds = nullptr);
 
 }  // namespace vllm::v1
 

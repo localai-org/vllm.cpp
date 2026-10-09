@@ -921,6 +921,19 @@ enum class OpId : uint8_t {
   kScaledRmsNorm,
   kSandwichRmsNorm,
   kCompiledGeluErfMul,
+  kCopy,
+  // GPTQ oneDNN operators are appended so existing op ids remain stable.
+  kMatmulGptq4W4A16,
+  kMatmulDenseF16,
+  kExl3GroupedLinear,
+  kGdnPrefillRawGate,
+  kExl3GroupedW8A8,
+  kMappedGreedyArgmax,
+  // Typed learned position-table interpolation, spatial-merge order. Appended
+  // so existing ids stay stable. Initially native XPU FP16 only.
+  kVisionPosEmbedInterpolate,
+  kVisionRopeGrid,
+  kVisionRopeApply,
   kCount
 };
 
@@ -968,6 +981,9 @@ struct DropinProbeArgs {
 struct RmsNormArgs {
   float eps = 1e-6f;
   bool gemma = false;  // weight applied as (1 + w), GemmaRMSNorm style
+  // Producer Q/K boundary: XPU D256, F16 output, F32 weight, no residual.
+  // F16/F32 input is normalized by the pinned F32 mean/rsqrt order.
+  bool qk_fp16 = false;
 };
 
 struct ResidualRmsNormArgs {
@@ -1042,6 +1058,12 @@ struct Exl3GemmArgs {
   // upstream's does. It exists so a device gate measures the arm it names
   // instead of whatever the occupancy query happened to choose.
   int force_gemv = -1;
+  // Native XPU can fold the activation's F16 cast into input Hadamard and
+  // the final F32->BF16 cast into output Hadamard/scale. Intermediate rounding
+  // is identical to the explicit casts; A_had remains F16. Other backends
+  // refuse this opt-in instead of silently interpreting the input as F16.
+  bool fuse_casts = false;
+  const char* debug_name = nullptr;  // Host-only, optional EXL3 dispatch trace label.
 };
 
 // ─── The fused MoE MLP — MODEL-DSV4-EXL3 W2d ─────────────────────────────────
@@ -1194,6 +1216,10 @@ struct RopeArgs {
   float llama3_low_freq_factor = 0.0f;   // rope_scaling "low_freq_factor"
   float llama3_high_freq_factor = 0.0f;  // rope_scaling "high_freq_factor"
   float llama3_orig_max_position = 0.0f;  // "original_max_position_embeddings"
+  // XPU producer FP16 preamble/cache consumer: round normalized inputs,
+  // coefficients and each rotation product before add/subtract. Default
+  // preserves the legacy F32 intermediate arithmetic on every backend.
+  bool fp16_intermediates = false;
 };
 
 // GDN op args (.agents/specs/gdn-semantics.md is the formula reference; sections
@@ -1249,6 +1275,17 @@ struct Qwen4ExpPleGateArgs {
 
 struct L2NormArgs {
   float eps = 1e-6f;  // upstream default (gdn-semantics.md §4)
+};
+
+// The XPU producer's FP16 prefill normalizes unrounded FP32 Conv output
+// and folds Dk^-0.5 into Q before storing FP16. Other GDN routes retain
+// their separate normalization/recurrence-scale boundary.
+struct GdnPostConvArgs {
+  float eps = 1e-6f;
+  bool xpu_fp16_prefill = false;
+  GdnPostConvArgs() = default;
+  GdnPostConvArgs(L2NormArgs norm) : eps(norm.eps) {}
+  GdnPostConvArgs(float epsilon, bool prefill) : eps(epsilon), xpu_fp16_prefill(prefill) {}
 };
 
 // Geometry of one Gated DeltaNet V-head re-indexing. See `vt::VHeadPermute`.
@@ -2291,6 +2328,22 @@ struct MoeRouterTopKArgs {
 // these types. A kernel that does not support a validated dtype combination
 // must throw loudly, never silently truncate.
 using MatmulFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&);
+using MatmulGptq4W4A16Fn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
+                                    const Tensor&, const Tensor&, int, const Tensor*);
+using MatmulDenseF16Fn =
+    void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor*);
+struct VisionPosEmbedArgs {
+  int64_t t = 1, h = 0, w = 0;
+  int64_t grid_side = 0, merge_size = 2;
+};
+using VisionPosEmbedInterpolateFn =
+    void (*)(Queue&, Tensor&, const Tensor&, const VisionPosEmbedArgs&);
+struct VisionRopeGridArgs {
+  int64_t t = 1, h = 0, w = 0, merge_size = 2;
+};
+using VisionRopeGridFn =
+    void (*)(Queue&, Tensor&, const Tensor&, const VisionRopeGridArgs&);
+using VisionRopeApplyFn = void (*)(Queue&, Tensor&, Tensor&, const Tensor&);
 using MatmulNvfp4Fn =
     void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&, float);
 using ScaledFp4QuantFn =
@@ -2418,6 +2471,12 @@ using PermuteVHeadsFn = void (*)(Queue&, Tensor&, const Tensor&, int64_t, int64_
                                   int64_t, int64_t);
 using CastF32Fn = void (*)(Queue&, Tensor&, const Tensor&);
 using CastF16Fn = void (*)(Queue&, Tensor&, const Tensor&);
+using CopyFn = void (*)(Queue&, Tensor&, const Tensor&);
+// Shape-preserving strided copy, with optional F16/BF16/F32 conversion.
+// Same-dtype copies preserve bits for every elementwise dtype. Overlapping
+// source/destination storage has snapshot semantics. Negative strides and
+// overlapping output elements are refused.
+void Copy(Queue& q, Tensor& out, const Tensor& in);
 using MulColVecF32Fn = void (*)(Queue&, Tensor&, const Tensor&);
 using AttnGateSplitFn = void (*)(Queue&, Tensor&, Tensor&, const Tensor&);
 using SigmoidGateBf16Fn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&);
@@ -2427,10 +2486,10 @@ using GdnConvSplitFn = void (*)(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&
 using QkvSplitFn = void (*)(Queue&, Tensor&, Tensor&, Tensor&, const Tensor&);
 // Fused GDN post-conv prep (mirror of fla fused_gdn_prefill_post_conv):
 // conv-split + q/k l2norm + g/beta gating in ONE launch. eps travels in
-// L2NormArgs (the q/k l2norm eps; softplus threshold 20 baked in as in GdnGBeta).
+// GdnPostConvArgs (eps and explicit producer prefill precision boundary).
 using GdnPostConvFn = void (*)(Queue&, Tensor&, Tensor&, Tensor&, Tensor&, Tensor&, const Tensor&,
                                const Tensor&, const Tensor&, const Tensor&, const Tensor&,
-                               const L2NormArgs&);
+                               const GdnPostConvArgs&);
 // Per-step RoPE cos|sin cache fill (fused-attn-preamble prep): cos_sin[T,rot] f32
 // from positions[T] (RopeArgs.base/rotary_dim). Cols [0,rot/2)=cos, [rot/2,rot)=sin.
 using RopeCosSinCacheFn = void (*)(Queue&, Tensor&, const Tensor&, const RopeArgs&);
@@ -2517,6 +2576,9 @@ using RmsNormGatedFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, c
 using GdnPrefillFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                               const Tensor&, const Tensor&, Tensor&, const Tensor&,
                               const GdnArgs&);
+using GdnPrefillRawGateFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
+    Tensor&, const Tensor&, const GdnArgs&);
 using GdnDecodeFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                              const Tensor&, const Tensor&, Tensor&, const Tensor*,
                              const GdnArgs&);
@@ -2766,6 +2828,7 @@ using PagedAttentionFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
 // --- V1 sampling ops (M1.7 Task 2). See the sampling-op section at the bottom.
 using ApplyTemperatureFn = void (*)(Queue&, Tensor&, const Tensor&, bool);
 using GreedyArgmaxFn = void (*)(Queue&, Tensor&, const Tensor&);
+using MappedGreedyArgmaxFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, int64_t);
 using ApplyTopKTopPFn = void (*)(Queue&, Tensor&, const Tensor*, const Tensor*);
 using ComputeProbsFn = void (*)(Queue&, Tensor&, const Tensor&);
 using ComputeLogprobsFn = void (*)(Queue&, Tensor&, const Tensor&);
@@ -2841,6 +2904,40 @@ void DropinProbe(Queue& q, Tensor& out, const Tensor& in,
 // cuBLASLt algo — and so the K-reduction split — differs); token-exact gates
 // decide call-site adoption.
 void MatmulBT(Queue& q, Tensor& out, const Tensor& a, const Tensor& b);
+
+// out[M,N] = a[M,K] @ dequant(qweight[N,K/8])^T. The post-load GPTQ bytes
+// remain packed U4; scales are [K/group,N] FP16 and zero_points is one
+// effective I8 value (8 for the pinned symmetric checkpoint). No CPU fallback
+// or weight repack is provided.
+void MatmulGptq4W4A16(Queue& q, Tensor& out, const Tensor& a,
+                      const Tensor& qweight, const Tensor& scales,
+                      const Tensor& zero_points, int group_size,
+                      const Tensor* bias = nullptr);
+
+// out[M,N] = a[M,K] @ weight[N,K]^T using FP16 storage, matching the unquantized
+// GPTQ BA and dense lm_head operator boundary.
+void MatmulDenseF16(Queue& q, Tensor& out, const Tensor& a,
+                    const Tensor& weight, const Tensor* bias = nullptr);
+
+// Learned table[grid_side^2,H] -> out[t*h*w,H], reordered into spatial merge
+// groups and repeated per frame. The executing reference uses FP32 coordinate
+// math, FP16 coefficients and contracted half FMA. Contiguous FP16 on XPU only;
+// output must not overlap the table. Async, no global scratch or host download.
+void VisionPosEmbedInterpolate(Queue& q, Tensor& out, const Tensor& table,
+                               const VisionPosEmbedArgs& args);
+
+// FP16 base[P,2*F] (cos|sin) -> out[t*h*w,4*F] (h_cos|w_cos|h_sin|w_sin),
+// with spatial merge ordering and frame repetition. P >= max(h,w).
+// Native XPU, contiguous/nonoverlapping operands, asynchronous bit copy;
+// no dynamic position tensor, host readback or scratch allocation.
+void VisionRopeGrid(Queue& q, Tensor& out, const Tensor& base,
+                    const VisionRopeGridArgs& args);
+
+// In-place NeoX vision rotation: FP16 q/k[T,H,D], aligned FP16 cos|sin[T,D].
+// Full even head width, product rounding to FP16 before the add/subtract.
+// Native XPU, contiguous/nonoverlapping operands. Row t always uses cache row t;
+// no dynamic positions, validation readback or scratch allocation.
+void VisionRopeApply(Queue& q, Tensor& queries, Tensor& keys, const Tensor& cache);
 
 // --- Compute-in-quant GEMM (QUANT-GGUF-CIQ-GEMM) ----------------------------
 // out[M,N] = a[M,K] @ b^T where the WEIGHT `b` is [N,K] row-major kept in its
@@ -3748,14 +3845,14 @@ void SoftCap(Queue& q, Tensor& out, const Tensor& x, double cap);
 // `vectorized_layer_norm_kernel`, the kernel `nn.LayerNorm` dispatches to for a
 // CUDA half/bfloat16 input). `weight`/`bias` are optional rank-1 [D] tensors:
 // both null == `elementwise_affine=False`. `var` is the BIASED (1/N) variance,
-// as torch uses. x/out f32 or bf16; the mean/variance accumulation, the
+// as torch uses. x/out f32 or bf16 (XPU also permits f16 output); moments,
 // normalization and the affine are all computed in f32 and rounded once on
 // store — matching torch's `acc_type<bfloat16> == float` contract, so a bf16
 // LayerNorm here rounds exactly where torch's does.
 //
 // This is the mean-subtracting, bias-carrying sibling of vt::RmsNorm. It is
 // what every pre-Llama-era family (OPT, GPT-2, BLOOM, ...) normalizes with;
-// vllm/model_executor/models/opt.py:146-148,164-166,248-251. CPU + CUDA.
+// vllm/model_executor/models/opt.py:146-148,164-166,248-251. CPU + CUDA + XPU.
 void LayerNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor* weight,
                const Tensor* bias, const LayerNormArgs& args);
 
@@ -3766,7 +3863,8 @@ void LayerNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor* weight,
 void Relu(Queue& q, Tensor& out, const Tensor& x);
 
 // Elementwise GELU (NEW, Qwen3-VL vision tower). out[i] = gelu(x[i]); `out` may
-// alias `x`. x/out f32 or bf16, computed in f32. GeluTanh is the tanh-approx
+// alias `x`. x/out f32 or bf16 (XPU also permits f16 output), computed in f32.
+// GeluTanh is the tanh-approx
 // (`gelu_pytorch_tanh`, vision MLP); GeluErf is exact erf (`nn.GELU()`, merger).
 void GeluTanh(Queue& q, Tensor& out, const Tensor& x);
 void GeluErf(Queue& q, Tensor& out, const Tensor& x);
@@ -4099,6 +4197,16 @@ void RmsNormGated(Queue& q, Tensor& out, const Tensor& x, const Tensor& gate,
 void GdnPrefill(Queue& q, Tensor& out, const Tensor& q_in, const Tensor& k, const Tensor& v,
                 const Tensor& g, const Tensor& beta, Tensor& state,
                 const Tensor& query_start_loc, const GdnArgs& args);
+
+// Pinned XPU FP16 chunk recurrence: q is already normalized AND scaled;
+// raw_a is the FP16 gate projection, beta is FP32 sigmoid(b), and a_log/bias
+// are FP32 checkpoint weights (bias rounds to the producer's FP16 boundary).
+// state is FP32 in/out, zeroed by the caller for a fresh sequence. This op
+// prepares the prefix directly from raw_a; rounded per-token g cannot replace it.
+void GdnPrefillRawGate(Queue&, Tensor& out, const Tensor& q, const Tensor& k,
+    const Tensor& v, const Tensor& raw_a, const Tensor& beta, const Tensor& a_log,
+    const Tensor& dt_bias, Tensor& state, const Tensor& query_start_loc,
+    const GdnArgs& args);
 
 // Kimi Delta Attention (KDA) gated-delta recurrence — the PER-K-CHANNEL-DECAY
 // variant of GdnPrefill. Ported 1:1 from FLA's
@@ -5720,6 +5828,13 @@ void ApplyTemperature(Queue& q, Tensor& logits, const Tensor& temp, bool all_ran
 // argmax returns int64); logits [num_reqs, vocab] f32.
 void GreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits);
 
+// Compact finite F32 logits [R,N], validated unique I32 global-ID map [N].
+// Select the maximum with LOWEST GLOBAL-ID ties, not compact-storage order.
+// I32 output [R]; -1 signals a nonfinite logit or out-of-range map value.
+// Currently implemented on XPU. Caller retains all storage through completion.
+void MappedGreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits,
+                        const Tensor& global_ids, int64_t target_vocab);
+
 // apply_top_k_top_p (topk_topp_sampler.py::apply_top_k_top_p_pytorch, the CPU
 // allow_cpu_sync path). Masks non-top-k / non-top-p logits to -inf IN PLACE.
 // k [num_reqs] i32 (nullptr => skip top-k), p [num_reqs] f32 (nullptr => skip
@@ -5942,6 +6057,8 @@ void AttnGateSplit(Queue& q, Tensor& q_out, Tensor& gate_out, const Tensor& qgat
 // values), gate f32 (sigmoid input must not be rounded), same element count.
 // The sigmoid output-gate applied to the attention result before the o_proj
 // (elementwise on the projection split).
+// Native XPU FP16 attention and output preserve the eager FP16 sigmoid result
+// before multiplication; other admitted dtype combinations use the F32 result.
 void SigmoidGateBf16(Queue& q, Tensor& out, const Tensor& attn, const Tensor& gate);
 
 // Derives the GDN per-head decay g and gate beta from the raw projections
@@ -5993,7 +6110,7 @@ void QkvSplit(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, const Tenso
 // share f32 or bf16 dtype and may have a padded row stride; all gate math is f32.
 void GdnPostConv(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out, Tensor& g_out,
                  Tensor& beta_out, const Tensor& conv, const Tensor& araw, const Tensor& braw,
-                 const Tensor& a_log, const Tensor& dt_bias, const L2NormArgs& args);
+                 const Tensor& a_log, const Tensor& dt_bias, const GdnPostConvArgs& args);
 
 // out[t,c] = F32ToBF16(sigmoid(gl[t]) * sd[t*H+c]); out bf16 [T,H], sd f32
 // [T,H], gl f32 with T elements (shape [T] or [T,1]). The shared-expert

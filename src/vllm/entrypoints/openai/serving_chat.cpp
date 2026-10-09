@@ -743,9 +743,10 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
   // route the media through the mm processor and carry the placeholder-EXPANDED
   // MultiModalInputs to the engine mm overload. Unset seam OR a text-only
   // request leaves mm_inputs empty and every path below is byte-identical to the
-  // text-only server (the RED-line inertness). Streaming mm is a NAMED residual.
+  // text-only server (the RED-line inertness). Both response modes carry the
+  // expanded prompt and image features to the same engine overload.
   std::optional<multimodal::MultiModalInputs> mm_inputs;
-  if (mm_chat_fn_) {
+  if (mm_chat_fn_ || mm_request_chat_fn_) {
     bool has_mm = false;
     for (const ChatMessage& m : request.messages) {
       if (HasMultiModalParts(m)) {
@@ -754,13 +755,10 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
       }
     }
     if (has_mm) {
-      mm_inputs = mm_chat_fn_(request.messages);
+      mm_inputs = mm_request_chat_fn_
+          ? mm_request_chat_fn_(request.messages, tools, request.chat_template_kwargs)
+          : mm_chat_fn_(request.messages);
     }
-  }
-  if (mm_inputs.has_value() && request.stream) {
-    throw std::runtime_error(
-        "streaming is not currently supported with multimodal input "
-        "(MM-SERVE-E2E residual)");
   }
 
   // ── use_beam_search (chat_completion/serving.py:319-343) ─────────────────
@@ -866,9 +864,11 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
     ChatDbg(request_id, "stage=stream_begin engine=" +
                             std::string(async_engine_ != nullptr ? "async" : "sync"));
     if (async_engine_ != nullptr) {
-      v1::AsyncRequest async_request = async_engine_->add_request(
-          engine_request_id, prompt, std::move(sampling_params),
-          request.priority);
+      v1::AsyncRequest async_request = mm_inputs.has_value()
+          ? async_engine_->add_request(engine_request_id, std::move(*mm_inputs),
+                                       std::move(sampling_params), request.priority)
+          : async_engine_->add_request(engine_request_id, prompt,
+                                       std::move(sampling_params), request.priority);
       ChatDbg(request_id, "stage=async_queued");
       ChatCompletionResult result;
       result.streaming = true;
@@ -900,8 +900,13 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
       throw std::runtime_error("chat handler has no engine");
     }
     ChatDbg(request_id, "stage=sync_add_request (prefill may take a while on long prompts)");
-    sync_engine_->add_request(engine_request_id, prompt,
-                              std::move(sampling_params), request.priority);
+    if (mm_inputs.has_value()) {
+      sync_engine_->add_request(engine_request_id, std::move(*mm_inputs),
+                               std::move(sampling_params), request.priority);
+    } else {
+      sync_engine_->add_request(engine_request_id, prompt,
+                               std::move(sampling_params), request.priority);
+    }
     ChatDbg(request_id, "stage=sync_step_loop");
     int step_i = 0;
     auto last_prog = std::chrono::steady_clock::now();

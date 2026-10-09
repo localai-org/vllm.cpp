@@ -156,6 +156,59 @@ std::vector<float> DownloadEmbeds(vt::Backend& b, vt::Queue& q,
 
 }  // namespace
 
+TEST_CASE("mm encoder lifetime: parent validation, ready ordering and retained consumers") {
+  struct Counts { int waits=0,uses=0; };
+  struct Owner final : vllm::MmEncoderLifetime {
+    std::shared_ptr<Counts> counts;
+    mutable std::vector<uint16_t> bits=std::vector<uint16_t>(2*kHidden,0);
+    vt::Tensor view;
+    explicit Owner(std::shared_ptr<Counts> c) : counts(std::move(c)) {
+      view=vt::Tensor::Contiguous(bits.data(),vt::DType::kBF16,{vt::DeviceType::kCPU,0},{2,kHidden});
+    }
+    const vt::Tensor& tensor() const override { return view; }
+    void WaitOn(vt::Queue&) const override {
+      ++counts->waits;
+      for (size_t i=0;i<bits.size();++i) bits[i]=vt::F32ToBF16(20+float(i));
+    }
+    void RecordUse(vt::Queue&) const override { ++counts->uses; }
+  };
+  const auto c=MakeConfig(); auto w=MakeTextOnlyVlWeights();
+  w.vision_cfg.deepstack_visual_indexes.clear();
+  auto model=vllm::BorrowQwen3VLLoadedModel(w); auto q=Q();
+  auto counts=std::make_shared<Counts>(); auto owner=std::make_shared<Owner>(counts);
+  std::weak_ptr<Owner> weak=owner;
+  std::vector<std::shared_ptr<vllm::MmEncoderLifetime>> owners{owner};
+  StepChannels step; step.mm_embeds={owner->tensor().Slice(0,1,2)};
+  step.is_mm_embed={0,1,0}; auto input=step.Make(); input.mm_lifetimes=&owners;
+  auto invalid=step.mm_embeds[0]; invalid.data=static_cast<char*>(invalid.data)+2;
+  step.mm_embeds[0]=invalid;
+  CHECK_THROWS_WITH_AS(vllm::ModelRegistry::EmbedMm(*model,c,q,input),
+                      doctest::Contains("outside its live encoder parent"),std::runtime_error);
+  CHECK(counts->waits==0); CHECK(counts->uses==0);
+  step.mm_embeds[0]=owner->tensor().Slice(0,1,2);
+  owners.clear();
+  CHECK_THROWS_WITH_AS(vllm::ModelRegistry::EmbedMm(*model,c,q,input),
+                      doctest::Contains("one lifetime per source slice"),std::runtime_error);
+  owners.push_back(owner);
+  step.is_mm_embed={1,1,0};
+  CHECK_THROWS_AS(vllm::ModelRegistry::EmbedMm(*model,c,q,input),std::runtime_error);
+  CHECK(counts->waits==1); CHECK(counts->uses==1);
+  step.is_mm_embed={0,1,0};
+  auto result=vllm::ModelRegistry::EmbedMm(*model,c,q,input);
+  CHECK(counts->waits==2); CHECK(counts->uses==2);
+  owner.reset(); owners.clear();
+  CHECK_FALSE(weak.expired());
+  const auto values=DownloadEmbeds(vt::GetBackend(q.device.type),q,result.mm.inputs_embeds);
+  REQUIRE(values.size()==3*kHidden);
+  for (int64_t col=0;col<kHidden;++col) {
+    CHECK(values[kHidden+col]==20+kHidden+col);
+    CHECK(values[col]==TableValue(step.host_ids[0],col));
+    CHECK(values[2*kHidden+col]==TableValue(step.host_ids[2],col));
+  }
+  result.storage.clear();
+  CHECK(weak.expired());
+}
+
 // ---------------------------------------------------------------------------
 // 1. THE DEFECT, as a number, through the production seam and the REAL
 //    Qwen3-VL registration.

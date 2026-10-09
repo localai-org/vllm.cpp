@@ -1,0 +1,60 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "plan-a/preflight-comparison.json",
+      "sha256": "d774bbe88beff47169fa4e5085e082b54c5627b8b789bf5e7e8a4f9f8f15387e",
+      "bytes": 61733
+    },
+    {
+      "artifact_id": "plan-a/tools-suite-diagnostic-summary.json",
+      "sha256": "c11dfbb6fb670eb8ab96aa191b5886ea29e1163f14507c4ab15e123891ff80b4",
+      "bytes": 14073
+    },
+    {
+      "artifact_id": "plan-a/http-prefix-trace-analysis.json",
+      "sha256": "a84869b2c47eff797688df831b98135f71c7204baac36a13a3ff2cf934702c46",
+      "bytes": 425
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "scope": "Historical pristine 0fbd7c9 versus final pre-rebase product preflight. The full automatic gate was not rerun on the new 4526171 base or repair head; current full-gate status is UNAVAILABLE, not inherited PASS. Focused current results are reported separately.",
+    "failures": [
+      {
+        "gate": "test_tower_skip_rss_arm",
+        "classification": "baseline-proven",
+        "level": "gate name; precise identical leaf causes unresolved",
+        "cause": "Readiness/completion/RSS/owned-child fixtures fail in both abbreviated logs. No full leaf-cause equivalence is asserted."
+      },
+      {
+        "gate": "test_rocprof_attach_preflight",
+        "classification": "baseline-proven",
+        "level": "gate name; precise identical leaf causes unresolved",
+        "cause": "Reservation allocation metadata refusal fixture fails; final excerpt includes invalid-page case. No unchanged individual-cause claim."
+      },
+      {
+        "gate": "tools suites",
+        "classification": "unresolved",
+        "baseline_gate_name_proven": true,
+        "cause": "Final separate diagnostic: 956 tests, 49 failures, 2 errors, 60 skips. 48 Strix failures hit /tmp headroom (20 GiB required, 16 GiB tmpfs); one missing failed-build report; cache eviction retains bytes and owned-child writer.pid is absent. Old abbreviated baseline logs do not prove identical individual causes."
+      },
+      {
+        "gate": "check-windows-portability.py automatic profile",
+        "classification": "introduced",
+        "cause": "New observed failed gate: optional parakeet.cpp dependency cannot be fetched with downloads prohibited. Focused static check with optional diarization/HF disabled passes. This does not prove Windows compilation or waive the automatic failure."
+      },
+      {
+        "gate": "automatic compile / 13 skipped gates",
+        "classification": "unavailable",
+        "cause": "Seven suites need unavailable numpy; five checker entry points need arguments automatic preflight does not supply; default compile profile also cannot fetch optional parakeet.cpp."
+      },
+      {
+        "gate": "strict HTTP prefix metric",
+        "classification": "unresolved",
+        "cause": "prompt_tokens_cached_total remains zero; separate existing snapshot trace observed 1600-token restore. Functional restore does not make the strict metric check pass."
+      }
+    ],
+    "disposition": "No maintainer waiver or independent full mutation review is recorded. Draft status does not waive required gates."
+  }
+}

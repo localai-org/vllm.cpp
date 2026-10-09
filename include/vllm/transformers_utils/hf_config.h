@@ -137,7 +137,10 @@ struct HfConfig {
   bool has_rope_parameters = false;
   double rms_norm_eps = 0.0;
   int64_t max_position_embeddings = 0;
+  // Resolved model declaration from `dtype` or legacy `torch_dtype`, with the
+  // effective text config preferred over its wrapper. Empty means undeclared.
   std::string torch_dtype;
+  std::string dtype_source;
   nlohmann::json raw;  // full doc for fields we don't type yet
   // eos_token_id from the sibling generation_config.json, sorted and unique.
   // Upstream ModelConfig.try_get_generation_config (config/model.py) loads that

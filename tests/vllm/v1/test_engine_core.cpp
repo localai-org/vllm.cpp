@@ -107,7 +107,8 @@ class RunnerStub : public ModelRunnerBase {
     for (const auto& [req_id, n] : stashed_output_.num_scheduled_tokens) {
       mro.req_ids.push_back(req_id);
       mro.req_id_to_index[req_id] = idx++;
-      mro.sampled_token_ids.push_back({kCannedToken});
+      mro.sampled_token_ids.push_back(suppress_tokens ? std::vector<int32_t>{}
+                                                   : std::vector<int32_t>{kCannedToken});
     }
     return mro;
   }
@@ -119,6 +120,7 @@ class RunnerStub : public ModelRunnerBase {
   int last_total_scheduled = 0;
   std::vector<std::string> last_scheduled_ids;
   bool last_grammar_present = false;
+  bool suppress_tokens = false;
   std::vector<std::string> last_grammar_req_ids;
 
  private:
@@ -260,6 +262,38 @@ TEST_CASE("EngineCore.step: empty scheduler returns ({}, false), no runner call"
   CHECK_FALSE(model_executed);
   CHECK(runner.execute_calls == 0);
   CHECK(runner.sample_calls == 0);
+}
+
+TEST_CASE("EngineCore.step: prefix lookup statistics survive a tokenless prefill chunk") {
+  bool queued = false;
+  SUBCASE("synchronous step") {}
+  SUBCASE("batch queue at depth one") { queued = true; }
+  auto scheduler = CreateScheduler(/*max_num_seqs=*/1, /*max_num_batched_tokens=*/16);
+  RunnerStub runner;
+  runner.suppress_tokens = true;
+  Executor executor(runner);
+  EngineCore engine(*scheduler, executor);
+  engine.add_request(MakeRequest("0", /*num_tokens=*/80));
+  const auto step = [&]() {
+    return queued ? engine.step_with_batch_queue() : engine.step();
+  };
+
+  const auto [first, executed] = step();
+  CHECK(executed);
+  REQUIRE(first.size() == 1);
+  const auto& observed = first.at(0);
+  CHECK(observed.outputs.empty());
+  CHECK(observed.scheduler_stats.prefix_cache_stats.requests == 1);
+  CHECK(observed.scheduler_stats.prefix_cache_stats.queries == 80);
+  CHECK(observed.scheduler_stats.prefix_cache_stats.hits == 0);
+  CHECK(scheduler->requests.at("0")->output_token_ids.empty());
+
+  // Subsequent tokenless chunks must not duplicate the admission observation.
+  const auto [second, executed_again] = step();
+  CHECK(executed_again);
+  CHECK(second.empty());
+  engine.abort_requests({"0"});
+  CHECK(step().first.empty());
 }
 
 // ---------------------------------------------------------------------------

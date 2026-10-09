@@ -463,6 +463,10 @@ def audit() -> list[dict]:
 # reachable on this fleet. The credit returns when the row reaches a gate-obliged
 # state, which its W2 does.
 RUNNABLE_BASELINE = frozenset({
+    # 2026-10-06: +BACKEND-XPU-EXL3-SERVING. The new ACTIVE row's committed
+    # serving spec declares runnable CPU/XPU/server gates. Pin this population
+    # growth in the same integration change; no existing row or gate is removed.
+    "BACKEND-XPU-EXL3-SERVING",
     # 2026-09-12: +QUANT-GGUF-IQ4_NL. GROWTH, and re-pinned in the change that
     # caused it. The row is new (#3149) and its spec's `## Gates` section names
     # a `ctest` invocation and the `strix:gpu0` ROCm suite, both of which can

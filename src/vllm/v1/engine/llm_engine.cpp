@@ -213,10 +213,12 @@ std::vector<RequestOutput> LLMEngine::step() {
     // detokenizer stopped them but EngineCore did not signal it itself).
     engine_core_.abort_requests(processed.reqs_to_abort);
 
-    // llm_engine.py:319-329 record stats: fold this step's SchedulerStats +
-    // IterationStats into the Prometheus registry. Guarded by outputs>0 exactly
-    // as upstream (len(outputs.outputs) > 0).
-    if (stat_logger_ != nullptr && !engine_core_outputs.outputs.empty()) {
+    // Record prefix lookups even when this chunk has no sampled token.
+    // IterationStats is empty for that observation, so it adds no token or
+    // completion timing sample.
+    if (stat_logger_ != nullptr &&
+        (!engine_core_outputs.outputs.empty() ||
+         engine_core_outputs.scheduler_stats.prefix_cache_stats.queries > 0)) {
       stat_logger_->Record(engine_core_outputs.scheduler_stats, iteration_stats);
     }
 

@@ -10,6 +10,11 @@
 #include "vllm/model_executor/models/qwen3_5_internal.h"
 #include "vllm/model_executor/models/qwen3_5_common.h"
 #include "vllm/v1/kv_cache_interface.h"
+#include "vllm/v1/kv_cache_dtype.h"
+#include "vllm/v1/core/kv_cache_manager.h"
+#include "vllm/v1/core/kv_cache_utils.h"
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
+#include "vllm/v1/request.h"
 
 #include <doctest/doctest.h>
 
@@ -38,6 +43,22 @@ HfConfig Config(std::vector<std::string> architectures) {
   HfConfig config;
   config.architectures = std::move(architectures);
   return config;
+}
+
+HfConfig EXL3QwenKVConfig() {
+  HfConfig cfg = Config({"Qwen3_5ForConditionalGeneration"});
+  cfg.raw["quantization_config"] = {{"quant_method", "exl3"}};
+  cfg.num_hidden_layers = 64;
+  cfg.layer_types.assign(64, "linear_attention");
+  for (int l = 3; l < 64; l += 4) cfg.layer_types[l] = "full_attention";
+  cfg.num_key_value_heads = 4;
+  cfg.head_dim = 256;
+  cfg.linear_num_key_heads = 16;
+  cfg.linear_num_value_heads = 48;
+  cfg.linear_key_head_dim = cfg.linear_value_head_dim = 128;
+  cfg.linear_conv_kernel_dim = 4;
+  cfg.mamba_ssm_dtype = "float32";
+  return cfg;
 }
 
 }  // namespace
@@ -1187,4 +1208,278 @@ TEST_CASE("Qwen3.5 KV-cache spec: num_spec widens the conv row and adds state bl
   // page_size_bytes covers ONE block (conv row + ssm row); k=1 grows the conv
   // part by conv_dim * sizeof(bf16) and leaves the ssm part alone.
   CHECK(k1->page_size_bytes() - base_mamba->page_size_bytes() == conv_dim * 2);
+}
+
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 MTP shares page identity and counts separate storage") {
+  const HfConfig cfg = EXL3QwenKVConfig();
+  for (int depth : {0, 3}) {
+    CAPTURE(depth);
+    auto kv = vllm::MakeQwen3_5KVCacheSpec(cfg, 1600, 180, depth, /*share_mtp_pages=*/true);
+    vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+    vllm::v1::ApplyCacheDType(kv, vllm::v1::ParseCacheDType("fp8", vt::DType::kF16), 1.0F, 1.0F);
+    REQUIRE(kv.kv_cache_groups.size() == 2);
+    CHECK(kv.kv_cache_groups[0].layer_names.size() == (depth > 0 ? 17 : 16));
+    CHECK(kv.kv_cache_groups[1].layer_names.size() == 48);
+    CHECK(vllm::v1::KVBytesPerBlock(kv) == (depth > 0 ? 17 : 16) * 3276800LL);
+    const auto names = kv.kv_cache_groups[0].layer_names;
+    vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+    CHECK(kv.kv_cache_groups[0].layer_names == names);
+    if (depth > 0) CHECK(names.back() == "model.layers.64.self_attn.attn");
+  }
+}
+
+TEST_CASE("Qwen3.5 GDN mixed token views preserve padded producer rows and refuse permutations") {
+  // Padding separates every row from unrelated producer columns (merged BA
+  // and QKVZ use this layout). A dense row-size offset would read poison.
+  std::array<uint16_t, 80> storage{};
+  storage.fill(0x7e00);
+  vt::Tensor source;
+  source.data = storage.data(); source.dtype = vt::DType::kF16;
+  source.rank = 2; source.shape[0] = 10; source.shape[1] = 4;
+  source.stride[0] = 8; source.stride[1] = 1;
+  for (int row = 0; row < 10; ++row)
+    for (int col = 0; col < 4; ++col) storage[row * 8 + col] = uint16_t(row * 4 + col);
+  const auto before = storage;
+  for (const auto& indices : {std::vector<int32_t>{0, 1}, {3, 4, 5}, {9}}) {
+    auto view = vllm::detail::GdnContiguousTokenRowsView(source, indices);
+    REQUIRE(view.has_value());
+    CHECK(view->shape[0] == int64_t(indices.size()));
+    CHECK(view->stride[0] == 8);
+    CHECK(view->shape[1] == 4);
+    CHECK(view->dtype == source.dtype);
+    auto* actual = static_cast<const uint16_t*>(view->data);
+    for (size_t row = 0; row < indices.size(); ++row)
+      for (int col = 0; col < 4; ++col)
+        CHECK(actual[row * view->stride[0] + col] == storage[indices[row] * 8 + col]);
+  }
+  for (const auto& indices : {std::vector<int32_t>{}, {1, 0}, {2, 2}, {-1, 0}, {9, 10}, {10}, {1, 3}})
+    CHECK_FALSE(vllm::detail::GdnContiguousTokenRowsView(source, indices).has_value());
+  source.stride[1] = 2;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenRowsView(source, {3, 4}).has_value());
+  source.stride[1] = 1; source.stride[0] = 3;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenRowsView(source, {3, 4}).has_value());
+  CHECK(storage == before);
+}
+
+TEST_CASE("Qwen3.5 GDN mixed output views cover disjoint rows and preserve guards") {
+  std::array<uint16_t, 56> storage;
+  storage.fill(0x7e00);
+  vt::Tensor output = vt::Tensor::Contiguous(storage.data() + 8, vt::DType::kF16,
+      vt::Device{}, {10, 4});
+  for (bool spec_first : {true, false}) {
+    storage.fill(0x7e00);
+    std::array<std::vector<int32_t>, 2> maps = spec_first
+        ? std::array<std::vector<int32_t>, 2>{{{0, 1, 2, 3}, {4, 5, 6, 7, 8, 9}}}
+        : std::array<std::vector<int32_t>, 2>{{{6, 7, 8, 9}, {0, 1, 2, 3, 4, 5}}};
+    auto views = vllm::detail::GdnContiguousTokenOutputViews(output, maps[0], maps[1]);
+    REQUIRE(views.has_value());
+    auto expected = storage;
+    for (size_t group = 0; group < 2; ++group) {
+      auto& view = (*views)[group];
+      REQUIRE(view.IsContiguous());
+      CHECK(view.shape[0] == int64_t(maps[group].size()));
+      auto* target = static_cast<uint16_t*>(view.data);
+      for (size_t row = 0; row < maps[group].size(); ++row)
+        for (int col = 0; col < 4; ++col) {
+          const uint16_t value = uint16_t(0x3000 + group * 256 + row * 4 + col);
+          target[row * 4 + col] = value;
+          expected[8 + maps[group][row] * 4 + col] = value;
+        }
+    }
+    CHECK(storage == expected);  // Complete output and both outside guards.
+  }
+  const auto before = storage;
+  for (const auto& maps : {
+      std::array<std::vector<int32_t>, 2>{{{}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}}},
+      {{{0, 1, 2, 3}, {3, 4, 5, 6, 7, 8}}},  // Overlap, even with total count10.
+      {{{0, 1, 2, 3}, {5, 6, 7, 8, 9}}},     // Gap.
+      {{{3, 2, 1, 0}, {4, 5, 6, 7, 8, 9}}}, // Permuted first group.
+      {{{0, 1, 2, 3}, {4, 5, 6, 6, 8, 9}}}, // Duplicate in second group.
+      {{{-1, 0, 1, 2}, {3, 4, 5, 6, 7, 8}}},
+      {{{0, 1, 2, 3}, {4, 5, 6, 7, 8, 10}}}})
+    CHECK_FALSE(vllm::detail::GdnContiguousTokenOutputViews(
+        output, maps[0], maps[1]).has_value());
+  output.stride[0] = 8;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenOutputViews(
+      output, {0, 1, 2, 3}, {4, 5, 6, 7, 8, 9}).has_value());
+  output.stride[0] = 4; output.data = nullptr;
+  CHECK_FALSE(vllm::detail::GdnContiguousTokenOutputViews(
+      output, {0, 1, 2, 3}, {4, 5, 6, 7, 8, 9}).has_value());
+  CHECK(storage == before);
+}
+
+TEST_CASE("Qwen3.5 KV-cache spec: shared EXL3 MTP prefix recomputes the future-dependent draft page") {
+  using namespace vllm::v1;
+  init_none_hash(sha256_cbor);
+  for (int depth : {0, 3}) {
+    CAPTURE(depth);
+    auto kv = vllm::MakeQwen3_5KVCacheSpec(EXL3QwenKVConfig(), 16, 40, depth, true);
+    CHECK(kv.mtp_draft_shares_target_pages == (depth > 0));
+    CHECK_FALSE(kv.kv_cache_groups.front().is_eagle_group);
+    CHECK_FALSE(kv.kv_cache_groups[1].is_eagle_group);
+    kv.recurrent_prefix_snapshots = std::make_shared<RecurrentPrefixSnapshotIndex>(4, 16);
+    auto index = kv.recurrent_prefix_snapshots;
+    KVCacheManager manager(kv, 128, 16, 16, 16, true, /*use_eagle=*/false);
+    const auto request = [](const std::string& id, const std::vector<int32_t>& tokens) {
+      return Request(id, tokens, vllm::SamplingParams{}, 0.0,
+                     get_request_block_hasher(16, sha256_cbor));
+    };
+    std::vector<int32_t> tokens(65);
+    for (int i = 0; i < 65; ++i) tokens[i] = i;
+    auto first = request("cold", tokens);
+    // Publish each block-aligned state exactly as chunked prefill does.
+    for (int position = 0; position < 65; ) {
+      const int count = std::min(16, 65 - position);
+      first.num_computed_tokens = position;
+      REQUIRE(manager.allocate_slots(first, count, 0, std::nullopt, depth).has_value());
+      position += count;
+      if (position % 16 == 0) {
+        auto snapshot = index->Reserve(first.block_hashes[position / 16 - 1], position);
+        REQUIRE(snapshot.has_value());
+        index->Publish(*snapshot);
+      }
+    }
+    manager.free(first);
+    manager.new_step_starts();
+    // Same prompt, or a changed next token after a still-identical hash:
+    // MTP must not reuse the draft page incorporating that next token.
+    for (int mutation : {-1, 64, 48}) {
+      CAPTURE(mutation);
+      auto changed = tokens;
+      if (mutation >= 0) changed[mutation] += 100;
+      auto next = request("warm", changed);
+      const int matched = mutation == 48 ? 48 : 64;
+      const int expected = matched - (depth ? 16 : 0);
+      CHECK(manager.num_matched_prefix_tokens(next) == expected);
+      auto [blocks, hit] = manager.get_computed_blocks(next);
+      REQUIRE(hit == expected);
+      REQUIRE(index->Pinned(next.request_id).has_value());
+      CHECK(index->Pinned(next.request_id)->tokens == expected);
+      CHECK(index->Pinned(next.request_id)->hash == next.block_hashes[expected / 16 - 1]);
+      CHECK(blocks.blocks[0].size() == size_t(expected / 16));
+      // Admission must restore this same boundary, retain the reader until
+      // completion, and release every pin when the request leaves.
+      REQUIRE(manager.allocate_slots(next, 65 - hit, hit, blocks, depth).has_value());
+      CHECK_FALSE(manager.reset_prefix_cache());
+      manager.free(next);
+      CHECK_FALSE(index->Pinned(next.request_id).has_value());
+    }
+    CHECK(manager.reset_prefix_cache());
+  }
+}
+
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 target-only and MTP maximum-context admission and recurrent retirement") {
+  constexpr int context = 262144, block_size = 1600;
+  const HfConfig cfg = EXL3QwenKVConfig();
+  for (int depth : {0, 3}) {
+    CAPTURE(depth);
+    const int pool_blocks = 167 + depth;  // FA164 + recurrent(2+k) + null
+    // Exercise the production no-spec entry point, including share=false.
+    auto kv = depth ? vllm::MakeQwen3_5KVCacheSpec(cfg, block_size, pool_blocks, depth, true)
+                    : vllm::MakeQwen3_5KVCache(cfg, block_size, pool_blocks);
+    vllm::v1::ResolveKVCacheGroupLayerNames(kv, cfg.num_hidden_layers, cfg.layer_types);
+    vllm::v1::ApplyCacheDType(kv, vllm::v1::ParseCacheDType("fp8", vt::DType::kF16), 1.0F, 1.0F);
+    const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(kv.kv_cache_groups[1].kv_cache_spec.get());
+    REQUIRE(mamba != nullptr);
+    CHECK(mamba->mamba_cache_mode == "align");
+    CHECK(vllm::v1::max_blocks_per_request(*mamba, context, block_size) == 2 + depth);
+    CHECK(mamba->max_num_blocks_per_req(context) == 164 + depth);  // null-padded logical row
+    const int64_t bytes_per_block = vllm::v1::KVBytesPerBlock(kv);
+    CHECK(bytes_per_block == (depth ? 17 : 16) * 3276800LL);
+    CHECK(vllm::v1::max_memory_usage_bytes_from_groups(kv, context, block_size) ==
+          (166 + depth) * bytes_per_block);  // FA + bounded live recurrence
+    CHECK_NOTHROW(vllm::v1::check_enough_kv_cache_memory(kv, pool_blocks * bytes_per_block, context, block_size));
+    auto too_small = kv;
+    too_small.num_blocks = pool_blocks - 1;
+    CHECK_THROWS(vllm::v1::check_enough_kv_cache_memory(too_small, (pool_blocks - 1) * bytes_per_block, context, block_size));
+    vllm::v1::KVCacheManager manager(kv, context, block_size, block_size, block_size,
+                                    /*enable_caching=*/false, /*use_eagle=*/false, /*log_stats=*/false);
+    vllm::SamplingParams sampling;
+    sampling.max_tokens = 1024;
+    vllm::v1::Request req("long", std::vector<int32_t>(261120, 42), sampling, 0.0);
+    const auto allocate = [&](const vllm::v1::Request& r, int count) {
+      return manager.allocate_slots(r, count, 0, std::nullopt, depth, 0, false, 0,
+                                    // Scheduler reserves the full prompt only
+                                    // when admitting a waiting/preempted owner.
+                                    /*full_sequence_must_fit=*/r.num_computed_tokens == 0);
+    };
+    int max_live_recurrent = 0;
+    for (int position = 0; position < context; ) {
+      CAPTURE(position);
+      const int count = std::min(block_size, context - position);
+      req.num_computed_tokens = position;
+      REQUIRE(allocate(req, count).has_value());
+      const auto blocks = manager.get_blocks(req.request_id).blocks;
+      REQUIRE(blocks.size() == 2);
+      CHECK(blocks[0].size() == size_t((std::min(context, position + count + depth) + block_size - 1) / block_size));
+      int live_recurrent = 0;
+      for (const auto* block : blocks[1]) {
+        if (!block->is_null) { ++live_recurrent; CHECK(block->ref_cnt == 1); }
+      }
+      max_live_recurrent = std::max(max_live_recurrent, live_recurrent);
+      CHECK(live_recurrent <= 2 + depth);
+      position += count;
+    }
+    CHECK(max_live_recurrent == 2 + depth);
+    vllm::v1::Request second("second", std::vector<int32_t>(261120, 43), sampling, 0.0);
+    CHECK_FALSE(allocate(second, block_size).has_value());
+    manager.free(req);
+    CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
+    CHECK(allocate(second, block_size).has_value());
+    manager.free(second);
+    CHECK(manager.block_pool.get_num_free_blocks() == pool_blocks - 1);
+  }
+}
+
+TEST_CASE("Qwen3.5 KV-cache spec: EXL3 uses FP16 Conv and FP32 recurrence despite BF16 export") {
+  HfConfig cfg = Config({"Qwen3_5ForConditionalGeneration"});
+  cfg.torch_dtype = "bfloat16";
+  cfg.mamba_ssm_dtype = "float32";
+  cfg.raw["quantization_config"] = {{"quant_method", "exl3"}, {"codebook", "mul1"}};
+  cfg.num_key_value_heads = 4;
+  cfg.head_dim = 256;
+  cfg.linear_num_key_heads = 16;
+  cfg.linear_num_value_heads = 48;
+  cfg.linear_key_head_dim = 128;
+  cfg.linear_value_head_dim = 128;
+  cfg.linear_conv_kernel_dim = 4;
+  for (int num_spec : {0, 3}) {
+    CAPTURE(num_spec);
+    const auto kv = vllm::MakeQwen3_5KVCacheSpec(cfg, 1600, 8, num_spec);
+    const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+        kv.kv_cache_groups[1].kv_cache_spec.get());
+    const auto* attention = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
+        kv.kv_cache_groups[0].kv_cache_spec.get());
+    REQUIRE(mamba != nullptr);
+    REQUIRE(attention != nullptr);
+    CHECK(mamba->dtypes == std::vector<vt::DType>{vt::DType::kF16, vt::DType::kF32});
+    CHECK(mamba->shapes[0] == std::vector<int64_t>{10240, 3 + num_spec});
+    CHECK(mamba->shapes[1] == std::vector<int64_t>{48, 128, 128});
+    CHECK(mamba->page_size_bytes() == 10240 * (3 + num_spec) * 2 + 48 * 128 * 128 * 4);
+    CHECK(attention->dtype == vt::DType::kF16);
+    CHECK(kv.kv_cache_groups.size() == (num_spec > 0 ? 3 : 2));
+    CHECK_FALSE(kv.mtp_draft_shares_target_pages);
+    if (num_spec > 0) {
+      const auto* draft = dynamic_cast<const vllm::v1::FullAttentionSpec*>(
+          kv.kv_cache_groups[2].kv_cache_spec.get());
+      REQUIRE(draft != nullptr);
+      CHECK(draft->dtype == vt::DType::kF16);
+    }
+  }
+  cfg.mamba_ssm_dtype = "bfloat16";
+  CHECK_THROWS_AS(vllm::MakeQwen3_5KVCache(cfg, 1600, 8), std::runtime_error);
+  cfg.mamba_ssm_dtype = "float32";
+  cfg.raw.erase("quantization_config");
+  const auto ordinary = vllm::MakeQwen3_5KVCache(cfg, 1600, 8);
+  const auto* mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+      ordinary.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(mamba != nullptr);
+  CHECK(mamba->dtypes == std::vector<vt::DType>{vt::DType::kBF16, vt::DType::kF32});
+  cfg.torch_dtype = "float16";
+  cfg.raw["quantization_config"] = {{"quant_method", "gptq"}};
+  const auto gptq = vllm::MakeQwen3_5KVCache(cfg, 1600, 8);
+  const auto* gptq_mamba = dynamic_cast<const vllm::v1::MambaSpec*>(
+      gptq.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(gptq_mamba != nullptr);
+  CHECK(gptq_mamba->dtypes == std::vector<vt::DType>{vt::DType::kF16, vt::DType::kF32});
 }

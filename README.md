@@ -376,7 +376,8 @@ hardware-blocked and why, is linked from [Project status](#project-status).
 | **Vulkan** | Portable GPU | `opt-125m` STRICT token-exact; Qwen3.6-27B decode **matches llama.cpp Vulkan** (4.36 vs 4.35, denominator SUPERSEDED, #1003) |
 | **ROCm** | AMD GPUs | Native EXL3 generation on gfx1151, matching the CPU reference. Discrete GPU correctness and competitive performance remain unverified ([evidence](.agents/specs/backend-rocm-exl3.md)) |
 | **Tenstorrent** | Blackhole | OPT-125m strict 6/6; Qwen3 gate wired, full rerun pending |
-| **Intel XPU / ANE** | Intel, Apple NPU | Spiked or roadmap |
+| **Intel XPU** | Intel Arc Pro B70 | Experimental native EXL3 text serving; [build, run and limits](docs/EXL3_XPU.md) |
+| **ANE** | Apple NPU | Spiked or roadmap |
 
 Per-arch build flags, per-op coverage, and the quantization format table:
 [docs/BUILD.md](docs/BUILD.md).
