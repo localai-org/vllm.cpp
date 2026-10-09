@@ -898,14 +898,18 @@ TEST_CASE("dsv4 exl3: unrepresentable inputs REFUSE BY NAME") {
     CHECK(Mentions(msg, "rank-sliced-deepseek-v4-v2"));
     CHECK(Mentions(msg, "MODEL-DSV4-EXL3"));
   }
-  SUBCASE("a codebook other than mcg") {
+  // `mul1` is NOT an unrepresentable input: 974c3b7f8 (QUANT-EXL3 W1-W2)
+  // made the loader decode it, so a mul1 fixture loads and this subcase's
+  // refusal would never fire. The unrepresentable example is a name outside
+  // the accepted set {mcg, mul1}.
+  SUBCASE("a codebook other than mcg or mul1") {
     FixtureOptions opt;
-    opt.codebook = "mul1";
+    opt.codebook = "not_a_codebook";
     auto f = BuildFixture(opt);
     const std::string msg = ThrowMessage(
         [&] { vllm::LoadDeepseekV4ForCausalLMWeights(f->shards, f->config); });
     CAPTURE(msg);
-    CHECK(Mentions(msg, "mul1"));
+    CHECK(Mentions(msg, "not_a_codebook"));
     CHECK(Mentions(msg, "MODEL-DSV4-EXL3"));
   }
   SUBCASE("a missing rank tensor") {
