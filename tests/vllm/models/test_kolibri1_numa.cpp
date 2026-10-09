@@ -33,15 +33,30 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <malloc.h>
+#include <algorithm>
 #include <set>
 #include <vector>
 
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
 #include "vllm/model_executor/models/kolibri1_numa.h"
+#include "vllm/model_executor/models/kolibri1_weights.h"
+#include "vllm/transformers_utils/hf_config.h"
+#include "vllm/model_executor/model_loader/safetensors_reader.h"
+
+#include <nlohmann/json.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 #if defined(__linux__)
 
 namespace {
+
+// The real checkpoint, the W3 convention. The loader-level case below is
+// model-gated on it.
+constexpr const char* kRealModelDir = "/mnt/models/Aleph-Alpha/Kolibri-1";
 
 std::vector<int> TouchedPageNodes(const void* addr, size_t bytes) {
   const size_t page = 4096;
@@ -130,6 +145,98 @@ TEST_CASE("kolibri1 NUMA interleave: dequant-cache arena pages interleave") {
   REQUIRE(lease);
   CHECK(Distinct(TouchedPageNodes(lease.data(),
                                   lease.size() * sizeof(uint16_t))) > 1);
+}
+
+// 3. THE PRODUCTION SITE. `LoadKolibri1Weights` is where the guard must hold:
+// its allocations ARE the decode's streaming working set. The unit cases above
+// prove the guard class; only a load through the real loader proves the
+// weights.cpp construction is reached and covers the arenas. Model-gated, the
+// same skip convention as test_kolibri1_w3 — deleting the PolicyGuard
+// construction at kolibri1_weights.cpp turns this case red on a multi-node
+// host, because the loader's first-touch pages then all land on one node.
+TEST_CASE("kolibri1 NUMA interleave: the loader's weight pages span nodes") {
+  if (!std::filesystem::exists(std::string(kRealModelDir) +
+                               "/model.safetensors.index.json")) {
+    MESSAGE("SKIP: " << kRealModelDir << " not mounted");
+    return;
+  }
+  if (!vllm::kolibri1_numa::Enabled()) {
+    MESSAGE("SKIP: VT_KOLIBRI1_NUMA_INTERLEAVE=0 disables the loader guard");
+    return;
+  }
+
+  const vllm::HfConfig config =
+      vllm::LoadHfConfig(std::string(kRealModelDir) + "/config.json");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(std::string(kRealModelDir) +
+                    "/model.safetensors.index.json"));
+  // ONE open per DISTINCT shard (the W3 convention — the weight_map holds a
+  // name per tensor and iterating it would blow the fd limit).
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items()) {
+    (void)name;
+    shard_names.insert(shard.get<std::string>());
+  }
+  std::vector<vllm::SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(vllm::SafetensorsFile::Open(std::string(kRealModelDir) + "/" + shard));
+  MESSAGE("loading the real fp8 checkpoint (placement probe)...");
+  const vllm::Kolibri1Weights w = vllm::LoadKolibri1Weights(shards, config);
+  shards.clear();
+
+  // The guard covers the loader's OWNED allocations. The house loader keeps
+  // every LARGE weight as an mmap borrow (BorrowStTensorBytes) — a borrowed
+  // view's file-backed pages answer to the page cache, not to mempolicy —
+  // and the decode's big owned arena is the dequant-cache lease (case 2).
+  // This case pins the loader construction itself: walk the loaded tree,
+  // find the largest OWNED tensor, and require it to have crossed nodes.
+  // Requiring one of at least 1 MiB keeps this honest: if a loader change
+  // left no owned tensor at all, this case must fail loudly, not silently
+  // pass.
+  std::vector<const vllm::OwnedBytes*> candidates;
+  auto push = [&candidates](const vllm::OwnedTensor& t) {
+    candidates.push_back(&t.bytes);
+  };
+  auto push_proj = [&push](const vllm::Kolibri1Projection& p) {
+    if (!p.fp8_block.Empty()) {
+      push(p.fp8_block.packed);
+      push(p.fp8_block.scale);
+    }
+    if (!p.bf16.Empty()) push(p.bf16);
+  };
+  auto push_expert = [&push_proj](const vllm::Kolibri1ExpertWeights& e) {
+    push_proj(e.gate_proj);
+    push_proj(e.up_proj);
+    push_proj(e.down_proj);
+  };
+  push(w.embed_tokens);
+  push(w.lm_head);
+  push(w.final_norm);
+  for (const auto& layer : w.layers) {
+    push(layer.input_layernorm);
+    push_proj(layer.attn.q_proj);
+    push_proj(layer.attn.o_proj);
+    if (!layer.moe.experts.empty()) push_expert(layer.moe.experts.front());
+    push_expert(layer.moe.shared_experts);
+  }
+  // malloc reuses freed, already-faulted pages, and a page's node is fixed
+  // at its FIRST fault — mempolicy moves only NEW faults. The doctest cases
+  // above touched and freed 128 MiB before this load ran, so without a trim
+  // the loader's buffers can recycle single-node pages and the probe would
+  // measure the recycling, not the guard. Trim first, fault fresh.
+  malloc_trim(0);
+  const vllm::OwnedBytes* probe = nullptr;
+  for (const vllm::OwnedBytes* b : candidates) {
+    if (b->borrowed() || b->size() < (1ull << 20)) continue;
+    if (probe == nullptr || b->size() > probe->size()) probe = b;
+  }
+  REQUIRE(probe != nullptr);
+  MESSAGE("probing the largest owned buffer, " << (probe->size() >> 20)
+                                               << " MiB");
+  // Sampling is per page at a 64-page stride; the interleaved arena crosses
+  // nodes within its first few MiB, the first-touch arena never leaves one.
+  const size_t window = std::min<size_t>(probe->size(), 64ull << 20);
+  CHECK(Distinct(TouchedPageNodes(probe->data(), window)) > 1);
 }
 
 #endif  // __linux__
