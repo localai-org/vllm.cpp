@@ -326,21 +326,30 @@ test_kolibri1_decode_bench anchor 109726 — all green; W3 not rerun (no
 forward change). Evidence: docs/bench-evidence/kolibri1-serve-20261008.md
 "Re-review repair".
 
-NEXT-LEVER UNIT (2026-10-08, branch `row/kolibri-perf-next`): the CPU decode
-lever space after the NEON GEMM tier and the dequant cache is measured and
-closed — see docs/bench-evidence/kolibri1-perf-next-lever-20261008.md (issue
+NEXT-LEVER UNIT (2026-10-08, branch `row/kolibri-perf-next`; review repair
+2026-10-09): the TESTED candidates in the CPU decode lever space after the
+NEON GEMM tier and the dequant cache are measured and closed — see
+docs/bench-evidence/kolibri1-perf-next-lever-20261008.md (issue
 ISSUE-LOCAL-01M4EEX40G7NH571CR5GQY4CA1). Production reproduces at 3.17-3.21
-decode tok/s (8 threads, 16 GiB). Attribution: linear_gemm ~50% of forward
-(at the order-preserving ALU roof), cold-miss whole-matrix decodes ~26%,
-attention ~17%, lm_head 4%; the recorded "moe_glue residual" reading is
-corrected — the moe_glue scope nests the routed experts' GEMM/dequant, so its
-separable residual is small. Falsified by measurement: fp8-direct GEMV
-(bit-exact but 8× slower — the order-preserving kernel is ALU-bound, not
-bandwidth-bound) and any bit-exact GEMM inner-loop change (the contract
-forbids fmla/dot). The one open lever is the dequant-cache production budget
-— a developer policy decision; the unit delivers the budget-sensitivity
-table and the 8/16/32 GiB sensitivity numbers (knee still open at 32 GiB,
-+5-6% over 16 GiB) and lands no product code.
+decode tok/s (8 threads, 16 GiB). Attribution is split by phase (2026-10-09
+repair): the WHOLE-RUN profile (60 forwards, prefill included) is
+linear_gemm ~50%, cold-miss whole-matrix decodes ~26% (prefill/warmup
+concentrated — 95.8% of misses occur in the first 10 forwards), attention
+~17%, lm_head 4%; the MEASURED DECODE phase (~302-315 ms/step) is
+linear_gemm ~59%, attention ~30%, lm_head ~5%, steady-state cold misses ~3%.
+The recorded "moe_glue residual" reading is corrected — the moe_glue scope
+nests the routed experts' GEMM/dequant, so its separable residual is small.
+Falsified by measurement (tested candidates only): fp8-direct GEMV (one
+implementation, two shapes, single thread; bit-exact but 8× slower — the
+order-preserving kernel is ALU-bound, not bandwidth-bound) and bit-exact
+changes to the landed GEMM inner loop (the contract forbids fmla/dot). NOT
+closed, and left open per the no-ceiling rule: attention (~30% of the
+measured decode step, never adjudicated), GEMM scheduling/layout/threading
+variants, decoder improvements, and prefill-path levers. The next DECISION
+is the dequant-cache production budget — a measured policy knob, not the only
+remaining lever; the unit delivers the budget-sensitivity table and the
+8/16/32 GiB sensitivity numbers (knee still open at 32 GiB, +5-6% over 16
+GiB) and lands no product code.
 
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 

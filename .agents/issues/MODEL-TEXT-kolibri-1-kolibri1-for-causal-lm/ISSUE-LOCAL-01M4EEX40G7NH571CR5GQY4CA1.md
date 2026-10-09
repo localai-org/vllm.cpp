@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-08
-Updated: 2026-10-08
+Updated: 2026-10-09
 Closed: 2026-10-08
 
 ## Problem
@@ -19,15 +19,24 @@ Production decode is ~3.1 tok/s (8 threads, 16 GiB dequant cache) after two land
 - 2026-10-08 (branch `row/kolibri-perf-next`): resolved as a measured
   proposal, no product code. Baseline reproduced (3.17-3.21 decode tok/s,
   8 threads, 16 GiB; anchor 109726, chain md5 8de1463a, counters
-  byte-identical). Remaining wall attributed: linear_gemm ~50% of forward at
-  the order-preserving ALU roof, cold-miss whole-matrix decodes ~26%,
-  attention ~17%, lm_head 4%; the recorded moe_glue "residual" reading is
-  corrected (the scope nests the routed experts' GEMM/dequant). Falsified by
-  measurement: fp8-direct GEMV (bit-exact, 8x slower — the kernel is
-  ALU-bound, not bandwidth-bound); no bit-exact GEMM inner-loop lever exists
-  under the row's contract. The one open lever is the dequant-cache
-  production budget (developer decision): 8 GiB 2.99-3.13 tok/s, 16 GiB
-  3.17-3.21, 32 GiB 3.36-3.37 (evictions 18321/13264/5043), OFF 1.23-1.26;
-  W3 16 GiB gate green on this tree (900/900, ARGMAX 141/145 = 4 near-tie,
-  fingerprints 2.18646/26763, counters byte-identical, 92.7 GiB RSS).
-  Evidence: docs/bench-evidence/kolibri1-perf-next-lever-20261008.md.
+  byte-identical). Remaining wall attributed, split by phase after the
+  2026-10-09 review repair: WHOLE-RUN (60 forwards, prefill included):
+  linear_gemm ~50%, cold-miss whole-matrix decodes ~26% (prefill/warmup
+  concentrated — 95.8% of misses occur in the first 10 forwards), attention
+  ~17%, lm_head 4%; the recorded moe_glue "residual" reading is corrected
+  (the scope nests the routed experts' GEMM/dequant). DECODE phase
+  (measured, ~302-315 ms/step): linear_gemm ~59%, attention ~30%, lm_head
+  ~5%, steady-state cold misses ~3%. Falsified by measurement (tested
+  candidates only): fp8-direct GEMV (one implementation, two shapes, single
+  thread; bit-exact, 8x slower — the kernel is ALU-bound, not bandwidth-bound)
+  and bit-exact changes to the landed GEMM inner loop (the contract forbids
+  fmla/dot). Left OPEN and unmeasured per the no-ceiling rule: attention
+  (~30% of the measured decode step, never adjudicated), GEMM
+  scheduling/layout/threading variants, decoder improvements, and
+  prefill-path levers. The next DECISION is the dequant-cache production
+  budget (a measured policy knob, not the only remaining lever; developer
+  decision): 8 GiB 2.99-3.13 tok/s, 16 GiB 3.17-3.21, 32 GiB 3.36-3.37
+  (evictions 18321/13264/5043), OFF 1.23-1.26; W3 16 GiB gate green on this
+  tree (900/900, ARGMAX 141/145 = 4 near-tie, fingerprints 2.18646/26763,
+  counters byte-identical, 92.7 GiB RSS). Evidence:
+  docs/bench-evidence/kolibri1-perf-next-lever-20261008.md.
