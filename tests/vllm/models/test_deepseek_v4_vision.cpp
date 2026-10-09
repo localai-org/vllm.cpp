@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -43,6 +44,33 @@ using vt::Backend;
 using vt::DType;
 using vt::Queue;
 using vt::Tensor;
+
+// THE SANITIZER LANE'S POOL BYPASS (VLLM_CPP_SANITIZE, .github/workflows/ci.yml
+// sanitize-cpu) runs the whole suite with VT_POOL_BYPASS=1 so ASan sees exact
+// allocations and real frees through the DevicePool's deliberate scratch
+// retention. Under the bypass every pool Get is a raw driver Alloc, block
+// reuse is disabled and the hit/miss counters stay dead — so the pool-REUSE
+// assertions in the two cases gated on this helper are unmeasurable in that
+// lane BY DESIGN, and they are skipped there, loudly (printed below, and
+// counted as `skipped` by doctest — never as a zero-assertion pass). Every
+// other lane, including the normal one, has no bypass and runs them.
+// Spelled EXACTLY as `DevicePool::Bypass()` spells it ("=1", first character
+// only), so this file cannot disagree with the header about which lane a
+// process is in.
+bool PoolBypassLane() {
+  const char* e = std::getenv("VT_POOL_BYPASS");
+  const bool on = e != nullptr && e[0] == '1';
+  if (on) {
+    std::fprintf(stderr,
+                 "\n*** POOL-BEHAVIOR CASES SKIPPED (doctest::skip) — NOT "
+                 "run, NOT a pass: VT_POOL_BYPASS=1 is active, so "
+                 "DevicePool reuse/hit accounting is disabled by design "
+                 "and the pool-behavior assertions in this file are "
+                 "unmeasurable in this lane ***\n\n");
+    std::fflush(stderr);
+  }
+  return on;
+}
 
 const json& Goldens() {
   static const json document = [] {
@@ -534,7 +562,8 @@ TEST_CASE("DeepSeek-V4 vision rejects invalid geometry dtype layout and weights"
   backend.DestroyQueue(queue);
 }
 
-TEST_CASE("DeepSeek-V4 repeated shape reuses scratch and 2-D RoPE allocation") {
+TEST_CASE("DeepSeek-V4 repeated shape reuses scratch and 2-D RoPE allocation" *
+          doctest::skip(PoolBypassLane())) {
   Backend& inner = vt::GetBackend(vt::DeviceType::kCPU);
   CountingBackend backend(inner);
   vllm::Pool(backend).Drain(backend);
@@ -846,7 +875,8 @@ TEST_CASE("DeepSeek-V4 vision keeps the model path bf16 except the rotary scratc
 // two per-layer buffers, the merged gate_up output and the activation it returns
 // (`UnquantizedMlpGateUpMethod::Apply`). Everything this file allocates is
 // hoisted, so it contributes 0 to the slope.
-TEST_CASE("DeepSeek-V4 vision allocates no per-layer scratch of its own") {
+TEST_CASE("DeepSeek-V4 vision allocates no per-layer scratch of its own" *
+          doctest::skip(PoolBypassLane())) {
   // The two per-layer buffers the shared MLP seam owns, and nothing else.
   constexpr uint64_t kPerLayerPooledBuffers = 2;
 
