@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FK4BJFZMCSG04WD0CAY5D2
 Title: ASan alloc-dealloc-mismatch in test_deepseek_v4_image_processor: test replaces operator new with malloc but not the nothrow/aligned forms, so stable_sort's temporary buffer is new-allocated and free()-d
 Row: MODEL-MM-deepseek-v4-deepseek-v4-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -16,4 +16,4 @@ The sanitize-cpu ASAN+UBSAN lane is red on test_deepseek_v4_image_processor (mai
 
 ## Resolution
 
--
+Fixed in f554bd146 on row/ci-sanitize-residue-a: the test now replaces the COMPLETE set of replaceable global allocation/deallocation functions (throwing, nothrow and aligned new/new[] via one noinline ProbeAlloc, and every matching delete/delete[] form via std::free), so every allocation pairs malloc with free. No product change; no assertion weakened or deleted. Verified 2026-10-09: ASAN (CI env, VT_POOL_BYPASS=1) test_deepseek_v4_image_processor 128/128 (23 cases) with zero AddressSanitizer reports; Release 128/128. Logs /tmp/verify-a-test_deepseek_v4_image_processor.log, /tmp/verify-rel-test_deepseek_v4_image_processor.log.

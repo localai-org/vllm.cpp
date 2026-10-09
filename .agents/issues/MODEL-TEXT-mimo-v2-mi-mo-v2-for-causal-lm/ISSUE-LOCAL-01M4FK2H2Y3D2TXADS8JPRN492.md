@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FK2H2Y3D2TXADS8JPRN492
 Title: ASan heap-use-after-free in MiMoV2 KV-cache write: scaled-V DBuf dies before WriteKvCache reads it; attn_sink Tensor dies before PagedAttention
 Row: MODEL-TEXT-mimo-v2-mi-mo-v2-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -16,4 +16,4 @@ The sanitize-cpu ASAN+UBSAN lane is red on test_mimov2_forward (main 41705a7a2).
 
 ## Resolution
 
--
+Fixed in f1320d752 on row/ci-sanitize-residue-a: DBuf vs (default-constructed, move-assigned in the scale branch) and Tensor sink are hoisted to the AttentionBlock scope so they outlive WriteKvCache and vt::PagedAttention. Verified 2026-10-09: ASAN (CI env, VT_POOL_BYPASS=1) test_mimov2_forward 178/178 with zero AddressSanitizer reports; ASAN battery green (test_kolibri1 234/234, w2 1608/1608, moe_glue 21/21, dequant 10/10, dequant_cache 52/52, mimov2_w1 51/51); Release green (mimov2_forward 178/178, mimov2_w1 51/51, W3 900/900 fingerprints 2.18646/26763 unchanged). Logs /tmp/verify-a-test_mimov2_forward.log, /tmp/verify-a-*.log, /tmp/verify-rel-*.log.
