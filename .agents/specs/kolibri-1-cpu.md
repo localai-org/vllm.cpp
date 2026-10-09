@@ -244,17 +244,32 @@ the kolibri1 pre-tokenizer regex, R7 — the encode contract stays owed).
 Remaining for the row: R7 tokenizer, the aleph-alpha-inference oracle
 gateability measurement (GPU), GGUF/CUDA/Tenstorrent arms (later rows).
 
-SERVING COMPLETION (2026-10-08, branch `row/kolibri-serve`): the OpenAI
-chat path now serves kolibri1 end to end on CPU. The checkpoint's
-tokenizer_config.json chat template renders through the minja adapter
-byte-identically to CPython jinja2 references on 15 scenarios covering
-the plugin's thinking switch (tests/fixtures/
-kolibri1_chat_template_references.json); the one renderer divergence the
-gate caught — minja's `tojson` dumped insertion order where jinja2's
-default policy sorts keys (DEFAULT_POLICIES["json.dumps_kwargs"] =
-{"sort_keys": True}) — is fixed in the adapter with a child-scope
-sorted-dump `tojson` (src/vllm/entrypoints/chat_template.cpp). The
-kolibri1 reasoning parser ports the plugin's reasoning.py @ 049a6a7bd240:
+SERVING COMPLETION (2026-10-08, branch `row/kolibri-serve`; REVIEW-REPAIRED
+2026-10-09, PR #3422): the OpenAI chat path now serves kolibri1 end to end
+on CPU. The checkpoint's tokenizer_config.json chat template renders through
+the minja adapter byte-identically to the PINNED transformers 5.14.1
+renderer on 20 scenarios covering the plugin's thinking switch (tests/
+fixtures/kolibri1_chat_template_references.json, regenerated through
+`render_jinja_template` by tests/fixtures/
+gen-kolibri1-chat-template-references.py). The 2026-10-08 version of this
+paragraph recorded the opposite tojson decision — a child-scope sorted-dump
+`tojson` overriding minja's insertion order, because the references had
+been captured with plain jinja2 — and the PR #3422 review falsified it:
+the pinned renderer installs its OWN tojson over Jinja's builtin with
+sort_keys=False / ensure_ascii=False / no HTML escaping (transformers 5.14.1
+utils/chat_template_utils.py:481), so plain Jinja's default is not the
+serving behavior and the sorted override rendered prompt bytes no serving
+reference produces. The repair replaced the override with a port of the
+pinned filter's full signature (ensure_ascii/indent/separators/sort_keys,
+CPython json.dumps semantics) in src/vllm/entrypoints/chat_template.cpp,
+made `FunctionDefinition::parameters` order-preserving (ordered_json, with
+RestoreToolSchemaOrder re-reading `tools` from an order-preserving body
+parse at every chat entry point — api_server, the C ABI, run_batch), and
+made BuildTools mirror pinned vLLM's measured `model_dump` tool shape
+(description/parameters present as null when absent). The template input is
+committed at tests/fixtures/kolibri1-chat-template-tokenizer_config.json so
+the gate runs on a clean checkout (no /mnt path). The kolibri1 reasoning
+parser ports the plugin's reasoning.py @ 049a6a7bd240:
 the Qwen3 engine grammar with the starting state derived the way the
 template switches thinking (reasoning_effort wins and only "none"
 disables; else a literal enable_thinking false does), threaded from the
@@ -267,7 +282,14 @@ test_tool_parser_kolibri1, test_kolibri1_chat_template green (red-first:
 detection resolved think_auto/hermes and the registry names did not
 exist before the change); the full host battery and the row's kolibri
 gates stay green; W3 rerun in a verified quiet window. Evidence:
-docs/bench-evidence/kolibri1-serve-20261008.md. Remaining for the row:
+docs/bench-evidence/kolibri1-serve-20261008.md. REVIEW-REPAIR GATES
+(2026-10-09): test_kolibri1_chat_template 61, test_chat_template 204
+(196 pre-existing + 8 non-kolibri tojson guard assertions),
+test_reasoning_parser_detect 75, test_tool_parser_detect 361,
+test_reasoning_qwen3 164, test_openai_tool_parsers 64,
+test_kolibri1 27/234, test_kolibri1_decode_bench anchor 109726 — all
+green; serving/protocol suites and the parameters-reading tool-parser
+suites green; W3 not rerun (no forward change). Remaining for the row:
 the aleph-alpha-inference oracle gateability measurement (GPU),
 GGUF/CUDA/Tenstorrent arms (later rows).
 
