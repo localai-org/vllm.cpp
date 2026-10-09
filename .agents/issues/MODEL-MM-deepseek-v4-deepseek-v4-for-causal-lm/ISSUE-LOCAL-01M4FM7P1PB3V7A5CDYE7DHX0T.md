@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FM7P1PB3V7A5CDYE7DHX0T
 Title: test_deepseek_v4_vision pool-behavior cases can never pass in the sanitize lane: VT_POOL_BYPASS=1 disables the DevicePool they measure
 Row: MODEL-MM-deepseek-v4-deepseek-v4-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -53,4 +53,4 @@ sanitize sweep (group B): this test is on the residue list of
 
 ## Resolution
 
--
+Fixed in 9e5f95b0e on row/ci-sanitize-residue-b: the two pool-REUSE cases are decorated with doctest::skip(PoolBypassLane()); PoolBypassLane() reads VT_POOL_BYPASS exactly as DevicePool::Bypass() spells it ('=1', first character only) and prints the loud skip banner to stderr when active — the skip is never silent and never a zero-assertion pass. No CHECK/REQUIRE/MESSAGE line touched; the other 14 cases run in every lane. Verified 2026-10-09 on a clean rebuild in four trees (Release /tmp/build-b, -O0 /tmp/build-b-o0, address,undefined /tmp/build-san, thread /tmp/build-tsan): with the exact CI env (ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 UBSAN_OPTIONS=print_stacktrace=1 VT_POOL_BYPASS=1) the sanitize and TSAN binaries read 14 passed | 0 failed | 2 skipped, 7410/7410 assertions, rc=0, banner printed once per skipped case; Release and -O0 read 16/16, 7420/7420, rc=0, no skip. VT_POOL_BYPASS=1 alone on the Release and -O0 binaries reads 14 passed | 2 skipped, 7410/7410, rc=0 — the env var alone triggers the skip. The same sanitize binary without VT_POOL_BYPASS (ASAN_OPTIONS=detect_leaks=0) reads 16/16, 7420/7420, rc=0: the pool-behavior assertions still run and pass wherever the pool is live. Logs /tmp/rsan-test_deepseek_v4_vision.log, /tmp/rtsan-test_deepseek_v4_vision.log, /tmp/rb-test_deepseek_v4_vision.log, /tmp/ro0-test_deepseek_v4_vision.log, /tmp/rb-dsv4-bypass.log, /tmp/rsan-dsv4-nobypass.log.
