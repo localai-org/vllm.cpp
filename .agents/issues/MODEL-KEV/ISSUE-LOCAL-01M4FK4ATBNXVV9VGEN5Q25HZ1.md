@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FK4ATBNXVV9VGEN5Q25HZ1
 Title: ASan heap-buffer-overflow in kev PointerHeadForward: no shape validation, wrong-scale perturbation test reads past the weight vectors
 Row: MODEL-KEV
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -16,4 +16,4 @@ The sanitize-cpu lane is red on test_kev (main 41705a7a2). CI ASAN+UBSAN leg: Ad
 
 ## Resolution
 
--
+Fixed in f47fab14c on row/ci-sanitize-residue-a: PointerHeadForward validates q/k weight and bias shapes, h_decide and h_opts extents, and throws std::invalid_argument naming the mismatch before any loop; HeadParams gains a default-inert optional scale_override so the wrong-scale perturbation test mutates the scale without resizing the projections, and a new case (kev.PointerHead.refuses mismatched shapes by name) pins the validation with three CHECK_THROWS_AS arms. No assertion weakened or deleted. Verified 2026-10-09: ASAN (CI env, VT_POOL_BYPASS=1) test_kev 129/129 (26 cases) with zero AddressSanitizer reports; Release test_kev 129/129. Logs /tmp/verify-a-test_kev.log, /tmp/verify-rel-test_kev.log.

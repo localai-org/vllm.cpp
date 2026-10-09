@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M4FK2A9T7BPB0KHPAA8TN1VA
 Title: ASan heap-use-after-free in kolibri1 RoPE path: qk-norm DBufs die before RoPE/KV-write read their views
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
 Updated: 2026-10-09
-Closed: -
+Closed: 2026-10-09
 
 ## Problem
 
@@ -16,4 +16,4 @@ The sanitize-cpu ASAN+UBSAN lane is red on test_kolibri1_w2 (main 41705a7a2). Re
 
 ## Resolution
 
--
+Fixed in 5bb9d85ff on row/ci-sanitize-residue-a: the qn/kn DBufs are hoisted to the AttentionBlock scope so they outlive vt::RopeNeox and the KV-cache write. Verified 2026-10-09: ASAN (ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 UBSAN_OPTIONS=print_stacktrace=1 VT_POOL_BYPASS=1) test_kolibri1_w2 1608/1608 with zero AddressSanitizer reports; TSAN (VT_POOL_BYPASS=1) 1608/1608 with zero ThreadSanitizer reports; Release battery green (test_kolibri1 234/234, w2 1608/1608, decode_bench anchor 109726, W3 900/900 with 141/145 argmax chain and fingerprints 2.18646/26763 unchanged). Logs /tmp/verify-a-test_kolibri1_w2.log, /tmp/verify-tsan-kolibri1_w2.log, /tmp/verify-rel-*.log.
