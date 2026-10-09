@@ -50,9 +50,9 @@ using vt::Tensor;
 namespace {
 
 vt::Device Cpu() { return vt::Device{vt::DeviceType::kCPU, 0}; }
-Queue Q() { return Queue{Cpu(), nullptr}; }
+[[maybe_unused]] Queue Q() { return Queue{Cpu(), nullptr}; }
 
-Tensor Contig(void* data, DType dt, const std::vector<int64_t>& shape) {
+[[maybe_unused]] Tensor Contig(void* data, DType dt, const std::vector<int64_t>& shape) {
   Tensor t;
   t.data = data;
   t.dtype = dt;
