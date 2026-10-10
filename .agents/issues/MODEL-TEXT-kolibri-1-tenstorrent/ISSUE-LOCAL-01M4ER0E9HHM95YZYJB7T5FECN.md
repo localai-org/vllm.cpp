@@ -155,3 +155,46 @@ B2b-i landed the dense-resident device forward with the routed-expert tier delib
   slot-pool `what()=="1"` throw did NOT fire on the fixed substrate in any
   instrument or gate run (0 occurrences). The remaining flips after the fix
   are the residual bf16 device-arm drift class, not the byte bug.
+
+- 2026-10-10 (branch row/tt-kolibri-l1moe, off 519c466b8): the L1-moe ~3%
+  relative divergence is LOCALIZED and CLASSIFIED as the drift class, not a
+  stride/staging bug — instrument on the fixed substrate, teacher-forced
+  'der Mond...' (VT_TF_DBG_PROMPT=1, 12 forwards), OFF-vs-CPU with per-stage
+  bf16 bit hashes (StageDump hash=/sq=), the router dump (RouteDump, both
+  arms), the router weight hash probe, host-reference logits for BOTH arms'
+  router GEMMs, and the element-level L0 dhn diff. Evidence chain: (1) the
+  FIRST diverging quantity is the L0 input rms_norm output at step 0
+  (hash b3eeb298 vs 2b64e8d9; element diff 1 bf16 ULP class, top ~0.03-0.06
+  on values to 14, rms 0.002) — the adjudicated substrate drift, not new;
+  (2) by L0 dh2 (the moe input) the drift carries OUTLIER element diffs
+  (max 47.25 vs 48.0, 3 bf16 ULP on a 48-magnitude element; sq 2.166e4 vs
+  2.175e4, ~0.4% rms, diff-norm ~10 over 2560 elems) from the device
+  attention/norm chain; (3) the router gate weight is BYTE-IDENTICAL across
+  arms (hash e6512148 at L0) and BOTH arms' router GEMMs match host
+  reference logits computed from their own inputs (CPU 1.4e-5, TT 0.15
+  max) — the GEMMs are correct; (4) the amplification is the ROUTER GAIN:
+  the kolibri router row has ||w||_2 ~ 1 over K=2560 against logits of
+  scale O(5), so a 0.4%-rms input drift injects O(1-5) ABSOLUTE logit noise
+  (measured max 4.8-7.0 per layer, rel_rms 0.3-1.4) and the top-6-of-384
+  sigmoid-logit-add selection — a near-tie boundary — flips 2-4 of the 6
+  experts AT EVERY LAYER INCLUDING L0. The ~3% L1 moe divergence IS the
+  flipped mixture. NO local defect: staging byte-exact (pool readback,
+  prior record), dequants byte-exact, weights identical, GEMMs verified
+  against host references. ONE CONTRACT DEFECT found and fixed by the
+  instrument (kept, red-first bf16grid evidence): the TT kMatmul/kMatmulBT
+  default produced a BF16 tensor upcast on commit for f32-out callers —
+  all 384 router logits sat on the bf16 grid (bf16grid=384/384) with bf16
+  partial sums, violating the CPU row's LinearBTRaw f32 contract
+  (tenstorrent_ops.cpp: f32 out now requests dtype FLOAT32 +
+  fp32_dest_acc_en; post-fix bf16grid=0/384). GATE (ON arm, clean reset,
+  this branch, post-fix): 4 HARD flips at the SAME positions as pre-fix
+  ('der Mond...' step 7 gap -5.92 -> -5.62; 'Australia' step 5 -4.56 ->
+  -3.85; 'Wissen ist Macht' step 8 -13.35 -> -14.76; 'x1 = 3...' step 22
+  -3.06 -> -3.75), then the same deterministic memoized-expert DRAM
+  exhaustion abort — the contract fix does NOT clear the flips because the
+  driver is the upstream drift class. CLASSIFICATION: selection flips
+  DRIVEN by continuous bf16 device-arm precision drift through the
+  attention/norm chain; per the row's adjudication rule this is an
+  upstream adjudication decision (f32-enabling the device attention/norm
+  chain or accepting the band), not a local patch. ISSUE STAYS OPEN on the
+  device gates and the OOM debt.
