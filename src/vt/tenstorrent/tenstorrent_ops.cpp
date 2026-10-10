@@ -1434,10 +1434,14 @@ void QkvSplitKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, const T
   const int64_t v_dim = v_out.Numel() / t;
   const int64_t total = q_dim + k_dim + v_dim;
   VT_CHECK(qkv.shape[1] == total, "tenstorrent kQkvSplit: inner dim mismatch");
-  VT_CHECK(q_out.rank == 2 && k_out.rank == 2 && v_out.rank == 2 &&
-               q_out.shape[0] == t && k_out.shape[0] == t && v_out.shape[0] == t &&
-               q_out.shape[1] == q_dim && k_out.shape[1] == k_dim && v_out.shape[1] == v_dim,
-           "tenstorrent kQkvSplit: out shapes must be [T, *]");
+  // Cross-backend flat-width contract (cpu_ops QkvSplitKernel, vulkan_ops,
+  // metal_ops): the widths are Numel/t and the outs may be rank-2 [T, dim] or
+  // the head-shaped rank-3 [T, H, Dh] the OPT caller passes. Contiguous and
+  // first-dim==t is all the copy needs.
+  VT_CHECK((q_out.rank == 2 || q_out.rank == 3) && (k_out.rank == 2 || k_out.rank == 3) &&
+               (v_out.rank == 2 || v_out.rank == 3) && q_out.shape[0] == t &&
+               k_out.shape[0] == t && v_out.shape[0] == t,
+           "tenstorrent kQkvSplit: out shapes must be [T, *] or [T, H, Dh]");
 
   const uint32_t tu = static_cast<uint32_t>(t);
   const uint32_t total_u = static_cast<uint32_t>(total);
@@ -1457,9 +1461,9 @@ void QkvSplitKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, const T
     ttnn::Tensor dv = ttnn::slice(dev, ttsl::SmallVector<uint32_t>{0, qd + kd},
                                   ttsl::SmallVector<uint32_t>{tu, qd + kd + vd},
                                   ttsl::SmallVector<uint32_t>{1, 1});
-    CommitDevice2D(q_out, std::move(dq));
-    CommitDevice2D(k_out, std::move(dk));
-    CommitDevice2D(v_out, std::move(dv));
+    CommitDeviceLogical2D(q_out, std::move(dq), tu, static_cast<uint32_t>(q_dim));
+    CommitDeviceLogical2D(k_out, std::move(dk), tu, static_cast<uint32_t>(k_dim));
+    CommitDeviceLogical2D(v_out, std::move(dv), tu, static_cast<uint32_t>(v_dim));
     return;
   }
 
