@@ -225,21 +225,17 @@ void RunPair(const Sweep& c, DType q_dt, DType kv_dt, DType out_dt, uint32_t see
   vt::PagedAttention(qq, tscalar, tq, tk, tv, tbt, tsl, tqsl, args);
   setenv("VT_CPU_PAGED_ATTN_NEON", "1", 1);
   vt::PagedAttention(qq, tneon, tq, tk, tv, tbt, tsl, tqsl, args);
-  // THE DEFAULT PATH: an UNSET knob means the lane is OFF and the scalar
-  // oracle serves the call. RunPair previously set the knob for every
-  // invocation, so the shipped default was never exercised and a mutation
-  // forcing the lane ON when the env is absent escaped review. The unset run
-  // must be BIT-EXACT with the scalar run — anything else means the default
-  // crossed into the NEON lane.
+  // THE DEFAULT PATH: an UNSET knob now means the lane is ON (the 2026-10-10
+  // default flip; the A/B evidence and the model gates adjudicate the
+  // reorder). The unset run must equal the NEON run — a mutation that
+  // detaches the default from the lane goes red here — and the `=0` run
+  // above remains BIT-EXACT with the scalar oracle: the rollback exits to
+  // the reference path, and anything else means the off switch is broken.
   unsetenv("VT_CPU_PAGED_ATTN_NEON");
   vt::PagedAttention(qq, tunset, tq, tk, tv, tbt, tsl, tqsl, args);
-  setenv("VT_CPU_PAGED_ATTN_NEON", "0", 1);
-  ++g_fallback_cases;
-  if (std::memcmp(unset.data(), scalar.data(), out_bytes) == 0) {
-    ++g_fallback_bitexact_cases;
-  } else {
-    REQUIRE_MESSAGE(false, c.name << " unset-knob run is NOT bit-exact with "
-                                      "scalar — the default lane is ON");
+  if (std::memcmp(unset.data(), neon.data(), out_bytes) != 0) {
+    REQUIRE_MESSAGE(false, c.name << " unset-knob run is NOT the NEON lane — "
+                                      "the default flip is detached");
   }
 
   // Narrow both outputs back to f32 for the comparison so the bf16 out arm is
@@ -465,7 +461,8 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
     }
   }
 
-  // Every fallback-gated run — unset knob and non-x4 shape — landed bit-exact.
+  // Every fallback-gated run — the non-x4 shapes — landed bit-exact, and
+  // every unset-knob run above already proved byte-equal to the NEON lane.
   REQUIRE_MESSAGE(g_fallback_bitexact_cases == g_fallback_cases,
                   "fallback bit-exact in " << g_fallback_bitexact_cases << " of "
                                            << g_fallback_cases
