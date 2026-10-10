@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "vt/backend.h"
+#include "vt/cpu/cpu_isa_arm.h"
 #include "vt/dtype.h"
 #include "vt/fp8_kv.h"
 #include "vt/ops.h"
@@ -476,6 +477,143 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
             << g_fallback_cases);
   MESSAGE("NEON arm bit-equal to the FMA-contracted scalar body in "
           << g_neon_cases << " of " << g_neon_cases << " swept configurations");
+}
+
+// ---------------------------------------------------------------------------
+// PERF-CPU-ATTN-BFDOT (DRAFT, FMA-contract branch). The native bf16 K-dot arm
+// behind VT_CPU_PAGED_ATTN_BFDOT (cpu_paged_attn_bfdot_arm.cpp) is a THIRD
+// mode: it must (a) leave the NEON-vs-scalar bit-identity of the sweep above
+// untouched when the knob is off, (b) actually execute (the BFDOT run must
+// differ in BITS from the widen+vfma NEON arm somewhere — a bit-identical run
+// means the arm was never reached), and (c) stay within ONE bf16 ULP of the
+// NEON arm, the accuracy class the micro evidence (/tmp/kolibri-micro/
+// bfdot_micro.cpp) claims for vbfdotq on this shape. The kernel consumes
+// bf16 PAIRS, so the case also pins the query contract: bf16 query rows only.
+TEST_CASE("PERF-CPU-ATTN-BFDOT: bf16-KV native BFDOT K-dot arm") {
+  if (!vt::cpu::DetectArmBf16()) {
+    MESSAGE("SKIP: no HWCAP2 FEAT_BF16 on this host; the BFDOT arm cannot "
+            "execute and there is no second path to adjudicate.");
+    return;
+  }
+  struct BfCase {
+    const char* name;
+    int64_t d, d_v;
+    DType out_dt;
+  };
+  const std::vector<BfCase> cases = {
+      {"kolibri-shaped d=128", 128, 0, DType::kBF16},
+      {"d=64 f32 out", 64, 0, DType::kF32},
+      // d=512: the raw K-dot sums overflow f32-exact range (bf16-pair
+      // products are multiples of ~2^-16; 512 of them near +-1 need >24
+      // mantissa bits), so the two reduction DAGs MUST round differently
+      // somewhere — this is the case the reach anchor below counts on. At
+      // the kolibri d=128 the two arms measure bit-identical (verified
+      // directly: 0/2000 random K-dots differ), so a bf16-out d=128 anchor
+      // would never go red.
+      {"d=512 f32 out", 512, 0, DType::kF32},
+      {"d=128 d_v=64", 128, 64, DType::kBF16},
+  };
+  const int64_t hq = 8, hkv = 2, block_size = 32, max_blocks = 4;
+  const std::vector<int32_t> qsl = {0, 7};
+  const std::vector<int32_t> seq_lens = {97};
+
+  int g_bitdiff_cases = 0;
+  size_t g_out_elems_total = 0;
+  uint32_t s = 0xBF0D071Cu;
+  for (const BfCase& c : cases) {
+    const int64_t d_v = c.d_v != 0 ? c.d_v : c.d;
+    const int64_t num_reqs = 1, total_q = qsl.back();
+    const int64_t num_blocks = num_reqs * max_blocks;
+    const size_t q_elems = static_cast<size_t>(total_q * hq * c.d);
+    const size_t out_elems = static_cast<size_t>(total_q * hq * d_v);
+    const size_t kv_elems =
+        static_cast<size_t>(num_blocks * block_size * hkv) *
+        static_cast<size_t>(c.d > d_v ? c.d : d_v);
+
+    std::vector<float> qf(q_elems), kf(kv_elems), vf(kv_elems);
+    for (auto& x : qf) x = RandUnit(s);
+    for (auto& x : kf) x = RandUnit(s);
+    for (auto& x : vf) x = RandUnit(s);
+
+    PagedAttentionArgs args{};
+    args.scale = 0.088f;
+    args.causal = true;
+
+    std::vector<uint8_t> qb = Encode(qf, DType::kBF16, 1.0f);
+    std::vector<uint8_t> kb = Encode(kf, DType::kBF16, 1.0f);
+    std::vector<uint8_t> vb = Encode(vf, DType::kBF16, 1.0f);
+    std::vector<int32_t> btab(static_cast<size_t>(num_blocks));
+    for (size_t i = 0; i < btab.size(); ++i) btab[i] = static_cast<int32_t>(i);
+    std::vector<int32_t> qslv = qsl, slensv = seq_lens;
+
+    Tensor tq = Contig(qb.data(), DType::kBF16, {total_q, hq, c.d});
+    Tensor tk = Contig(kb.data(), DType::kBF16,
+                       {num_blocks, block_size, hkv, c.d});
+    Tensor tv = Contig(vb.data(), DType::kBF16,
+                       {num_blocks, block_size, hkv, d_v});
+    Tensor tbt = Contig(btab.data(), DType::kI32, {num_reqs, max_blocks});
+    Tensor tsl = Contig(slensv.data(), DType::kI32, {num_reqs});
+    Tensor tqsl = Contig(qslv.data(), DType::kI32, {num_reqs + 1});
+    const size_t out_bytes = out_elems * ElemBytes(c.out_dt);
+    std::vector<uint8_t> neon(out_bytes, 0xA5), bfdot(out_bytes, 0xA5);
+    Tensor tneon = Contig(neon.data(), c.out_dt, {total_q, hq, d_v});
+    Tensor tbfdot = Contig(bfdot.data(), c.out_dt, {total_q, hq, d_v});
+    Queue qq = Q();
+
+    // Baseline: NEON lane, BFDOT OFF — the widen+vfma arm, bit-equal to the
+    // FMA-contracted scalar body (asserted by the sweep above; re-asserted
+    // here so this case cannot pass with the knob leaking ON).
+    setenv("VT_CPU_PAGED_ATTN_NEON", "1", 1);
+    unsetenv("VT_CPU_PAGED_ATTN_BFDOT");
+    vt::PagedAttention(qq, tneon, tq, tk, tv, tbt, tsl, tqsl, args);
+    setenv("VT_CPU_PAGED_ATTN_BFDOT", "1", 1);
+    vt::PagedAttention(qq, tbfdot, tq, tk, tv, tbt, tsl, tqsl, args);
+    unsetenv("VT_CPU_PAGED_ATTN_BFDOT");
+    unsetenv("VT_CPU_PAGED_ATTN_NEON");
+
+    // (c) every element within one bf16 ULP of the NEON arm.
+    auto widen = [&](const std::vector<uint8_t>& raw) {
+      std::vector<float> v(out_elems);
+      if (c.out_dt == DType::kF32) {
+        std::memcpy(v.data(), raw.data(), out_bytes);
+      } else {
+        for (size_t i = 0; i < out_elems; ++i) {
+          uint16_t h;
+          std::memcpy(&h, raw.data() + i * 2, 2);
+          v[i] = vt::BF16ToF32(h);
+        }
+      }
+      return v;
+    };
+    const std::vector<float> got = widen(bfdot);
+    const std::vector<float> want = widen(neon);
+    size_t bitdiff = 0;
+    for (size_t i = 0; i < out_elems; ++i) {
+      if (std::memcmp(&got[i], &want[i], 4) != 0) ++bitdiff;
+      const float diff = std::fabs(got[i] - want[i]);
+      REQUIRE_MESSAGE(diff <= 1.0f / 128.0f,
+                      c.name << " elem " << i << ": BFDOT " << got[i]
+                             << " vs NEON " << want[i]
+                             << " — beyond one bf16 ULP");
+    }
+    // (b) reach anchor. NOTE the shape of this anchor: the bf16-out store
+    // rounds away f32 reorder noise (one bf16 ULP is 2^-7, f32 noise ~2^-23),
+    // so a bf16-out BFDOT run CAN be bit-identical while the arm executes —
+    // bit-diff is counted but only demanded in AGGREGATE across the sweep,
+    // where the f32-out case sees the raw f32 values. Without the arm (or
+    // with the dispatch predicate refusing bf16+x8), every run is
+    // bit-identical and this aggregate REQUIRE goes red — the red-first shape
+    // of this gate.
+    g_out_elems_total += out_elems;
+    if (bitdiff > 0) ++g_bitdiff_cases;
+    MESSAGE(c.name << ": bit-diff " << bitdiff << "/" << out_elems
+                   << " (within 1 bf16 ULP)");
+  }
+  REQUIRE_MESSAGE(g_bitdiff_cases > 0,
+                  "BFDOT runs bit-identical to the widen+vfma NEON arm in "
+                  "every swept case (" << g_out_elems_total
+                  << " elements) — the arm was NOT reached or its DAG does "
+                     "not actually differ");
 }
 
 #endif  // __aarch64__

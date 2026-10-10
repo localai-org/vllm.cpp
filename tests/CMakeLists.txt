@@ -3913,6 +3913,7 @@ vllm_cpp_add_test(test_ops_paged_attn vt/test_ops_paged_attn.cpp)
 # adjudicated by the stated tolerance envelope, not a memcmp. Non-aarch64
 # builds skip loudly.
 vllm_cpp_add_test(test_ops_paged_attn_neon vt/test_ops_paged_attn_neon.cpp)
+target_include_directories(test_ops_paged_attn_neon PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # SPEC-DFLASH2 W10 (#1857): the host lane-classification seam of the CUDA
 # paged-attention dispatch (include/vt/paged_attn_route.h).
 vllm_cpp_add_test(test_paged_attn_route vt/test_paged_attn_route.cpp)

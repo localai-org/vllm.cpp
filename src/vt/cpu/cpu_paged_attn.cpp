@@ -28,6 +28,19 @@
 #include "vt/dtype.h"
 #include "vt/ops.h"
 
+// PERF-CPU-ATTN-BFDOT (DRAFT, FMA-contract branch): native bf16 K-dot arm.
+// The kernel and its knob live in cpu_paged_attn_bfdot_arm.cpp (+bf16 TU);
+// non-Arm or no-bf16 builds link the stubs. Usable() already ANDs the
+// VT_CPU_PAGED_ATTN_BFDOT=1 opt-in (default off) with the HWCAP2 FEAT_BF16
+// probe. This arm changes the reduction DAG (bf16 PAIR dots + no query
+// widen), so it is a THIRD mode measured beside the scalar and widen+vfma
+// NEON arms — never a silent replacement: the scalar-vs-NEON bit-identity the
+// FMA-contract draft rests on is untouched.
+namespace vt::cpu {
+bool PagedAttnBfDotUsable();
+float PagedAttnKDotBfDot(const uint16_t* q, const uint16_t* k, int64_t d);
+}  // namespace vt::cpu
+
 namespace vt::cpu {
 namespace {
 
@@ -281,8 +294,16 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
   // flip raced under load; ISSUE-LOCAL-01M4J4QNTE166QFG5MN7V3H4DG): an
   // explicit `=1` selects the lane, anything else runs the scalar body.
   // The scalar body below stays the reference and the non-aarch64 path.
+using vt::cpu::PagedAttnBfDotUsable;
+using vt::cpu::PagedAttnKDotBfDot;
 #if defined(__aarch64__)
   const bool neon_active = PagedAttnNeonActive();
+  // BFDOT is a sub-mode OF the NEON lane: it needs the lane on, and it serves
+  // only bf16 keys with a bf16 query row (the kernel consumes bf16 PAIRS, so
+  // there is no widen step to reuse) at x8 widths. Resolved once per call.
+  const bool bfdot_requested = neon_active && PagedAttnBfDotUsable() &&
+                               kv_kind == KvKind::kBF16 &&
+                               query.dtype == DType::kBF16;
 #else
   const bool neon_active = false;
   (void)neon_active;
@@ -334,16 +355,34 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
           if (neon_active && d % 4 == 0 && d_v % 4 == 0) {
             // The NEON lane: same scores, same masking, same softmax passes.
             // Only the K reduction and the V accumulation run four lanes wide.
+            // The BFDOT arm (VT_CPU_PAGED_ATTN_BFDOT=1) replaces ONLY the K
+            // dot — 8 bf16 products per vbfdotq, native pair-dot over the
+            // UNWIDENED bf16 query; the V accumulation stays on the widen+
+            // vfma path below (no f32-accumulator BFMLA form matches the
+            // scalar fma DAG). It changes the DAG by design; the lane is
+            // already not bit-identical to the scalar body, and the BFDOT
+            // run is adjudicated by its own unit gate + the bench chain.
+            const bool bfdot_k = bfdot_requested && d % 8 == 0;
+            const uint16_t* q_bf =
+                bfdot_k ? reinterpret_cast<const uint16_t*>(
+                              q_bytes + static_cast<size_t>(t * hq * d) * q_esize) +
+                              h * d
+                        : nullptr;
             for (int64_t j = jmin; j <= jmax; ++j) {
               const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
               const int64_t off = j % block_size;
               const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
+              float dot;
+              if (bfdot_k) {
+                dot = PagedAttnKDotBfDot(q_bf, reinterpret_cast<const uint16_t*>(k_base) + kbase, d);
+              } else {
               float32x4_t vacc = vdupq_n_f32(0.0f);
               for (int64_t e = 0; e < d; e += 4)
                 vacc = vfmaq_f32(vacc, vld1q_f32(q + e),
                                  KvElem4<decltype(kv_tag)::value>(k_base, kbase + e, k_scale));
               // Lane-serial-in-block, block-sequential: NOT the scalar order.
-              float dot = vaddvq_f32(vacc);
+              dot = vaddvq_f32(vacc);
+              }
               dot *= scale;
               if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
               probs[static_cast<size_t>(j - jmin)] = dot;
