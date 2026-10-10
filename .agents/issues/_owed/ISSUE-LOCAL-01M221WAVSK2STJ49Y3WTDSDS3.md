@@ -12,9 +12,7 @@ Closed: -
 
 ## Problem
 
-The aarch64 NEON lane and the scalar body of vt::PagedAttention differ only in rounding policy: the scalar body builds with -ffp-contract=off (mul + add, two roundings), the NEON lane uses fused vfmaq (one rounding, like upstream vLLM and llama.cpp). The outputs agree to 1 bf16 ulp, but the kolibri1 decode bench pins the greedy chain byte-exactly, so the difference flips one near-tie token (0.197 nats gap) and fails the gate. Adjudication: docs/bench-evidence/kolibri1-neon-paged-attn-20261008.md; history #3425, #3433, #3435.
-
-DECIDED (developer): compile the scalar body with fused multiply-add so both arms are identical by construction. The anchor stays byte-exact; the NEON lane then defaults on with no gate relaxation. Cost: the scalar arm is production for every CPU-served model, so CPU token goldens must be re-captured and re-adjudicated under the fused numerics (kolibri W3 + bench anchor first, then anything else that moves). Plan: spec first, then re-capture, then flip the NEON default.
+The aarch64 NEON lane of vt::PagedAttention agrees with the scalar body to 1 bf16 ulp (rounding policy only: scalar is -ffp-contract=off, NEON is fused like upstream). The kolibri1 decode bench pins the greedy chain byte-exactly, so one near-tie token flips (0.197 nats) and the gate fails. GitHub issue #3438 asks Ettore: B (near-tie instrument for the bench anchor, W3 methodology, running as a pilot) or C (FMA-contract the scalar reference, fleet-wide re-oracle, better long-run end state). Not on the table: making NEON bit-match the non-fused chain.
 
 ## Resolution
 
