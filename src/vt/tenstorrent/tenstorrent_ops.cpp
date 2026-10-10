@@ -18,6 +18,9 @@
 // ttnn::sdpa_decode is deferred. kQkvSplit is hybrid: device-slice when the
 #include "vt/tenstorrent/tenstorrent_internal.h"
 
+#include <ttnn/operations/data_movement/bcast/bcast.hpp>
+#include <ttnn/operations/data_movement/repeat/repeat.hpp>
+
 namespace vt::tenstorrent {
 namespace {
 // Publish a device result as the current value of `out` WITHOUT downloading
@@ -422,12 +425,49 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   // VT_TT_FORCE_HOST_RESIDUAL: host-free bisection — run the residual merge
   // + norm host-side even when host-free decode forces the device path.
   const bool force_host_residual = std::getenv("VT_TT_FORCE_HOST_RESIDUAL") != nullptr;
+  // ROOT-CAUSE RECORD (kolibri1 TT prompt-dependent hard divergence): the
+  // device rms_norm arm (ttnn::rms_norm on f32 tiles) deviates from the f32
+  // oracle ~1% SYSTEMATICALLY with bit-identical inputs and gamma — the
+  // micro-test (test_kolibri1_tt_b2ii "SCRATCH dbg rmsnorm micro") measures
+  // sum ratio 0.9899 and max_abs 4 bf16 ULP, red against the CPU row. Two
+  // repairs were tried and REFUSED by the substrate, so the baseline
+  // routing below is kept and the bias stays the row's open defect:
+  //   1. Composed f32 chain (x^2 -> mean -> +eps -> rsqrt -> scale): exact
+  //      in the micro-test (ratio 0.9998, 1 bf16 ULP) but its [rows,1] row
+  //      scale cannot reach the model — plain multiply broadcasts padded-
+  //      tile garbage (sporadic 1e37 logits in the gate), BcastOpDim::W is
+  //      numerically wrong (ratio 1.019), BcastOpDim::H is refused, and the
+  //      repeat+same-shape multiply form is refused by binary_ng with
+  //      "Invalid subtile broadcast type" in the model context.
+  //   2. Serving the eager arm's residual-free short-row norms from the
+  //      host f32 loop (this same branch, condition widened): the extra
+  //      host round-trips of the attention/MoE intermediates desync the
+  //      device shadow — the gate collapsed from 26/33 to 0/8 with 1e37
+  //      garbage logits, in BOTH the all-norms and hidden-width-only
+  //      narrowings. The device-shadow reconciliation this needs is the
+  //      same defect class the host-free residency row is closing.
   const bool host_residual = (!host_free_decode || force_host_residual) &&
       (args.gemma || (residual != nullptr && rows < kDeviceResidualMinRows));
   if (host_residual) {
     EnsureHost(x);
     EnsureHost(weight);
     if (residual != nullptr) EnsureHost(*residual);
+    if (std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr && residual != nullptr) {
+      static std::atomic<int> calls{0};
+      if (calls.fetch_add(1) < 4) {
+        double sx = 0, sr = 0;
+        for (int64_t j = 0; j < static_cast<int64_t>(d); ++j) {
+          sx += LoadElemF32(x, j);
+          sr += LoadElemF32(*residual, j);
+        }
+        std::fprintf(stderr,
+                     "[STAGE] rmsnorm-host call=%d d=%lld sum(x[0..d])=%.6f "
+                     "sum(res[0..d])=%.6f xfirst=[%.6f %.6f] resfirst=[%.6f %.6f]\n",
+                     calls.load(), static_cast<long long>(d), sx, sr,
+                     LoadElemF32(x, 0), LoadElemF32(x, 1),
+                     LoadElemF32(*residual, 0), LoadElemF32(*residual, 1));
+      }
+    }
     for (int64_t r = 0; r < static_cast<int64_t>(rows); ++r) {
       float sumsq = 0.0f;
       for (int64_t j = 0; j < static_cast<int64_t>(d); ++j) {
@@ -567,7 +607,48 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   ttnn::Tensor wf32 = args.gemma
                           ? dev_w
                           : ttnn::typecast(dev_w, ttnn::DataType::FLOAT32);
-  ttnn::Tensor dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
+  // SCRATCH FIX (kolibri1 TT prompt-dependent hard divergence, row
+  // MODEL-TEXT-kolibri-1-tenstorrent): the pinned tt-metal's
+  // ttnn::rms_norm deviates from the f32 oracle ~1% SYSTEMATICALLY even on
+  // f32 tiles — the micro-test (test_kolibri1_tt_b2ii "SCRATCH dbg rmsnorm
+  // micro") measured sum ratio 0.9899 and max_abs 0.0625 against the
+  // CPU/host-double oracle on random bf16 [1,2560], with bit-identical
+  // inputs and gamma. Normed once per norm site per layer, that bias
+  // compounds through 50 layers into multi-nat logit shifts and the
+  // prompt-dependent hard flips the teacher-forced instrument records.
+  // Compose the norm from exact f32 primitives instead — the same chain the
+  // CPU oracle runs (x^2 -> mean -> +eps -> rsqrt -> scale -> gamma) and the
+  // same composition the L2Norm device arm already uses
+  // (tenstorrent_gdn.cpp l2 lambda). VT_TT_RMSNORM_TTNN=1 restores the
+  // pinned ttnn::rms_norm arm for A/B.
+  ttnn::Tensor dev_y;
+  // The composed f32 arm is the micro-test-clean one but its row broadcast
+  // does not survive the model's tensor geometry on this stack (binary_ng
+  // refuses the subtile), so the pinned ttnn::rms_norm stays the device
+  // default; VT_TT_RMSNORM_COMPOSED=1 selects the composed arm for A/B.
+  static const bool rms_composed = [] {
+    const char* e = std::getenv("VT_TT_RMSNORM_COMPOSED");
+    return e != nullptr && e[0] == '1';
+  }();
+  if (!rms_composed) {
+    dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
+  } else {
+    ttnn::Tensor sq = ttnn::multiply(norm_f32, norm_f32);
+    ttnn::Tensor ssq = ttnn::sum(sq, ttsl::SmallVector<int>{1}, true);
+    ttnn::Tensor ms = ttnn::multiply(
+        ssq, 1.0f / static_cast<float>(d));
+    ttnn::Tensor inv = ttnn::rsqrt(ttnn::add(ms, args.eps));
+    // The plain multiply of [rows,cols] by [rows,1] and the bcast kernel
+    // both mis-broadcast on this stack (the micro-test measured ratio 1.019
+    // through BcastOpDim::W, and the gate recorded sporadic 1e37 garbage
+    // logits through the plain multiply). Materialize the row scale with an
+    // exact data-movement replication instead: repeat([rows,1] -> [rows,cols])
+    // and a same-shape f32 multiply.
+    dev_y = ttnn::multiply(
+        norm_f32,
+        ttnn::repeat(inv, ttnn::Shape({rows, d})));
+    dev_y = ttnn::multiply(dev_y, wf32);
+  }
   static const bool out_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
   if (out_dbg) {
     auto chk2 = [&](const ttnn::Tensor& t, const char* tag) {

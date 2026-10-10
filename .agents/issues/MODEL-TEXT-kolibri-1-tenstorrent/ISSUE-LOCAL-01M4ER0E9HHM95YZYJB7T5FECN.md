@@ -36,3 +36,41 @@ B2b-i landed the dense-resident device forward with the routed-expert tier delib
   token-gate leg is committed and runs on the first healthy card
   window. Issue stays OPEN on the device gates.
 -
+- 2026-10-10 (branch row/tt-kolibri-residue, off e510885d7 + the
+  teacher-forced instrument eb7cefb85): the prompt-dependent hard
+  divergence is ROOT-CAUSED to the tt-metal rms_norm kernel, evidence in
+  test_kolibri1_tt_b2ii.cpp "SCRATCH dbg rmsnorm micro" (red, kept). With
+  BIT-IDENTICAL bf16 inputs and gamma ([1,2560], random seed 7), the
+  device arm — ttnn::rms_norm over f32 tiles via the NormalizeDevF32Tile
+  pin-forward — measures sum ratio 0.98992 and max_abs 0.0625 (4 bf16
+  ULP) against the CPU row / host-double oracle; the CPU row matches
+  host-double to 1 ULP. Normed 3-4x per layer over 50 layers, that
+  systematic bias compounds into the multi-nat logit shifts the
+  teacher-forced instrument records (OFF arm 47 HARD, worst gap 5.17
+  nats; per-prompt 'der Mond...' steps 0-24, 'Translation to German...'
+  steps 0-22, 'x1 = 3...' steps 1-9). NOT a slot-pool/expert-stream
+  defect for these prompts: the slot-pool no-slot refusal STILL fires on
+  the fixed base (4 of 8 teacher-forced walks abort, e.what()=="1") but
+  the diverging prompts never abort — two defect classes share the row.
+  Two repairs were tried and refused by the substrate, both recorded in
+  src/vt/tenstorrent/tenstorrent_ops.cpp (RmsNormKernel): (1) a composed
+  f32 chain (x^2 -> mean -> +eps -> rsqrt -> scale), exact in the micro
+  (ratio 0.9998, 1 ULP) — its [rows,1] row scale cannot reach the model:
+  plain multiply broadcasts padded-tile garbage (gate collapse, 1e37
+  logits), BcastOpDim::W is numerically wrong (ratio 1.019), ::H is
+  refused, and repeat+same-shape multiply is refused by binary_ng
+  ("Invalid subtile broadcast type"); (2) serving the eager arm's
+  residual-free short-row norms from the host f32 loop — the extra host
+  round-trips desync the device shadow (gate 26/33 -> 0/8 with 1e37
+  garbage), both all-norms and hidden-width-only narrowings. Both
+  reverted; the landed tree keeps baseline routing (byte gate back at
+  26/33, 47 HARD — verified post-revert, /tmp/final_off.log) plus the
+  composed arm behind VT_TT_RMSNORM_COMPOSED=1 for A/B. The embed table
+  and the norm gamma stage BIT-EXACT on device (VT_KOLIBRI1_TT_STAGE_DUMP
+  emb/gam dumps, both arms) — staging is clean; the bias is in the
+  kernel math. defect class: tt-metal substrate (ttnn::rms_norm numeric
+  bias + binary_ng subtile broadcast refusal). ISSUE STAYS OPEN; the
+  fix needs either an upstream rms_norm with f32 statistics that
+  matches the oracle, or a broadcast primitive that survives the model
+  geometry, or the host-free shadow reconciliation this row already
+  owes.

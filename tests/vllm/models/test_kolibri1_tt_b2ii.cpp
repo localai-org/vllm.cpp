@@ -809,6 +809,200 @@ TEST_CASE("SCRATCH dbg TT vs CPU logits") {
   (void)gp;
 }
 
+// SCRATCH DEBUG (remove before landing): vt::RmsNorm TT vs CPU micro-test,
+// bf16 [1,2560] with and without residual.
+TEST_CASE("SCRATCH dbg rmsnorm micro") {
+  if (!TenstorrentDevicePresent()) return;
+  vt::Backend& cpu_be = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue cpu_q = cpu_be.CreateQueue();
+  vt::Backend& ttbeg = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue tt_q = ttbeg.CreateQueue();
+  const int64_t d = 2560;
+  std::vector<uint16_t> xb(static_cast<size_t>(d));
+  std::vector<uint16_t> gb(static_cast<size_t>(d));
+  std::mt19937 rng(7);
+  std::normal_distribution<float> nd(0.0f, 0.5f);
+  auto tobf = [](float f) {
+    uint32_t u;
+    std::memcpy(&u, &f, 4);
+    return static_cast<uint16_t>(u >> 16);
+  };
+  for (int64_t i = 0; i < d; ++i) xb[static_cast<size_t>(i)] = tobf(nd(rng));
+  for (int64_t i = 0; i < d; ++i)
+    gb[static_cast<size_t>(i)] = tobf(nd(rng) * 0.1f + 1.0f);
+  for (int with_res : {0, 1}) {
+    std::vector<uint16_t> resb(static_cast<size_t>(d),
+                               static_cast<uint16_t>(0));
+    std::vector<uint16_t> outc(static_cast<size_t>(d));
+    std::vector<uint16_t> outt(static_cast<size_t>(d));
+    {
+      vllm::dense_attn::Dev dc{cpu_be, cpu_q};
+      vllm::dense_attn::DBuf x(dc, vt::DType::kBF16, {1, d}, xb.data());
+      vllm::dense_attn::DBuf g(dc, vt::DType::kBF16, {d}, gb.data());
+      vllm::dense_attn::DBuf res(dc, vt::DType::kBF16, {1, d},
+               with_res ? resb.data() : nullptr);
+      vllm::dense_attn::DBuf out(dc, vt::DType::kBF16, {1, d});
+      if (with_res)
+        vt::RmsNorm(dc.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false}, &res.t());
+      else
+        vt::RmsNorm(dc.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false});
+      out.Download(dc, outc.data());
+    }
+    {
+      vllm::dense_attn::Dev dt{ttbeg, tt_q};
+      vllm::dense_attn::DBuf x(dt, vt::DType::kBF16, {1, d}, xb.data());
+      vllm::dense_attn::DBuf g(dt, vt::DType::kBF16, {d}, gb.data());
+      vllm::dense_attn::DBuf res(dt, vt::DType::kBF16, {1, d},
+               with_res ? resb.data() : nullptr);
+      vllm::dense_attn::DBuf out(dt, vt::DType::kBF16, {1, d});
+      if (with_res)
+        vt::RmsNorm(dt.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false}, &res.t());
+      else
+        vt::RmsNorm(dt.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false});
+      out.Download(dt, outt.data());
+    }
+    auto val = [](uint16_t bits) {
+      uint32_t u = static_cast<uint32_t>(bits) << 16;
+      float f;
+      std::memcpy(&f, &u, 4);
+      return f;
+    };
+    double sc = 0, st = 0, mad = 0;
+    for (int64_t i = 0; i < d; ++i) {
+      float c = val(outc[static_cast<size_t>(i)]);
+      float t = val(outt[static_cast<size_t>(i)]);
+      sc += c;
+      st += t;
+      mad = std::max(mad, static_cast<double>(std::fabs(c - t)));
+    }
+    {
+      double sumsq = 0;
+      for (int64_t i = 0; i < d; ++i) {
+        double v = val(xb[static_cast<size_t>(i)]);
+        sumsq += v * v;
+      }
+      double inv = 1.0 / std::sqrt(sumsq / static_cast<double>(d) + 1e-6);
+      double h0 = val(xb[0]) * inv * val(gb[0]);
+      MESSAGE("host-double out[0]=" << h0 << " cpu out[0]=" << val(outc[0])
+                                    << " tt out[0]=" << val(outt[0])
+                                    << " host inv=" << inv);
+    }
+    MESSAGE("with_res=" << with_res << " sum_cpu=" << sc << " sum_tt=" << st
+                        << " ratio=" << (sc != 0 ? st / sc : 0.0)
+                        << " max_abs=" << mad);
+  }
+}
+
+// chosen golden prompt (VT_TF_DBG_PROMPT, default 1 'der Mond'), VT_TF_DBG_STEPS
+// decode steps (default 6). Stage dumps come from VT_KOLIBRI1_TT_STAGE_DUMP.
+TEST_CASE("SCRATCH dbg TF prompt") {
+  if (!TenstorrentDevicePresent()) return;
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || *model_dir == '\0') return;
+  const int which = std::getenv("VT_TF_DBG_PROMPT") != nullptr
+                        ? std::atoi(std::getenv("VT_TF_DBG_PROMPT"))
+                        : 1;
+  const int steps = std::getenv("VT_TF_DBG_STEPS") != nullptr
+                        ? std::atoi(std::getenv("VT_TF_DBG_STEPS"))
+                        : 6;
+  const std::string dir = model_dir;
+  const HfConfig config = vllm::LoadHfConfig(dir + "/config.json");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(dir + "/model.safetensors.index.json"));
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items())
+    shard_names.insert(shard.get<std::string>());
+  std::vector<SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(SafetensorsFile::Open(dir + "/" + shard));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+
+  vt::Backend& cpu_be = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue cpu_q = cpu_be.CreateQueue();
+  std::unique_ptr<LoadedModel> cpu_model = ModelRegistry::Load(config, source);
+  ModelRegistry::Prepare(*cpu_model, config, cpu_q);
+  const int64_t num_blocks = 32;
+  const Kolibri1Weights& cw = Kolibri1LoadedModelWeights(*cpu_model);
+  const Kolibri1Params& cp = cw.params;
+  std::vector<PagedKvCache> cpu_kv;
+  std::vector<std::vector<uint8_t>> cpu_kv_bytes;
+  for (int64_t l = 0; l < cp.num_hidden_layers; ++l) {
+    cpu_kv_bytes.emplace_back(static_cast<size_t>(
+        num_blocks * 2 * 16 * cp.num_key_value_heads * cp.head_dim *
+        vt::SizeOf(vt::DType::kBF16)));
+    PagedKvCache c;
+    c.data = cpu_kv_bytes.back().data();
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = cp.num_key_value_heads;
+    c.head_size = cp.head_dim;
+    cpu_kv.push_back(c);
+  }
+
+  vt::Backend& tt_be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue tt_q = tt_be.CreateQueue();
+  std::unique_ptr<LoadedModel> tt_model = ModelRegistry::Load(config, source);
+  ModelRegistry::Prepare(*tt_model, config, tt_q);
+  std::vector<PagedKvCache> tt_kv;
+  std::vector<std::shared_ptr<void>> tt_keep;
+  for (int64_t l = 0; l < cp.num_hidden_layers; ++l) {
+    void* buf = tt_be.Alloc(cpu_kv_bytes[0].size());
+    std::memset(buf, 0, cpu_kv_bytes[0].size());
+    tt_keep.emplace_back(buf, [&tt_be](void* p) { tt_be.Free(p); });
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = cp.num_key_value_heads;
+    c.head_size = cp.head_dim;
+    tt_kv.push_back(c);
+  }
+
+  const GateGolden gp = LoadGateGoldens()[static_cast<size_t>(which)];
+  MESSAGE("TF prompt '" << gp.prompt << "' steps=" << steps);
+  std::vector<int32_t> seq;
+  int32_t fed = -1;
+  for (int i = 0; i < static_cast<int>(gp.input_ids.size()) + steps; ++i) {
+    if (i < static_cast<int>(gp.input_ids.size())) {
+      fed = gp.input_ids[static_cast<size_t>(i)];
+    } else {
+      // teacher-forced: feed the GOLDEN chain's previous token
+      fed = gp.generated_ids[static_cast<size_t>(i) -
+                             gp.input_ids.size() - 1];
+    }
+    seq.push_back(fed);
+    const int64_t ctx = static_cast<int64_t>(seq.size()) - 1;
+    std::vector<float> lc = ForwardLastLogits(
+        *cpu_model, config, cpu_q, cpu_be, cpu_kv, {seq.back()}, ctx,
+        num_blocks);
+    std::vector<float> lt = ForwardLastLogits(
+        *tt_model, config, tt_q, tt_be, tt_kv, {seq.back()}, ctx, num_blocks);
+    double ma = 0;
+    size_t amax = 0;
+    for (size_t j = 0; j < lc.size(); ++j) {
+      const double dd = std::fabs(static_cast<double>(lc[j]) -
+                                  static_cast<double>(lt[j]));
+      if (dd > ma) { ma = dd; amax = j; }
+    }
+    int32_t ac = static_cast<int32_t>(
+        std::max_element(lc.begin(), lc.end()) - lc.begin());
+    int32_t at = static_cast<int32_t>(
+        std::max_element(lt.begin(), lt.end()) - lt.begin());
+    const int d = i - static_cast<int>(gp.input_ids.size());
+    MESSAGE("TFstep " << d << " tok " << seq.back() << ": max_abs=" << ma
+                      << " at " << amax << " argmax cpu=" << ac
+                      << " tt=" << at << " logit cpu="
+                      << lc[static_cast<size_t>(ac)] << " tt="
+                      << lt[static_cast<size_t>(at)]);
+  }
+}
+
 TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
           "on the card (W3 methodology, 141/145 in the 2.5-nat band)") {
   if (!TenstorrentDevicePresent()) {

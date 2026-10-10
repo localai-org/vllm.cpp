@@ -751,6 +751,7 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     Tensor tab = ResidentWeight(d, weights.embed_tokens, {vocab, h});
     vt::Embedding(d.q, hidden_held->t(), tab, ids.t());
   }
+  StageDump("emb", -2, *hidden_held, d);
   Tensor hidden = hidden_held->t();
   DBuf res(d, DType::kBF16, {t, h});
   res.Zero(d);
@@ -783,6 +784,23 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     // CPU row's exact conditional, so the op sequence matches its default.
     DBuf dhn(d, DType::kBF16, {t, h});
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
+    if (StageDumpOn() && l == 0) {
+      std::vector<uint8_t> tmp(static_cast<size_t>(h) * 2);
+      d.b.Copy(d.q, tmp.data(),
+               static_cast<const uint8_t*>(w_in.data), tmp.size());
+      d.b.Synchronize(d.q);
+      const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+      double s = 0;
+      auto val = [](uint16_t bits) {
+        uint32_t u = static_cast<uint32_t>(bits) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+      };
+      for (int64_t i = 0; i < h; ++i) s += val(bf[i]);
+      std::fprintf(stderr, "[STAGE] gam sum=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+                   s, val(bf[0]), val(bf[1]), val(bf[2]), val(bf[3]));
+    }
     Tensor dhn_t = dhn.t();
     Tensor res_t = res.t();
     if (dense_attn::FusedChainAdoptEnabled()) {
