@@ -377,10 +377,24 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
             const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
-            float dot = 0.0f;
-            for (int64_t e = 0; e < d; ++e)
-              dot += q[e] *
-                     KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale);
+            float dot;
+            if (d % 4 == 0) {
+              float lane[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+              for (int64_t e = 0; e < d; e += 4)
+                for (int l = 0; l < 4; ++l)
+                  lane[l] = std::fma(
+                      q[e + l],
+                      KvElem<decltype(kv_tag)::value>(k_base, kbase + e + l, k_scale),
+                      lane[l]);
+              dot = (lane[0] + lane[1]) + (lane[2] + lane[3]);
+            } else {
+              // Non-x4 widths have no lane form to match; plain fused dot.
+              dot = 0.0f;
+              for (int64_t e = 0; e < d; ++e)
+                dot = std::fma(
+                    q[e], KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale),
+                    dot);
+            }
             dot *= scale;
             if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
             probs[static_cast<size_t>(j - jmin)] = dot;
@@ -403,8 +417,9 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
             const int64_t off = j % block_size;
             const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
             for (int64_t e = 0; e < d_v; ++e)
-              acc[static_cast<size_t>(e)] +=
-                  pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
+              acc[static_cast<size_t>(e)] = std::fma(
+                  pw, KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale),
+                  acc[static_cast<size_t>(e)]);
           }
           StoreRowF32(out, qoff, d_v, acc.data());
           }
