@@ -871,13 +871,15 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
       std::memcpy(&f, &u, 4);
       return f;
     };
-    double sc = 0, st = 0, mad = 0;
+    double sc = 0, st = 0, mad = 0, sh = 0;
+    int ndiff = 0, ndiff2 = 0;
     for (int64_t i = 0; i < d; ++i) {
       float c = val(outc[static_cast<size_t>(i)]);
       float t = val(outt[static_cast<size_t>(i)]);
       sc += c;
       st += t;
       mad = std::max(mad, static_cast<double>(std::fabs(c - t)));
+      if (c != t) ++ndiff;
     }
     {
       double sumsq = 0;
@@ -886,10 +888,25 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
         sumsq += v * v;
       }
       double inv = 1.0 / std::sqrt(sumsq / static_cast<double>(d) + 1e-6);
+      for (int64_t i = 0; i < d; ++i) {
+        double h = static_cast<double>(val(xb[static_cast<size_t>(i)])) * inv *
+                   static_cast<double>(val(gb[static_cast<size_t>(i)]));
+        // round the host-double value once to bf16, the same final store
+        uint32_t hu;
+        float hf = static_cast<float>(h);
+        std::memcpy(&hu, &hf, 4);
+        uint16_t hb = static_cast<uint16_t>(hu >> 16);
+        sh += val(hb);
+        if (val(hb) != val(outt[static_cast<size_t>(i)])) ++ndiff2;
+      }
       double h0 = val(xb[0]) * inv * val(gb[0]);
       MESSAGE("host-double out[0]=" << h0 << " cpu out[0]=" << val(outc[0])
                                     << " tt out[0]=" << val(outt[0])
                                     << " host inv=" << inv);
+      MESSAGE("host2 sum=" << sh << " tt/host2=" << (sh != 0 ? st / sh : 0.0)
+                           << " cpu/host2=" << (sh != 0 ? sc / sh : 0.0)
+                           << " tt!=cpu elems=" << ndiff
+                           << " tt!=host-bf16 elems=" << ndiff2);
     }
     MESSAGE("with_res=" << with_res << " sum_cpu=" << sc << " sum_tt=" << st
                         << " ratio=" << (sc != 0 ? st / sc : 0.0)

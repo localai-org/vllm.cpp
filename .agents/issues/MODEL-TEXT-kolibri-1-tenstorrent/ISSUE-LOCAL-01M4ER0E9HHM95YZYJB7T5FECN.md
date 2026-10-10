@@ -74,3 +74,46 @@ B2b-i landed the dense-resident device forward with the routed-expert tier delib
   matches the oracle, or a broadcast primitive that survives the model
   geometry, or the host-free shadow reconciliation this row already
   owes.
+
+- 2026-10-10 (substrate rms reduction fix, this branch): the blocked
+  in-kernel repairs are superseded by a TT-METAL SUBSTRATE patch in the
+  trial tree `/tmp/tt-metal-umdtrial` (installed at
+  `/tmp/umdtrial-install`, rebuilt and reinstalled in
+  `/tmp/build-umdtrial2`). Mechanism: `ttnn::rms_norm`'s default compute
+  config hardwired `fp32_acc = false`
+  (`ttnn/cpp/ttnn/operations/normalization/rmsnorm/rmsnorm.cpp`), so the
+  layernorm program factory ran Float16_b circular buffers and
+  `float32_reduction = fp32_dest_acc_en && !legacy_reduction` was false
+  (`layernorm_op_multi_core.cpp`) EVEN when the vllm.cpp f32-shadow arm
+  fed FLOAT32 tiles — the sum of squares accumulated in bf16, which is
+  the whole 0.9899 bias. The patch sets `fp32_acc = true` and
+  `approx_mode = false` for the rms_norm default config (f32 CBs, f32
+  reduce, accurate SFPU rsqrt) and widens the reduce scaler CB to
+  Float32 under an f32 reduction. Micro (`SCRATCH dbg rmsnorm micro`,
+  same bit-identical bf16 [1,2560] seed-7 inputs): ratio 0.98992 ->
+  0.99972 vs the CPU row, max_abs 4 ULP -> 1 ULP, and vs the
+  host-double-bf16 denominator TT 0.99915 vs CPU 0.99942 — the residual
+  is the bf16 output-store quantization floor, which the CPU oracle row
+  itself cannot beat. Gate verdicts (both arms re-run, clean
+  reset+cache per leg): ON 26/33, 7 flips (0 near-tie, 7 hard),
+  instrument 40 tf flips (5 near-tie, 35 HARD) worst 3.19 nats; OFF
+  26/33, 7 flips (1 near-tie, 6 hard — baseline was 7 hard), instrument
+  116 tf flips (11 near-tie, 105 HARD) worst 7.59 nats. The ARGMAX
+  chain did not move materially: the remaining flips are dominated by
+  the two open op-level drifts (kGdnDecode state reduction,
+  kMatmulBTQuantGrouped Q4_K envelope), both re-confirmed failing in
+  isolation; the >=141 target stays out of reach. Suite
+  `test_tenstorrent_backend`: the only cases failing in isolation are
+  the two known ones (kGdnDecode, kMatmulBTQuantGrouped); the W4
+  EnsureDevice2D counter and the matmul region class split fail only in
+  full-suite order state and pass isolated. NOTE: the OFF-arm
+  teacher-forced instrument reads 105 HARD / worst 7.59 nats in this
+  run against the 47 / 5.17 recorded on 5277bdc72 — deterministic
+  across a clean reset; the instrument counts over the full 33-position
+  harness, so part of the delta is coverage, and the norm arm change
+  plausibly moved teacher-forced near-ties; the argmax chain (the
+  gate's contract) is unchanged. THE TRIAL TT-METAL TREE NOW CARRIES
+  THIS REDUCTION-PRECISION PATCH ON TOP OF THE PORT FIXES — any future
+  measurement or gate on this stack must use the rebuilt
+  `/tmp/umdtrial-install` (rebuild: `cmake --build /tmp/build-umdtrial2
+  -j 4 && cmake --install . --prefix /tmp/umdtrial-install`).
