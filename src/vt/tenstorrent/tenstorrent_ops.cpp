@@ -49,6 +49,19 @@ namespace {
 
 // Device compute: keep result on device (CommitDevice2D). Host round-trip only
 // when the consumer is a host-staged op (EnsureHost) or an untracked buffer.
+// The f32-output GEMM contract (the CPU row's LinearBTRaw accumulates in f32
+// and its logits are NOT bf16-representable): request a FLOAT32 output tensor
+// AND fp32 destination accumulation. The default config produced a bf16
+// tensor upcast to f32 on commit (every router logit landed on the bf16 grid,
+// per-element error up to ~5 against the CPU row) and bf16 partial sums —
+// the selection-flip class that drove the L1-moe 3% divergence
+// (ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN, this branch's record).
+std::optional<ttnn::DeviceComputeKernelConfig> F32AccKernelConfig() {
+  ttnn::DeviceComputeKernelConfig cfg{};
+  cfg.fp32_dest_acc_en = true;
+  return cfg;
+}
+
 void MatmulKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   TT_OP_TRACE("Matmul");
   VT_CHECK(a.rank == 2 && b.rank == 2 && out.rank == 2,
@@ -68,7 +81,14 @@ void MatmulKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   ttnn::Tensor dev_a = EnsureDevice2D(a, device);
   ttnn::Tensor dev_b = EnsureMatmulWeightDevice(b, device);
   if (dev_b.dtype() == ttnn::DataType::BFLOAT8_B) Bfp8MatmulUse();
-  ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(dev_a, dev_b);
+  const std::optional<ttnn::DataType> out_dt =
+      out.dtype == DType::kF32 ? std::optional(ttnn::DataType::FLOAT32)
+                               : std::nullopt;
+  ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(
+      dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/false,
+      /*memory_config=*/std::nullopt, out_dt, /*program_config=*/std::nullopt,
+      /*activation=*/std::nullopt,
+      out_dt ? F32AccKernelConfig() : std::nullopt);
   CommitDevice2D(out, std::move(dev_c));
 }
 
@@ -77,6 +97,8 @@ void MatmulKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
 // exposes a transpose_b flag, so this is the same sequence as kMatmul with
 // that flag flipped — no separate upload shape needed since `b` is uploaded
 // in its native [N,K] layout and ttnn transposes on device.
+
+
 void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   TT_OP_TRACE("MatmulBT");
   VT_CHECK(a.rank == 2 && b.rank == 2 && out.rank == 2,
@@ -96,8 +118,14 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   ttnn::Tensor dev_a = EnsureDevice2D(a, device);
   ttnn::Tensor dev_b = EnsureMatmulWeightDevice(b, device);
   if (dev_b.dtype() == ttnn::DataType::BFLOAT8_B) Bfp8MatmulUse();
-  ttnn::Tensor dev_c =
-      ttnn::operations::matmul::matmul(dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/true);
+  const std::optional<ttnn::DataType> out_dt =
+      out.dtype == DType::kF32 ? std::optional(ttnn::DataType::FLOAT32)
+                               : std::nullopt;
+  ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(
+      dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/true,
+      /*memory_config=*/std::nullopt, out_dt, /*program_config=*/std::nullopt,
+      /*activation=*/std::nullopt,
+      out_dt ? F32AccKernelConfig() : std::nullopt);
   CommitDevice2D(out, std::move(dev_c));
 }
 
@@ -461,7 +489,7 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
           sr += LoadElemF32(*residual, j);
         }
         std::fprintf(stderr,
-                     "[STAGE] rmsnorm-host call=%d d=%lld sum(x[0..d])=%.6f "
+                     "[STAGE][TT] rmsnorm-host call=%d d=%lld sum(x[0..d])=%.6f "
                      "sum(res[0..d])=%.6f xfirst=[%.6f %.6f] resfirst=[%.6f %.6f]\n",
                      calls.load(), static_cast<long long>(d), sx, sr,
                      LoadElemF32(x, 0), LoadElemF32(x, 1),

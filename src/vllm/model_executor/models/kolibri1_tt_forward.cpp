@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -41,6 +42,11 @@
 #include "vllm/model_executor/models/kv_cache_route.h"   // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"    // the ONE pool (#1664)
 #include "vt/ops.h"
+
+// SCRATCH DEBUG (layer-1 moe localization): the CPU arm's stashed router
+// logits (defined in kolibri1_forward.cpp, same process), read by RouteDump.
+extern std::vector<float> g_kolibri1_dbg_route_logits;
+extern std::vector<uint16_t> g_kolibri1_dbg_dhn;
 
 namespace vllm {
 
@@ -89,6 +95,10 @@ bool StageDumpOn() {
   return on;
 }
 
+void RouteDump(int64_t layer, const std::vector<float>& logits,
+               const Kolibri1HostRouting& route, int64_t t, int64_t e,
+               int64_t top_k);
+
 void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
   if (!StageDumpOn()) return;
   const Tensor& t = buf.t();
@@ -96,8 +106,9 @@ void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
   std::vector<uint8_t> tmp(static_cast<size_t>(n) * 2);
   buf.Download(d, tmp.data());
   const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
-  double sum = 0;
+  double sum = 0, sq = 0;
   float mx = 0;
+  uint32_t hash = 2166136261u;
   auto val = [](uint16_t bits) {
     uint32_t u = static_cast<uint32_t>(bits) << 16;
     float f;
@@ -107,11 +118,81 @@ void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
   for (int64_t i = 0; i < n; ++i) {
     const float v = val(bf[i]);
     sum += v;
+    sq += static_cast<double>(v) * v;
     if (std::fabs(v) > mx) mx = std::fabs(v);
+    hash = (hash ^ bf[i]) * 16777619u;
   }
-  std::fprintf(stderr, "[STAGE] L%lld %s sum=%.6f max=%.6f first=[%.6f %.6f %.6f %.6f]\n",
-               static_cast<long long>(layer), tag, sum, mx, val(bf[0]), val(bf[1]),
+  std::fprintf(stderr, "[STAGE][TT] L%lld %s sum=%.6f sq=%.6e hash=%08x max=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+               static_cast<long long>(layer), tag, sum, sq, hash, mx, val(bf[0]), val(bf[1]),
                val(bf[2]), val(bf[3]));
+}
+
+// SCRATCH DEBUG: dump a keyed weight once per layer (first forward only).
+bool l3dbg(int64_t layer) {
+  static std::set<int64_t> seen;
+  if (seen.count(layer)) return false;
+  seen.insert(layer);
+  return true;
+}
+
+// SCRATCH DEBUG (layer-1 moe localization): the router's raw logits, top-k
+// selection and weights per token — mirrors the CPU arm's RouteDump (same
+// env, same line shape) so the discrete-selection leg diffs arm vs arm. The
+// CPU arm stashes its logits in g_kolibri1_dbg_route_logits (same process);
+// this side prints the per-element diff against it plus the bf16-grid
+// membership count (a grid hit means the logit was computed IN bf16).
+float Kolibri1DbgToBf16(float v) {
+  uint32_t u;
+  std::memcpy(&u, &v, 4);
+  u = ((u + 0x7fffu + ((u >> 16) & 1u)) >> 16) << 16;
+  std::memcpy(&v, &u, 4);
+  return v;
+}
+
+void RouteDump(int64_t layer, const std::vector<float>& logits,
+               const Kolibri1HostRouting& route, int64_t t, int64_t e,
+               int64_t top_k) {
+  if (!StageDumpOn()) return;
+  for (int64_t i = 0; i < t; ++i) {
+    double ls = 0;
+    for (int64_t j = 0; j < e; ++j)
+      ls += logits[static_cast<size_t>(i * e + j)];
+    std::string ids, ws;
+    for (int64_t k = 0; k < top_k; ++k) {
+      const size_t idx = static_cast<size_t>(i * top_k + k);
+      ids += (k ? "," : "") + std::to_string(route.ids[idx]);
+      ws += (k ? "," : "") +
+            [](float v) {
+              char b[32];
+              std::snprintf(b, sizeof b, "%.6f", v);
+              return std::string(b);
+            }(route.weights[idx]);
+    }
+    std::fprintf(stderr,
+                 "[STAGE][TT] L%lld route tok=%lld logit_sum=%.6f ids=[%s] "
+                 "w=[%s]\n",
+                 static_cast<long long>(layer), static_cast<long long>(i), ls,
+                 ids.c_str(), ws.c_str());
+  }
+  if (g_kolibri1_dbg_route_logits.size() == logits.size()) {
+    double mad = 0, c2 = 0, dd2 = 0;
+    size_t grid = 0, kmax = 0;
+    for (size_t k = 0; k < logits.size(); ++k) {
+      const double c = g_kolibri1_dbg_route_logits[k];
+      const double tt = logits[k];
+      const double dd = std::fabs(c - tt);
+      if (dd > mad) { mad = dd; kmax = k; }
+      c2 += c * c;
+      dd2 += (c - tt) * (c - tt);
+      if (Kolibri1DbgToBf16(logits[k]) == logits[k]) ++grid;
+    }
+    std::fprintf(stderr,
+                 "[STAGE][TT] L%lld route_diff max=%.6f@%zu cpu=%.4f tt=%.4f "
+                 "bf16grid=%zu/%zu rel_rms=%.5f\n",
+                 static_cast<long long>(layer), mad, kmax,
+                 g_kolibri1_dbg_route_logits[kmax], logits[kmax], grid,
+                 logits.size(), std::sqrt(dd2 / (c2 != 0 ? c2 : 1)));
+  }
 }
 
 // ---- The routed-expert refusal (fires by name, counted, never thrown) ------
@@ -309,7 +390,7 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
           const auto* f4 = reinterpret_cast<const float*>(tmp.data());
           for (int64_t i = 0; i < tn.Numel(); ++i) s += f4[i];
         }
-        std::fprintf(stderr, "[STAGE] attnin %s sum=%.6f n=%lld dt=%d\n", tag, s,
+        std::fprintf(stderr, "[STAGE][TT] attnin %s sum=%.6f n=%lld dt=%d\n", tag, s,
                      static_cast<long long>(tn.Numel()),
                      static_cast<int>(tn.dtype));
       };
@@ -358,7 +439,7 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
     };
     const int64_t n = t * hq * dh;
     for (int64_t i = 0; i < n; ++i) s += val(bf[i]);
-    std::fprintf(stderr, "[STAGE] L%lld pa_out sum=%.6f first=%.6f\n",
+    std::fprintf(stderr, "[STAGE][TT] L%lld pa_out sum=%.6f first=%.6f\n",
                  static_cast<long long>(t * 0), s, val(bf[0]));
   }
   return LinearBTDevice(d, o_in, o_w, t);  // [T, H]
@@ -405,8 +486,67 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // The inherited sigmoid-logit-add routing (kolibri1_shared.h, verbatim
   // from the CPU row): selection on logits + bias, weights = sigmoid of
   // the UNBIASED logits, no renormalisation.
+  if (StageDumpOn() && l3dbg(layer)) {
+    const int64_t hk = w.router_gate.shape[1];
+    Tensor bt3 = ResidentWeight(d, w.router_gate, {e, hk});
+    std::vector<uint8_t> tb(static_cast<size_t>(e) * hk * 2);
+    d.b.Copy(d.q, tb.data(), bt3.data, tb.size());
+    d.b.Synchronize(d.q);
+    const auto* bf3 = reinterpret_cast<const uint16_t*>(tb.data());
+    uint32_t hh = 2166136261u;
+    double ss = 0;
+    for (int64_t i = 0; i < e * hk; ++i) {
+      hh = (hh ^ bf3[i]) * 16777619u;
+      uint32_t u = static_cast<uint32_t>(bf3[i]) << 16;
+      float f;
+      std::memcpy(&f, &u, 4);
+      ss += f;
+    }
+    std::fprintf(stderr, "[STAGE][TT] router_gate hash=%08x sum=%.4f\n", hh, ss);
+    // Host reference logits from the SAME dhn the MoeBlock received and the
+    // SAME router_gate bytes: separates "the GEMM ate the wrong data" from
+    // "the GEMM computed badly".
+    {
+      const int64_t hk2 = w.router_gate.shape[1];
+      std::vector<uint8_t> xb(static_cast<size_t>(t) * hk2 * 2);
+      d.b.Copy(d.q, xb.data(), dhn.data, xb.size());
+      d.b.Synchronize(d.q);
+      const auto* xb16 = reinterpret_cast<const uint16_t*>(xb.data());
+      std::vector<float> href(static_cast<size_t>(t) * e, 0.f);
+      for (int64_t n0 = 0; n0 < e; ++n0) {
+        const auto* wr =
+            reinterpret_cast<const uint16_t*>(tb.data()) +
+            static_cast<size_t>(n0) * hk2;
+        for (int64_t i = 0; i < t; ++i) {
+          double acc = 0;
+          for (int64_t k = 0; k < hk2; ++k) {
+            auto dec = [](uint16_t b) {
+              uint32_t u = static_cast<uint32_t>(b) << 16;
+              float f;
+              std::memcpy(&f, &u, 4);
+              return static_cast<double>(f);
+            };
+            acc += dec(wr[k]) * dec(xb16[static_cast<size_t>(i) * hk2 + k]);
+          }
+          href[static_cast<size_t>(i) * e + n0] = static_cast<float>(acc);
+        }
+      }
+      double madd = 0, mlog = 0;
+      for (size_t k = 0; k < href.size(); ++k) {
+        madd = std::max(madd, std::fabs(static_cast<double>(href[k]) -
+                                        static_cast<double>(logits[k])));
+        mlog = std::max(mlog, std::fabs(static_cast<double>(href[k]) -
+                                        static_cast<double>(
+                                            g_kolibri1_dbg_route_logits[k])));
+      }
+      std::fprintf(stderr,
+                   "[STAGE][TT] router_href maxdiff_dev=%.6f maxdiff_cpu=%.6f\n",
+                   madd, mlog);
+    }
+  }
   Kolibri1HostRouting route =
       SigmoidLogitAddRouting(logits, bias, t, e, top_k);
+  RouteDump(layer, logits, route, t, e, top_k);
 
   // SLICE ii: the routed tier. Without a streaming context (the
   // streaming-disabled arm) the B2b-i refusal still fires by name.
@@ -490,7 +630,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   st.epoch.Record(st.pool.policy);
   if (StageDumpOn()) {
     std::fprintf(stderr,
-                 "[STAGE] pool L%lld staged=%lld verified=%lld fills=%lld\n",
+                 "[STAGE][TT] pool L%lld staged=%lld verified=%lld fills=%lld\n",
                  static_cast<long long>(layer),
                  static_cast<long long>(st.staged_bytes),
                  static_cast<long long>(st.readback_verified_bytes),
@@ -610,10 +750,18 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         d.b.Copy(d.q, dp + s * rb,
                  sp + static_cast<size_t>(token_rows[s]) * rb, rb);
     }
-    StageDump("moe_gath", layer, gathered, d);
+    {
+      char tag[32];
+      std::snprintf(tag, sizeof tag, "moe_gath#%d", static_cast<int>(ex));
+      StageDump(tag, layer, gathered, d);
+    }
     DBuf o = ExpertMlp(d, gathered.t(), ne, inter, it->second.gate,
                        it->second.up, it->second.down);
-    StageDump("moe_ex", layer, o, d);
+    {
+      char tag[32];
+      std::snprintf(tag, sizeof tag, "moe_ex#%d", static_cast<int>(ex));
+      StageDump(tag, layer, o, d);
+    }
     for (int64_t i = 0; i < ne; ++i) {
       d.b.Copy(d.q,
                static_cast<char*>(expert_out.ptr()) +
@@ -630,7 +778,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     std::vector<float> wsum(route.weights.begin(), route.weights.end());
     double s = 0;
     for (float v : wsum) s += v;
-    std::fprintf(stderr, "[STAGE] route sum=%.6f n=%zu\n", s, wsum.size());
+    std::fprintf(stderr, "[STAGE][TT] route sum=%.6f n=%zu\n", s, wsum.size());
   }
   Tensor shared_t = shared.t();
   vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared_t,
@@ -824,7 +972,7 @@ ForwardLogits ForwardKolibri1TTResidentForward(
         return f;
       };
       for (int64_t i = 0; i < h; ++i) s += val(bf[i]);
-      std::fprintf(stderr, "[STAGE] gam sum=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+      std::fprintf(stderr, "[STAGE][TT] gam sum=%.6f first=[%.6f %.6f %.6f %.6f]\n",
                    s, val(bf[0]), val(bf[1]), val(bf[2]), val(bf[3]));
     }
     Tensor dhn_t = dhn.t();
@@ -838,6 +986,40 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     }
 
     StageDump("dhn", l, dhn, d);
+    if (l == 0 && !g_kolibri1_dbg_dhn.empty() &&
+        g_kolibri1_dbg_dhn.size() ==
+            static_cast<size_t>(dhn.t().shape[0] * dhn.t().shape[1])) {
+      std::vector<uint16_t> tb(g_kolibri1_dbg_dhn.size());
+      d.b.Copy(d.q, tb.data(), dhn.t().data, tb.size() * 2);
+      d.b.Synchronize(d.q);
+      auto dec = [](uint16_t b) {
+        uint32_t u = static_cast<uint32_t>(b) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return static_cast<double>(f);
+      };
+      double d2 = 0;
+      int worst[3] = {0, 0, 0};
+      double wv[3] = {0, 0, 0};
+      for (size_t i = 0; i < tb.size(); ++i) {
+        const double dd = dec(tb[i]) - dec(g_kolibri1_dbg_dhn[i]);
+        d2 += dd * dd;
+        if (std::fabs(dd) > wv[2]) {
+          wv[2] = std::fabs(dd);
+          worst[2] = static_cast<int>(i);
+          if (wv[2] > wv[1]) { std::swap(wv[1], wv[2]); std::swap(worst[1], worst[2]); }
+          if (wv[1] > wv[0]) { std::swap(wv[0], wv[1]); std::swap(worst[0], worst[1]); }
+        }
+      }
+      std::fprintf(stderr,
+                   "[STAGE][TT] dhn_diff rms=%.6f top0 i=%d cpu=%.6f tt=%.6f "
+                   "top1 i=%d cpu=%.6f tt=%.6f top2 i=%d cpu=%.6f tt=%.6f\n",
+                   std::sqrt(d2 / static_cast<double>(tb.size())), worst[0],
+                   dec(g_kolibri1_dbg_dhn[worst[0]]), dec(tb[worst[0]]),
+                   worst[1], dec(g_kolibri1_dbg_dhn[worst[1]]),
+                   dec(tb[worst[1]]), worst[2],
+                   dec(g_kolibri1_dbg_dhn[worst[2]]), dec(tb[worst[2]]));
+    }
     // Attention -> post_attn_norm (no residual).
     DBuf attn = AttentionBlock(d, lw.attn, p, lw.is_sliding, dhn.t(),
                                si.positions.t(), si, *kv_ptr, t, cl.q, cl.k,
