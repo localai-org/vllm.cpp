@@ -488,6 +488,14 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // Re-record the epoch AFTER the fills so the next layer's check fires
   // only on a NEW content change (swaps it did not cause itself).
   st.epoch.Record(st.pool.policy);
+  if (StageDumpOn()) {
+    std::fprintf(stderr,
+                 "[STAGE] pool L%lld staged=%lld verified=%lld fills=%lld\n",
+                 static_cast<long long>(layer),
+                 static_cast<long long>(st.staged_bytes),
+                 static_cast<long long>(st.readback_verified_bytes),
+                 static_cast<long long>(st.slot_fills));
+  }
 
   // The routed experts: the CPU row's gather/ExpertMlp/scatter over the
   // slot dequants, then the weighted combine with the always-added shared
@@ -500,6 +508,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
             const_cast<int32_t*>(route.ids.data()));
   DBuf shared = ExpertMlp(d, dhn, t, p.shared_expert_intermediate_size,
                           sh_gate_w, sh_up_w, sh_down_w);
+  StageDump("moe_shared", layer, shared, d);
   DBuf expert_out(d, DType::kBF16, {t, top_k, h});
   expert_out.Zero(d);
   for (int64_t ex = 0; ex < e; ++ex) {
@@ -559,7 +568,14 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         be.Free(ptr);
       });
       vt::Tensor* dsts[3] = {&dq.gate, &dq.up, &dq.down};
-      int64_t byte_base = 0;
+      // Two offsets over the carved allocation: the packed fp8 SOURCE
+      // advances ONE byte per element, the bf16 destination TWO. The old
+      // single byte_base doubled for both and walked the source out of the
+      // slot: up dequanted down's region and down dequanted past the slot
+      // end — NaN/Inf weights, the 1e38 routed-expert outputs, and the hard
+      // flips downstream (the local record this commit cites).
+      int64_t packed_base = 0;
+      int64_t bf16_base = 0;
       for (int pi = 0; pi < 3; ++pi) {
         const Kolibri1Projection& pr =
             pi == 0 ? ewx.gate_proj : (pi == 1 ? ewx.up_proj : ewx.down_proj);
@@ -568,8 +584,8 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         VT_CHECK(static_cast<int64_t>(pr.fp8_block.packed.bytes.size()) ==
                      n * k,
                  "kolibri1-tt B2b-ii: routed projection byte math diverged");
-        auto* dst = static_cast<uint16_t*>(bp) + byte_base / 2;
-        const auto* src = rb.data() + byte_base;
+        auto* dst = static_cast<uint16_t*>(bp) + bf16_base / 2;
+        const auto* src = rb.data() + packed_base;
         const auto* sc =
             reinterpret_cast<const float*>(pr.fp8_block.scale.bytes.data());
         host_parallel::ForOutputRows(n, k, [&](int64_t n0, int64_t n1) {
@@ -577,7 +593,8 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
                                         pr.fp8_block.block_n,
                                         pr.fp8_block.block_k, dst);
         });
-        byte_base += n * k * 2;
+        packed_base += n * k;
+        bf16_base += n * k * 2;
         *dsts[pi] = MakeTensor(dst, DType::kBF16, d.q.device,
                                std::vector<int64_t>{n, k});
       }
@@ -593,8 +610,10 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         d.b.Copy(d.q, dp + s * rb,
                  sp + static_cast<size_t>(token_rows[s]) * rb, rb);
     }
+    StageDump("moe_gath", layer, gathered, d);
     DBuf o = ExpertMlp(d, gathered.t(), ne, inter, it->second.gate,
                        it->second.up, it->second.down);
+    StageDump("moe_ex", layer, o, d);
     for (int64_t i = 0; i < ne; ++i) {
       d.b.Copy(d.q,
                static_cast<char*>(expert_out.ptr()) +
@@ -607,9 +626,16 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     }
   }
   DBuf out(d, DType::kBF16, {t, h});
+  if (StageDumpOn()) {
+    std::vector<float> wsum(route.weights.begin(), route.weights.end());
+    double s = 0;
+    for (float v : wsum) s += v;
+    std::fprintf(stderr, "[STAGE] route sum=%.6f n=%zu\n", s, wsum.size());
+  }
   Tensor shared_t = shared.t();
   vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared_t,
                  /*routed_scale=*/1.0f);
+  StageDump("moe_combined", layer, out, d);
   return out;
 }
 
