@@ -1394,6 +1394,68 @@ TEST_CASE("kTENSTORRENT kQkvSplit device path matches host within BF16 envelope"
   CHECK(max_abs < 0.05f);
 }
 
+// Rank-3 outs [T, Hq, Dh]: the shape the OPT caller passes
+// (src/vllm/model_executor/models/opt.cpp) and that CPU/Vulkan/Metal QkvSplit
+// all accept — their flat-width contract is q_dim = Numel/t regardless of out
+// rank. Mirrors the sweep leg-1 throw (ISSUE-LOCAL-01M4J8TY34AKMC4NFACBNSA2ED).
+TEST_CASE("kTENSTORRENT kQkvSplit accepts rank-3 [T, H, Dh] outs (OPT shape)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kQkvSplit, DeviceType::kTENSTORRENT));
+
+  // OPT-125M-like: equal widths, out rank 3.
+  constexpr int64_t T = 5, Hq = 12, Dh = 64, Hkv = 12;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+
+  std::vector<float> host_qkv(static_cast<size_t>(T * 3 * Hq * Dh));
+  for (size_t i = 0; i < host_qkv.size(); ++i)
+    host_qkv[i] = static_cast<float>(i % 23) * 0.1f - 1.1f;
+
+  void* mem_qkv = backend.Alloc(host_qkv.size() * sizeof(float));
+  void* mem_q = backend.Alloc(static_cast<size_t>(T * Hq * Dh) * sizeof(float));
+  void* mem_k = backend.Alloc(static_cast<size_t>(T * Hkv * Dh) * sizeof(float));
+  void* mem_v = backend.Alloc(static_cast<size_t>(T * Hkv * Dh) * sizeof(float));
+  Queue q = backend.CreateQueue();
+  backend.Copy(q, mem_qkv, host_qkv.data(), host_qkv.size() * sizeof(float));
+
+  Tensor qkv = Tensor::Contiguous(mem_qkv, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {T, 3 * Hq * Dh});
+  Tensor tq = Tensor::Contiguous(mem_q, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0},
+                                 {T, Hq, Dh});
+  Tensor tk = Tensor::Contiguous(mem_k, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0},
+                                 {T, Hkv, Dh});
+  Tensor tv = Tensor::Contiguous(mem_v, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0},
+                                 {T, Hkv, Dh});
+
+  auto split =
+      reinterpret_cast<vt::QkvSplitFn>(vt::GetOp(vt::OpId::kQkvSplit, DeviceType::kTENSTORRENT));
+  split(q, tq, tk, tv, qkv);
+
+  std::vector<float> host_q(static_cast<size_t>(T * Hq * Dh)),
+      host_k(static_cast<size_t>(T * Hkv * Dh)), host_v(static_cast<size_t>(T * Hkv * Dh));
+  backend.Copy(q, host_q.data(), mem_q, host_q.size() * sizeof(float));
+  backend.Copy(q, host_k.data(), mem_k, host_k.size() * sizeof(float));
+  backend.Copy(q, host_v.data(), mem_v, host_v.size() * sizeof(float));
+  backend.Free(mem_qkv);
+  backend.Free(mem_q);
+  backend.Free(mem_k);
+  backend.Free(mem_v);
+
+  for (int64_t i = 0; i < T; ++i) {
+    for (int64_t j = 0; j < Hq * Dh; ++j)
+      CHECK(host_q[static_cast<size_t>(i * Hq * Dh + j)] ==
+            host_qkv[static_cast<size_t>(i * 3 * Hq * Dh + j)]);
+    for (int64_t j = 0; j < Hkv * Dh; ++j) {
+      CHECK(host_k[static_cast<size_t>(i * Hkv * Dh + j)] ==
+            host_qkv[static_cast<size_t>(i * 3 * Hq * Dh + Hq * Dh + j)]);
+      CHECK(host_v[static_cast<size_t>(i * Hkv * Dh + j)] ==
+            host_qkv[static_cast<size_t>(i * 3 * Hq * Dh + 2 * Hq * Dh + j)]);
+    }
+  }
+}
+
 TEST_CASE("kTENSTORRENT kReshapeAndCache is BIT-EXACT incl. slot<0 skip") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
