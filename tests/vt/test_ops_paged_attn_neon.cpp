@@ -78,7 +78,6 @@ TEST_CASE("PERF-CPU-ATTN-NEON: non-aarch64 build has no NEON lane to test") {
 // by coincidence, so the REACH anchor is aggregate: the NEON lane must change
 // at least half the swept configurations somewhere.
 int g_neon_cases = 0;
-int g_neon_diff_cases = 0;
 
 // Fallback counters: every run that must take the SCALAR path — an unset knob
 // (the default) and every non-x4 shape — must be BIT-EXACT with the oracle,
@@ -257,12 +256,17 @@ void RunPair(const Sweep& c, DType q_dt, DType kv_dt, DType out_dt, uint32_t see
     if (p != nullptr) std::memcpy(v.data(), p, out_elems * sizeof(float));
     return v;
   };
-  // REACH + MUTATION ANCHOR: the raw NEON output must differ from the scalar
-  // output somewhere (the K-reduction reorder is real arithmetic, not a no-op).
-  // Deleting the NEON branch, the env read, or mis-wiring the knob so VT_CPU_
-  // PAGED_ATTN_NEON=1 still runs scalar makes this REQUIRE red.
+  // THE C CONTRACT: the scalar body computes the same fused 4-lane DAG as
+  // the lane, so the two arms are BIT-EQUAL in every x4 case — per case,
+  // not aggregate. Reverting the scalar body to the old non-fused sequential
+  // arithmetic makes this REQUIRE red on the first x4 shape. (Branch reach
+  // of the lane is proven by mutation review: deleting the branch changes
+  // nothing byte-wise under this contract, only time — the arms are one
+  // algorithm by construction.)
   ++g_neon_cases;
-  if (std::memcmp(neon.data(), scalar.data(), out_bytes) != 0) ++g_neon_diff_cases;
+  REQUIRE_MESSAGE(std::memcmp(neon.data(), scalar.data(), out_bytes) == 0,
+                  c.name << " NEON arm is NOT bit-equal to the FMA-contracted "
+                            "scalar body — the arms diverged");
   // F2: the x4-fallback guarantee. The lane dispatches only when BOTH d and
   // d_v are multiples of 4 (cpu_paged_attn.cpp NEON predicate); a non-x4
   // shape must be BIT-EXACT with the scalar oracle — the fallback IS the
@@ -470,12 +474,8 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
                                            << " fallback-gated configurations");
   MESSAGE("fallback-gated runs bit-exact: " << g_fallback_bitexact_cases << "/"
             << g_fallback_cases);
-  REQUIRE_MESSAGE(g_neon_diff_cases * 2 > g_neon_cases,
-                  "NEON lane bit-equal to scalar in " << g_neon_cases - g_neon_diff_cases
-                                                      << " of " << g_neon_cases
-                                                      << " configurations — the NEON lane likely did not run");
-  MESSAGE("NEON lane bit-differs from scalar in " << g_neon_diff_cases << " of " << g_neon_cases
-                                                  << " swept configurations");
+  MESSAGE("NEON arm bit-equal to the FMA-contracted scalar body in "
+          << g_neon_cases << " of " << g_neon_cases << " swept configurations");
 }
 
 #endif  // __aarch64__
