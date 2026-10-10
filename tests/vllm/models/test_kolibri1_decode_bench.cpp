@@ -60,7 +60,12 @@ constexpr int64_t kPromptLen = 128;
 constexpr int kSteps = 63;
 // The token-identity anchor: the greedy last token captured on main
 // 323f81ca6 (2026-10-07, this bench, 8 and 4 threads).
-constexpr int32_t kAnchorLastToken = 109726;
+// Re-anchored under the FMA-contract paged-attention numerics (draft:
+// GitHub #3438 option C). Under the fused numerics this prompt's greedy
+// chain is the alternate near-tie chain — 33382 from the prefill token on —
+// and both paged-attention arms are bit-identical, so one anchor serves
+// them both. The pre-fuse anchor was 109726 (chain 101807/109726).
+constexpr int32_t kAnchorLastToken = 33382;
 
 struct Topology {
   vt::DType dtype = vt::DType::kBF16;
