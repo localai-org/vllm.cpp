@@ -124,11 +124,15 @@ void StoreRowF32(const Tensor& t, int64_t elem_offset, int64_t n, const float* s
 // ---------------------------------------------------------------------------
 #if defined(__aarch64__)
 bool PagedAttnNeonActive() {
-  // Default ON since the 2026-10-10 developer decision (the A/B evidence
-  // stands: attn_core halves, W3 adjudicates the near-tie flips); `=0` is the
-  // rollback to the scalar body in the same binary.
+  // ROLLED BACK to opt-in (ISSUE-LOCAL-01M4J4QNTE166QFG5MN7V3H4DG): under
+  // thread contention (host load ~18) the lane serves a DEGENERATE chain
+  // (prefill anchor 33382, not 101807) while the scalar path on the same
+  // host, same 32 threads, is correct — a load-dependent race in the lane's
+  // parallel dispatch that quiet-host gates (W3 900/900) never see. The
+  // scalar body is the default again; an explicit `=1` opts into the lane
+  // for the race hunt. `=0` keeps working.
   const char* e = std::getenv("VT_CPU_PAGED_ATTN_NEON");
-  return !(e != nullptr && e[0] == '0' && e[1] == '\0');
+  return e != nullptr && e[0] == '1';
 }
 
 // Four consecutive K/V elements as an f32 vector, the vector counterpart of
@@ -273,8 +277,9 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
     }
   }
 
-  // NEON lane, resolved ONCE per invocation. Default ON: the A/B evidence and
-  // the model gates adjudicate it; `VT_CPU_PAGED_ATTN_NEON=0` is the rollback.
+  // NEON lane, resolved ONCE per invocation. Opt-in again (the default-on
+  // flip raced under load; ISSUE-LOCAL-01M4J4QNTE166QFG5MN7V3H4DG): an
+  // explicit `=1` selects the lane, anything else runs the scalar body.
   // The scalar body below stays the reference and the non-aarch64 path.
 #if defined(__aarch64__)
   const bool neon_active = PagedAttnNeonActive();
