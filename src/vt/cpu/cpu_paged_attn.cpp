@@ -105,8 +105,8 @@ void StoreRowF32(const Tensor& t, int64_t elem_offset, int64_t n, const float* s
 
 // ---------------------------------------------------------------------------
 // PERF-CPU-ATTN-NEON. The K dot-product and the V accumulation below run the
-// SAME math as the scalar reference, one float32x4 at a time, aarch64 only and
-// behind VT_CPU_PAGED_ATTN_NEON (default off; the scalar path stays the
+// SAME math as the scalar reference, one float32x4 at a time, aarch64 only
+// (default on; `VT_CPU_PAGED_ATTN_NEON=0` rolls back to the scalar body, the
 // reference and the non-aarch64 path). Two consequences the scalar body does
 // not have:
 //   1. The K reduction order changes (four interleaved lanes summed by
@@ -124,8 +124,11 @@ void StoreRowF32(const Tensor& t, int64_t elem_offset, int64_t n, const float* s
 // ---------------------------------------------------------------------------
 #if defined(__aarch64__)
 bool PagedAttnNeonActive() {
+  // Default ON since the 2026-10-10 developer decision (the A/B evidence
+  // stands: attn_core halves, W3 adjudicates the near-tie flips); `=0` is the
+  // rollback to the scalar body in the same binary.
   const char* e = std::getenv("VT_CPU_PAGED_ATTN_NEON");
-  return e != nullptr && e[0] == '1';
+  return !(e != nullptr && e[0] == '0' && e[1] == '\0');
 }
 
 // Four consecutive K/V elements as an f32 vector, the vector counterpart of
@@ -270,9 +273,9 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
     }
   }
 
-  // NEON lane, resolved ONCE per invocation. Off by default: VT_CPU_PAGED_ATTN_NEON=1
-  // is the opt-in while the A/B evidence stands; the scalar body below stays the
-  // reference and the non-aarch64 path.
+  // NEON lane, resolved ONCE per invocation. Default ON: the A/B evidence and
+  // the model gates adjudicate it; `VT_CPU_PAGED_ATTN_NEON=0` is the rollback.
+  // The scalar body below stays the reference and the non-aarch64 path.
 #if defined(__aarch64__)
   const bool neon_active = PagedAttnNeonActive();
 #else
