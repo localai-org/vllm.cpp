@@ -294,6 +294,21 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   }
 
   Tensor o_in = Reshape(attn.t(), {t, hq * dh});
+  if (std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr) {
+    std::vector<uint8_t> tmp(static_cast<size_t>(t) * hq * dh * 2);
+    attn.Download(d, tmp.data());
+    const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+    double s = 0;
+    auto val = [](uint16_t bits) {
+      uint32_t u = static_cast<uint32_t>(bits) << 16;
+      float f;
+      std::memcpy(&f, &u, 4);
+      return f;
+    };
+    const int64_t n = t * hq * dh;
+    for (int64_t i = 0; i < n; ++i) s += val(bf[i]);
+    std::fprintf(stderr, "[STAGE] pa_out sum=%.6f first=%.6f\n", s, val(bf[0]));
+  }
   return LinearBT(d, o_in, w.o_proj, t);  // [T, H]
 }
 
@@ -387,6 +402,39 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   return out;
 }
 
+// SCRATCH DEBUG (root-cause the host-free decode corruption): per-stage
+// activation checksums mirroring the TT arm's dump (same tags, same env), so
+// the TT stage outputs diff against the CPU reference stage by stage.
+bool StageDumpOn() {
+  static const bool on = std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr;
+  return on;
+}
+
+void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
+  if (!StageDumpOn()) return;
+  const Tensor& t = buf.t();
+  const int64_t n = t.shape[0] * t.shape[1];
+  std::vector<uint8_t> tmp(static_cast<size_t>(n) * 2);
+  buf.Download(d, tmp.data());
+  const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+  double sum = 0;
+  float mx = 0;
+  auto val = [](uint16_t bits) {
+    uint32_t u = static_cast<uint32_t>(bits) << 16;
+    float f;
+    std::memcpy(&f, &u, 4);
+    return f;
+  };
+  for (int64_t i = 0; i < n; ++i) {
+    const float v = val(bf[i]);
+    sum += v;
+    if (std::fabs(v) > mx) mx = std::fabs(v);
+  }
+  std::fprintf(stderr, "[STAGE] L%lld %s sum=%.6f max=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+               static_cast<long long>(layer), tag, sum, mx, val(bf[0]), val(bf[1]),
+               val(bf[2]), val(bf[3]));
+}
+
 }  // namespace
 
 ForwardLogits ForwardKolibri1Forward(
@@ -458,14 +506,17 @@ ForwardLogits ForwardKolibri1Forward(
     }
 
     // Attention -> post_attn_norm (no residual).
+    StageDump("dhn", l, dhn, d);
     DBuf attn = AttentionBlock(d, lw.attn, p, lw.is_sliding, dhn.t(),
                                si.positions.t(), si, *kv_ptr, t);
+    StageDump("attn", l, attn, d);
     DBuf attn_n(d, DType::kBF16, {t, h});
     Tensor w_pa = ResidentWeight(d, lw.post_attn_norm, {h});
     {
       prof::Scope prof("norms");
       vt::RmsNorm(d.q, attn_n.t(), attn.t(), w_pa, vt::RmsNormArgs{eps, false});
     }
+    StageDump("attn_n", l, attn_n, d);
 
     // post_attention_layernorm carries the residual: residual += the
     // POST-NORMED attention output (kolibri1.py:250).
@@ -482,15 +533,18 @@ ForwardLogits ForwardKolibri1Forward(
       vt::RmsNorm(d.q, dh2_t, attn_n.t(), w_pal, vt::RmsNormArgs{eps, false},
                   &res_t);
     }
+    StageDump("dh2", l, dh2, d);
 
     // MoE on EVERY layer -> post_ffn_norm (no residual).
     DBuf moe = MoeBlock(d, lw.moe, p, dh2.t(), t);
+    StageDump("moe", l, moe, d);
     DBuf moe_n(d, DType::kBF16, {t, h});
     Tensor w_pf = ResidentWeight(d, lw.post_ffn_norm, {h});
     {
       prof::Scope prof("norms");
       vt::RmsNorm(d.q, moe_n.t(), moe.t(), w_pf, vt::RmsNormArgs{eps, false});
     }
+    StageDump("moe_n", l, moe_n, d);
 
     auto* held = new DBuf(std::move(moe_n));
     hidden = held->t();
