@@ -360,3 +360,84 @@ with a delivered sensitivity table, not the only remaining lever — and that
 decision belongs to the developer. This unit delivers the corrected
 attribution, the phase split, the falsifications with their measurements, and
 the budget-sensitivity table backing a default recommendation.
+
+## 4. Post-NUMA attribution: the in-process interleave lever lands, and the
+## decode wall moves (2026-10-09/10, ISSUE-LOCAL-01M4GQ82X99D6JNBWDPX7ATJPY)
+
+The lever this doc's mechanism section predicted — allocation placement, not
+scheduling — is landed in-process on `row/kolibri-numa-interleave`
+(commit `1bdb9c1cc`): a scoped `set_mempolicy(MPOL_INTERLEAVE, allowed_nodes)`
+over the two weight-arena allocation sites (`LoadKolibri1Weights` and the
+dequant-cache miss decode), knob `VT_KOLIBRI1_NUMA_INTERLEAVE` (0 = off, unset
+= on). Raw syscalls, no libnuma link. `test_kolibri1_numa` pins the seam
+(policy engaged and restored; a touched 128 MiB arena spans >1 NUMA node under
+the guard and exactly 1 under default first-touch; a cache miss's decoded
+block lands interleaved).
+
+Build: Release, `-DVLLM_CPP_CUDA=OFF -DVLLM_CPP_TENSTORRENT=OFF
+-DVLLM_CPP_SERVER=OFF -DVLLM_CPP_BUILD_EXAMPLES=OFF`, worktree
+`/tmp/vllm-kolibri-numa`, build `/tmp/build-kolibri-numa`, checkpoint
+`/mnt/models/Aleph-Alpha/Kolibri-1`. Bench:
+`VLLM_CPP_CPU_THREADS=<t> VT_KOLIBRI1_DEQUANT_CACHE_MB=16384
+[VT_KOLIBRI1_NUMA_INTERLEAVE=0] ctest -R '^test_kolibri1_decode_bench$'`.
+
+A/B, 3 reps per config (per-leg 1-min load at start; t8/t32-off legs ran at
+the strict load < 1.0 gate; the t32-on and profile legs ran at load < 1.6
+because the host's `rtk` daemon holds a constant ~0.5 floor that made the
+strict gate unreachable overnight — the daemon was running during the strict
+legs too, and no other kolibri/bench process by name on any leg; > 190 GB
+available on every leg):
+
+| config | interleave OFF (tok/s) | interleave ON (tok/s) | ON vs OFF |
+|---|---|---|---|
+| t8 | 3.168 / 3.149 / 3.143 | 3.213 / 3.190 / 3.229 | +1.4-2.7% |
+| t32 | 3.963 / 4.076 / 4.105 | 4.638 / 4.635 / 4.585 | **+12-17%** |
+
+Numerics: ALL TWELVE legs exit 0 with the CHAIN byte-identical
+(md5 `8de1463a`, last token 109726, alternating 101807/109726) and the
+profiled legs' whole-run cache counters byte-identical to the record
+(`hits=71157 misses=18717 evictions=13264 decode_calls=89874`) — allocation
+policy only, as designed. t8 barely moves (8 threads sit near the loading
+node), t32+interleave reaches 4.59-4.64, reproducing the measured
+`numactl --interleave=all` figure (4.69) in-process with no wrapper.
+
+### 4b. The fresh post-NUMA decode-phase attribution
+
+Legs: t32 + interleave ON + 16 GiB cache, `VT_KOLIBRI1_PROFILE=1`, 3 reps
+(4.629 / 4.614 / 4.609 tok/s — the profiler costs nothing measurable). Same
+R60 − R10 exact-decode-window method as §2b (forwards #11..#60, 50 pure t=1
+decode steps):
+
+| stage | s (rep1 / rep2 / rep3) | ms per decode step | share of the decode-phase forward time | pre-NUMA share (§2b) |
+|---|---|---|---|---|
+| linear_gemm | 4.85 / 4.83 / 4.83 | 97.0 | **46%** | 59% |
+| attn_core | 4.10 / 4.09 / 4.10 | 82.0 | **39%** | 27% |
+| moe_glue | 2.05 / 2.05 / 2.07 | 41.0 | 20% (NESTED, same caveat) | 26% |
+| attn_rope | 0.50 / 0.50 / 0.50 | 10.0 | 5% | 3% |
+| lm_head | 0.33 / 0.33 / 0.33 | 6.6 | 3% | 5% |
+| norms | 0.18 / 0.19 / 0.18 | 3.6 | 2% | 1% |
+| dequant_fp8_block | 0.18 / 0.18 / 0.18 | 3.6 | 2% | 3% |
+| total_forward | 10.53 / 10.51 / 10.54 | 210.6 | 100% | 302-304 ms/step |
+
+What moved and what did not: the weight-streaming stages collapsed
+(linear_gemm 178→97 ms/step; steady-state cold misses 10→3.6 ms/step), while
+attention is UNCHANGED to the tenth of a millisecond (attn_core 82.0 ms/step
+before and after — it touches KV-cache and activations, not weight arenas, so
+the lever could not reach it, and the prediction is confirmed). The decode
+step is 210 ms, down from ~315.
+
+THE NEXT WALL: attention. linear_gemm is still the largest single stage (46%)
+but it dropped 45% and its bit-exact candidates are already falsified (§3a,
+§3b); the remaining GEMM space (scheduling/layout/threading variants) is open
+but the measured headroom left there is bounded by what interleave already
+harvested. attn_core is now 39% and is the only large stage whose absolute
+cost has never moved in ANY measured experiment in this unit. The next lever
+is the attention core (decode-path attention kernels: KV gather, the
+q·k/o·v GEMVs, and their threading), with GEMM scheduling/layout variants the
+second candidate. lm_head and moe_glue are small or nested and stay
+deprioritized.
+
+Gate evidence at the final config (t32 + interleave ON + 16 GiB cache):
+`test_kolibri1_w3` PASS — see the PR body for the run's fingerprint line;
+the kolibri unit battery (test_kolibri1, _dequant, _dequant_cache,
+_moe_glue, mimov2_w1, _w2) is green on the same tree.
