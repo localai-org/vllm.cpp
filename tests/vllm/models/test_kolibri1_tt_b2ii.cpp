@@ -964,4 +964,156 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
   // THE GATE VERDICT: 141/145 with the flips inside the band, 0 hard.
   CHECK(argmax_matches >= 141);
   CHECK(hard_flips == 0);
+
+  // ---- the near-tie instrument (the decode-bench methodology,
+  // tests/vllm/models/test_kolibri1_decode_bench.cpp RunTeacherForced) ----
+  //
+  // The byte-comparison pass above BREAKS at the first divergence, so every
+  // later same-index comparison never happens — but the moment the
+  // free-running chain splits from the golden, ANY per-index comparison
+  // against a different prefix is meaningless. This instrument adjudicates
+  // each divergence under the COMMON (golden) prefix:
+  //   pass 1: the TT engine TEACHER-FORCED on the golden chain's tokens
+  //           (decode inputs = generated_ids[d-1], never the engine's own
+  //           argmax) — per-step logits under the golden prefix;
+  //   pass 2: the TT engine free-running over the full 32 steps — the
+  //           free chain marks the DIVERGENCE positions (not flips yet).
+  // A divergence is a flip only when the engine's teacher-forced argmax
+  // under the golden prefix also differs from the golden token; the gap is
+  // scored in that engine row. The committed goldens carry per-step TOKENS
+  // only (final_logits is the prefill's last position, one top-5), so the
+  // distribution here is the engine's own teacher-forced row — the
+  // documented fallback. In-band (<= 2.5 nats) and in the row's top-5 =>
+  // NEAR-TIE; otherwise HARD. hard_flips == 0 is the NEW check; it is
+  // expected to be RED today — that red quantifies the real defect.
+  int64_t instr_divergences = 0, instr_flips = 0, instr_near_ties = 0,
+           instr_hard_flips = 0;
+  double instr_worst_gap = 0.0;
+  std::vector<std::string> hard_records;
+  for (const GateGolden& gp : LoadGateGoldens()) {
+    auto walk = [&](const std::vector<int32_t>* forced) {
+      std::vector<int32_t> chain;
+      std::vector<std::vector<float>> rows;
+      for (auto& kkeep : kv_keep)
+        std::memset(kkeep.get(), 0, static_cast<size_t>(kv_bytes));
+      std::vector<int32_t> seq;
+      int32_t prev = -1;
+      for (int32_t step = 0; step < kGateSteps; ++step) {
+        if (static_cast<size_t>(step) < gp.input_ids.size()) {
+          seq.push_back(gp.input_ids[static_cast<size_t>(step)]);
+          ForwardLastLogits(*model, config, q, be, kv, {seq.back()},
+                            static_cast<int64_t>(seq.size()) - 1, num_blocks);
+          continue;
+        }
+        if (step == static_cast<int32_t>(gp.input_ids.size())) {
+          // First decode logits come off the prompt's last position.
+        } else {
+          // Feed the GOLDEN chain's previous token, never the engine's own
+          // argmax: decode position d predicts generated_ids[d] from the
+          // prefix ending with generated_ids[d-1]. The walk's global `step`
+          // is prompt_len + d, so the fed token is generated_ids[step-1].
+          const int32_t fed =
+              forced != nullptr
+                  ? (*forced)[static_cast<size_t>(step) - 1]
+                  : prev;
+          seq.push_back(fed);
+        }
+        std::vector<float> row = ForwardLastLogits(
+            *model, config, q, be, kv, {seq.back()},
+            static_cast<int64_t>(seq.size()) - 1, num_blocks);
+        prev = static_cast<int32_t>(
+            std::max_element(row.begin(), row.end()) - row.begin());
+        chain.push_back(prev);
+        rows.push_back(std::move(row));
+      }
+      return std::make_pair(std::move(chain), std::move(rows));
+    };
+
+    // PASS 1 (first, so a free-run failure cannot eat the scoring pass):
+    // teacher-forced on the golden chain; adjudicate each divergence under
+    // the common golden prefix.
+    std::vector<int32_t> forced;
+    forced.reserve(gp.generated_ids.size());
+    for (int32_t t : gp.generated_ids) forced.push_back(t);
+    // KNOWN DEFECT (observed, VT_TT_HOST_FREE_DECODE=0, 2026-10-10): even
+    // the GOLDEN-prefix walk can hit the streaming pool's no-slot refusal
+    // mid-chain ("expert N selected on layer L but no slot holds it",
+    // kolibri1_tt_forward.cpp) — the byte gate never reaches that state
+    // because it breaks at the first divergence. Record the abort, keep
+    // every prompt adjudicated so far.
+    std::pair<std::vector<int32_t>, std::vector<std::vector<float>>> tf_run;
+    try {
+      tf_run = walk(&forced);
+    } catch (const std::runtime_error& e) {
+      MESSAGE("teacher-forced run aborted on '" << gp.prompt
+                                                << "' (recorded defect): "
+                                                << e.what());
+      continue;
+    }
+    const std::vector<int32_t>& tf_chain = tf_run.first;
+    const std::vector<std::vector<float>>& tf_rows = tf_run.second;
+    for (size_t d = 0; d < tf_chain.size(); ++d) {
+      const int32_t lane_tok = tf_chain[d];
+      const int32_t want =
+          gp.generated_ids[d];
+      if (lane_tok == want) continue;  // prefix amplification, not a flip
+      ++instr_flips;
+      const std::vector<float>& row = tf_rows[d];
+      const int32_t top = static_cast<int32_t>(
+          std::max_element(row.begin(), row.end()) - row.begin());
+      const double gap = static_cast<double>(row[static_cast<size_t>(top)]) -
+                         static_cast<double>(row[static_cast<size_t>(want)]);
+      instr_worst_gap = std::max(instr_worst_gap, gap);
+      int above = 0;
+      for (float v : row)
+        if (static_cast<double>(v) >
+            static_cast<double>(row[static_cast<size_t>(want)]))
+          ++above;
+      const bool in_top5 = above < 5;
+      if (gap > kNatBand || !in_top5) {
+        ++instr_hard_flips;
+        hard_records.push_back("'" + gp.prompt + "' step " +
+                               std::to_string(d) + ": golden " +
+                               std::to_string(want) + " tf-argmax " +
+                               std::to_string(lane_tok) + ", gap " +
+                               std::to_string(gap) + " nats, in-top5=" +
+                               (in_top5 ? "yes" : "no"));
+      } else {
+        ++instr_near_ties;
+      }
+    }
+
+    // PASS 2: free-running over the FULL 32 steps — the divergence count.
+    // KNOWN DEFECT (observed, host-free ON, 2026-10-10): past the first
+    // divergence the free-running chain can route experts the streaming
+    // slot pool refuses to serve ("expert N selected on layer L but no
+    // slot holds it", kolibri1_tt_forward.cpp) — the golden-prefix walk
+    // never reaches that state because the byte gate breaks at the first
+    // divergence. The refusal is a FINDING, not something this instrument
+    // fixes: record it, keep the divergences counted up to the abort.
+    try {
+      const auto free_run = walk(nullptr);
+      const std::vector<int32_t>& free_chain = free_run.first;
+      for (size_t d = 0; d < free_chain.size(); ++d)
+        if (free_chain[d] != gp.generated_ids[d]) ++instr_divergences;
+    } catch (const std::runtime_error& e) {
+      MESSAGE("free run aborted on '" << gp.prompt
+                                      << "' (recorded defect): " << e.what());
+    }
+  }
+  MESSAGE("NEAR-TIE INSTRUMENT: " << instr_divergences
+                                  << " free-running divergences, "
+                                  << instr_flips << " teacher-forced flips ("
+                                  << instr_near_ties << " near-ties, "
+                                  << instr_hard_flips << " HARD), worst "
+                                     "teacher-forced gap "
+                                  << instr_worst_gap << " nats (band "
+                                  << kNatBand << ", top-5, engine's own "
+                                     "teacher-forced logits as the "
+                                     "distribution — the goldens carry "
+                                     "per-step tokens only)");
+  for (const std::string& r : hard_records) MESSAGE("REAL hard flip: " << r);
+  // THE ADJUDICATED VERDICT (expected RED today): every divergence under the
+  // common prefix must be a near-tie.
+  CHECK(instr_hard_flips == 0);
 }
