@@ -464,6 +464,7 @@ ForwardLogits ForwardKolibri1Forward(
     Tensor tab = ResidentWeight(d, weights.embed_tokens, {vocab, h});
     vt::Embedding(d.q, hidden_buf.t(), tab, ids.t());
   }
+  StageDump("emb", -2, hidden_buf, d);
   Tensor hidden = hidden_buf.t();
   DBuf res(d, DType::kBF16, {t, h});
   res.Zero(d);
@@ -493,6 +494,30 @@ ForwardLogits ForwardKolibri1Forward(
     // input_layernorm + residual (the vLLM fused add-norm contract).
     DBuf dhn(d, DType::kBF16, {t, h});
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
+    if (StageDumpOn() && l == 0) {
+      // SCRATCH: the gamma bytes as the device arm would see them (bf16).
+      double s = 0;
+      auto val = [](uint16_t bits) {
+        uint32_t u = static_cast<uint32_t>(bits) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+      };
+      std::vector<uint16_t> bf(static_cast<size_t>(h));
+      if (w_in.dtype == vt::DType::kBF16) {
+        const auto* p16 = static_cast<const uint16_t*>(w_in.data);
+        for (int64_t i = 0; i < h; ++i) bf[static_cast<size_t>(i)] = p16[i];
+      } else {
+        const auto* pf = static_cast<const float*>(w_in.data);
+        for (int64_t i = 0; i < h; ++i) {
+          float v = pf[i];
+          std::memcpy(&bf[static_cast<size_t>(i)], &v, 2);  // low bits (trunc)
+        }
+      }
+      for (int64_t i = 0; i < h; ++i) s += val(bf[static_cast<size_t>(i)]);
+      std::fprintf(stderr, "[STAGE] gam sum=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+                   s, val(bf[0]), val(bf[1]), val(bf[2]), val(bf[3]));
+    }
     Tensor dhn_t = dhn.t();
     Tensor res_t = res.t();
     if (dense_attn::FusedChainAdoptEnabled()) {
