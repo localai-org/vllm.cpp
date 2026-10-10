@@ -1470,6 +1470,7 @@ add_library(vllm STATIC
   src/vt/cpu/cpu_quant_dot.cpp
   src/vt/cpu/cpu_quant_dot_sdot.cpp
   src/vt/cpu/cpu_quant_dot_arm.cpp
+  src/vt/cpu/cpu_paged_attn_bfdot_arm.cpp
   src/vt/cpu/cpu_quant_repack.cpp
   src/vt/cpu/cpu_quant_repack_arm.cpp
   src/vt/cpu/cpu_quant_traits.cpp
@@ -1558,6 +1559,12 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     src/vt/cpu/cpu_quant_dot_arm.cpp
     src/vt/cpu/cpu_quant_repack_arm.cpp PROPERTIES
     COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+i8mm+dotprod>")
+  # Paged-attention BFDOT arm: same per-file +bf16 / runtime-HWCAP shape as the
+  # mmla tier above. The kernel is handed out only after DetectArmBf16() proves
+  # FEAT_BF16, and only behind VT_CPU_PAGED_ATTN_BFDOT=1 (default off).
+  set_source_files_properties(
+    src/vt/cpu/cpu_paged_attn_bfdot_arm.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+bf16>")
 endif()
 # Static-init registrars (e.g. the CPU backend, the platform table, the op
 # table, the attention backends) live in archive members no consumer references
