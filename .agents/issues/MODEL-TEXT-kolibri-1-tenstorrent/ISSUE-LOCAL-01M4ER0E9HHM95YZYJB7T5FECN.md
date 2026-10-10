@@ -117,3 +117,41 @@ B2b-i landed the dense-resident device forward with the routed-expert tier delib
   measurement or gate on this stack must use the rebuilt
   `/tmp/umdtrial-install` (rebuild: `cmake --build /tmp/build-umdtrial2
   -j 4 && cmake --install . --prefix /tmp/umdtrial-install`).
+
+- 2026-10-10 (branch row/tt-kolibri-flips2, host-free worktree): the
+  remaining-gate-divergence localization RE-DERIVED on the fixed substrate
+  (rmsnorm fp32-accumulation patch in /tmp/umdtrial-install). The prior
+  attribution to kGdnDecode / kMatmulBTQuantGrouped is FALSIFIED for kolibri1
+  at census level: the kolibri TT forward dispatches Embedding, MatmulBT,
+  RmsNorm/FusedChain, MoeSiluMul, MoeCombine, RopeNeox (sliding layers),
+  the KV write + PagedAttention, and Add — kolibri has NO GDN op and its
+  experts are fp8-block dequanted to bf16 on HOST (no kMatmulBTQuant, no
+  kMatmulBTQuantGrouped arm anywhere in the forward). The first diverging
+  stage on the fixed substrate was the routed-expert MoE block at layer 0:
+  the memoized slot dequant of the DOWN projection dequanted the WRONG
+  source bytes — `byte_base += n * k * 2` doubled for BOTH the fp8 source
+  (one byte per element) and the bf16 destination, so up read down's slot
+  region and down read past the slot end (NaN/Inf weights, 1e38 expert
+  outputs, every downstream stage corrupt). Red-first evidence:
+  `downdequant` ref-vs-memo 1,177,065/1,310,720 elements mismatched
+  (NaN memo sums) and the one-hot down_w probe returned inf/NaN at k>=256
+  against a clean scale grid; slotcmp proved the slot bytes themselves
+  byte-exact. FIX: separate `packed_base` (n*k) and `bf16_base` (n*k*2)
+  offsets in kolibri1_tt_forward.cpp. After: dequant mismatch 0/1,310,720,
+  L0 moe matches the CPU arm exactly, first diverging stage moves to L1 moe
+  at ~3% relative (near-tie class). Numbers (fixed substrate, this branch):
+  teacher-forced 'der Mond...' worst gap 11.76 nats -> 10.05 nats with the
+  argmax chain recovering CPU agreement at 5 of 13 steps (was 0);
+  device token gate 4 HARD flips ON (steps to flip moved much later:
+  'der Mond' step 7 gap -5.92; 'capital of Australia' step 5 -4.56;
+  'Wissen ist Macht' step 8 -13.35; 'x1 = 3...' step 22 -3.06) and 3 HARD
+  flips OFF before the run ABORTS on device DRAM exhaustion
+  (TT_FATAL Out of Memory, 4.27 GiB bank space full — the memoized
+  expert-dequant device staging budget; walks now survive much longer than
+  the pre-fix early flips, so the gate reaches the exhaustion
+  deterministically at the same point on both arms). THE OOM IS OPEN DEBT:
+  the full 33-prompt tally cannot complete on this substrate until the
+  memoized-expert device residency is capped or freed. The streaming
+  slot-pool `what()=="1"` throw did NOT fire on the fixed substrate in any
+  instrument or gate run (0 occurrences). The remaining flips after the fix
+  are the residual bf16 device-arm drift class, not the byte bug.
