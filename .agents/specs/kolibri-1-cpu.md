@@ -509,6 +509,9 @@ ONE pull request (developer's standing choice for this row).
 
 ## Owed
 
+- $ID: the gate-semantics decision for the CPU paged-attention
+  NEON lane — ratify a near-tie instrument for the decode-bench
+  anchor (owner: Ettore), then re-decide the default under it.
 - `.agents/oracles/aleph-alpha-inference.md`: create the oracle file with
   the pin `049a6a7bd2405b27d6d280d256bd3d585191c7ae`, `gateable = no`, and
   the issue that owns the GPU gateability measurement.
