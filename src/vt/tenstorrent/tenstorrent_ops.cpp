@@ -1355,8 +1355,15 @@ void RopeApplyHost(Tensor& qs, Tensor* ks, const float* cos_t, const float* sin_
 
 inline bool PreferDeviceRope(int64_t tokens, int64_t heads) {
   // HOST-FREE-FORWARD R1: force device RoPE at T=1 for capture (see RmsNorm note).
-  // VT_TT_FORCE_HOST_ROPE: host-free bisection — restore the host apply at T=1.
-  if (HostFreeDecodeEnabled() && std::getenv("VT_TT_FORCE_HOST_ROPE") == nullptr)
+  // HOST-FREE-FORWARD R1 forces the device apply at T=1 so the CAPTURED region
+  // has no host rope. The eager (non-capture) path has no such constraint, and
+  // the T=1 device apply is where the kolibri1 host-free corruption lived
+  // (ISSUE-LOCAL-01M4JK8PT8NF9TQ7M06VS51JJH): the rope's shadow replacement
+  // raced the async queue on this near-full device. Scope the force to the
+  // case that justifies it — an active capture — and let the eager decode use
+  // the host apply the >=64-row heuristic already prefers.
+  if (tt_capture_active() && HostFreeDecodeEnabled() &&
+      std::getenv("VT_TT_FORCE_HOST_ROPE") == nullptr)
     return true;
   return tokens * heads >= 64;
 }
