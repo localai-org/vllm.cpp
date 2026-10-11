@@ -26,8 +26,7 @@
 
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <map>
 #include <set>
 #include <mutex>
 #include <stdexcept>
@@ -462,6 +461,17 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
 // streaming context is attached the B2b-i refusal still fires by name —
 // the refusal remains ONLY for the streaming-disabled arm and genuine
 // over-capacity/miss-handle failures (which throw by name).
+
+// PROTOTYPE (ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR): the per-layer
+// e_score_correction_bias host image, cached once per device buffer (the
+// resident weights keep stable device pointers for the process lifetime).
+std::mutex& BiasMutex() { static std::mutex m; return m; }
+std::map<const void*, std::vector<float>>& BiasCache() {
+  static std::map<const void*, std::vector<float>>* c =
+      new std::map<const void*, std::vector<float>>(); // never destroyed (#1486 pattern)
+  return *c;
+}
+
 DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
               const Tensor& dhn, int64_t t, int64_t layer,
               const Tensor& sh_gate_w, const Tensor& sh_up_w,
@@ -476,13 +486,22 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   DBuf dlog = LinearBTRaw(d, dhn, w.router_gate, t, DType::kF32);
   std::vector<float> logits(static_cast<size_t>(t * e));
   dlog.Download(d, logits.data());
-  std::vector<float> bias(static_cast<size_t>(e));
-  {
+  // PROTOTYPE (ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR): the bias is a STATIC
+  // weight, so the per-step D2H copy + blocking Synchronize here was 50 extra
+  // host round-trips per decode step. Cache the host image once per device
+  // buffer (the resident weights keep stable device pointers for the process
+  // lifetime) and serve the step from the cache.
+  const std::vector<float>& bias = [&] {
     Tensor bt = ResidentWeight(d, w.e_score_correction_bias, {e});
+    std::lock_guard<std::mutex> g(BiasMutex());
+    auto it = BiasCache().find(bt.data);
+    if (it != BiasCache().end()) return it->second;
     vt::Backend& be = vt::GetBackend(d.q.device.type);
-    be.Copy(d.q, bias.data(), bt.data, static_cast<size_t>(e) * sizeof(float));
+    std::vector<float> fresh(static_cast<size_t>(e));
+    be.Copy(d.q, fresh.data(), bt.data, static_cast<size_t>(e) * sizeof(float));
     be.Synchronize(d.q);
-  }
+    return BiasCache().emplace(bt.data, std::move(fresh)).first->second;
+  }();
 
   // The inherited sigmoid-logit-add routing (kolibri1_shared.h, verbatim
   // from the CPU row): selection on logits + bias, weights = sigmoid of
