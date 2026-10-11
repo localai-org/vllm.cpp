@@ -597,7 +597,8 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       PlanKolibri1TTMoEDispatch(st.pool.policy, layer_req);
   const Kolibri1TTLayerDispatch& ld = disp.layers[0];
   const Kolibri1TTSlotFetchList list = BuildKolibri1TTSlotFetchList(
-      st.pool.policy, ld, weights, st.pool, st.per_token_stream_bytes);
+      st.pool.policy, ld, weights, st.pool,
+      st.per_token_stream_bytes * t);
   VT_CHECK(st.guard != nullptr,
            "kolibri1-tt B2b-ii: the per-step stream guard is missing");
   st.guard->Charge(layer, list.stream_bytes);
@@ -948,15 +949,18 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     Kolibri1TTStreamingDeviceContext* streaming) {
   VT_CHECK(queue.device.type == vt::DeviceType::kTENSTORRENT, kNonTTRefusal);
   VT_CHECK(ctx.built, "kolibri1-tt forward: the device context is not built");
-  // A fresh charge window per step: the B1 per-token stream bound is a
-  // PER-TOKEN bound, and the guard refuses LOUDLY past it.
-  if (streaming != nullptr) {
-    streaming->guard = std::make_unique<Kolibri1TTStreamBoundGuard>(
-        streaming->per_token_stream_bytes);
-  }
   const Kolibri1Params& p = weights.params;
   Dev d{vt::GetBackend(queue.device.type), queue};
   const int64_t t = static_cast<int64_t>(token_ids.size());
+  // A fresh charge window per step: the B1 per-token stream bound is a
+  // PER-TOKEN bound, and the guard refuses LOUDLY past it. A multi-token
+  // forward (chunked prefill) draws the SAME per-token envelope t times,
+  // so the window scales with the token count — one token's bound is
+  // unchanged, and a chunk never claims a larger per-token allowance.
+  if (streaming != nullptr) {
+    streaming->guard = std::make_unique<Kolibri1TTStreamBoundGuard>(
+        streaming->per_token_stream_bytes * t);
+  }
   const int64_t h = p.hidden_size;
   const int64_t vocab = p.vocab_size;
 

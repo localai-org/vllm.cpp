@@ -82,11 +82,26 @@ v1::CommonAttentionMetadata OneReqMeta(int64_t t, int64_t ctx_before,
 // forward — one whole-prompt routed dispatch streams every selected expert's
 // slot bytes in a single charge and trips the B1 per-step stream bound
 // (observed here: 1404123840 B against the 1179936000 B bound at layer 3;
-// the b2ii gate records the same refusal, 1242865920 B at layer 15). The
-// one-token incremental walk over the persistent KV cache is the faithful
-// same-math alternative (test_kolibri1_tt_b2ii.cpp device gate, which cites
-// test_kolibri1_w3.cpp:298-310), so the prefill walks the prompt one token
-// per forward and the walk is what the prefill timer covers.
+// the b2ii gate records the same refusal, 1242865920 B at layer 15).
+//
+// CHUNKED PREFILL WAS TRIED (2026-10-11) AND IS NOT ADOPTED AS THE
+// DEFAULT: with the per-token stream envelope generalized to multi-token
+// forwards (kolibri1_tt_forward.cpp scales the guard by the token count)
+// and an 8-token chunk walk, prefill dropped 156.3 s -> 72.1 s with the
+// decode split unchanged. But the greedy chain could NOT be proven
+// equivalent: this instrument is NOT bit-reproducible run to run — three
+// runs of the SAME one-token walk produced three different chains (first
+// token 346, 30686, and 10 under chunking), and the b2ii golden gate's
+// HARD flips move between runs too (it is a band gate, 141/145 in the
+// 2.5-nat band, not a bit gate). The chunked walk additionally runs the
+// prefill-path kernels (the one-token walk forces pure_decode=true,
+// decode-path kernels), a further drift source. Adopting chunked prefill
+// therefore owes its own adjudicated equivalence evidence (a band-class
+// TF comparison, not a chain identity check). The faithful one-token
+// incremental walk over the persistent KV cache stays
+// (test_kolibri1_tt_b2ii.cpp device gate, which cites
+// test_kolibri1_w3.cpp:298-310), so the prefill walks the prompt one
+// token per forward and the walk is what the prefill timer covers.
 constexpr int kPromptLen = 128;
 constexpr int kDecodeSteps = 64;
 
