@@ -484,29 +484,55 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // Router logits, f32 (kolibri1.py:171-177) — the bf16 gate over the
   // shared residency seam, f32 out like the CPU row's LinearBTRaw.
   DBuf dlog = LinearBTRaw(d, dhn, w.router_gate, t, DType::kF32);
-  std::vector<float> logits(static_cast<size_t>(t * e));
-  dlog.Download(d, logits.data());
-  // PROTOTYPE (ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR): the bias is a STATIC
-  // weight, so the per-step D2H copy + blocking Synchronize here was 50 extra
-  // host round-trips per decode step. Cache the host image once per device
-  // buffer (the resident weights keep stable device pointers for the process
-  // lifetime) and serve the step from the cache.
-  const std::vector<float>& bias = [&] {
+  // The routing itself. The device composite (vt::SigmoidBiasTopK) exists and
+  // is gate-verified, but MEASURED SLOWER at this shape and is NOT the
+  // default: VT_KOLIBRI1_TT_DEVICE_ROUTER=1 opts in (the composite's extra
+  // eager op launches per layer cost at least as much host serialization as
+  // the full-tail [T,E] download they replace). The host path stays default
+  // until a captured/graphed region removes the launch overhead.
+  static const bool kDeviceRouter =
+      std::getenv("VT_KOLIBRI1_TT_DEVICE_ROUTER") != nullptr &&
+      std::string(std::getenv("VT_KOLIBRI1_TT_DEVICE_ROUTER")) == "1";
+  std::vector<float> logits;
+  std::vector<float> bias;
+  Kolibri1HostRouting route;
+  if (kDeviceRouter) {
+    DBuf topw(d, DType::kF32, {t, top_k});
+    DBuf topi(d, DType::kI32, {t, top_k});
+    vt::SigmoidBiasTopK(d.q, topw.t(), topi.t(), dlog.t(),
+                        ResidentWeight(d, w.e_score_correction_bias, {e}),
+                        static_cast<int>(top_k));
+    route.ids.resize(static_cast<size_t>(t * top_k));
+    route.weights.resize(static_cast<size_t>(t * top_k));
+    topi.Download(d, route.ids.data());
+    topw.Download(d, route.weights.data());
+  } else {
+    logits.resize(static_cast<size_t>(t * e));
+    dlog.Download(d, logits.data());
+    // The bias is a STATIC weight, so the per-step D2H copy + blocking
+    // Synchronize here was 50 extra host round-trips per decode step
+    // (the #3447 bias host cache: the resident weights keep stable device
+    // pointers for the process lifetime — cache the host image once per
+    // device buffer and serve the step from the cache).
     Tensor bt = ResidentWeight(d, w.e_score_correction_bias, {e});
     std::lock_guard<std::mutex> g(BiasMutex());
     auto it = BiasCache().find(bt.data);
-    if (it != BiasCache().end()) return it->second;
-    vt::Backend& be = vt::GetBackend(d.q.device.type);
-    std::vector<float> fresh(static_cast<size_t>(e));
-    be.Copy(d.q, fresh.data(), bt.data, static_cast<size_t>(e) * sizeof(float));
-    be.Synchronize(d.q);
-    return BiasCache().emplace(bt.data, std::move(fresh)).first->second;
-  }();
+    if (it != BiasCache().end()) {
+      bias = it->second;
+    } else {
+      vt::Backend& be = vt::GetBackend(d.q.device.type);
+      bias.resize(static_cast<size_t>(e));
+      be.Copy(d.q, bias.data(), bt.data, static_cast<size_t>(e) * sizeof(float));
+      be.Synchronize(d.q);
+      BiasCache().emplace(bt.data, bias);
+    }
+    route = SigmoidLogitAddRouting(logits, bias, t, e, top_k);
+  }
 
   // The inherited sigmoid-logit-add routing (kolibri1_shared.h, verbatim
   // from the CPU row): selection on logits + bias, weights = sigmoid of
   // the UNBIASED logits, no renormalisation.
-  if (StageDumpOn() && l3dbg(layer)) {
+  if (!kDeviceRouter && StageDumpOn() && l3dbg(layer)) {
     const int64_t hk = w.router_gate.shape[1];
     Tensor bt3 = ResidentWeight(d, w.router_gate, {e, hk});
     std::vector<uint8_t> tb(static_cast<size_t>(e) * hk * 2);
@@ -569,9 +595,9 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       }
     }
   }
-  Kolibri1HostRouting route =
-      SigmoidLogitAddRouting(logits, bias, t, e, top_k);
-  RouteDump(layer, logits, route, t, e, top_k);
+  if (!kDeviceRouter) {
+    RouteDump(layer, logits, route, t, e, top_k);
+  }
 
   // SLICE ii: the routed tier. Without a streaming context (the
   // streaming-disabled arm) the B2b-i refusal still fires by name.

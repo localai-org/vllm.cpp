@@ -20,6 +20,7 @@
 
 #include <ttnn/operations/data_movement/bcast/bcast.hpp>
 #include <ttnn/operations/data_movement/repeat/repeat.hpp>
+#include <ttnn/operations/experimental/topk_large_indices/topk_large_indices.hpp>
 
 namespace vt::tenstorrent {
 namespace {
@@ -1693,6 +1694,89 @@ void GreedyArgmaxKernel(Queue&, Tensor& token_ids, const Tensor& logits) {
   CommitHost(token_ids);
 }
 
+// ---- kSigmoidBiasTopK: the Kolibri-1 router ON DEVICE ------------------------
+// Composite of device ops mirroring SigmoidLogitAddRouting
+// (kolibri1_shared.h / kolibri1.py:126-142; the CPU kernel in cpu_ops.cpp is
+// the reference): selection score = RAW logit + bias (broadcast add), top-k
+// selection via ttnn::experimental::topk_large_indices, the UNBIASED logit
+// gathered at the selected ids (ttnn::gather), weight = ttnn::sigmoid. Only
+// the [T,K] ids + weights cross back to the host — the full [T,E] logits
+// tail NEVER downloads (the per-layer full-tail drain was the top
+// serialization in the kolibri1 decode step).
+//
+// TIE DEVIATION (recorded): the host rule breaks an exact score tie to the
+// LOWER expert index (strict `>` ascending scan). topk_large_indices packs
+// (value, index) words for its TopK LLK, which also prefers the lower index
+// on an exact tie, but that is the substrate's behavior, not a contract we
+// own; the unit test pins the constructed-tie case against the CPU kernel.
+void SigmoidBiasTopKKernel(Queue&, Tensor& weights, Tensor& indices,
+                           const Tensor& logits, const Tensor& bias, int top_k) {
+  TT_OP_TRACE("SigmoidBiasTopK");
+  VT_CHECK(logits.rank == 2 && weights.rank == 2 && indices.rank == 2,
+           "tenstorrent kSigmoidBiasTopK: rank-2 logits/weights/indices");
+  VT_CHECK(logits.dtype == DType::kF32 && bias.dtype == DType::kF32 &&
+               weights.dtype == DType::kF32 && indices.dtype == DType::kI32,
+           "tenstorrent kSigmoidBiasTopK: f32 logits/bias/weights, i32 indices");
+  VT_CHECK(logits.IsContiguous() && bias.IsContiguous() &&
+               weights.IsContiguous() && indices.IsContiguous(),
+           "tenstorrent kSigmoidBiasTopK: contiguous required");
+  const uint32_t t = static_cast<uint32_t>(logits.shape[0]);
+  const uint32_t e = static_cast<uint32_t>(logits.shape[1]);
+  const uint32_t k = static_cast<uint32_t>(top_k);
+  VT_CHECK(bias.rank == 1 && bias.shape[0] == e,
+           "tenstorrent kSigmoidBiasTopK: bias must be [E]");
+  VT_CHECK(weights.shape[0] == t && weights.shape[1] == k &&
+               indices.shape[0] == t && indices.shape[1] == k,
+           "tenstorrent kSigmoidBiasTopK: weights/indices must be [T, K]");
+
+  MeshDevice& device = SharedMeshDevice();
+  ttnn::Tensor dev_logits = EnsureDevice2D(logits, device);  // [T,E] f32
+  EnsureHost(bias);
+  ttnn::Tensor dev_biasb = BroadcastOperandDevice(bias, t, e, device);
+  ttnn::Tensor scores = ttnn::add(dev_logits, dev_biasb);
+  // SUBSTRATE CONSTRAINT (recorded): topk_large_indices — the ONLY top-k op
+  // on this tt-metal — requires a ROW_MAJOR BFLOAT16 input and k in
+  // multiples of 16. The selection therefore rounds the biased scores to
+  // bf16 (the router GEMM itself is already bf16 compute; the weights stay
+  // f32 below) and requests the k-slot bucket, then keeps the leading
+  // `top_k` of the descending order.
+  ttnn::Tensor scores_bf16 = ttnn::typecast(
+      ttnn::to_layout(scores, ttnn::Layout::ROW_MAJOR),
+      ttnn::DataType::BFLOAT16);
+  uint32_t k_bucket = ((k + 15u) / 16u) * 16u;
+  ttnn::Tensor ids_top = ttnn::experimental::topk_large_indices(
+      scores_bf16, k_bucket);
+  ttnn::Tensor ids =
+      k_bucket == k
+          ? ids_top
+          : ttnn::slice(ids_top,
+                        ttsl::SmallVector<int>{0, 0},
+                        ttsl::SmallVector<int>{static_cast<int>(t),
+                                               static_cast<int>(k)},
+                        ttsl::SmallVector<int>{1, 1});
+  // The WEIGHT reads the UNBIASED logit at each selected id (dim=1 gather),
+  // in f32 — the selection precision stays bf16, the weight does not.
+  ttnn::Tensor logits_rm = ttnn::to_layout(dev_logits, ttnn::Layout::ROW_MAJOR);
+  ttnn::Tensor sel = ttnn::gather(logits_rm, /*dim=*/1, ids,
+                                  /*sparse_grad=*/false, std::nullopt);
+  ttnn::Tensor w = ttnn::sigmoid(ttnn::to_layout(sel, ttnn::Layout::ROW_MAJOR));
+
+  std::vector<uint32_t> host_ids = ids.to_vector<uint32_t>();
+  std::vector<float> host_w = w.to_vector<float>();
+  VT_CHECK(host_ids.size() == static_cast<size_t>(t) * k &&
+               host_w.size() == static_cast<size_t>(t) * k,
+           "tenstorrent kSigmoidBiasTopK: device returned wrong element count");
+  std::memcpy(weights.data, host_w.data(), host_w.size() * sizeof(float));
+  int32_t* out_ids = indices.Ptr<int32_t>();
+  for (size_t i = 0; i < host_ids.size(); ++i) {
+    VT_CHECK(host_ids[i] < e,
+             "tenstorrent kSigmoidBiasTopK: expert id out of range");
+    out_ids[i] = static_cast<int32_t>(host_ids[i]);
+  }
+  CommitHost(weights);
+  CommitHost(indices);
+}
+
 // ---- GDN prefill op set (BACKEND-TENSTORRENT-GDN W1) -------------------------
 // kL2Norm / kRmsNormGated / kCausalConv1dFwd / kGdnPrefill: the op chain the
 // Qwen3.5-family GDN layer issues in prefill. The CPU f32 arm (cpu_ops.cpp
@@ -1738,6 +1822,9 @@ struct Registrar {
     RegisterOp(OpId::kMoeCombine, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(
                    static_cast<MoeCombineFn>(&MoeCombineKernel)));
+    RegisterOp(OpId::kSigmoidBiasTopK, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(
+                   static_cast<SigmoidBiasTopKFn>(&SigmoidBiasTopKKernel)));
     RegisterOp(OpId::kCastBf16, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<CastBf16Fn>(&CastBf16Kernel)));
     RegisterOp(OpId::kCastF32, DeviceType::kTENSTORRENT,

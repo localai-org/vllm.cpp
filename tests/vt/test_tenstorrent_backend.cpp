@@ -12362,3 +12362,130 @@ TEST_CASE("kTENSTORRENT wave-3 fused Q4_K decode launch is bit-exact to the chai
   // Exact-f32 decode arm, single chunk.
   run_shape(1, 130, 2560, rng);
 }
+
+// ---- kSigmoidBiasTopK: the Kolibri-1 router on device ------------------------
+// RED-FIRST: this gate ran red before the TT kernel existed (GetOp threw "no
+// kernel for SigmoidBiasTopK on kTENSTORRENT") and goes green only when the
+// device composite matches the CPU reference kernel (cpu_ops.cpp
+// SigmoidBiasTopKKernel, the exact port of SigmoidLogitAddRouting /
+// kolibri1.py:126-142): selection score = RAW logit + bias, weight = sigmoid
+// of the UNBIASED logit, no renormalization, ties to the LOWER expert index.
+TEST_CASE("kTENSTORRENT kSigmoidBiasTopK matches the CPU reference "
+          "(selection on biased raw logits, sigmoid-of-unbiased weights)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kSigmoidBiasTopK,
+                           DeviceType::kTENSTORRENT));
+
+  constexpr int64_t T = 4, E = 384, K = 6;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  std::mt19937 rng(20261011u);
+  std::uniform_real_distribution<float> dist(-8.0f, 8.0f);
+  std::vector<float> host_logits(T * E), host_bias(E);
+  for (auto& v : host_logits) v = dist(rng);
+  for (auto& v : host_bias) v = dist(rng) * 0.25f;
+
+  auto* cpu_kernel = reinterpret_cast<vt::SigmoidBiasTopKFn>(
+      vt::GetOp(vt::OpId::kSigmoidBiasTopK, DeviceType::kCPU));
+  Tensor cpu_logits = Tensor::Contiguous(
+      const_cast<float*>(host_logits.data()), vt::DType::kF32,
+      Device{DeviceType::kCPU, 0}, {T, E});
+  Tensor cpu_bias = Tensor::Contiguous(
+      const_cast<float*>(host_bias.data()), vt::DType::kF32,
+      Device{DeviceType::kCPU, 0}, {E});
+  std::vector<float> cpu_w(T * K);
+  std::vector<int32_t> cpu_ids(T * K);
+  Tensor cpu_wt = Tensor::Contiguous(cpu_w.data(), vt::DType::kF32,
+                                     Device{DeviceType::kCPU, 0}, {T, K});
+  Tensor cpu_idt = Tensor::Contiguous(cpu_ids.data(), vt::DType::kI32,
+                                      Device{DeviceType::kCPU, 0}, {T, K});
+  Queue cpu_q{Device{DeviceType::kCPU, 0}, nullptr, 0};
+  cpu_kernel(cpu_q, cpu_wt, cpu_idt, cpu_logits, cpu_bias, K);
+
+  void* mem_logits = backend.Alloc(host_logits.size() * sizeof(float));
+  void* mem_bias = backend.Alloc(host_bias.size() * sizeof(float));
+  void* mem_w = backend.Alloc(T * K * sizeof(float));
+  void* mem_ids = backend.Alloc(T * K * sizeof(int32_t));
+  backend.Copy(q, mem_logits, host_logits.data(),
+               host_logits.size() * sizeof(float));
+  backend.Copy(q, mem_bias, host_bias.data(), host_bias.size() * sizeof(float));
+  Tensor dev_logits = Tensor::Contiguous(
+      mem_logits, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {T, E});
+  Tensor dev_bias = Tensor::Contiguous(
+      mem_bias, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {E});
+  Tensor dev_w = Tensor::Contiguous(
+      mem_w, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {T, K});
+  Tensor dev_ids = Tensor::Contiguous(
+      mem_ids, vt::DType::kI32, Device{DeviceType::kTENSTORRENT, 0}, {T, K});
+  vt::SigmoidBiasTopK(q, dev_w, dev_ids, dev_logits, dev_bias, K);
+
+  std::vector<float> tt_w(T * K);
+  std::vector<int32_t> tt_ids(T * K);
+  backend.Copy(q, tt_w.data(), mem_w, tt_w.size() * sizeof(float));
+  backend.Copy(q, tt_ids.data(), mem_ids, tt_ids.size() * sizeof(int32_t));
+  backend.Synchronize(q);
+  backend.Free(mem_logits);
+  backend.Free(mem_bias);
+  backend.Free(mem_w);
+  backend.Free(mem_ids);
+
+  for (int64_t i = 0; i < T; ++i) {
+    // The selection is a SET: the device top-k must pick the SAME experts as
+    // the CPU reference. The ORDER may differ: the substrate selects on
+    // bf16-rounded scores, so two experts whose f32 scores differ slightly
+    // can tie in bf16 and swap positions. Order within the top-k is benign
+    // to the model math — the combine sums weight x expert over the k slots
+    // and the dispatch dedups — and the deviation is recorded in the TT
+    // kernel comment.
+    std::vector<int32_t> cpu_set(cpu_ids.begin() + static_cast<long>(i * K),
+                                 cpu_ids.begin() + static_cast<long>((i + 1) * K));
+    std::vector<int32_t> tt_set(tt_ids.begin() + static_cast<long>(i * K),
+                                tt_ids.begin() + static_cast<long>((i + 1) * K));
+    std::sort(cpu_set.begin(), cpu_set.end());
+    std::sort(tt_set.begin(), tt_set.end());
+    REQUIRE(cpu_set.size() == K);
+    CHECK(tt_set == cpu_set);
+    for (int j = 0; j < K; ++j) {
+      const int32_t id = tt_ids[static_cast<size_t>(i * K + j)];
+      // Each returned weight is sigmoid of the UNBIASED logit AT ITS OWN id
+      // (the biased score selects, the unbiased logit weights), within the
+      // elementwise envelope (device sigmoid vs host std::exp).
+      const float expect =
+          1.0f / (1.0f + std::exp(-host_logits[static_cast<size_t>(i * E + id)]));
+      CHECK(std::fabs(tt_w[static_cast<size_t>(i * K + j)] - expect) < 2e-3f);
+      // And it must equal the CPU reference weight for the SAME id.
+      const auto pos = std::find(cpu_ids.begin() + static_cast<long>(i * K),
+                                 cpu_ids.begin() + static_cast<long>((i + 1) * K),
+                                 id);
+      REQUIRE(pos != cpu_ids.begin() + static_cast<long>((i + 1) * K));
+      const auto cpos = static_cast<int64_t>(pos - cpu_ids.begin());
+      CHECK(std::fabs(tt_w[static_cast<size_t>(i * K + j)] -
+                      cpu_w[static_cast<size_t>(cpos)]) < 2e-3f);
+    }
+  }
+
+  // The tie CONTRACT is on the CPU reference: two experts with an exactly
+  // equal biased score select the LOWER index first (host convention, pinned
+  // so a TT-arm tie-order deviation is at least a RECORDED deviation).
+  {
+    std::vector<float> tl(1 * 4), tb(4, 0.0f);
+    tl[0] = 1.0f; tl[1] = 3.0f; tl[2] = 3.0f; tl[3] = 0.0f;  // tie at 1,2
+    Tensor cl = Tensor::Contiguous(tl.data(), vt::DType::kF32,
+                                   Device{DeviceType::kCPU, 0}, {1, 4});
+    Tensor cb = Tensor::Contiguous(tb.data(), vt::DType::kF32,
+                                   Device{DeviceType::kCPU, 0}, {4});
+    std::vector<float> cw(1 * 2);
+    std::vector<int32_t> ci(1 * 2);
+    Tensor cwt = Tensor::Contiguous(cw.data(), vt::DType::kF32,
+                                    Device{DeviceType::kCPU, 0}, {1, 2});
+    Tensor cit = Tensor::Contiguous(ci.data(), vt::DType::kI32,
+                                    Device{DeviceType::kCPU, 0}, {1, 2});
+    cpu_kernel(cpu_q, cwt, cit, cl, cb, 2);
+    CHECK(ci[0] == 1);
+    CHECK(ci[1] == 2);
+  }
+}

@@ -3451,6 +3451,32 @@ void MoeRouterTopK(Queue& q, Tensor& weights, Tensor& indices, const Tensor& log
       q, weights, indices, logits, args, e_score_correction_bias);
 }
 
+void SigmoidBiasTopK(Queue& q, Tensor& weights, Tensor& indices,
+                     const Tensor& logits, const Tensor& bias, int top_k) {
+  VT_CHECK(logits.rank == 2 && weights.rank == 2 && indices.rank == 2,
+           "sigmoid_bias_topk: logits/weights/indices rank-2");
+  const int64_t t = logits.shape[0], e = logits.shape[1];
+  VT_CHECK(bias.rank == 1 && bias.shape[0] == e,
+           "sigmoid_bias_topk: bias must be [num_experts]");
+  VT_CHECK(IsFloat(logits.dtype) && bias.dtype == DType::kF32,
+           "sigmoid_bias_topk: float logits, f32 bias");
+  VT_CHECK(weights.dtype == DType::kF32 && indices.dtype == DType::kI32,
+           "sigmoid_bias_topk: f32 weights, i32 indices");
+  VT_CHECK(top_k >= 1 && top_k <= e,
+           "sigmoid_bias_topk: top_k must be in [1, num_experts]");
+  VT_CHECK(weights.shape[0] == t && weights.shape[1] == top_k &&
+               indices.shape[0] == t && indices.shape[1] == top_k,
+           "sigmoid_bias_topk: weights/indices must be [T, top_k]");
+  VT_CHECK(logits.IsContiguous() && bias.IsContiguous() &&
+               weights.IsContiguous() && indices.IsContiguous(),
+           "sigmoid_bias_topk: contiguous required");
+  VT_CHECK(logits.device == q.device && bias.device == q.device &&
+               weights.device == q.device && indices.device == q.device,
+           "sigmoid_bias_topk: device mismatch");
+  reinterpret_cast<SigmoidBiasTopKFn>(GetOp(OpId::kSigmoidBiasTopK, q.device.type))(
+      q, weights, indices, logits, bias, top_k);
+}
+
 void MoeCombine(Queue& q, Tensor& out, const Tensor& expert_out, const Tensor& weights,
                 const Tensor* shared, float routed_scale) {
   VT_CHECK(expert_out.rank == 3 && weights.rank == 2 && out.rank == 2,

@@ -332,6 +332,8 @@ const char* OpNameImpl(OpId op) {
       return "KdaChunkPrefill";
     case OpId::kMoeRouterTopK:
       return "MoeRouterTopK";
+    case OpId::kSigmoidBiasTopK:
+      return "SigmoidBiasTopK";
     case OpId::kMoeCombine:
       return "MoeCombine";
     case OpId::kAttention:

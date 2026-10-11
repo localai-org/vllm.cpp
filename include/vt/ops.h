@@ -105,6 +105,7 @@ enum class OpId : uint8_t {
   kKdaGatedDeltaRule,
   kKdaChunkPrefill,
   kMoeRouterTopK,
+  kSigmoidBiasTopK,
   kMoeCombine,
   kAttention,
   kAttentionCross,
@@ -2641,6 +2642,15 @@ using VHeadPermuteFn =
     void (*)(Queue&, Tensor&, const Tensor&, const VHeadPermuteArgs&);
 using MoeRouterTopKFn = void (*)(Queue&, Tensor&, Tensor&, const Tensor&,
                                  const MoeRouterTopKArgs&, const Tensor*);
+// The Kolibri-1 router (kolibri1.py:126-142): selection score = RAW logit +
+// e_score_correction_bias (NOT sigmoid-of-logit + bias — that is the
+// DeepSeek noaux_tc path), weight = sigmoid of the UNBIASED logit, NO
+// renormalization, ties break to the LOWER expert index. This is exactly
+// SigmoidLogitAddRouting (kolibri1_shared.h) as a registered device op so
+// the TT arm can run it on card and download only [T,K] ids + weights
+// instead of the full [T,E] logits tail.
+using SigmoidBiasTopKFn = void (*)(Queue&, Tensor&, Tensor&, const Tensor&,
+                                   const Tensor&, int);
 // The trailing float is `routed_scale` — the routed_scaling_factor applied to
 // the ROUTED sum before the shared term is added (see vt::MoeCombine).
 using MoeCombineFn =
@@ -4642,6 +4652,12 @@ void IndexCopy(Queue& q, Tensor& out, const Tensor& in, const Tensor& idx);
 void MoeRouterTopK(Queue& q, Tensor& weights, Tensor& indices, const Tensor& logits,
                    const MoeRouterTopKArgs& args,
                    const Tensor* e_score_correction_bias = nullptr);
+
+// The Kolibri-1 router op (see SigmoidBiasTopKFn above). logits [T,E] float,
+// bias [E] f32, out: weights [T,K] f32 (sigmoid of the UNBIASED logit),
+// indices [T,K] i32 (biased raw-logit selection, ties to the lower index).
+void SigmoidBiasTopK(Queue& q, Tensor& weights, Tensor& indices,
+                     const Tensor& logits, const Tensor& bias, int top_k);
 
 // Weighted scatter-combine of the per-expert outputs (moe-semantics.md §4/§6).
 //   out[t,:] = routed_scale * sum_j weights[t,j] * expert_out[t,j,:]  (f32 accum)

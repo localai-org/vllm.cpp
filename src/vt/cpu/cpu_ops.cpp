@@ -3303,9 +3303,42 @@ void MoeRouterGroupedTopKKernel(Tensor& weights, Tensor& indices, const Tensor& 
 
 // §3 router: softmax (f32, over all E) -> greedy top-k (lowest-index tie-break)
 // -> optional renormalize. weights [T,K] f32, indices [T,K] i32.
+// The Kolibri-1 router as a kernel: EXACTLY SigmoidLogitAddRouting
+// (kolibri1_shared.h, kolibri1.py:126-142) — selection score = RAW logit +
+// e_score_correction_bias, weight = sigmoid of the UNBIASED logit, NO
+// renormalization, ties break to the LOWER expert index (strict `>` scan over
+// ascending index). The CPU reference and the executable spec; the TT kernel
+// mirrors it (the op is the seam that removes the kolibri1 TT arm's
+// per-layer full-tail router-logits download).
+void SigmoidBiasTopKKernel(Queue&, Tensor& weights, Tensor& indices,
+                           const Tensor& logits, const Tensor& bias, int top_k) {
+  const int64_t t = logits.shape[0], e = logits.shape[1];
+  const float* l = logits.Ptr<float>();
+  const float* b = bias.Ptr<float>();
+  for (int64_t i = 0; i < t; ++i) {
+    const float* row = l + i * e;
+    std::vector<char> taken(static_cast<size_t>(e), 0);
+    for (int kk = 0; kk < top_k; ++kk) {
+      int64_t best = -1;
+      float best_score = 0.0f;
+      for (int64_t j = 0; j < e; ++j) {
+        if (taken[static_cast<size_t>(j)]) continue;
+        const float score = row[j] + b[j];
+        if (best < 0 || score > best_score) {
+          best = j;
+          best_score = score;
+        }
+      }
+      taken[static_cast<size_t>(best)] = 1;
+      weights.Ptr<float>()[i * top_k + kk] =
+          1.0f / (1.0f + std::exp(-row[best]));
+      indices.Ptr<int32_t>()[i * top_k + kk] = static_cast<int32_t>(best);
+    }
+  }
+}
+
 void MoeRouterTopKKernel(Queue&, Tensor& weights, Tensor& indices, const Tensor& logits,
-                         const MoeRouterTopKArgs& args, const Tensor* bias) {
-  if (args.num_expert_group > 0) {  // W3 grouped-topk (`noaux_tc`) path
+                         const MoeRouterTopKArgs& args, const Tensor* bias) {  if (args.num_expert_group > 0) {  // W3 grouped-topk (`noaux_tc`) path
     MoeRouterGroupedTopKKernel(weights, indices, logits, args, bias);
     return;
   }
@@ -4525,6 +4558,8 @@ struct Registrar {
                    static_cast<VHeadPermuteFn>(&VHeadPermuteKernel)));
     RegisterOp(OpId::kMoeRouterTopK, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<MoeRouterTopKFn>(&MoeRouterTopKKernel)));
+    RegisterOp(OpId::kSigmoidBiasTopK, DeviceType::kCPU,
+               reinterpret_cast<void*>(static_cast<SigmoidBiasTopKFn>(&SigmoidBiasTopKKernel)));
     RegisterOp(OpId::kMoeCombine, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<MoeCombineFn>(&MoeCombineKernel)));
     RegisterOp(OpId::kAttention, DeviceType::kCPU,
