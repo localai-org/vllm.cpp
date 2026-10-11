@@ -419,7 +419,10 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   // Default ON since the R5 flip; VT_TT_HOST_FREE_DECODE=0 opts out (the
   // pre-flip default). Numerics proven by BACKEND-TENSTORRENT-RESIDUAL-GOLDEN.
   const bool host_free_decode = HostFreeDecodeEnabled();
-  const bool host_residual = !host_free_decode &&
+  // VT_TT_FORCE_HOST_RESIDUAL: host-free bisection — run the residual merge
+  // + norm host-side even when host-free decode forces the device path.
+  const bool force_host_residual = std::getenv("VT_TT_FORCE_HOST_RESIDUAL") != nullptr;
+  const bool host_residual = (!host_free_decode || force_host_residual) &&
       (args.gemma || (residual != nullptr && rows < kDeviceResidualMinRows));
   if (host_residual) {
     EnsureHost(x);
@@ -511,8 +514,36 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
     dev_w = EnsureAffine1D(weight, d, device);
   }
   ttnn::Tensor to_norm = dev_x;
+  static const bool nores_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
+  if (nores_dbg && residual == nullptr) {
+    auto chk0 = [&](const ttnn::Tensor& t, const char* tag) {
+      auto h = t.to_vector<float>();
+      double s = 0;
+      for (float v : h) s += v;
+      const auto ls = t.logical_shape();
+      std::fprintf(stderr, "[NORM] %s shape=[%u,%u] n=%zu sum=%.6f first=%.6f\n",
+                   tag, (unsigned)ls[0], (unsigned)ls[1], h.size(), s,
+                   h.empty() ? 0.f : h[0]);
+    };
+    chk0(dev_x, "nores-dev_x");
+  }
   if (residual != nullptr) {
     ttnn::Tensor dev_r = EnsureDevice2D(*residual, device);
+    // SCRATCH DEBUG (host-free decode root-cause): dump the device norm
+    // inputs when VT_TT_NORM_DEBUG is set.
+    static const bool norm_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
+    if (norm_dbg) {
+      auto chk = [&](const ttnn::Tensor& t, const char* tag) {
+        auto h = t.to_vector<float>();
+        double s = 0;
+        float m = 0;
+        for (float v : h) { s += v; if (std::fabs(v) > m) m = std::fabs(v); }
+        std::fprintf(stderr, "[NORM] %s rows=%u d=%u n=%zu sum=%.6f max=%.6f first=%.6f\n",
+                     tag, rows, d, h.size(), s, m, h.empty() ? 0.f : h[0]);
+      };
+      chk(dev_x, "dev_x");
+      chk(dev_r, "dev_r");
+    }
     to_norm = ttnn::add(dev_x, dev_r);
     CommitDevice2D(*residual, to_norm);
   }
@@ -537,6 +568,36 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
                           ? dev_w
                           : ttnn::typecast(dev_w, ttnn::DataType::FLOAT32);
   ttnn::Tensor dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
+  static const bool out_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
+  if (out_dbg) {
+    auto chk2 = [&](const ttnn::Tensor& t, const char* tag) {
+      auto h = t.to_vector<float>();
+      double s = 0;
+      float m = 0;
+      for (float v : h) { s += v; if (std::fabs(v) > m) m = std::fabs(v); }
+      const auto ls = t.logical_shape();
+      std::fprintf(stderr, "[NORM] %s shape=[%u,%u] n=%zu sum=%.6f max=%.6f first=%.6f\n",
+                   tag, (unsigned)ls[0], (unsigned)ls[1], h.size(), s, m,
+                   h.empty() ? 0.f : h[0]);
+    };
+    chk2(norm_f32, "norm_f32");
+    chk2(wf32, "wf32");
+    chk2(dev_y, "dev_y");
+    if (residual != nullptr) {
+      EnsureHost(out);
+      const auto* hp = static_cast<const uint16_t*>(out.data);
+      double s = 0;
+      auto bv = [](uint16_t bits) {
+        uint32_t u = static_cast<uint32_t>(bits) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+      };
+      for (int64_t i = 0; i < rows * d; ++i) s += bv(hp[i]);
+      std::fprintf(stderr, "[NORM] out-after-commit sum=%.6f first=%.6f\n",
+                   s, bv(hp[0]));
+    }
+  }
   if (out.dtype == DType::kBF16)
     dev_y = ttnn::typecast(std::move(dev_y), ttnn::DataType::BFLOAT16);
   CommitDevice2D(out, std::move(dev_y));
@@ -1294,7 +1355,16 @@ void RopeApplyHost(Tensor& qs, Tensor* ks, const float* cos_t, const float* sin_
 
 inline bool PreferDeviceRope(int64_t tokens, int64_t heads) {
   // HOST-FREE-FORWARD R1: force device RoPE at T=1 for capture (see RmsNorm note).
-  if (HostFreeDecodeEnabled()) return true;
+  // HOST-FREE-FORWARD R1 forces the device apply at T=1 so the CAPTURED region
+  // has no host rope. The eager (non-capture) path has no such constraint, and
+  // the T=1 device apply is where the kolibri1 host-free corruption lived
+  // (ISSUE-LOCAL-01M4JK8PT8NF9TQ7M06VS51JJH): the rope's shadow replacement
+  // raced the async queue on this near-full device. Scope the force to the
+  // case that justifies it — an active capture — and let the eager decode use
+  // the host apply the >=64-row heuristic already prefers.
+  if (tt_capture_active() && HostFreeDecodeEnabled() &&
+      std::getenv("VT_TT_FORCE_HOST_ROPE") == nullptr)
+    return true;
   return tokens * heads >= 64;
 }
 
