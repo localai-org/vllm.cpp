@@ -367,6 +367,36 @@ the lane ON — the default flip is blocked on (1) the idle-host A/B and (2) a
 near-tie adjudication of that anchor (gate-semantics change, own spec).
 Evidence: docs/bench-evidence/kolibri1-neon-paged-attn-20261008.md.
 
+N-GRAM SPEC DECODE LANDED ON THE ENGINE PATH (2026-10-12, branch
+`row/kolibri-spec-engine`, issue ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6): the
+spec-probe's one seam is fixed — `LoadedEngine::MakeKVCacheMaybeSpec`
+(src/vllm/entrypoints/model_loader.cpp) builds the model's own KV spec and
+takes the widened qwen3.5 branch only when `spec->use_eagle()` or the model's
+own groups carry a recurrent/mamba group. A draft-free n-gram config on
+kolibri keeps kolibri's own two groups (full + sliding attention): the drafts
+are ordinary scheduled tokens, so the target's groups are the whole cache need
+and no draft-proposal group is added (the `fa_draft` group serves only the MTP
+draft head's paged KV, a forward n-gram does not have). The default (no spec
+config) path is byte-identical. No new engine wiring was needed:
+`EngineParams::speculative_config` (the C ABI v6 field / the server's
+--speculative-config) already fed the generic scheduler slots, engine draft
+pull, runner verify and n-gram proposer. `test_kolibri1_ngram_spec` is flipped
+from the pinned blocker into a checkpoint-free seam unit (kolibri keeps its
+own groups under an ngram spec; qwen3.5 still widens) plus the engine e2e
+gate: spec-ON == spec-OFF BYTE-IDENTICAL on 9/9 prompts (bench prompt +
+8 W3 goldens), acceptance exactly 53/53 on the bench prompt and 146/270 on
+the goldens (the probe harness's numbers), and engine-level decode tok/s
+4.34 -> 13.39 on the bench prompt (3.08x, CLEARS the 12 tok/s target;
+harness reference 4.92 -> 14.51) and 6.80 -> 8.17 on the goldens (1.20x),
+measured with the synchronous scheduler on BOTH arms (ngram forces sync;
+VT_ASYNC_SCHED=0, t32 + 32 GiB cache, under the lock). W3 unchanged: 900/900
+with spec off; with spec ON the chains are byte-identical to spec-OFF, so the
+torch-golden relationship (4/8 prompts end-to-end identical, 4 adjudicated
+near-tie flips) is unchanged. Owed: the engine's reject-heavy path costs more
+than the harness's on the lowest-acceptance golden (verify T=1+kr for ~0.5
+emitted tokens/pass; aggregate still wins); batch>1 acceptance; real-traffic
+acceptance; serving-shaped k/window tuning (config, not code).
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file

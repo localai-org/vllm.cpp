@@ -1682,6 +1682,25 @@ TEST_CASE("capi: malformed speculative_config is INVALID_ARGUMENT") {
   CHECK(eng == nullptr);
 }
 
+// A VALID draft-free ngram document is PARSED and REACHES the engine load
+// (the v24 kv_cache_dtype reach proof, applied to the speculative_config
+// field): the load of a nonexistent checkpoint fails with VLLM_ERR_MODEL_LOAD
+// — the code every FromModelDir failure reports — not VLLM_ERR_INVALID_ARGUMENT,
+// which is what the ABI layer returns for a document it rejects before any
+// model I/O. The opt-in flag is read, not merely tolerated, and the ngram
+// method is accepted at the ABI layer (the engine-level proof that the config
+// drives kolibri's spec-decode loop lives in test_kolibri1_ngram_spec).
+TEST_CASE("capi: a valid ngram speculative_config reaches the engine load") {
+  vllm_model_params p = vllm_model_params_default();
+  p.model_path = "/nonexistent/vllm-cpp/model/dir";
+  p.speculative_config =
+      "{\"method\":\"ngram\",\"num_speculative_tokens\":5,"
+      "\"prompt_lookup_min\":1,\"prompt_lookup_max\":4}";
+  vllm_engine* eng = nullptr;
+  CHECK(vllm_engine_load(&p, &eng) == VLLM_ERR_MODEL_LOAD);
+  CHECK(eng == nullptr);
+}
+
 // ─── version / abi ───────────────────────────────────────────────────────────
 TEST_CASE("capi: version and abi-version are exposed") {
   CHECK(std::string(vllm_version()).size() > 0);

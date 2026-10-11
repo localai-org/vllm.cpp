@@ -176,12 +176,14 @@ target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
-# Kolibri-1 n-gram SPEC-DECODE e2e probe (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6,
-# branch row/kolibri-spec-probe): drives the FULL paged engine on CPU with
+# Kolibri-1 n-gram SPEC-DECODE engine gate (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6,
+# branch row/kolibri-spec-engine): pins the FIXED KV seam at unit level (an
+# ngram spec config keeps kolibri's own KV groups — no MambaSpec, no fa_draft —
+# while qwen3.5 still widens), then drives the FULL paged engine on CPU with
 # speculative_config method=ngram and gates spec-ON == spec-OFF byte-exactness
 # while measuring acceptance and wall tok/s on the W3 golden prompts + the
-# deterministic bench prompt. Checkpoint-gated (skips when the real model is
-# absent); needs no GPU.
+# deterministic bench prompt. The e2e case is checkpoint-gated (skips when the
+# real model is absent); the seam unit runs everywhere. Needs no GPU.
 vllm_cpp_add_test(test_kolibri1_ngram_spec vllm/models/test_kolibri1_ngram_spec.cpp)
 target_include_directories(test_kolibri1_ngram_spec PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_ngram_spec PRIVATE

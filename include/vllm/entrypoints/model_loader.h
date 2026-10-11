@@ -748,10 +748,15 @@ class LoadedEngine {
   static std::pair<int, int> ResolveSchedulerBlockSizes(
       const vllm::v1::KVCacheConfig& kv_cfg, int block_size,
       bool enable_prefix_caching);
-  // SPEC-MTP I5d: build the KV-cache spec, widened for speculation when a spec
-  // config is set (the extra GDN k+1 state slots + widened conv row + the
-  // `fa_draft` full-attn group, MakeQwen3_5KVCacheSpec num_spec>0). With no spec
-  // config it is exactly ModelRegistry::MakeKVCache (byte-identical).
+  // SPEC-MTP I5d: build the model's own KV-cache spec (ModelRegistry::MakeKVCache)
+  // and, when a spec config is set AND the method or the model needs spec state
+  // (an eagle method, or the model's own groups carry a recurrent/mamba group),
+  // rebuild it widened (the extra GDN k+1 state slots + widened conv row + the
+  // `fa_draft` full-attn group, MakeQwen3_5KVCacheSpec num_spec>0). A draft-free
+  // method (ngram) on a model with no recurrent group keeps the model's own spec:
+  // the drafts are ordinary scheduled tokens, so the target's groups are the
+  // whole cache need. With no spec config this is exactly
+  // ModelRegistry::MakeKVCache (byte-identical).
  public:
   //
   // PUBLIC because it is the only entry to the KV geometry the engine actually
