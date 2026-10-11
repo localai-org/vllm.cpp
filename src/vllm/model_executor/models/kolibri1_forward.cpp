@@ -242,6 +242,18 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
   Tensor wt = ResidentWeight(d, wt_raw);
   DBuf out(d, out_dtype, {t, wt.shape[0]});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * wt.shape[0] * wt.shape[1]);
+  // BFDOT f32-out arm (same knob, same t==1 decode-only gate as the fp8-block
+  // arm below): covers the ROUTER GATE, the one bf16-native LinearBTRaw
+  // projection the t==1 LinearBT hook cannot reach. Rounding-policy change,
+  // identical to the arm's documented envelope; measured, not hidden.
+  if (t == 1 && out_dtype == DType::kF32 &&
+   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::KnobActive()) {
+ kolibri1_bfdot_gemv::GemvF32Out(
+     static_cast<const uint16_t*>(wt.data),
+     static_cast<const uint16_t*>(x.data),
+     static_cast<float*>(out.ptr()), wt.shape[0], wt.shape[1]);
+ return out;
+  }
   vt::MatmulBT(d.q, out.t(), x, wt);
   return out;
 }
@@ -1079,6 +1091,20 @@ ForwardLogits ForwardKolibri1Forward(
     prof::Scope prof("lm_head");
     gemvprof::Call gc("lm_head", static_cast<uint64_t>(n_out) * vocab * h);
     vt::MatmulBT(d.q, logits.t(), src, lm);
+ // BFDOT f32-out arm, same knob and t==1 decode-only gate as the
+ // LinearBT/LinearBTRaw arms: the lm_head weight is bf16 [vocab, H]
+ // row-major (the untied head, never an fp8 warm-cache tensor), the one
+ // remaining decode linear outside the LinearBT hook's coverage. Same
+ // rounding-policy envelope; measured, not hidden.
+ if (n_out == 1 && lm.dtype == DType::kBF16 &&
+     kolibri1_bfdot_gemv::KnobActive()) {
+   kolibri1_bfdot_gemv::GemvF32Out(
+       static_cast<const uint16_t*>(lm.data),
+       static_cast<const uint16_t*>(src.data),
+       static_cast<float*>(logits.ptr()), vocab, h);
+ } else {
+   vt::MatmulBT(d.q, logits.t(), src, lm);
+ }
   }
 
   ForwardLogits fl;
