@@ -347,12 +347,14 @@ DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
                                       wg[0].wt.shape[1] * 2);
     vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
     DBuf a(d, DType::kBF16, {t, inter});
+    prof::Scope prof_silu("moe_silu_mul");
     vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
     return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());
   }
   DBuf g = LinearBT(d, x, e.gate_proj, t, DType::kBF16, sg.c_str());  // [t, I]
   DBuf u = LinearBT(d, x, e.up_proj, t, DType::kBF16, su.c_str());    // [t, I]
   DBuf a(d, DType::kBF16, {t, inter});
+  prof::Scope prof_silu("moe_silu_mul");
   vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
   return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());  // [t, H]
 }
@@ -640,6 +642,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       {
         const size_t rb = static_cast<size_t>(h) * vt::SizeOf(DType::kBF16);
         auto* dp = static_cast<char*>(gathered.ptr());
+        prof::Scope prof_gather("moe_gather");  // the row-wise gather Copy below
         const auto* sp = static_cast<const char*>(dhn.data);
         for (size_t s = 0; s < token_rows.size(); ++s)
           d.b.Copy(d.q, dp + s * rb,
@@ -647,6 +650,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       }
       DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(),
                          ne, inter, "routed");
+      prof::Scope prof_scatter("moe_scatter");
       for (int64_t i = 0; i < ne; ++i) {
         d.b.Copy(d.q,
                  static_cast<char*>(expert_out.ptr()) +
@@ -768,6 +772,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       Tensor ag = rows_view(gout.t(), run.row0, ne);
       Tensor au = rows_view(uout.t(), run.row0, ne);
       Tensor aa = rows_view(act.t(), run.row0, ne);
+      prof::Scope prof_silu("moe_silu_mul");
       vt::MoeSiluMul(d.q, aa, ag, au);
     }
 
@@ -793,6 +798,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
 
     // Scatter each run's rows to their (token, top-k) slots — unchanged.
     for (const RoutedRun& run : runs) {
+      prof::Scope prof_scatter("moe_scatter");
       for (int64_t i = 0; i < static_cast<int64_t>(run.slot_rows.size()); ++i) {
         d.b.Copy(d.q,
                  static_cast<char*>(expert_out.ptr()) +
@@ -811,6 +817,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // router weights ARE the mixture weights (no renormalisation, no scaling).
   DBuf out(d, DType::kBF16, {t, h});
   Tensor shared_t = shared.t();
+  prof::Scope prof_combine("moe_combine");
   vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared_t,
                  /*routed_scale=*/1.0f);
   return out;
