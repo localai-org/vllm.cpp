@@ -45,6 +45,7 @@
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
+#include "vllm/model_executor/models/kolibri1_bfdot_gemv.h"
 #include "vllm/model_executor/models/kolibri1_shared.h"  // the routing + step inputs, shared with the TT row
 #include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
@@ -292,6 +293,30 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // unchanged unless the env var is set.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
+  // BFDOT bf16 GEMV DRAFT arm, strictly opt-in (VT_CPU_KOLIBRI_BFDOT_GEMV=1,
+  // default OFF) and t==1 decode-only: the warm-cache tensor is ALREADY bf16
+  // [n, k] row-major (the dequant cache decode rounds to bf16 on store), so
+  // the arm feeds those bytes straight into vbfdotq_f32 (bf16 in, f32
+  // accumulate). This is a rounding-policy change versus the f32
+  // widen+fma MatmulBT below — the chain WILL move under the knob; measured,
+  // not hidden. Requires DetectArmBf16 (KnobActive refuses by name
+  // otherwise); deliberately dotprod-free. The residency precondition is the
+  // dequant cache itself: the arm exists to re-use the warm bf16 bytes, so
+  // with the cache disabled the knob refuses and the f32-widen path below
+  // runs. Covers every fp8-block projection that resolves here at decode:
+  // attention q/k/v/o and the routed-expert gate/up/down. The router gate
+  // (IsBf16) keeps its production path — it never was an fp8 warm-cache
+  // tensor.
+  if (t == 1 && kolibri1_bfdot_gemv::KnobActive() &&
+      kolibri1_dequant_cache::ProcessCache().enabled()) {
+    prof::Scope prof("linear_gemm");
+    DBuf out(d, out_dtype, {1, w.fp8_block.n});
+    kolibri1_bfdot_gemv::Gemv(static_cast<const uint16_t*>(r.wt.data),
+                              static_cast<const uint16_t*>(x.data),
+                              static_cast<uint16_t*>(out.ptr()),
+                              w.fp8_block.n, w.fp8_block.k);
+    return out;
+  }
   DBuf out(d, out_dtype, {t, w.fp8_block.n});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * w.fp8_block.n *
                                w.fp8_block.k);
