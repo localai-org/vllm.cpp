@@ -44,8 +44,17 @@ bool KnobActive() {
   return true;
 }
 
-void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
-          int64_t n, int64_t k) {
+template <bool kF32Out>
+inline void StoreOut(void* out_ptr, int64_t row, float acc) {
+  if (kF32Out)
+    static_cast<float*>(out_ptr)[row] = acc;
+  else
+    static_cast<uint16_t*>(out_ptr)[row] = vt::F32ToBF16(acc);
+}
+
+template <bool kF32Out>
+void GemvBody(const uint16_t* w_bf16, const uint16_t* x_bf16, void* out_ptr,
+              int64_t n, int64_t k) {
   // Threaded over OUTPUT rows only: every output element is one worker's
   // same-order instruction sequence (the host_parallel contract), so the
   // threaded result is bit-identical to the serial loop by construction.
@@ -68,7 +77,7 @@ void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
       for (; e < k; ++e) {
         acc = acc + vt::BF16ToF32(w[e]) * vt::BF16ToF32(x_bf16[e]);
       }
-      out_bf16[row] = vt::F32ToBF16(acc);
+      StoreOut<kF32Out>(out_ptr, row, acc);
     }
 #else
     // Portable fallback: never selected at runtime (KnobActive refuses
@@ -80,10 +89,20 @@ void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
       for (int64_t e = 0; e < k; ++e) {
         acc = acc + vt::BF16ToF32(w[e]) * vt::BF16ToF32(x_bf16[e]);
       }
-      out_bf16[row] = vt::F32ToBF16(acc);
+      StoreOut<kF32Out>(out_ptr, row, acc);
     }
 #endif
   });
+}
+
+void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
+          int64_t n, int64_t k) {
+  GemvBody<false>(w_bf16, x_bf16, out_bf16, n, k);
+}
+
+void GemvF32Out(const uint16_t* w_bf16, const uint16_t* x_bf16, float* out_f32,
+                int64_t n, int64_t k) {
+  GemvBody<true>(w_bf16, x_bf16, out_f32, n, k);
 }
 
 }  // namespace kolibri1_bfdot_gemv

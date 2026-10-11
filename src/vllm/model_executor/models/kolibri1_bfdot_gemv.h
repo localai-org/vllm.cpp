@@ -53,6 +53,16 @@ bool KnobActive();
 void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
           int64_t n, int64_t k);
 
+// The f32-out form for the two linear sites the t==1 LinearBT hook does not
+// reach — the UNTIED lm_head (bf16 [vocab, H] weight, f32 logits) and the
+// bf16 router gate (f32 logits). Same kernel, same numerics contract as
+// `Gemv`, minus the final bf16 store round: the f32 accumulator IS the f32
+// output, exactly as the widen-f32 MatmulBT these sites replace produces f32
+// without an intermediate narrower round. The f32 store cannot move the
+// envelope relative to `Gemv`'s (it REMOVES one rounding the bf16 form has).
+void GemvF32Out(const uint16_t* w_bf16, const uint16_t* x_bf16, float* out_f32,
+                int64_t n, int64_t k);
+
 }  // namespace kolibri1_bfdot_gemv
 }  // namespace vllm
 
