@@ -1328,3 +1328,90 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
   // common prefix must be a near-tie.
   CHECK(instr_hard_flips == 0);
 }
+
+// ---- SCRATCH DEBUG: the router diagnostic's reference separation -----------
+//
+// RED-FIRST (review finding on 1bf1e5c55): the MoeBlock stage-dump block
+// indexed `g_kolibri1_dbg_route_logits[k]` unconditionally while iterating
+// the host reference — TT-only execution (the global starts EMPTY) or a
+// prior shorter CPU batch read the global OUT OF BOUNDS. The fix separates
+// the HOST-REFERENCE leg (same-input TT-vs-host, always safe, both vectors
+// local) from the OPTIONAL CPU leg (only when the stashed CPU reference's
+// layer identity AND size match this call). These cases pin the guard.
+
+namespace {
+// Saves and restores the process-global CPU debug stashes around each
+// case — the globals belong to the CPU arm and the suite must not leak
+// state into the device legs.
+struct DbgStashGuard {
+  std::vector<float> route;
+  int64_t route_layer;
+  std::vector<uint16_t> dhn;
+  int64_t dhn_layer;
+  DbgStashGuard()
+      : route(g_kolibri1_dbg_route_logits),
+        route_layer(g_kolibri1_dbg_route_layer),
+        dhn(g_kolibri1_dbg_dhn),
+        dhn_layer(g_kolibri1_dbg_dhn_layer) {}
+  ~DbgStashGuard() {
+    g_kolibri1_dbg_route_logits = route;
+    g_kolibri1_dbg_route_layer = route_layer;
+    g_kolibri1_dbg_dhn = dhn;
+    g_kolibri1_dbg_dhn_layer = dhn_layer;
+  }
+};
+}  // namespace
+
+TEST_CASE("SCRATCH dbg router diagnostic: TT-only execution (empty CPU "
+          "reference) skips the CPU leg and never reads the global") {
+  DbgStashGuard guard;
+  g_kolibri1_dbg_route_logits.clear();
+  g_kolibri1_dbg_route_layer = -1;
+  g_kolibri1_dbg_dhn.clear();
+  g_kolibri1_dbg_dhn_layer = -1;
+
+  // TT-only: the dump env is set, the CPU arm never ran in this process.
+  std::vector<float> logits = {1.0f, -2.0f, 3.0f, 0.5f};
+  std::vector<float> href = {1.25f, -2.0f, 2.5f, 0.5f};
+  const vllm::Kolibri1DebugRouteDiff rep =
+      vllm::Kolibri1DebugRouteCompare(0, logits, href);
+  CHECK_FALSE(rep.cpu_compared);
+  CHECK(rep.maxdiff_cpu == 0.0);
+  CHECK(rep.maxdiff_dev == doctest::Approx(0.5));  // |1.0-1.25| vs |3.0-2.5|
+}
+
+TEST_CASE("SCRATCH dbg router diagnostic: a shorter prior CPU batch (size "
+          "mismatch) skips the CPU leg cleanly") {
+  DbgStashGuard guard;
+  // A prior CPU run with a SHORTER token batch left the global too small;
+  // the pre-fix loop indexed it up to href.size() and read out of bounds.
+  g_kolibri1_dbg_route_logits = {9.0f, 9.0f};
+  g_kolibri1_dbg_route_layer = 0;
+
+  std::vector<float> logits(4, 1.0f);
+  std::vector<float> href(4, 1.0f);
+  const vllm::Kolibri1DebugRouteDiff rep =
+      vllm::Kolibri1DebugRouteCompare(0, logits, href);
+  CHECK_FALSE(rep.cpu_compared);
+  CHECK(rep.maxdiff_cpu == 0.0);
+  CHECK(rep.maxdiff_dev == 0.0);
+}
+
+TEST_CASE("SCRATCH dbg router diagnostic: a different-layer CPU reference "
+          "never establishes parity") {
+  DbgStashGuard guard;
+  g_kolibri1_dbg_route_logits = {9.0f, 9.0f, 9.0f, 9.0f};
+  g_kolibri1_dbg_route_layer = 1;  // the stash came from layer 1
+
+  std::vector<float> logits = {0.0f, 0.0f, 0.0f, 0.0f};
+  std::vector<float> href = {0.0f, 0.0f, 0.0f, 0.0f};
+  const vllm::Kolibri1DebugRouteDiff rep0 =
+      vllm::Kolibri1DebugRouteCompare(0, logits, href);
+  CHECK_FALSE(rep0.cpu_compared);  // layer identity mismatch: skipped
+
+  const vllm::Kolibri1DebugRouteDiff rep1 =
+      vllm::Kolibri1DebugRouteCompare(1, logits, href);
+  CHECK(rep1.cpu_compared);        // same layer AND same size: compared
+  CHECK(rep1.maxdiff_cpu == doctest::Approx(9.0));
+  CHECK(rep1.maxdiff_dev == 0.0);
+}

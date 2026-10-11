@@ -53,7 +53,9 @@
 // SCRATCH DEBUG (layer-1 moe localization): the CPU arm's last router logits,
 // read by the TT arm's RouteDump for the direct per-expert diff.
 std::vector<float> g_kolibri1_dbg_route_logits;
+int64_t g_kolibri1_dbg_route_layer = -1;
 std::vector<uint16_t> g_kolibri1_dbg_dhn;
+int64_t g_kolibri1_dbg_dhn_layer = -1;
 
 namespace vllm {
 
@@ -545,6 +547,7 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
                  ids.c_str(), ws.c_str());
   }
   g_kolibri1_dbg_route_logits = logits;
+  g_kolibri1_dbg_route_layer = layer;
 }
 
 
@@ -650,6 +653,7 @@ ForwardLogits ForwardKolibri1Forward(
       g_kolibri1_dbg_dhn.assign(
           reinterpret_cast<const uint16_t*>(dhn.t().data),
           reinterpret_cast<const uint16_t*>(dhn.t().data) + hn);
+      g_kolibri1_dbg_dhn_layer = l;
     }
     DBuf attn = AttentionBlock(d, lw.attn, p, lw.is_sliding, dhn.t(),
                                si.positions.t(), si, *kv_ptr, t);
