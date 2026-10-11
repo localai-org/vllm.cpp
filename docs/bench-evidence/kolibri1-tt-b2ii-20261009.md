@@ -179,3 +179,50 @@ Owed after this session: root-cause the host-free device handoff
 paths host materialization bypasses); the two op-level drifts above;
 the decode bench anchor 109726 (chain 101807/109726), gated behind the
 token gate per the addendum.
+
+## 7. Substrate rms reduction-precision patch (2026-10-10, row/tt-kolibri-residue)
+
+The rms_norm bias root-caused in section 6's red micro was fixed at the
+TT-METAL SUBSTRATE level, not in vllm.cpp. The trial tt-metal tree
+`/tmp/tt-metal-umdtrial` now carries a reduction-precision patch on top
+of the port fixes, and `/tmp/umdtrial-install` was rebuilt from it
+(build dir `/tmp/build-umdtrial2`; rebuild recipe:
+`cmake --build /tmp/build-umdtrial2 -j 4 && cmake --install . --prefix
+/tmp/umdtrial-install`). ANY future measurement or gate on this stack
+must use this rebuilt install.
+
+Substrate patch (3 edits in the trial tree):
+
+- `ttnn/cpp/ttnn/operations/normalization/rmsnorm/rmsnorm.cpp`
+  (`rmsnorm_default_compute_config`): `fp32_acc = true`,
+  `approx_mode = false`. Mechanism: the old default (`fp32_acc=false`)
+  made the layernorm program factory run Float16_b CBs with
+  `float32_reduction=false` (`layernorm_op_multi_core.cpp:499`) even
+  for FLOAT32 input tiles — the kolibri1 norms' sum-of-squares
+  accumulated in bf16, the whole -3.4% bias.
+- `ttnn/cpp/ttnn/operations/normalization/layernorm/device/
+  layernorm_op_multi_core.cpp`: the reduce scaler CB is Float32 when
+  `fp32_dest_acc_en` (the 1/W mean factor no longer rides a bf16 tile).
+
+Verdicts (same env/reset/cache recipe as section 6, clean reset per leg):
+
+- Micro (`SCRATCH dbg rmsnorm micro`, bit-identical bf16 [1,2560]
+  seed 7): sum ratio 0.98992 -> 0.99972 vs the CPU row, max_abs
+  0.0625 -> 0.015625 (4 ULP -> 1 ULP). Against the host-double sum
+  rounded per element to bf16, TT 0.99915 vs CPU 0.99942: the residual
+  is the bf16 output-store quantization floor, not a kernel bias.
+- B2b-ii gate, host-free ON: ARGMAX CHAIN 26/33, flips 7 (7 hard);
+  instrument 40 tf flips (5 near-tie, 35 HARD), worst 3.19 nats
+  (baseline 47 HARD, worst 5.17).
+- B2b-ii gate, `VT_TT_HOST_FREE_DECODE=0`: ARGMAX CHAIN 26/33, flips 7
+  (1 near-tie, 6 hard — baseline 7 hard); instrument 116 tf flips
+  (105 HARD), worst 7.59 nats, deterministic across a clean reset.
+- Verdict: the systematic norm bias is gone but the argmax chain did
+  not move: the remaining flips belong to the two open op-level drifts
+  (kGdnDecode, kMatmulBTQuantGrouped), both re-confirmed failing in
+  isolation on this stack. The >=141 target stays open.
+- `test_tenstorrent_backend` on this stack: the only cases failing in
+  isolation are the two known ones; the W4 EnsureDevice2D
+  `uploads_bulk_bf16` counter and the matmul region class split fail
+  only in full-suite order state and pass isolated (same intermittent
+  class as the section-6 RAC flake).
