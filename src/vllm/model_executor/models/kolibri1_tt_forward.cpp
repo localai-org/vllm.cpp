@@ -79,6 +79,41 @@ bool ProgressOn() {
   return on;
 }
 
+// SCRATCH DEBUG (root-cause the host-free decode corruption): per-stage
+// activation checksums, env VT_KOLIBRI1_TT_STAGE_DUMP. Downloads the tensor
+// (bf16 rows [t,h]) and prints sum, max|.|, and the first values so the TT
+// arm's stage outputs can be diffed against the host-free-OFF arm stage by
+// stage. Bisection instrumentation, not a shipped surface.
+bool StageDumpOn() {
+  static const bool on = std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr;
+  return on;
+}
+
+void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
+  if (!StageDumpOn()) return;
+  const Tensor& t = buf.t();
+  const int64_t n = t.shape[0] * t.shape[1];
+  std::vector<uint8_t> tmp(static_cast<size_t>(n) * 2);
+  buf.Download(d, tmp.data());
+  const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+  double sum = 0;
+  float mx = 0;
+  auto val = [](uint16_t bits) {
+    uint32_t u = static_cast<uint32_t>(bits) << 16;
+    float f;
+    std::memcpy(&f, &u, 4);
+    return f;
+  };
+  for (int64_t i = 0; i < n; ++i) {
+    const float v = val(bf[i]);
+    sum += v;
+    if (std::fabs(v) > mx) mx = std::fabs(v);
+  }
+  std::fprintf(stderr, "[STAGE] L%lld %s sum=%.6f max=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+               static_cast<long long>(layer), tag, sum, mx, val(bf[0]), val(bf[1]),
+               val(bf[2]), val(bf[3]));
+}
+
 // ---- The routed-expert refusal (fires by name, counted, never thrown) ------
 
 std::mutex& RefusalMutex() {
@@ -255,6 +290,52 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
       pa.window_size = std::nullopt;  // full attention, RNoPE or not
     }
     dense_attn::ApplyKvCacheQuant(pa, kv);
+    if (StageDumpOn()) {
+      auto cks = [&](const char* tag, const Tensor& tn) {
+        std::vector<uint8_t> tmp(static_cast<size_t>(tn.Numel()) *
+                                 vt::SizeOf(tn.dtype));
+        d.b.Copy(d.q, tmp.data(), tn.data, tmp.size());
+        double s = 0;
+        if (tn.dtype == vt::DType::kBF16) {
+          const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+          auto val = [](uint16_t bits) {
+            uint32_t u = static_cast<uint32_t>(bits) << 16;
+            float f;
+            std::memcpy(&f, &u, 4);
+            return f;
+          };
+          for (int64_t i = 0; i < tn.Numel(); ++i) s += val(bf[i]);
+        } else {
+          const auto* f4 = reinterpret_cast<const float*>(tmp.data());
+          for (int64_t i = 0; i < tn.Numel(); ++i) s += f4[i];
+        }
+        std::fprintf(stderr, "[STAGE] attnin %s sum=%.6f n=%lld dt=%d\n", tag, s,
+                     static_cast<long long>(tn.Numel()),
+                     static_cast<int>(tn.dtype));
+      };
+      auto view_at = [&](Tensor base, int64_t blocks) {
+        Tensor t2;
+        t2.data = base.data;
+        t2.dtype = base.dtype;
+        t2.device = base.device;
+        t2.rank = 4;
+        t2.shape[0] = blocks;
+        t2.shape[1] = kv.block_size;
+        t2.shape[2] = hkv;
+        t2.shape[3] = dh;
+        t2.stride[0] = kv.block_size * hkv * dh;
+        t2.stride[1] = hkv * dh;
+        t2.stride[2] = dh;
+        t2.stride[3] = 1;
+        return t2;
+      };
+      cks("k3", k3);
+      cks("v3", v3);
+      cks("k_cache", view_at(k_cache, 1));
+      cks("v_cache", view_at(v_cache, 1));
+      cks("slot_mapping", si.slot_mapping.t());
+      cks("seq_lens", si.seq_lens.t());
+    }
     dense_attn::WriteKvCache(d.q, kv, k3, v3, k_cache, v_cache,
                              si.slot_mapping.t());
     vt::PagedAttention(d.q, attn.t(), q3, k_cache, v_cache,
@@ -263,6 +344,23 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   }
 
   Tensor o_in = Reshape(attn.t(), {t, hq * dh});
+  // SCRATCH DEBUG: the paged-attention output before the o projection.
+  if (StageDumpOn()) {
+    std::vector<uint8_t> tmp(static_cast<size_t>(t) * hq * dh * 2);
+    attn.Download(d, tmp.data());
+    const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+    double s = 0;
+    auto val = [](uint16_t bits) {
+      uint32_t u = static_cast<uint32_t>(bits) << 16;
+      float f;
+      std::memcpy(&f, &u, 4);
+      return f;
+    };
+    const int64_t n = t * hq * dh;
+    for (int64_t i = 0; i < n; ++i) s += val(bf[i]);
+    std::fprintf(stderr, "[STAGE] L%lld pa_out sum=%.6f first=%.6f\n",
+                 static_cast<long long>(t * 0), s, val(bf[0]));
+  }
   return LinearBTDevice(d, o_in, o_w, t);  // [T, H]
 }
 
@@ -633,18 +731,32 @@ ForwardLogits ForwardKolibri1TTResidentForward(
 
   // Embedding (bf16 table, [vocab, H] raw orientation) — the shared
   // residency seam, exactly like the CPU row.
-  DBuf hidden_buf(d, DType::kBF16, {t, h});
+  std::shared_ptr<void> hidden_hold;
+  // SCRATCH FIX (host-free decode corruption): the embedding buffer used to
+  // die at the end of this scope while `hidden` kept referencing its pooled
+  // block. The block then went back to the DevicePool and was recycled by the
+  // next [t,h] allocation (res/dhn), whose Memset + slot reuse desynced the
+  // embedding's TT device shadow: in the host-free ON arm the first residual
+  // RmsNorm served a stale/garbage shadow for the recycled buffer (L0 dhn
+  // sum 26.34 vs CPU 9.85, first diverging stage, VT_KOLIBRI1_TT_STAGE_DUMP),
+  // and the corruption propagated to junk logits. The OFF arm masked it
+  // because the host residual path EnsureHost-downloads the true embedding
+  // bytes first. Hold the embedding DBuf alive for the whole step instead.
+  auto* hidden_held = new DBuf(d, DType::kBF16, {t, h});
+  hidden_hold = std::shared_ptr<void>(hidden_held, [](void* q) {
+    delete static_cast<DBuf*>(q);
+  });
   {
     DBuf ids(d, DType::kI32, {t}, const_cast<int32_t*>(token_ids.data()));
     Tensor tab = ResidentWeight(d, weights.embed_tokens, {vocab, h});
-    vt::Embedding(d.q, hidden_buf.t(), tab, ids.t());
+    vt::Embedding(d.q, hidden_held->t(), tab, ids.t());
   }
-  Tensor hidden = hidden_buf.t();
+  StageDump("emb", -2, *hidden_held, d);
+  Tensor hidden = hidden_held->t();
   DBuf res(d, DType::kBF16, {t, h});
   res.Zero(d);
 
   const float eps = static_cast<float>(p.rms_norm_eps);
-  std::shared_ptr<void> hidden_hold;
 
   // The per-step device inputs are layer-invariant: upload ONCE per step
   // (the CPU row rebuilds them per layer; the same bytes either way).
@@ -672,6 +784,23 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     // CPU row's exact conditional, so the op sequence matches its default.
     DBuf dhn(d, DType::kBF16, {t, h});
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
+    if (StageDumpOn() && l == 0) {
+      std::vector<uint8_t> tmp(static_cast<size_t>(h) * 2);
+      d.b.Copy(d.q, tmp.data(),
+               static_cast<const uint8_t*>(w_in.data), tmp.size());
+      d.b.Synchronize(d.q);
+      const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+      double s = 0;
+      auto val = [](uint16_t bits) {
+        uint32_t u = static_cast<uint32_t>(bits) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+      };
+      for (int64_t i = 0; i < h; ++i) s += val(bf[i]);
+      std::fprintf(stderr, "[STAGE] gam sum=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+                   s, val(bf[0]), val(bf[1]), val(bf[2]), val(bf[3]));
+    }
     Tensor dhn_t = dhn.t();
     Tensor res_t = res.t();
     if (dense_attn::FusedChainAdoptEnabled()) {
@@ -682,14 +811,17 @@ ForwardLogits ForwardKolibri1TTResidentForward(
                   vt::RmsNormArgs{eps, false}, &res_t);
     }
 
+    StageDump("dhn", l, dhn, d);
     // Attention -> post_attn_norm (no residual).
     DBuf attn = AttentionBlock(d, lw.attn, p, lw.is_sliding, dhn.t(),
                                si.positions.t(), si, *kv_ptr, t, cl.q, cl.k,
                                cl.v, cl.o);
+    StageDump("attn", l, attn, d);
     DBuf attn_n(d, DType::kBF16, {t, h});
     Tensor w_pa = ResidentWeight(d, lw.post_attn_norm, {h});
     vt::RmsNorm(d.q, attn_n.t(), attn.t(), w_pa,
                 vt::RmsNormArgs{eps, false});
+    StageDump("attn_n", l, attn_n, d);
 
     // post_attention_layernorm carries the residual: residual += the
     // POST-NORMED attention output (kolibri1.py:250).
@@ -705,15 +837,18 @@ ForwardLogits ForwardKolibri1TTResidentForward(
                   vt::RmsNormArgs{eps, false}, &res_t);
     }
 
+    StageDump("dh2", l, dh2, d);
     // MoE on EVERY layer -> post_ffn_norm (no residual). Slice ii: the
     // router, the streaming routed path (or the named refusal when the
     // streaming arm is disabled), and the shared expert.
     DBuf moe = MoeBlock(d, lw.moe, p, dh2.t(), t, l, cl.sh_gate, cl.sh_up,
                         cl.sh_down, streaming, weights);
+    StageDump("moe", l, moe, d);
     DBuf moe_n(d, DType::kBF16, {t, h});
     Tensor w_pf = ResidentWeight(d, lw.post_ffn_norm, {h});
     vt::RmsNorm(d.q, moe_n.t(), moe.t(), w_pf, vt::RmsNormArgs{eps, false});
 
+    StageDump("moe_n", l, moe_n, d);
     auto* held = new DBuf(std::move(moe_n));
     hidden = held->t();
     hidden_hold = std::shared_ptr<void>(held, [](void* q) {
@@ -737,6 +872,7 @@ ForwardLogits ForwardKolibri1TTResidentForward(
   } else {
     vt::RmsNorm(d.q, dnorm_t, hidden, w_fn, vt::RmsNormArgs{eps, false},
                 &res_t);
+  StageDump("dnorm", -1, dnorm, d);
   }
 
   // logits_indices gather, then the UNTIED lm_head.

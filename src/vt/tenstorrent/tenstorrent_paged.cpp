@@ -1118,6 +1118,8 @@ bool TryPagedAttentionDeviceDecode(Tensor& out, const Tensor& query, const Tenso
                                    const Tensor& seq_lens, const Tensor& query_start_loc,
                                    const PagedAttentionArgs& args) {
   TT_OP_TRACE("TryPagedAttentionDeviceDecode");
+  // VT_TT_FORCE_HOST_PA: host-free bisection — decline the device sdpa arm.
+  if (std::getenv("VT_TT_FORCE_HOST_PA") != nullptr) return false;
   if (!args.causal || args.logits_soft_cap > 0.0f) return false;
   if (args.window_size.has_value()) return false;
   if (args.kv_cache_dtype != Fp8KVCacheDataType::kAuto) return false;
