@@ -176,6 +176,25 @@ target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Kolibri-1 n-gram SPEC-DECODE e2e probe (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6,
+# branch row/kolibri-spec-probe): drives the FULL paged engine on CPU with
+# speculative_config method=ngram and gates spec-ON == spec-OFF byte-exactness
+# while measuring acceptance and wall tok/s on the W3 golden prompts + the
+# deterministic bench prompt. Checkpoint-gated (skips when the real model is
+# absent); needs no GPU.
+vllm_cpp_add_test(test_kolibri1_ngram_spec vllm/models/test_kolibri1_ngram_spec.cpp)
+target_include_directories(test_kolibri1_ngram_spec PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_ngram_spec PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# Kolibri-1 n-gram SPEC-DECODE PROBE HARNESS (ISSUE-LOCAL-
+# 01M4P22PX6BPRQAY1CK20FZQF6): the contained prototype — the production n-gram
+# proposer + ONE production target forward over the k+1 verify sequence,
+# measuring the true accept rate and verify-step cost on the real checkpoint.
+# Checkpoint-gated; CPU only.
+vllm_cpp_add_test(test_kolibri1_spec_probe vllm/models/test_kolibri1_spec_probe.cpp)
+target_include_directories(test_kolibri1_spec_probe PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_spec_probe PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 # MODEL-TEXT-kolibri-1 in-process NUMA interleave
 # (ISSUE-LOCAL-01M4GQ82X99D6JNBWDPX7ATJPY): the mempolicy guard engages
 # (MPOL_INTERLEAVE, VT_KOLIBRI1_NUMA_INTERLEAVE=0 opt-out) and a touched
@@ -2576,6 +2595,16 @@ target_include_directories(test_dflash_propose PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # vllm/tests/v1/spec_decode/test_ngram.py, host-side, runs everywhere).
 vllm_cpp_add_test(test_ngram_proposer vllm/v1/spec_decode/test_ngram_proposer.cpp)
 target_include_directories(test_ngram_proposer PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Kolibri-1 n-gram ACCEPTANCE unit (probe, ISSUE-LOCAL-
+# 01M4P22PX6BPRQAY1CK20FZQF6): the production proposer simulated over the W3
+# golden chains — the measured accept-rate table, exactness-pinned. Host-side;
+# runs everywhere the goldens fixture is readable.
+vllm_cpp_add_test(test_kolibri1_ngram_accept
+  vllm/v1/spec_decode/test_kolibri1_ngram_accept.cpp)
+target_include_directories(test_kolibri1_ngram_accept PRIVATE
+  ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_ngram_accept PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 # SPEC-DRAFT-MODEL (CLAIM-SPEC-DRAFT-MEDUSA) — the generic separate-draft-model
 # greedy propose brick; host-side, reuses the landed RejectionSampler verify.
 vllm_cpp_add_test(test_draft_model_proposer
