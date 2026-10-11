@@ -809,6 +809,217 @@ TEST_CASE("SCRATCH dbg TT vs CPU logits") {
   (void)gp;
 }
 
+// SCRATCH DEBUG (remove before landing): vt::RmsNorm TT vs CPU micro-test,
+// bf16 [1,2560] with and without residual.
+TEST_CASE("SCRATCH dbg rmsnorm micro") {
+  if (!TenstorrentDevicePresent()) return;
+  vt::Backend& cpu_be = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue cpu_q = cpu_be.CreateQueue();
+  vt::Backend& ttbeg = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue tt_q = ttbeg.CreateQueue();
+  const int64_t d = 2560;
+  std::vector<uint16_t> xb(static_cast<size_t>(d));
+  std::vector<uint16_t> gb(static_cast<size_t>(d));
+  std::mt19937 rng(7);
+  std::normal_distribution<float> nd(0.0f, 0.5f);
+  auto tobf = [](float f) {
+    uint32_t u;
+    std::memcpy(&u, &f, 4);
+    return static_cast<uint16_t>(u >> 16);
+  };
+  for (int64_t i = 0; i < d; ++i) xb[static_cast<size_t>(i)] = tobf(nd(rng));
+  for (int64_t i = 0; i < d; ++i)
+    gb[static_cast<size_t>(i)] = tobf(nd(rng) * 0.1f + 1.0f);
+  for (int with_res : {0, 1}) {
+    std::vector<uint16_t> resb(static_cast<size_t>(d),
+                               static_cast<uint16_t>(0));
+    std::vector<uint16_t> outc(static_cast<size_t>(d));
+    std::vector<uint16_t> outt(static_cast<size_t>(d));
+    {
+      vllm::dense_attn::Dev dc{cpu_be, cpu_q};
+      vllm::dense_attn::DBuf x(dc, vt::DType::kBF16, {1, d}, xb.data());
+      vllm::dense_attn::DBuf g(dc, vt::DType::kBF16, {d}, gb.data());
+      vllm::dense_attn::DBuf res(dc, vt::DType::kBF16, {1, d},
+               with_res ? resb.data() : nullptr);
+      vllm::dense_attn::DBuf out(dc, vt::DType::kBF16, {1, d});
+      if (with_res)
+        vt::RmsNorm(dc.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false}, &res.t());
+      else
+        vt::RmsNorm(dc.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false});
+      out.Download(dc, outc.data());
+    }
+    {
+      vllm::dense_attn::Dev dt{ttbeg, tt_q};
+      vllm::dense_attn::DBuf x(dt, vt::DType::kBF16, {1, d}, xb.data());
+      vllm::dense_attn::DBuf g(dt, vt::DType::kBF16, {d}, gb.data());
+      vllm::dense_attn::DBuf res(dt, vt::DType::kBF16, {1, d},
+               with_res ? resb.data() : nullptr);
+      vllm::dense_attn::DBuf out(dt, vt::DType::kBF16, {1, d});
+      if (with_res)
+        vt::RmsNorm(dt.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false}, &res.t());
+      else
+        vt::RmsNorm(dt.q, out.t(), x.t(), g.t(),
+                    vt::RmsNormArgs{1e-6f, false});
+      out.Download(dt, outt.data());
+    }
+    auto val = [](uint16_t bits) {
+      uint32_t u = static_cast<uint32_t>(bits) << 16;
+      float f;
+      std::memcpy(&f, &u, 4);
+      return f;
+    };
+    double sc = 0, st = 0, mad = 0, sh = 0;
+    int ndiff = 0, ndiff2 = 0;
+    for (int64_t i = 0; i < d; ++i) {
+      float c = val(outc[static_cast<size_t>(i)]);
+      float t = val(outt[static_cast<size_t>(i)]);
+      sc += c;
+      st += t;
+      mad = std::max(mad, static_cast<double>(std::fabs(c - t)));
+      if (c != t) ++ndiff;
+    }
+    {
+      double sumsq = 0;
+      for (int64_t i = 0; i < d; ++i) {
+        double v = val(xb[static_cast<size_t>(i)]);
+        sumsq += v * v;
+      }
+      double inv = 1.0 / std::sqrt(sumsq / static_cast<double>(d) + 1e-6);
+      for (int64_t i = 0; i < d; ++i) {
+        double h = static_cast<double>(val(xb[static_cast<size_t>(i)])) * inv *
+                   static_cast<double>(val(gb[static_cast<size_t>(i)]));
+        // round the host-double value once to bf16, the same final store
+        uint32_t hu;
+        float hf = static_cast<float>(h);
+        std::memcpy(&hu, &hf, 4);
+        uint16_t hb = static_cast<uint16_t>(hu >> 16);
+        sh += val(hb);
+        if (val(hb) != val(outt[static_cast<size_t>(i)])) ++ndiff2;
+      }
+      double h0 = val(xb[0]) * inv * val(gb[0]);
+      MESSAGE("host-double out[0]=" << h0 << " cpu out[0]=" << val(outc[0])
+                                    << " tt out[0]=" << val(outt[0])
+                                    << " host inv=" << inv);
+      MESSAGE("host2 sum=" << sh << " tt/host2=" << (sh != 0 ? st / sh : 0.0)
+                           << " cpu/host2=" << (sh != 0 ? sc / sh : 0.0)
+                           << " tt!=cpu elems=" << ndiff
+                           << " tt!=host-bf16 elems=" << ndiff2);
+    }
+    MESSAGE("with_res=" << with_res << " sum_cpu=" << sc << " sum_tt=" << st
+                        << " ratio=" << (sc != 0 ? st / sc : 0.0)
+                        << " max_abs=" << mad);
+  }
+}
+
+// chosen golden prompt (VT_TF_DBG_PROMPT, default 1 'der Mond'), VT_TF_DBG_STEPS
+// decode steps (default 6). Stage dumps come from VT_KOLIBRI1_TT_STAGE_DUMP.
+TEST_CASE("SCRATCH dbg TF prompt") {
+  if (!TenstorrentDevicePresent()) return;
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || *model_dir == '\0') return;
+  const int which = std::getenv("VT_TF_DBG_PROMPT") != nullptr
+                        ? std::atoi(std::getenv("VT_TF_DBG_PROMPT"))
+                        : 1;
+  const int steps = std::getenv("VT_TF_DBG_STEPS") != nullptr
+                        ? std::atoi(std::getenv("VT_TF_DBG_STEPS"))
+                        : 6;
+  const std::string dir = model_dir;
+  const HfConfig config = vllm::LoadHfConfig(dir + "/config.json");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(dir + "/model.safetensors.index.json"));
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items())
+    shard_names.insert(shard.get<std::string>());
+  std::vector<SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(SafetensorsFile::Open(dir + "/" + shard));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+
+  vt::Backend& cpu_be = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue cpu_q = cpu_be.CreateQueue();
+  std::unique_ptr<LoadedModel> cpu_model = ModelRegistry::Load(config, source);
+  ModelRegistry::Prepare(*cpu_model, config, cpu_q);
+  const int64_t num_blocks = 32;
+  const Kolibri1Weights& cw = Kolibri1LoadedModelWeights(*cpu_model);
+  const Kolibri1Params& cp = cw.params;
+  std::vector<PagedKvCache> cpu_kv;
+  std::vector<std::vector<uint8_t>> cpu_kv_bytes;
+  for (int64_t l = 0; l < cp.num_hidden_layers; ++l) {
+    cpu_kv_bytes.emplace_back(static_cast<size_t>(
+        num_blocks * 2 * 16 * cp.num_key_value_heads * cp.head_dim *
+        vt::SizeOf(vt::DType::kBF16)));
+    PagedKvCache c;
+    c.data = cpu_kv_bytes.back().data();
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = cp.num_key_value_heads;
+    c.head_size = cp.head_dim;
+    cpu_kv.push_back(c);
+  }
+
+  vt::Backend& tt_be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue tt_q = tt_be.CreateQueue();
+  std::unique_ptr<LoadedModel> tt_model = ModelRegistry::Load(config, source);
+  ModelRegistry::Prepare(*tt_model, config, tt_q);
+  std::vector<PagedKvCache> tt_kv;
+  std::vector<std::shared_ptr<void>> tt_keep;
+  for (int64_t l = 0; l < cp.num_hidden_layers; ++l) {
+    void* buf = tt_be.Alloc(cpu_kv_bytes[0].size());
+    std::memset(buf, 0, cpu_kv_bytes[0].size());
+    tt_keep.emplace_back(buf, [&tt_be](void* p) { tt_be.Free(p); });
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = cp.num_key_value_heads;
+    c.head_size = cp.head_dim;
+    tt_kv.push_back(c);
+  }
+
+  const GateGolden gp = LoadGateGoldens()[static_cast<size_t>(which)];
+  MESSAGE("TF prompt '" << gp.prompt << "' steps=" << steps);
+  std::vector<int32_t> seq;
+  int32_t fed = -1;
+  for (int i = 0; i < static_cast<int>(gp.input_ids.size()) + steps; ++i) {
+    if (i < static_cast<int>(gp.input_ids.size())) {
+      fed = gp.input_ids[static_cast<size_t>(i)];
+    } else {
+      // teacher-forced: feed the GOLDEN chain's previous token
+      fed = gp.generated_ids[static_cast<size_t>(i) -
+                             gp.input_ids.size() - 1];
+    }
+    seq.push_back(fed);
+    const int64_t ctx = static_cast<int64_t>(seq.size()) - 1;
+    std::vector<float> lc = ForwardLastLogits(
+        *cpu_model, config, cpu_q, cpu_be, cpu_kv, {seq.back()}, ctx,
+        num_blocks);
+    std::vector<float> lt = ForwardLastLogits(
+        *tt_model, config, tt_q, tt_be, tt_kv, {seq.back()}, ctx, num_blocks);
+    double ma = 0;
+    size_t amax = 0;
+    for (size_t j = 0; j < lc.size(); ++j) {
+      const double dd = std::fabs(static_cast<double>(lc[j]) -
+                                  static_cast<double>(lt[j]));
+      if (dd > ma) { ma = dd; amax = j; }
+    }
+    int32_t ac = static_cast<int32_t>(
+        std::max_element(lc.begin(), lc.end()) - lc.begin());
+    int32_t at = static_cast<int32_t>(
+        std::max_element(lt.begin(), lt.end()) - lt.begin());
+    const int d = i - static_cast<int>(gp.input_ids.size());
+    MESSAGE("TFstep " << d << " tok " << seq.back() << ": max_abs=" << ma
+                      << " at " << amax << " argmax cpu=" << ac
+                      << " tt=" << at << " logit cpu="
+                      << lc[static_cast<size_t>(ac)] << " tt="
+                      << lt[static_cast<size_t>(at)]);
+  }
+}
+
 TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
           "on the card (W3 methodology, 141/145 in the 2.5-nat band)") {
   if (!TenstorrentDevicePresent()) {
@@ -964,4 +1175,243 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
   // THE GATE VERDICT: 141/145 with the flips inside the band, 0 hard.
   CHECK(argmax_matches >= 141);
   CHECK(hard_flips == 0);
+
+  // ---- the near-tie instrument (the decode-bench methodology,
+  // tests/vllm/models/test_kolibri1_decode_bench.cpp RunTeacherForced) ----
+  //
+  // The byte-comparison pass above BREAKS at the first divergence, so every
+  // later same-index comparison never happens — but the moment the
+  // free-running chain splits from the golden, ANY per-index comparison
+  // against a different prefix is meaningless. This instrument adjudicates
+  // each divergence under the COMMON (golden) prefix:
+  //   pass 1: the TT engine TEACHER-FORCED on the golden chain's tokens
+  //           (decode inputs = generated_ids[d-1], never the engine's own
+  //           argmax) — per-step logits under the golden prefix;
+  //   pass 2: the TT engine free-running over the full 32 steps — the
+  //           free chain marks the DIVERGENCE positions (not flips yet).
+  // A divergence is a flip only when the engine's teacher-forced argmax
+  // under the golden prefix also differs from the golden token; the gap is
+  // scored in that engine row. The committed goldens carry per-step TOKENS
+  // only (final_logits is the prefill's last position, one top-5), so the
+  // distribution here is the engine's own teacher-forced row — the
+  // documented fallback. In-band (<= 2.5 nats) and in the row's top-5 =>
+  // NEAR-TIE; otherwise HARD. hard_flips == 0 is the NEW check; it is
+  // expected to be RED today — that red quantifies the real defect.
+  int64_t instr_divergences = 0, instr_flips = 0, instr_near_ties = 0,
+           instr_hard_flips = 0;
+  double instr_worst_gap = 0.0;
+  std::vector<std::string> hard_records;
+  for (const GateGolden& gp : LoadGateGoldens()) {
+    auto walk = [&](const std::vector<int32_t>* forced) {
+      std::vector<int32_t> chain;
+      std::vector<std::vector<float>> rows;
+      for (auto& kkeep : kv_keep)
+        std::memset(kkeep.get(), 0, static_cast<size_t>(kv_bytes));
+      std::vector<int32_t> seq;
+      int32_t prev = -1;
+      for (int32_t step = 0; step < kGateSteps; ++step) {
+        if (static_cast<size_t>(step) < gp.input_ids.size()) {
+          seq.push_back(gp.input_ids[static_cast<size_t>(step)]);
+          ForwardLastLogits(*model, config, q, be, kv, {seq.back()},
+                            static_cast<int64_t>(seq.size()) - 1, num_blocks);
+          continue;
+        }
+        if (step == static_cast<int32_t>(gp.input_ids.size())) {
+          // First decode logits come off the prompt's last position.
+        } else {
+          // Feed the GOLDEN chain's previous token, never the engine's own
+          // argmax: decode position d predicts generated_ids[d] from the
+          // prefix ending with generated_ids[d-1]. The walk's global `step`
+          // is prompt_len + d, so the fed token is generated_ids[step-1].
+          const int32_t fed =
+              forced != nullptr
+                  ? (*forced)[static_cast<size_t>(step) - 1]
+                  : prev;
+          seq.push_back(fed);
+        }
+        std::vector<float> row = ForwardLastLogits(
+            *model, config, q, be, kv, {seq.back()},
+            static_cast<int64_t>(seq.size()) - 1, num_blocks);
+        prev = static_cast<int32_t>(
+            std::max_element(row.begin(), row.end()) - row.begin());
+        chain.push_back(prev);
+        rows.push_back(std::move(row));
+      }
+      return std::make_pair(std::move(chain), std::move(rows));
+    };
+
+    // PASS 1 (first, so a free-run failure cannot eat the scoring pass):
+    // teacher-forced on the golden chain; adjudicate each divergence under
+    // the common golden prefix.
+    std::vector<int32_t> forced;
+    forced.reserve(gp.generated_ids.size());
+    for (int32_t t : gp.generated_ids) forced.push_back(t);
+    // KNOWN DEFECT (observed, VT_TT_HOST_FREE_DECODE=0, 2026-10-10): even
+    // the GOLDEN-prefix walk can hit the streaming pool's no-slot refusal
+    // mid-chain ("expert N selected on layer L but no slot holds it",
+    // kolibri1_tt_forward.cpp) — the byte gate never reaches that state
+    // because it breaks at the first divergence. Record the abort, keep
+    // every prompt adjudicated so far.
+    std::pair<std::vector<int32_t>, std::vector<std::vector<float>>> tf_run;
+    try {
+      tf_run = walk(&forced);
+    } catch (const std::runtime_error& e) {
+      MESSAGE("teacher-forced run aborted on '" << gp.prompt
+                                                << "' (recorded defect): "
+                                                << e.what());
+      continue;
+    }
+    const std::vector<int32_t>& tf_chain = tf_run.first;
+    const std::vector<std::vector<float>>& tf_rows = tf_run.second;
+    for (size_t d = 0; d < tf_chain.size(); ++d) {
+      const int32_t lane_tok = tf_chain[d];
+      const int32_t want =
+          gp.generated_ids[d];
+      if (lane_tok == want) continue;  // prefix amplification, not a flip
+      ++instr_flips;
+      const std::vector<float>& row = tf_rows[d];
+      const int32_t top = static_cast<int32_t>(
+          std::max_element(row.begin(), row.end()) - row.begin());
+      const double gap = static_cast<double>(row[static_cast<size_t>(top)]) -
+                         static_cast<double>(row[static_cast<size_t>(want)]);
+      instr_worst_gap = std::max(instr_worst_gap, gap);
+      int above = 0;
+      for (float v : row)
+        if (static_cast<double>(v) >
+            static_cast<double>(row[static_cast<size_t>(want)]))
+          ++above;
+      const bool in_top5 = above < 5;
+      if (gap > kNatBand || !in_top5) {
+        ++instr_hard_flips;
+        hard_records.push_back("'" + gp.prompt + "' step " +
+                               std::to_string(d) + ": golden " +
+                               std::to_string(want) + " tf-argmax " +
+                               std::to_string(lane_tok) + ", gap " +
+                               std::to_string(gap) + " nats, in-top5=" +
+                               (in_top5 ? "yes" : "no"));
+      } else {
+        ++instr_near_ties;
+      }
+    }
+
+    // PASS 2: free-running over the FULL 32 steps — the divergence count.
+    // KNOWN DEFECT (observed, host-free ON, 2026-10-10): past the first
+    // divergence the free-running chain can route experts the streaming
+    // slot pool refuses to serve ("expert N selected on layer L but no
+    // slot holds it", kolibri1_tt_forward.cpp) — the golden-prefix walk
+    // never reaches that state because the byte gate breaks at the first
+    // divergence. The refusal is a FINDING, not something this instrument
+    // fixes: record it, keep the divergences counted up to the abort.
+    try {
+      const auto free_run = walk(nullptr);
+      const std::vector<int32_t>& free_chain = free_run.first;
+      for (size_t d = 0; d < free_chain.size(); ++d)
+        if (free_chain[d] != gp.generated_ids[d]) ++instr_divergences;
+    } catch (const std::runtime_error& e) {
+      MESSAGE("free run aborted on '" << gp.prompt
+                                      << "' (recorded defect): " << e.what());
+    }
+  }
+  MESSAGE("NEAR-TIE INSTRUMENT: " << instr_divergences
+                                  << " free-running divergences, "
+                                  << instr_flips << " teacher-forced flips ("
+                                  << instr_near_ties << " near-ties, "
+                                  << instr_hard_flips << " HARD), worst "
+                                     "teacher-forced gap "
+                                  << instr_worst_gap << " nats (band "
+                                  << kNatBand << ", top-5, engine's own "
+                                     "teacher-forced logits as the "
+                                     "distribution — the goldens carry "
+                                     "per-step tokens only)");
+  for (const std::string& r : hard_records) MESSAGE("REAL hard flip: " << r);
+  // THE ADJUDICATED VERDICT (expected RED today): every divergence under the
+  // common prefix must be a near-tie.
+  CHECK(instr_hard_flips == 0);
+}
+
+// ---- SCRATCH DEBUG: the router diagnostic's reference separation -----------
+//
+// RED-FIRST (review finding on 1bf1e5c55): the MoeBlock stage-dump block
+// indexed `g_kolibri1_dbg_route_logits[k]` unconditionally while iterating
+// the host reference — TT-only execution (the global starts EMPTY) or a
+// prior shorter CPU batch read the global OUT OF BOUNDS. The fix separates
+// the HOST-REFERENCE leg (same-input TT-vs-host, always safe, both vectors
+// local) from the OPTIONAL CPU leg (only when the stashed CPU reference's
+// layer identity AND size match this call). These cases pin the guard.
+
+namespace {
+// Saves and restores the process-global CPU debug stashes around each
+// case — the globals belong to the CPU arm and the suite must not leak
+// state into the device legs.
+struct DbgStashGuard {
+  std::vector<float> route;
+  int64_t route_layer;
+  std::vector<uint16_t> dhn;
+  int64_t dhn_layer;
+  DbgStashGuard()
+      : route(g_kolibri1_dbg_route_logits),
+        route_layer(g_kolibri1_dbg_route_layer),
+        dhn(g_kolibri1_dbg_dhn),
+        dhn_layer(g_kolibri1_dbg_dhn_layer) {}
+  ~DbgStashGuard() {
+    g_kolibri1_dbg_route_logits = route;
+    g_kolibri1_dbg_route_layer = route_layer;
+    g_kolibri1_dbg_dhn = dhn;
+    g_kolibri1_dbg_dhn_layer = dhn_layer;
+  }
+};
+}  // namespace
+
+TEST_CASE("SCRATCH dbg router diagnostic: TT-only execution (empty CPU "
+          "reference) skips the CPU leg and never reads the global") {
+  DbgStashGuard guard;
+  g_kolibri1_dbg_route_logits.clear();
+  g_kolibri1_dbg_route_layer = -1;
+  g_kolibri1_dbg_dhn.clear();
+  g_kolibri1_dbg_dhn_layer = -1;
+
+  // TT-only: the dump env is set, the CPU arm never ran in this process.
+  std::vector<float> logits = {1.0f, -2.0f, 3.0f, 0.5f};
+  std::vector<float> href = {1.25f, -2.0f, 2.5f, 0.5f};
+  const vllm::Kolibri1DebugRouteDiff rep =
+      vllm::Kolibri1DebugRouteCompare(0, logits, href);
+  CHECK_FALSE(rep.cpu_compared);
+  CHECK(rep.maxdiff_cpu == 0.0);
+  CHECK(rep.maxdiff_dev == doctest::Approx(0.5));  // |1.0-1.25| vs |3.0-2.5|
+}
+
+TEST_CASE("SCRATCH dbg router diagnostic: a shorter prior CPU batch (size "
+          "mismatch) skips the CPU leg cleanly") {
+  DbgStashGuard guard;
+  // A prior CPU run with a SHORTER token batch left the global too small;
+  // the pre-fix loop indexed it up to href.size() and read out of bounds.
+  g_kolibri1_dbg_route_logits = {9.0f, 9.0f};
+  g_kolibri1_dbg_route_layer = 0;
+
+  std::vector<float> logits(4, 1.0f);
+  std::vector<float> href(4, 1.0f);
+  const vllm::Kolibri1DebugRouteDiff rep =
+      vllm::Kolibri1DebugRouteCompare(0, logits, href);
+  CHECK_FALSE(rep.cpu_compared);
+  CHECK(rep.maxdiff_cpu == 0.0);
+  CHECK(rep.maxdiff_dev == 0.0);
+}
+
+TEST_CASE("SCRATCH dbg router diagnostic: a different-layer CPU reference "
+          "never establishes parity") {
+  DbgStashGuard guard;
+  g_kolibri1_dbg_route_logits = {9.0f, 9.0f, 9.0f, 9.0f};
+  g_kolibri1_dbg_route_layer = 1;  // the stash came from layer 1
+
+  std::vector<float> logits = {0.0f, 0.0f, 0.0f, 0.0f};
+  std::vector<float> href = {0.0f, 0.0f, 0.0f, 0.0f};
+  const vllm::Kolibri1DebugRouteDiff rep0 =
+      vllm::Kolibri1DebugRouteCompare(0, logits, href);
+  CHECK_FALSE(rep0.cpu_compared);  // layer identity mismatch: skipped
+
+  const vllm::Kolibri1DebugRouteDiff rep1 =
+      vllm::Kolibri1DebugRouteCompare(1, logits, href);
+  CHECK(rep1.cpu_compared);        // same layer AND same size: compared
+  CHECK(rep1.maxdiff_cpu == doctest::Approx(9.0));
+  CHECK(rep1.maxdiff_dev == 0.0);
 }

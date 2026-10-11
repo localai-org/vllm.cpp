@@ -18,6 +18,9 @@
 // ttnn::sdpa_decode is deferred. kQkvSplit is hybrid: device-slice when the
 #include "vt/tenstorrent/tenstorrent_internal.h"
 
+#include <ttnn/operations/data_movement/bcast/bcast.hpp>
+#include <ttnn/operations/data_movement/repeat/repeat.hpp>
+
 namespace vt::tenstorrent {
 namespace {
 // Publish a device result as the current value of `out` WITHOUT downloading
@@ -46,6 +49,19 @@ namespace {
 
 // Device compute: keep result on device (CommitDevice2D). Host round-trip only
 // when the consumer is a host-staged op (EnsureHost) or an untracked buffer.
+// The f32-output GEMM contract (the CPU row's LinearBTRaw accumulates in f32
+// and its logits are NOT bf16-representable): request a FLOAT32 output tensor
+// AND fp32 destination accumulation. The default config produced a bf16
+// tensor upcast to f32 on commit (every router logit landed on the bf16 grid,
+// per-element error up to ~5 against the CPU row) and bf16 partial sums —
+// the selection-flip class that drove the L1-moe 3% divergence
+// (ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN, this branch's record).
+std::optional<ttnn::DeviceComputeKernelConfig> F32AccKernelConfig() {
+  ttnn::DeviceComputeKernelConfig cfg{};
+  cfg.fp32_dest_acc_en = true;
+  return cfg;
+}
+
 void MatmulKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   TT_OP_TRACE("Matmul");
   VT_CHECK(a.rank == 2 && b.rank == 2 && out.rank == 2,
@@ -65,7 +81,14 @@ void MatmulKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   ttnn::Tensor dev_a = EnsureDevice2D(a, device);
   ttnn::Tensor dev_b = EnsureMatmulWeightDevice(b, device);
   if (dev_b.dtype() == ttnn::DataType::BFLOAT8_B) Bfp8MatmulUse();
-  ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(dev_a, dev_b);
+  const std::optional<ttnn::DataType> out_dt =
+      out.dtype == DType::kF32 ? std::optional(ttnn::DataType::FLOAT32)
+                               : std::nullopt;
+  ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(
+      dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/false,
+      /*memory_config=*/std::nullopt, out_dt, /*program_config=*/std::nullopt,
+      /*activation=*/std::nullopt,
+      out_dt ? F32AccKernelConfig() : std::nullopt);
   CommitDevice2D(out, std::move(dev_c));
 }
 
@@ -74,6 +97,8 @@ void MatmulKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
 // exposes a transpose_b flag, so this is the same sequence as kMatmul with
 // that flag flipped — no separate upload shape needed since `b` is uploaded
 // in its native [N,K] layout and ttnn transposes on device.
+
+
 void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   TT_OP_TRACE("MatmulBT");
   VT_CHECK(a.rank == 2 && b.rank == 2 && out.rank == 2,
@@ -93,8 +118,14 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   ttnn::Tensor dev_a = EnsureDevice2D(a, device);
   ttnn::Tensor dev_b = EnsureMatmulWeightDevice(b, device);
   if (dev_b.dtype() == ttnn::DataType::BFLOAT8_B) Bfp8MatmulUse();
-  ttnn::Tensor dev_c =
-      ttnn::operations::matmul::matmul(dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/true);
+  const std::optional<ttnn::DataType> out_dt =
+      out.dtype == DType::kF32 ? std::optional(ttnn::DataType::FLOAT32)
+                               : std::nullopt;
+  ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(
+      dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/true,
+      /*memory_config=*/std::nullopt, out_dt, /*program_config=*/std::nullopt,
+      /*activation=*/std::nullopt,
+      out_dt ? F32AccKernelConfig() : std::nullopt);
   CommitDevice2D(out, std::move(dev_c));
 }
 
@@ -419,12 +450,52 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   // Default ON since the R5 flip; VT_TT_HOST_FREE_DECODE=0 opts out (the
   // pre-flip default). Numerics proven by BACKEND-TENSTORRENT-RESIDUAL-GOLDEN.
   const bool host_free_decode = HostFreeDecodeEnabled();
-  const bool host_residual = !host_free_decode &&
+  // VT_TT_FORCE_HOST_RESIDUAL: host-free bisection — run the residual merge
+  // + norm host-side even when host-free decode forces the device path.
+  const bool force_host_residual = std::getenv("VT_TT_FORCE_HOST_RESIDUAL") != nullptr;
+  // ROOT-CAUSE RECORD (kolibri1 TT prompt-dependent hard divergence): the
+  // device rms_norm arm (ttnn::rms_norm on f32 tiles) deviates from the f32
+  // oracle ~1% SYSTEMATICALLY with bit-identical inputs and gamma — the
+  // micro-test (test_kolibri1_tt_b2ii "SCRATCH dbg rmsnorm micro") measures
+  // sum ratio 0.9899 and max_abs 4 bf16 ULP, red against the CPU row. Two
+  // repairs were tried and REFUSED by the substrate, so the baseline
+  // routing below is kept and the bias stays the row's open defect:
+  //   1. Composed f32 chain (x^2 -> mean -> +eps -> rsqrt -> scale): exact
+  //      in the micro-test (ratio 0.9998, 1 bf16 ULP) but its [rows,1] row
+  //      scale cannot reach the model — plain multiply broadcasts padded-
+  //      tile garbage (sporadic 1e37 logits in the gate), BcastOpDim::W is
+  //      numerically wrong (ratio 1.019), BcastOpDim::H is refused, and the
+  //      repeat+same-shape multiply form is refused by binary_ng with
+  //      "Invalid subtile broadcast type" in the model context.
+  //   2. Serving the eager arm's residual-free short-row norms from the
+  //      host f32 loop (this same branch, condition widened): the extra
+  //      host round-trips of the attention/MoE intermediates desync the
+  //      device shadow — the gate collapsed from 26/33 to 0/8 with 1e37
+  //      garbage logits, in BOTH the all-norms and hidden-width-only
+  //      narrowings. The device-shadow reconciliation this needs is the
+  //      same defect class the host-free residency row is closing.
+  const bool host_residual = (!host_free_decode || force_host_residual) &&
       (args.gemma || (residual != nullptr && rows < kDeviceResidualMinRows));
   if (host_residual) {
     EnsureHost(x);
     EnsureHost(weight);
     if (residual != nullptr) EnsureHost(*residual);
+    if (std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr && residual != nullptr) {
+      static std::atomic<int> calls{0};
+      if (calls.fetch_add(1) < 4) {
+        double sx = 0, sr = 0;
+        for (int64_t j = 0; j < static_cast<int64_t>(d); ++j) {
+          sx += LoadElemF32(x, j);
+          sr += LoadElemF32(*residual, j);
+        }
+        std::fprintf(stderr,
+                     "[STAGE][TT] rmsnorm-host call=%d d=%lld sum(x[0..d])=%.6f "
+                     "sum(res[0..d])=%.6f xfirst=[%.6f %.6f] resfirst=[%.6f %.6f]\n",
+                     calls.load(), static_cast<long long>(d), sx, sr,
+                     LoadElemF32(x, 0), LoadElemF32(x, 1),
+                     LoadElemF32(*residual, 0), LoadElemF32(*residual, 1));
+      }
+    }
     for (int64_t r = 0; r < static_cast<int64_t>(rows); ++r) {
       float sumsq = 0.0f;
       for (int64_t j = 0; j < static_cast<int64_t>(d); ++j) {
@@ -511,8 +582,36 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
     dev_w = EnsureAffine1D(weight, d, device);
   }
   ttnn::Tensor to_norm = dev_x;
+  static const bool nores_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
+  if (nores_dbg && residual == nullptr) {
+    auto chk0 = [&](const ttnn::Tensor& t, const char* tag) {
+      auto h = t.to_vector<float>();
+      double s = 0;
+      for (float v : h) s += v;
+      const auto ls = t.logical_shape();
+      std::fprintf(stderr, "[NORM] %s shape=[%u,%u] n=%zu sum=%.6f first=%.6f\n",
+                   tag, (unsigned)ls[0], (unsigned)ls[1], h.size(), s,
+                   h.empty() ? 0.f : h[0]);
+    };
+    chk0(dev_x, "nores-dev_x");
+  }
   if (residual != nullptr) {
     ttnn::Tensor dev_r = EnsureDevice2D(*residual, device);
+    // SCRATCH DEBUG (host-free decode root-cause): dump the device norm
+    // inputs when VT_TT_NORM_DEBUG is set.
+    static const bool norm_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
+    if (norm_dbg) {
+      auto chk = [&](const ttnn::Tensor& t, const char* tag) {
+        auto h = t.to_vector<float>();
+        double s = 0;
+        float m = 0;
+        for (float v : h) { s += v; if (std::fabs(v) > m) m = std::fabs(v); }
+        std::fprintf(stderr, "[NORM] %s rows=%u d=%u n=%zu sum=%.6f max=%.6f first=%.6f\n",
+                     tag, rows, d, h.size(), s, m, h.empty() ? 0.f : h[0]);
+      };
+      chk(dev_x, "dev_x");
+      chk(dev_r, "dev_r");
+    }
     to_norm = ttnn::add(dev_x, dev_r);
     CommitDevice2D(*residual, to_norm);
   }
@@ -536,7 +635,78 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   ttnn::Tensor wf32 = args.gemma
                           ? dev_w
                           : ttnn::typecast(dev_w, ttnn::DataType::FLOAT32);
-  ttnn::Tensor dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
+  // SCRATCH FIX (kolibri1 TT prompt-dependent hard divergence, row
+  // MODEL-TEXT-kolibri-1-tenstorrent): the pinned tt-metal's
+  // ttnn::rms_norm deviates from the f32 oracle ~1% SYSTEMATICALLY even on
+  // f32 tiles — the micro-test (test_kolibri1_tt_b2ii "SCRATCH dbg rmsnorm
+  // micro") measured sum ratio 0.9899 and max_abs 0.0625 against the
+  // CPU/host-double oracle on random bf16 [1,2560], with bit-identical
+  // inputs and gamma. Normed once per norm site per layer, that bias
+  // compounds through 50 layers into multi-nat logit shifts and the
+  // prompt-dependent hard flips the teacher-forced instrument records.
+  // Compose the norm from exact f32 primitives instead — the same chain the
+  // CPU oracle runs (x^2 -> mean -> +eps -> rsqrt -> scale -> gamma) and the
+  // same composition the L2Norm device arm already uses
+  // (tenstorrent_gdn.cpp l2 lambda). VT_TT_RMSNORM_TTNN=1 restores the
+  // pinned ttnn::rms_norm arm for A/B.
+  ttnn::Tensor dev_y;
+  // The composed f32 arm is the micro-test-clean one but its row broadcast
+  // does not survive the model's tensor geometry on this stack (binary_ng
+  // refuses the subtile), so the pinned ttnn::rms_norm stays the device
+  // default; VT_TT_RMSNORM_COMPOSED=1 selects the composed arm for A/B.
+  static const bool rms_composed = [] {
+    const char* e = std::getenv("VT_TT_RMSNORM_COMPOSED");
+    return e != nullptr && e[0] == '1';
+  }();
+  if (!rms_composed) {
+    dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
+  } else {
+    ttnn::Tensor sq = ttnn::multiply(norm_f32, norm_f32);
+    ttnn::Tensor ssq = ttnn::sum(sq, ttsl::SmallVector<int>{1}, true);
+    ttnn::Tensor ms = ttnn::multiply(
+        ssq, 1.0f / static_cast<float>(d));
+    ttnn::Tensor inv = ttnn::rsqrt(ttnn::add(ms, args.eps));
+    // The plain multiply of [rows,cols] by [rows,1] and the bcast kernel
+    // both mis-broadcast on this stack (the micro-test measured ratio 1.019
+    // through BcastOpDim::W, and the gate recorded sporadic 1e37 garbage
+    // logits through the plain multiply). Materialize the row scale with an
+    // exact data-movement replication instead: repeat([rows,1] -> [rows,cols])
+    // and a same-shape f32 multiply.
+    dev_y = ttnn::multiply(
+        norm_f32,
+        ttnn::repeat(inv, ttnn::Shape({rows, d})));
+    dev_y = ttnn::multiply(dev_y, wf32);
+  }
+  static const bool out_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
+  if (out_dbg) {
+    auto chk2 = [&](const ttnn::Tensor& t, const char* tag) {
+      auto h = t.to_vector<float>();
+      double s = 0;
+      float m = 0;
+      for (float v : h) { s += v; if (std::fabs(v) > m) m = std::fabs(v); }
+      const auto ls = t.logical_shape();
+      std::fprintf(stderr, "[NORM] %s shape=[%u,%u] n=%zu sum=%.6f max=%.6f first=%.6f\n",
+                   tag, (unsigned)ls[0], (unsigned)ls[1], h.size(), s, m,
+                   h.empty() ? 0.f : h[0]);
+    };
+    chk2(norm_f32, "norm_f32");
+    chk2(wf32, "wf32");
+    chk2(dev_y, "dev_y");
+    if (residual != nullptr) {
+      EnsureHost(out);
+      const auto* hp = static_cast<const uint16_t*>(out.data);
+      double s = 0;
+      auto bv = [](uint16_t bits) {
+        uint32_t u = static_cast<uint32_t>(bits) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+      };
+      for (int64_t i = 0; i < rows * d; ++i) s += bv(hp[i]);
+      std::fprintf(stderr, "[NORM] out-after-commit sum=%.6f first=%.6f\n",
+                   s, bv(hp[0]));
+    }
+  }
   if (out.dtype == DType::kBF16)
     dev_y = ttnn::typecast(std::move(dev_y), ttnn::DataType::BFLOAT16);
   CommitDevice2D(out, std::move(dev_y));
@@ -1294,7 +1464,16 @@ void RopeApplyHost(Tensor& qs, Tensor* ks, const float* cos_t, const float* sin_
 
 inline bool PreferDeviceRope(int64_t tokens, int64_t heads) {
   // HOST-FREE-FORWARD R1: force device RoPE at T=1 for capture (see RmsNorm note).
-  if (HostFreeDecodeEnabled()) return true;
+  // HOST-FREE-FORWARD R1 forces the device apply at T=1 so the CAPTURED region
+  // has no host rope. The eager (non-capture) path has no such constraint, and
+  // the T=1 device apply is where the kolibri1 host-free corruption lived
+  // (ISSUE-LOCAL-01M4JK8PT8NF9TQ7M06VS51JJH): the rope's shadow replacement
+  // raced the async queue on this near-full device. Scope the force to the
+  // case that justifies it — an active capture — and let the eager decode use
+  // the host apply the >=64-row heuristic already prefers.
+  if (tt_capture_active() && HostFreeDecodeEnabled() &&
+      std::getenv("VT_TT_FORCE_HOST_ROPE") == nullptr)
+    return true;
   return tokens * heads >= 64;
 }
 

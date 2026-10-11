@@ -1279,6 +1279,16 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
     BufferSlot* d = FindSlot(dst);
     if (s == nullptr || !s->device_current || !s->device.has_value()) return false;
     if (d == nullptr) return false;
+    // ISSUE-LOCAL-01M4JK8PT8NF9TQ7M06VS51JJH: the destination must be the
+    // slot's BASE. FindSlot resolves an interior pointer to the base slot, so
+    // a row-granular staging copy (the kolibri1 expert gather/scatter loops
+    // copy single [1,h] rows into `base + row*rb`) used to install a
+    // whole-slot device shadow for one row at a foreign offset, leave the
+    // slot's host bytes stale, and clobber the recorded geometry — the next
+    // EnsureDevice2D then refreshed the whole buffer from the last row's
+    // shadow. The eager resident lane below already guards `d->host == dst`;
+    // the capture lane is the same contract.
+    if (d->host != dst) return false;
     // The Copy contract is `bytes`, NOT slot capacity. The registered
     // s->bytes / d->bytes are the HOST blocks' pool capacities, and the
     // best-fit lend (#1922) hands a DBuf a block from a LARGER size class:

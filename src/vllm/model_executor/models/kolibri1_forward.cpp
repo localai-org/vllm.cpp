@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -48,6 +49,13 @@
 #include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
 #include "vt/ops.h"
+
+// SCRATCH DEBUG (layer-1 moe localization): the CPU arm's last router logits,
+// read by the TT arm's RouteDump for the direct per-expert diff.
+std::vector<float> g_kolibri1_dbg_route_logits;
+int64_t g_kolibri1_dbg_route_layer = -1;
+std::vector<uint16_t> g_kolibri1_dbg_dhn;
+int64_t g_kolibri1_dbg_dhn_layer = -1;
 
 namespace vllm {
 
@@ -294,12 +302,35 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   }
 
   Tensor o_in = Reshape(attn.t(), {t, hq * dh});
+  if (std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr) {
+    std::vector<uint8_t> tmp(static_cast<size_t>(t) * hq * dh * 2);
+    attn.Download(d, tmp.data());
+    const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+    double s = 0;
+    auto val = [](uint16_t bits) {
+      uint32_t u = static_cast<uint32_t>(bits) << 16;
+      float f;
+      std::memcpy(&f, &u, 4);
+      return f;
+    };
+    const int64_t n = t * hq * dh;
+    for (int64_t i = 0; i < n; ++i) s += val(bf[i]);
+    std::fprintf(stderr, "[STAGE][CPU] pa_out sum=%.6f first=%.6f\n", s, val(bf[0]));
+  }
   return LinearBT(d, o_in, w.o_proj, t);  // [T, H]
 }
 
 // ── MoE block (kolibri1.py:126-207) ─────────────────────────────────────────
+
+// SCRATCH DEBUG (layer-1 moe localization, defined after StageDump below;
+// forward-declared here because MoeBlock calls it):
+void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d);
+void RouteDump(int64_t layer, const std::vector<float>& logits,
+               const Kolibri1HostRouting& route, int64_t t, int64_t e,
+               int64_t top_k);
+
 DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
-              const Tensor& dhn, int64_t t) {
+              const Tensor& dhn, int64_t t, int64_t layer) {
   const int64_t h = p.hidden_size;
   const int64_t e = p.num_experts;
   const int64_t top_k = p.num_experts_per_tok;
@@ -321,11 +352,68 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     be.Synchronize(d.q);
   }
 
+  if (std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr) {
+    static std::set<int64_t> seen;
+    if (!seen.count(layer)) {
+      seen.insert(layer);
+      Tensor bt3 = ResidentWeight(d, w.router_gate, {e, h});
+      const auto* bf3 = reinterpret_cast<const uint16_t*>(bt3.data);
+      uint32_t hh = 2166136261u;
+      double ss = 0;
+      for (int64_t i = 0; i < e * h; ++i) {
+        hh = (hh ^ bf3[i]) * 16777619u;
+        uint32_t u = static_cast<uint32_t>(bf3[i]) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        ss += f;
+      }
+      std::fprintf(stderr, "[STAGE][CPU] router_gate hash=%08x sum=%.4f\n",
+                   hh, ss);
+      // Host reference logits from the same dhn + router_gate bytes.
+      const int64_t hk2 = w.router_gate.shape[1];
+      std::vector<uint8_t> xb(static_cast<size_t>(t) * hk2 * 2);
+      std::memcpy(xb.data(), dhn.data, xb.size());
+      const auto* xb16 = reinterpret_cast<const uint16_t*>(xb.data());
+      std::vector<float> href(static_cast<size_t>(t) * e, 0.f);
+      for (int64_t n0 = 0; n0 < e; ++n0) {
+        const auto* wr =
+            reinterpret_cast<const uint16_t*>(bt3.data) +
+            static_cast<size_t>(n0) * hk2;
+        for (int64_t i = 0; i < t; ++i) {
+          double acc = 0;
+          for (int64_t k = 0; k < hk2; ++k) {
+            auto dec = [](uint16_t b) {
+              uint32_t u = static_cast<uint32_t>(b) << 16;
+              float f;
+              std::memcpy(&f, &u, 4);
+              return static_cast<double>(f);
+            };
+            acc += dec(wr[k]) * dec(xb16[static_cast<size_t>(i) * hk2 + k]);
+          }
+          href[static_cast<size_t>(i) * e + n0] = static_cast<float>(acc);
+        }
+      }
+      double madd = 0, mlog = 0;
+      for (size_t k = 0; k < href.size(); ++k) {
+        madd = std::max(madd, std::fabs(static_cast<double>(href[k]) -
+                                        static_cast<double>(logits[k])));
+        mlog = std::max(
+            mlog,
+            std::fabs(static_cast<double>(href[k]) -
+                      static_cast<double>(g_kolibri1_dbg_route_logits.empty()
+                                              ? 0.f
+                                              : href[k])));
+      }
+      std::fprintf(stderr, "[STAGE][CPU] router_href maxdiff_dev=%.6f\n",
+                   madd);
+    }
+  }
   Kolibri1HostRouting route;
   {
     prof::Scope prof("moe_topk");
     route = SigmoidLogitAddRouting(logits, bias, t, e, top_k);
   }
+  RouteDump(layer, logits, route, t, e, top_k);
 
   DBuf dtw(d, DType::kF32, {t, top_k},
            const_cast<float*>(route.weights.data()));
@@ -334,6 +422,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // Shared expert: UNGATED, always added (:146-188).
   DBuf shared = ExpertMlp(d, w.shared_experts, dhn, t,
                           p.shared_expert_intermediate_size);
+  StageDump("moe_shared", layer, shared, d);
 
   // Routed experts: the CPU-reference per-expert gather/scatter loop (the
   // mimo-v2 MoeBlock pattern).
@@ -366,6 +455,13 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     }
     DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(), ne,
                        inter);
+    {
+      char tag[32];
+      std::snprintf(tag, sizeof tag, "moe_gath#%d", static_cast<int>(ex));
+      StageDump(tag, layer, gathered, d);
+      std::snprintf(tag, sizeof tag, "moe_ex#%d", static_cast<int>(ex));
+      StageDump(tag, layer, o, d);
+    }
     for (int64_t i = 0; i < ne; ++i) {
       d.b.Copy(d.q,
                static_cast<char*>(expert_out.ptr()) +
@@ -386,6 +482,74 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
                  /*routed_scale=*/1.0f);
   return out;
 }
+
+// SCRATCH DEBUG (root-cause the host-free decode corruption): per-stage
+// activation checksums mirroring the TT arm's dump (same tags, same env), so
+// the TT stage outputs diff against the CPU reference stage by stage.
+bool StageDumpOn() {
+  static const bool on = std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr;
+  return on;
+}
+
+void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
+  if (!StageDumpOn()) return;
+  const Tensor& t = buf.t();
+  const int64_t n = t.shape[0] * t.shape[1];
+  std::vector<uint8_t> tmp(static_cast<size_t>(n) * 2);
+  buf.Download(d, tmp.data());
+  const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+  double sum = 0, sq = 0;
+  float mx = 0;
+  uint32_t hash = 2166136261u;
+  auto val = [](uint16_t bits) {
+    uint32_t u = static_cast<uint32_t>(bits) << 16;
+    float f;
+    std::memcpy(&f, &u, 4);
+    return f;
+  };
+  for (int64_t i = 0; i < n; ++i) {
+    const float v = val(bf[i]);
+    sum += v;
+    sq += static_cast<double>(v) * v;
+    if (std::fabs(v) > mx) mx = std::fabs(v);
+    hash = (hash ^ bf[i]) * 16777619u;
+  }
+  std::fprintf(stderr, "[STAGE][CPU] L%lld %s sum=%.6f sq=%.6e hash=%08x max=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+               static_cast<long long>(layer), tag, sum, sq, hash, mx, val(bf[0]), val(bf[1]),
+               val(bf[2]), val(bf[3]));
+}
+// SCRATCH DEBUG (layer-1 moe localization, same env as StageDump): the
+// router's raw logits, top-k selection and weights per token — the
+// discrete-selection leg of the OFF-vs-CPU stage diff.
+void RouteDump(int64_t layer, const std::vector<float>& logits,
+               const Kolibri1HostRouting& route, int64_t t, int64_t e,
+               int64_t top_k) {
+  if (std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") == nullptr) return;
+  for (int64_t i = 0; i < t; ++i) {
+    double ls = 0;
+    for (int64_t j = 0; j < e; ++j)
+      ls += logits[static_cast<size_t>(i * e + j)];
+    std::string ids, ws;
+    for (int64_t k = 0; k < top_k; ++k) {
+      const size_t idx = static_cast<size_t>(i * top_k + k);
+      ids += (k ? "," : "") + std::to_string(route.ids[idx]);
+      ws += (k ? "," : "") +
+            [](float v) {
+              char b[32];
+              std::snprintf(b, sizeof b, "%.6f", v);
+              return std::string(b);
+            }(route.weights[idx]);
+    }
+    std::fprintf(stderr,
+                 "[STAGE][CPU] L%lld route tok=%lld logit_sum=%.6f ids=[%s] "
+                 "w=[%s]\n",
+                 static_cast<long long>(layer), static_cast<long long>(i), ls,
+                 ids.c_str(), ws.c_str());
+  }
+  g_kolibri1_dbg_route_logits = logits;
+  g_kolibri1_dbg_route_layer = layer;
+}
+
 
 }  // namespace
 
@@ -416,6 +580,7 @@ ForwardLogits ForwardKolibri1Forward(
     Tensor tab = ResidentWeight(d, weights.embed_tokens, {vocab, h});
     vt::Embedding(d.q, hidden_buf.t(), tab, ids.t());
   }
+  StageDump("emb", -2, hidden_buf, d);
   Tensor hidden = hidden_buf.t();
   DBuf res(d, DType::kBF16, {t, h});
   res.Zero(d);
@@ -445,6 +610,30 @@ ForwardLogits ForwardKolibri1Forward(
     // input_layernorm + residual (the vLLM fused add-norm contract).
     DBuf dhn(d, DType::kBF16, {t, h});
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
+    if (StageDumpOn() && l == 0) {
+      // SCRATCH: the gamma bytes as the device arm would see them (bf16).
+      double s = 0;
+      auto val = [](uint16_t bits) {
+        uint32_t u = static_cast<uint32_t>(bits) << 16;
+        float f;
+        std::memcpy(&f, &u, 4);
+        return f;
+      };
+      std::vector<uint16_t> bf(static_cast<size_t>(h));
+      if (w_in.dtype == vt::DType::kBF16) {
+        const auto* p16 = static_cast<const uint16_t*>(w_in.data);
+        for (int64_t i = 0; i < h; ++i) bf[static_cast<size_t>(i)] = p16[i];
+      } else {
+        const auto* pf = static_cast<const float*>(w_in.data);
+        for (int64_t i = 0; i < h; ++i) {
+          float v = pf[i];
+          std::memcpy(&bf[static_cast<size_t>(i)], &v, 2);  // low bits (trunc)
+        }
+      }
+      for (int64_t i = 0; i < h; ++i) s += val(bf[static_cast<size_t>(i)]);
+      std::fprintf(stderr, "[STAGE][CPU] gam sum=%.6f first=[%.6f %.6f %.6f %.6f]\n",
+                   s, val(bf[0]), val(bf[1]), val(bf[2]), val(bf[3]));
+    }
     Tensor dhn_t = dhn.t();
     Tensor res_t = res.t();
     if (dense_attn::FusedChainAdoptEnabled()) {
@@ -458,14 +647,24 @@ ForwardLogits ForwardKolibri1Forward(
     }
 
     // Attention -> post_attn_norm (no residual).
+    StageDump("dhn", l, dhn, d);
+    if (l == 0 && std::getenv("VT_KOLIBRI1_TT_STAGE_DUMP") != nullptr) {
+      const int64_t hn = dhn.t().shape[0] * dhn.t().shape[1];
+      g_kolibri1_dbg_dhn.assign(
+          reinterpret_cast<const uint16_t*>(dhn.t().data),
+          reinterpret_cast<const uint16_t*>(dhn.t().data) + hn);
+      g_kolibri1_dbg_dhn_layer = l;
+    }
     DBuf attn = AttentionBlock(d, lw.attn, p, lw.is_sliding, dhn.t(),
                                si.positions.t(), si, *kv_ptr, t);
+    StageDump("attn", l, attn, d);
     DBuf attn_n(d, DType::kBF16, {t, h});
     Tensor w_pa = ResidentWeight(d, lw.post_attn_norm, {h});
     {
       prof::Scope prof("norms");
       vt::RmsNorm(d.q, attn_n.t(), attn.t(), w_pa, vt::RmsNormArgs{eps, false});
     }
+    StageDump("attn_n", l, attn_n, d);
 
     // post_attention_layernorm carries the residual: residual += the
     // POST-NORMED attention output (kolibri1.py:250).
@@ -482,15 +681,18 @@ ForwardLogits ForwardKolibri1Forward(
       vt::RmsNorm(d.q, dh2_t, attn_n.t(), w_pal, vt::RmsNormArgs{eps, false},
                   &res_t);
     }
+    StageDump("dh2", l, dh2, d);
 
     // MoE on EVERY layer -> post_ffn_norm (no residual).
-    DBuf moe = MoeBlock(d, lw.moe, p, dh2.t(), t);
+    DBuf moe = MoeBlock(d, lw.moe, p, dh2.t(), t, l);
+    StageDump("moe", l, moe, d);
     DBuf moe_n(d, DType::kBF16, {t, h});
     Tensor w_pf = ResidentWeight(d, lw.post_ffn_norm, {h});
     {
       prof::Scope prof("norms");
       vt::RmsNorm(d.q, moe_n.t(), moe.t(), w_pf, vt::RmsNormArgs{eps, false});
     }
+    StageDump("moe_n", l, moe_n, d);
 
     auto* held = new DBuf(std::move(moe_n));
     hidden = held->t();
