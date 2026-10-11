@@ -585,6 +585,15 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   vt::Backend& be = vt::GetBackend(d.q.device.type);
   std::vector<uint8_t> slot_image(
       static_cast<size_t>(st.pool.packed_bytes_per_slot));
+  // The same-step residents must not become eviction victims: refresh
+  // their recency BEFORE the fetch loop, so a miss's LRU victim is never
+  // an expert THIS step's route selected (observed on the production-shape
+  // decode bench: expert 258 resident on layer 3, then evicted by the same
+  // step's 323 fetch, and the compute loop refused "no slot holds it" — a
+  // self-inflicted miss-handle on a fully warm table). Touch on a resident
+  // only refreshes the stamp; the table is unchanged.
+  for (const int64_t e : ld.resident_experts)
+    st.pool.policy.Touch(layer, e);
   for (const Kolibri1TTSlotFetchJob& job : list.jobs) {
     // Touch FIRST: the policy's slot is authoritative (the dispatch
     // plan's fetch_slots are advisory — SuggestSlotFor is read-only over
@@ -745,6 +754,16 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
                                std::vector<int64_t>{n, k});
       }
       it = st.memo.emplace(key, std::move(dq)).first;
+      // THE BOUND: the memo is a cache, and an unbounded one exhausts the
+      // device (each entry owns a 3*inter*h*2 = 7.86 MB bf16 buffer at the
+      // Kolibri-1 dims; a free-running decode routes to ever-new experts
+      // until the allocator refuses — ISSUE-LOCAL-01M4MJG2CKSM1FK53PZ44QFN1J).
+      // Cap it: 512 entries ≈ 4 GiB, comfortably beside the 3.5 GiB
+      // resident context and the slot pool. Eviction is correctness-free
+      // (a dropped entry is re-dequanted from the authoritative slot bytes
+      // on the next touch), and a fresh dequant is bit-identical.
+      constexpr size_t kMemoMaxEntries = 512;
+      while (st.memo.size() > kMemoMaxEntries) st.memo.erase(st.memo.begin());
     }
     const int64_t ne = static_cast<int64_t>(token_rows.size());
     DBuf gathered(d, DType::kBF16, {ne, h});

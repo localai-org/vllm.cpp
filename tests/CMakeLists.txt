@@ -230,6 +230,16 @@ if(VLLM_CPP_TENSTORRENT)
   target_include_directories(test_kolibri1_tt_b2ii PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_definitions(test_kolibri1_tt_b2ii PRIVATE
     KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+  # test_kolibri1_tt_decode_bench is the production-shape decode THROUGHPUT
+  # bench on the TT device path (the TT mirror of the CPU
+  # test_kolibri1_decode_bench): load once, one 128-token prefill, 64
+  # free-running greedy steps through ModelRegistry::Forward, wall/prefill/
+  # decode split and the greedy chain PRINTED, never asserted. Operator-run
+  # under the GPU lease (VT_KOLIBRI1_TT_B2II_MODEL gate).
+  vllm_cpp_add_test(test_kolibri1_tt_decode_bench
+                    vllm/models/test_kolibri1_tt_decode_bench.cpp)
+  target_include_directories(test_kolibri1_tt_decode_bench
+                             PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 # mimo_v2_weights.h is a MODEL-PRIVATE header under src/, not include/vllm/.
 vllm_cpp_add_test(test_mimov2_w2 vllm/models/test_mimov2_w2.cpp)
