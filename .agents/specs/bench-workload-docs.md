@@ -70,5 +70,29 @@ record failures visible instead of weakening checkers.
 
 ## Now
 
-Scope committed before implementation. Documentation correction only; the
-owning benchmark lifecycle and pending hardware gates remain unchanged.
+Documentation implemented and independently reviewed. Awaiting upstream PR
+review. The owning benchmark lifecycle and pending hardware gates are unchanged.
+
+## Outcome
+
+The documentation implementation is `db60c0813156aca4d92243b563e73341104ab3aa`.
+A fresh reviewer returned PASS on that immutable head. The review checked the
+parser, defaults, template rendering, sampling, KV resolution, and existing
+benchmark tests. A scratch em-dash mutation failed the README checker as
+expected; the reviewer restored the original bytes.
+
+The coordinator reran the five focused commands above successfully, including
+all 19 README tests. A source check found all 19 documented options in the
+parser and resolved the new links. Commit style and trailer checks passed.
+`check-tree-compiles.py --base upstream/main` returned zero: no C++ source,
+header, or build file changed. No inference example ran.
+
+Full preflight is not green in this environment. The baseline and staged runs
+encounter missing PyYAML and CMake, release metadata tooling failures, and
+subprocess library-path failures from the temporary interpreter. These failures
+are outside the changed prose. Logs for this session are
+`/tmp/vllm-docs-baseline.log` and `/tmp/vllm-docs-spec-preflight.log`.
+
+No performance measurement or benchmark lifecycle changed. The guide preserves
+the shipped defaults instead of selecting new ones. The local issue remains
+open until the documentation lands upstream.
