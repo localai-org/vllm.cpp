@@ -45,8 +45,8 @@
 
 // SCRATCH DEBUG (layer-1 moe localization): the CPU arm's stashed router
 // logits (defined in kolibri1_forward.cpp, same process), read by RouteDump.
-extern std::vector<float> g_kolibri1_dbg_route_logits;
-extern std::vector<uint16_t> g_kolibri1_dbg_dhn;
+// Declared WITH their layer identity in kolibri1_tt_forward.h; every read
+// of these globals is bounds-checked against size AND layer identity.
 
 namespace vllm {
 
@@ -174,7 +174,8 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
                  static_cast<long long>(layer), static_cast<long long>(i), ls,
                  ids.c_str(), ws.c_str());
   }
-  if (g_kolibri1_dbg_route_logits.size() == logits.size()) {
+  if (g_kolibri1_dbg_route_layer == layer &&
+      g_kolibri1_dbg_route_logits.size() == logits.size()) {
     double mad = 0, c2 = 0, dd2 = 0;
     size_t grid = 0, kmax = 0;
     for (size_t k = 0; k < logits.size(); ++k) {
@@ -532,16 +533,21 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         }
       }
       double madd = 0, mlog = 0;
-      for (size_t k = 0; k < href.size(); ++k) {
-        madd = std::max(madd, std::fabs(static_cast<double>(href[k]) -
-                                        static_cast<double>(logits[k])));
-        mlog = std::max(mlog, std::fabs(static_cast<double>(href[k]) -
-                                        static_cast<double>(
-                                            g_kolibri1_dbg_route_logits[k])));
+      const Kolibri1DebugRouteDiff rep =
+          Kolibri1DebugRouteCompare(layer, logits, href);
+      madd = rep.maxdiff_dev;
+      mlog = rep.maxdiff_cpu;
+      if (rep.cpu_compared) {
+        std::fprintf(
+            stderr,
+            "[STAGE][TT] router_href maxdiff_dev=%.6f maxdiff_cpu=%.6f\n",
+            madd, mlog);
+      } else {
+        std::fprintf(stderr,
+                     "[STAGE][TT] router_href maxdiff_dev=%.6f "
+                     "cpu_ref=skipped(no matching CPU layer/size)\n",
+                     madd);
       }
-      std::fprintf(stderr,
-                   "[STAGE][TT] router_href maxdiff_dev=%.6f maxdiff_cpu=%.6f\n",
-                   madd, mlog);
     }
   }
   Kolibri1HostRouting route =
@@ -789,6 +795,36 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
 
 }  // namespace
 
+Kolibri1DebugRouteDiff Kolibri1DebugRouteCompare(
+    int64_t layer, const std::vector<float>& logits,
+    const std::vector<float>& href) {
+  Kolibri1DebugRouteDiff rep;
+  // HOST-REFERENCE leg: device logits vs the host-computed reference for
+  // the SAME inputs. Both vectors are local; bound over the smaller so a
+  // mismatched caller cannot read either out of range.
+  const size_t ndev = std::min(logits.size(), href.size());
+  for (size_t k = 0; k < ndev; ++k) {
+    rep.maxdiff_dev =
+        std::max(rep.maxdiff_dev, std::fabs(static_cast<double>(href[k]) -
+                                            static_cast<double>(logits[k])));
+  }
+  // OPTIONAL CPU leg: only against a CPU reference whose layer identity
+  // AND size match this call. TT-only execution (empty global), a
+  // different layer, or a shorter prior CPU batch all SKIP cleanly.
+  if (g_kolibri1_dbg_route_layer == layer &&
+      g_kolibri1_dbg_route_logits.size() == logits.size() &&
+      logits.size() == href.size()) {
+    rep.cpu_compared = true;
+    for (size_t k = 0; k < logits.size(); ++k) {
+      rep.maxdiff_cpu = std::max(
+          rep.maxdiff_cpu,
+          std::fabs(static_cast<double>(g_kolibri1_dbg_route_logits[k]) -
+                    static_cast<double>(href[k])));
+    }
+  }
+  return rep;
+}
+
 // ---- The routed-expert refusal (public contract) -----------------------------
 
 std::string Kolibri1TTRoutedExpertRefusalMessage(
@@ -986,7 +1022,8 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     }
 
     StageDump("dhn", l, dhn, d);
-    if (l == 0 && !g_kolibri1_dbg_dhn.empty() &&
+    if (l == 0 && g_kolibri1_dbg_dhn_layer == 0 &&
+        !g_kolibri1_dbg_dhn.empty() &&
         g_kolibri1_dbg_dhn.size() ==
             static_cast<size_t>(dhn.t().shape[0] * dhn.t().shape[1])) {
       std::vector<uint16_t> tb(g_kolibri1_dbg_dhn.size());

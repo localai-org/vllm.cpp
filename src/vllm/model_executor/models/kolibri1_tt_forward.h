@@ -200,4 +200,41 @@ ForwardLogits ForwardKolibri1TTResidentForward(
     Kolibri1TTResidentDeviceContext& ctx,
     Kolibri1TTStreamingDeviceContext* streaming = nullptr);
 
+// ---- SCRATCH DEBUG (layer-1 moe localization): the router diagnostic -------
+//
+// The CPU arm stashes its last router logits in
+// `g_kolibri1_dbg_route_logits` (kolibri1_forward.cpp) tagged with the
+// layer it came from in `g_kolibri1_dbg_route_layer`; the same pattern
+// carries the layer-0 dhn stash. The TT arm's diagnostic compares
+// against the CPU reference ONLY when the layer identity AND the element
+// count match — a process-global "last CPU layer" alone cannot establish
+// layer-by-layer parity, and an unconditional index into the global
+// reads out of bounds when the TT arm runs alone (the global starts
+// empty) or after a shorter CPU batch.
+}  // namespace vllm
+
+// Defined at file scope in kolibri1_forward.cpp (global namespace).
+extern std::vector<float> g_kolibri1_dbg_route_logits;
+extern int64_t g_kolibri1_dbg_route_layer;
+extern std::vector<uint16_t> g_kolibri1_dbg_dhn;
+extern int64_t g_kolibri1_dbg_dhn_layer;
+
+namespace vllm {
+
+struct Kolibri1DebugRouteDiff {
+  double maxdiff_dev = 0;  // device logits vs the host reference (same inputs)
+  double maxdiff_cpu = 0;  // device logits vs the CPU arm's stashed reference
+  bool cpu_compared = false;
+};
+
+// The MoeBlock router diagnostic: the HOST-REFERENCE leg (device values vs
+// host-computed reference logits for the SAME inputs) stands on its own and
+// is bounds-checked over the two local vectors. The optional CPU leg runs
+// only when the stashed CPU reference exists, its layer identity matches
+// `layer`, and its size matches `logits`. Never indexes the CPU global
+// without those checks.
+Kolibri1DebugRouteDiff Kolibri1DebugRouteCompare(
+    int64_t layer, const std::vector<float>& logits,
+    const std::vector<float>& href);
+
 }  // namespace vllm
