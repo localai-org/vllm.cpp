@@ -1,10 +1,10 @@
 # Building vllm.cpp
 
 vllm.cpp uses CMake (>= 3.24) and a C++20 compiler (gcc 13/14 and clang are
-exercised; the tree builds -Werror-clean on gcc 14.2). The core has no ML
-dependencies; the OpenAI server uses a vendored header-only HTTP transport
-(cpp-httplib). The [README](../README.md) carries the two-line quickstart; this
-page is the full build reference.
+exercised; the tree builds -Werror-clean on gcc 14.2). The text engine uses its own tensor runtime.
+The default build includes parakeet.cpp for diarization, with its ggml dependency.
+The OpenAI server uses the vendored header-only HTTP transport cpp-httplib.
+The [README](../README.md) carries the quickstart. This page is the full build reference.
 
 ## Build out-of-source
 
@@ -30,6 +30,27 @@ ctest --test-dir build
 The server is ON by default. Example binaries land under `build/examples/`:
 `vllm-cli`, `vllm-server`, `vllm-bench`, and `tokenize`.
 
+## Speaker diarization dependency
+
+`VLLM_CPP_WITH_DIARIZATION` defaults to `ON`. CMake downloads parakeet.cpp at
+revision `394d270fabb1d6125f05c772aa3ca078a574b19d` and builds its library with ggml linked statically.
+It disables parakeet.cpp's tests, CLI, and server.
+
+To use an existing checkout at that revision, configure with:
+
+```sh
+cmake -S . -B build -DVLLM_CPP_PARAKEET_CPP_DIR=/path/to/parakeet.cpp
+```
+
+To omit this dependency, configure with:
+
+```sh
+cmake -S . -B build -DVLLM_CPP_WITH_DIARIZATION=OFF
+```
+
+The [diarization API](reference/c-api.md#speaker-diarization) remains exported but reports that diarization is not compiled in.
+This option does not disable the text engine or its `vt::` runtime.
+
 ## CUDA build (NVIDIA GB10 / DGX Spark)
 
 ```sh
@@ -46,10 +67,10 @@ them. Because building them needs nothing a CUDA build does not already have,
 carries it; `-DVLLM_CPP_TRITON=OFF` drops back to the hand C++/CUDA kernels,
 which stay the always-available fallback.
 
-### CUTLASS: the one external build dependency
+### CUTLASS dependency
 
-CUTLASS (>= 4.5.0) is header-only, and it is the only thing a CUDA build fetches
-from the network. It feeds two independent consumers:
+CUTLASS (>= 4.5.0) is a header-only CUDA dependency.
+It feeds two independent consumers:
 
 - **FlashAttention-2** prefill/decode, on every arch in `8.0 8.6 8.7 8.9 12.0a 12.1a`.
 - The **sm_12xa NVFP4 block-scaled GEMM**, on Blackwell only.
