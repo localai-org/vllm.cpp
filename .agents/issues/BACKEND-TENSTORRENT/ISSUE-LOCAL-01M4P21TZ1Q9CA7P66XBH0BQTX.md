@@ -103,15 +103,66 @@ On the P150 (host thalia, /tmp/umdtrial-install, /tmp/tt-metal-umdtrial), the ko
   nats); identical across repeated runs. All flips are semantic (nat gaps
   2-16), not garbage.
 
-- FOUND, NOT FIXED (out of scope, reported for the gate's owner): the b2ii
-  ARGMAX CHAIN compares the d-th decoded token against
-  generated_ids[step] instead of generated_ids[step - input_len] — an
-  off-by-input_len index introduced with the one-token prompt walk
-  (9124217b3). The recorded 26/33 baseline predates that rewrite; under the
-  current indexing the compared/match counts are not comparable to it. With
-  the correct index, the post-fix run matches the golden at the first
-  decoded step for 3 of 8 prompts (the rest are semantic near-ties/hard
-  flips, the known B2b-ii residual).
+- FIXED (row/tt-b2ii-index, 2026-10-12): the b2ii ARGMAX CHAIN compared
+  the d-th decoded token against generated_ids[step]. `step` is the GLOBAL
+  walk step (the prompt walks one token per step, 9124217b3), while the
+  goldens' generated_ids is laid out over DECODE positions only (32
+  entries, no prompt prefix — kolibri1_goldens.json, max_new_tokens=32),
+  so every scored position was off by input_len. The correct index is
+  generated_ids[step - input_len] = generated_ids[decode position], the
+  W3 methodology's indexing (test_kolibri1_w3.cpp:314). Three sites in
+  tests/vllm/models/test_kolibri1_tt_b2ii.cpp carried the same class of
+  bug; all three are fixed: (1) the ARGMAX CHAIN comparison — its flip
+  records now name the DECODE position, comparable to the W3 records;
+  (2) the near-tie instrument's teacher-forced walk fed
+  generated_ids[step-1] = generated_ids[input_len + d - 1], a SHIFTED
+  chain, so pass 1 never ran on the golden prefix and its teacher-forced
+  flip counts were meaningless — it now feeds generated_ids[d-1]; (3) the
+  SCRATCH dbg TF walk fed generated_ids[i - input_len - 1], off by one
+  and an out-of-bounds read (SIZE_MAX index) at the first decode step — it
+  now feeds the golden token at position i.
+  RED (wrong index, this tree, both arms, 2026-10-12; reproduces this
+  issue's recorded verdicts exactly): ON — ARGMAX CHAIN 0/8 (7 hard, 1
+  near), instrument 140 teacher-forced flips (128 HARD, worst 13.5
+  nats); OFF — 0/8 (7 hard, 1 near), instrument 142 teacher-forced flips
+  (128 HARD, worst 16.2 nats). All 16 flips sit at each prompt's FIRST
+  compared position, recorded at step = input_len with want =
+  generated_ids[input_len] — the wrong positions: the gate scored 8
+  positions in total, one per prompt, and never left decode position 0.
+  GREEN (fixed index, both arms, 2026-10-12; two identical runs per arm,
+  the acceptance above re-checked on the corrected indexing):
+  ON — ARGMAX CHAIN 3/11 (3 near-ties, 5 hard): prompt 4 matches at
+  decode 0, prompt 5 at decode 0 and 1, the other six prompts flip at
+  decode 0 (genuine first-position drift, gaps -0.998 to -10.617 nats);
+  instrument 170 free-running divergences, 69 teacher-forced flips (29
+  near-ties, 40 HARD, worst 10.617 nats). Both runs identical, streaming
+  counters byte-identical (slot fills 4718, staged 18551930880 B,
+  readback-verified 101316034560 B, memo hits 4452).
+  OFF — ARGMAX CHAIN 12/20 (6 near-ties, 2 hard): prompt 3 matches decode
+  0-8 and flips at decode 9 (gap -0.474), prompt 5 matches decode 0-1 and
+  flips at decode 2 (gap -0.970), prompt 7 matches decode 0 and flips at
+  decode 1 (gap -1.727); the other five prompts flip at decode 0 (gaps
+  -0.236 to -6.157). Instrument 158 free-running divergences, 44
+  teacher-forced flips (27 near-ties, 17 HARD, worst 8.647 nats). Both
+  runs identical.
+  The counts moved from 0/8 to 3/11 (ON) and 12/20 (OFF): the gate now
+  scores the real decode chain, and the flips are the known B2b-ii
+  residual (semantic near-ties just past the band on the OFF arm, the
+  signature recorded in the 2026-10-09 evidence). The CHECKs stay RED by
+  design.
+  RECORD CORRECTION: the note above ("the recorded 26/33 baseline
+  predates that rewrite") was wrong. The 26/33 was recorded 2026-10-09/10
+  (docs/bench-evidence/kolibri1-tt-b2ii-20261009.md sections 6-7) on trees
+  that already carried the walk 9124217b3 — the pre-walk gate scored 0/8
+  on the zero-KV step 0, so a 26/33 verdict cannot predate the walk.
+  Under the wrong index even a PERFECT engine scores 48/54: the six
+  varied-golden prompts flip at decode position 0 (generated_ids[0] !=
+  generated_ids[input_len]) and only the two repetitive-golden prompts
+  (121598-repeated, 12843-repeated) are unaffected, so 26/33 decomposes
+  exactly as 6x1 plus 27 from those two — a wrong-index artifact, not a
+  correct-index baseline. The comparable reference is the W3
+  methodology's decode-position indexing (the 141/145 CPU baseline the
+  gate's CHECK is calibrated to).
 
 - PERF NOTE: decode ~104 s vs ~73.5 s pre-fix on the bench (+40%): the cost
   of destroying the ~136k stale weight-view tensors at each memo eviction

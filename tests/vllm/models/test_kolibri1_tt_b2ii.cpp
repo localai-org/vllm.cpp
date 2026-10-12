@@ -989,9 +989,10 @@ TEST_CASE("SCRATCH dbg TF prompt") {
     if (i < static_cast<int>(gp.input_ids.size())) {
       fed = gp.input_ids[static_cast<size_t>(i)];
     } else {
-      // teacher-forced: feed the GOLDEN chain's previous token
-      fed = gp.generated_ids[static_cast<size_t>(i) -
-                             gp.input_ids.size() - 1];
+      // teacher-forced: feed the golden token at position i. generated_ids
+      // is laid out over DECODE positions only (no prompt prefix), so
+      // position i (i >= input_len) is generated_ids[i - input_len].
+      fed = gp.generated_ids[static_cast<size_t>(i) - gp.input_ids.size()];
     }
     seq.push_back(fed);
     const int64_t ctx = static_cast<int64_t>(seq.size()) - 1;
@@ -1133,7 +1134,15 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
       prev_got = static_cast<int32_t>(
           std::max_element(logits.begin(), logits.end()) - logits.begin());
       const int32_t got = prev_got;
-      const int32_t want = gp.generated_ids[static_cast<size_t>(step)];
+      // `step` is the GLOBAL walk step: the prompt walked one token per
+      // step, so this forward predicts DECODE position d = step - input_len.
+      // The goldens' generated_ids is laid out over DECODE positions only
+      // (32 entries, no prompt prefix — kolibri1_goldens.json,
+      // max_new_tokens=32), so the predicted token is
+      // generated_ids[step - input_len] — the W3 methodology's
+      // generated_ids[decode_step] (test_kolibri1_w3.cpp:314).
+      const int32_t d = step - static_cast<int32_t>(gp.input_ids.size());
+      const int32_t want = gp.generated_ids[static_cast<size_t>(d)];
       ++argmax_total;
       if (got == want) {
         ++argmax_matches;
@@ -1143,7 +1152,7 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
         const double gap = static_cast<double>(
             logits[static_cast<size_t>(want)] - logits[static_cast<size_t>(got)]);
         flip_records.push_back("'" + gp.prompt + "' step " +
-                               std::to_string(step) + ": got " +
+                               std::to_string(d) + ": got " +
                                std::to_string(got) + " want " +
                                std::to_string(want) + ", nat gap " +
                                std::to_string(gap));
@@ -1151,7 +1160,7 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
           ++near_ties;
         } else {
           ++hard_flips;
-          MESSAGE("HARD flip at '" << gp.prompt << "' step " << step
+          MESSAGE("HARD flip at '" << gp.prompt << "' step " << d
                                    << ": got " << got << " want " << want
                                    << " (gap " << gap << " beyond band "
                                    << kNatBand << ")");
@@ -1222,10 +1231,13 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
           // Feed the GOLDEN chain's previous token, never the engine's own
           // argmax: decode position d predicts generated_ids[d] from the
           // prefix ending with generated_ids[d-1]. The walk's global `step`
-          // is prompt_len + d, so the fed token is generated_ids[step-1].
+          // is prompt_len + d and generated_ids is laid out over DECODE
+          // positions only (no prompt prefix), so the fed token is
+          // generated_ids[d-1] = (*forced)[step - prompt_len - 1].
           const int32_t fed =
               forced != nullptr
-                  ? (*forced)[static_cast<size_t>(step) - 1]
+                  ? (*forced)[static_cast<size_t>(step) -
+                              gp.input_ids.size() - 1]
                   : prev;
           seq.push_back(fed);
         }
