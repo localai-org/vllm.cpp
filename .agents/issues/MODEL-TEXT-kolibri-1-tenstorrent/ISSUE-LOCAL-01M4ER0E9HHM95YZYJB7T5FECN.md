@@ -195,6 +195,34 @@ B2b-i landed the dense-resident device forward with the routed-expert tier delib
   driver is the upstream drift class. CLASSIFICATION: selection flips
   DRIVEN by continuous bf16 device-arm precision drift through the
   attention/norm chain; per the row's adjudication rule this is an
-  upstream adjudication decision (f32-enabling the device attention/norm
+  upstream adjudication decision (  f32-enabling the device attention/norm
   chain or accepting the band), not a local patch. ISSUE STAYS OPEN on the
   device gates and the OOM debt.
+
+- 2026-10-12 (branch row/tt-kolibri-readj, off row/tt-b2ii-index
+  @ 2c4efce88): the teacher-forced adjudication RE-RUN on the CORRECTED
+  instrument — the prior classification was computed on a SHIFTED chain
+  (generated_ids[step-1] fed instead of generated_ids[d-1]), so every
+  prior per-step teacher-forced number is invalid as step evidence. The
+  corrected walk reproduces the #3453-era corrected counts exactly (ON 69
+  tf flips: 29 near-tie, 40 HARD, worst 10.617 nats; OFF 44: 27 near-tie,
+  17 HARD, worst 8.647) — the residual is REAL, not an instrument
+  artifact. Drift origin UNCHANGED: L0 dh2 (the L0 MoE input) is the first
+  divergent stage at EVERY decode step from step 0 on all three diverging
+  prompts (SCRATCH dbg TF prompt, CPU-vs-TT bit hashes), 0.03-2.5% rel per
+  step — the 1-bf16-ULP-class L0 input-norm origin stands. Router-flip
+  mechanism CONFIRMED: per-layer CPU-vs-TT top-6-of-384 selected-expert
+  overlap under the corrected walk averages 3.0-3.7 of 6 (full agreement
+  only 6-7% of layer-steps) at EVERY layer including L0, median router
+  logit_sum rel diff 6.7-9.7%; the route_scores probe shows top1-top2
+  margins are robust (median 0.13-0.48) while top6-top7 margins sit below
+  0.05 nats at 26-41 of 50 layers at every hard-flip step — the incoming
+  noise exceeds the rank-6/7 boundary margin at most layers. Distribution:
+  hard flips SPREAD, not concentrated — 7 of 8 prompts, opening bursts
+  (steps 0-4) on some prompts and isolated late flips (steps 14-26) on
+  others, both arms. Gate-standard input: the P150 band-2.5 residual is
+  STRUCTURAL (continuous step-0-resident drift x router gain onto a
+  sub-0.05-nat selection boundary), not a single-site repair; levers in
+  order: host-free shadow reconciliation (17 vs 40 hard shows it halves
+  the count), then f32 device attention/norm chain. Evidence:
+  docs/bench-evidence/kolibri1-tt-readjudication-20261012.md.

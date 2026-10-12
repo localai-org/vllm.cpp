@@ -96,7 +96,7 @@ bool StageDumpOn() {
 
 void RouteDump(int64_t layer, const std::vector<float>& logits,
                const Kolibri1HostRouting& route, int64_t t, int64_t e,
-               int64_t top_k);
+               int64_t top_k, const std::vector<float>& bias);
 
 void StageDump(const char* tag, int64_t layer, DBuf& buf, Dev d) {
   if (!StageDumpOn()) return;
@@ -150,9 +150,34 @@ float Kolibri1DbgToBf16(float v) {
 
 void RouteDump(int64_t layer, const std::vector<float>& logits,
                const Kolibri1HostRouting& route, int64_t t, int64_t e,
-               int64_t top_k) {
+               int64_t top_k, const std::vector<float>& bias) {
   if (!StageDumpOn()) return;
   for (int64_t i = 0; i < t; ++i) {
+    // READJUDICATION INSTRUMENT (ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN):
+    // the sorted top-8 BIASED selection scores (logits+bias, the exact key
+    // SigmoidLogitAddRouting selects on) so the per-layer router gaps
+    // (top1-top2, top6-top7) can be compared with the incoming drift.
+    {
+      std::vector<float> sc(static_cast<size_t>(e));
+      for (int64_t jj = 0; jj < e; ++jj)
+        sc[static_cast<size_t>(jj)] =
+            logits[static_cast<size_t>(i * e + jj)] +
+            bias[static_cast<size_t>(jj)];
+      std::partial_sort(sc.begin(), sc.begin() + (e < 8 ? e : 8), sc.end(),
+                        std::greater<float>());
+      std::string ss;
+      const int64_t nk = e < 8 ? e : 8;
+      for (int64_t kk = 0; kk < nk; ++kk) {
+        char b[32];
+        std::snprintf(b, sizeof b, "%s%.6f", kk ? "," : "",
+                      sc[static_cast<size_t>(kk)]);
+        ss += b;
+      }
+      std::fprintf(stderr,
+                   "[STAGE][TT] L%lld route_scores tok=%lld top8=[%s]\n",
+                   static_cast<long long>(layer), static_cast<long long>(i),
+                   ss.c_str());
+    }
     double ls = 0;
     for (int64_t j = 0; j < e; ++j)
       ls += logits[static_cast<size_t>(i * e + j)];
@@ -172,6 +197,31 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
                  "w=[%s]\n",
                  static_cast<long long>(layer), static_cast<long long>(i), ls,
                  ids.c_str(), ws.c_str());
+    // READJUDICATION INSTRUMENT (ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN):
+    // the sorted top-8 BIASED selection scores (logits+bias, the exact key
+    // SigmoidLogitAddRouting selects on) so the per-layer router gaps
+    // (top1-top2, top6-top7) can be compared with the incoming drift.
+    {
+      std::vector<float> sc(static_cast<size_t>(e));
+      for (int64_t j = 0; j < e; ++j)
+        sc[static_cast<size_t>(j)] =
+            logits[static_cast<size_t>(i * e + j)] +
+            bias[static_cast<size_t>(j)];
+      std::partial_sort(sc.begin(), sc.begin() + (e < 8 ? e : 8), sc.end(),
+                        std::greater<float>());
+      std::string ss;
+      const int64_t nk = e < 8 ? e : 8;
+      for (int64_t k = 0; k < nk; ++k) {
+        char b[32];
+        std::snprintf(b, sizeof b, "%s%.6f", k ? "," : "",
+                      sc[static_cast<size_t>(k)]);
+        ss += b;
+      }
+      std::fprintf(stderr,
+                   "[STAGE][TT] L%lld route_scores tok=%lld top8=[%s]\n",
+                   static_cast<long long>(layer), static_cast<long long>(i),
+                   ss.c_str());
+    }
   }
   if (g_kolibri1_dbg_route_layer == layer &&
       g_kolibri1_dbg_route_logits.size() == logits.size()) {
@@ -596,7 +646,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     }
   }
   if (!kDeviceRouter) {
-    RouteDump(layer, logits, route, t, e, top_k);
+    RouteDump(layer, logits, route, t, e, top_k, bias);
   }
 
   // SLICE ii: the routed tier. Without a streaming context (the
