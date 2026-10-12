@@ -46,6 +46,10 @@
 - **2026-09** **Tev1 serves typed decisions and chat from one engine.**
   The decision route returns probabilities for each question. See the
   [Tev1 recipe](docs/models/tev1.md) for activation, CPU comparisons, and remaining validation gaps.
+- **2026-09** **C ABI 30 adds speaker diarization interfaces.** Applications can load a separate
+  diarization model and request speaker segments. Combined transcription interfaces have loader
+  limitations, and the bundled server does not expose the new routes. See the
+  [audio API reference](docs/reference/c-api.md#speaker-diarization-and-attributed-transcription).
 - **2026-09** **Multimodal chat reaches the model through HTTP.** Qwen3-VL accepts images;
   dots3-note also accepts audio and multiple media items. CPU tests use synthetic weights;
   real-checkpoint token parity remains unverified. See the [input guide](docs/guides/multimodal-input.md)
@@ -242,7 +246,7 @@ configs, token-for-token the same output. Switching to it should be boring. Ever
 you get on top, most of it borrowed from whichever engine does it best:
 
 - **One 66 MiB binary instead of a 9.1 GiB install.** A flat, exception-free, llama.cpp-style C ABI
-  ([`include/vllm.h`](include/vllm.h), ABI v26) for C, C++, Go, or Rust. No Python
+  ([`include/vllm.h`](include/vllm.h), ABI v30) for C, C++, Go, or Rust. No Python
   interpreter in the process.
 - **GGUF as a first-class citizen.** Load the same quantized files llama.cpp uses, and on CPU
   **compute directly on the compressed blocks** (Q4_0, Q8_0, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XS,
@@ -383,8 +387,9 @@ Per-arch build flags, per-op coverage, and the quantization format table:
 
 ## Build
 
-CMake (>= 3.24) and a C++20 compiler. The core has no ML dependencies, and the tree builds
--Werror-clean on gcc 14.2.
+Use CMake (>= 3.24) and a C++20 compiler. Diarization is enabled by default and fetches
+parakeet.cpp, which builds ggml. Set `-DVLLM_CPP_WITH_DIARIZATION=OFF` to omit this dependency.
+See the [build options and dependency limits](docs/BUILD.md#diarization-dependency).
 
 ```sh
 cmake -S . -B build && cmake --build build -j   # CPU: the correctness / CI reference
@@ -453,7 +458,7 @@ behind a model gallery, multi-model serving, the full OpenAI API surface, auth, 
 ## Use it as a library (C API)
 
 Link `libvllm` and include [`include/vllm.h`](include/vllm.h): a flat, exception-free,
-llama.cpp-style C ABI (currently `VLLM_ABI_VERSION 26`) suitable for `dlopen` / FFI. Check the
+llama.cpp-style C ABI (currently `VLLM_ABI_VERSION 30`) suitable for `dlopen` / FFI. Check the
 header for the version that your build provides.
 
 ```c
@@ -540,10 +545,9 @@ from:
 - Kernel work is ported from **CUTLASS**, **FlashInfer**, **Marlin**, and **TRT-LLM** rather than
   reinvented, cited per kernel in the porting inventory.
 
-**A note on ggml:** vllm.cpp does not use ggml. It reads GGUF and follows llama.cpp's C ABI style, but
-tensors, kernels, and dispatch are its own portable `vt::` runtime
-([`include/vt/`](include/vt/)) with no ggml or PyTorch dependency at any point. ggml is a superb piece of engineering and llama.cpp
-built the ecosystem this project plugs into; we needed a different tensor layer, that is all.
+**A note on ggml:** the core tensors, kernels, and dispatch use the portable `vt::` runtime
+([`include/vt/`](include/vt/)). The optional diarization integration uses parakeet.cpp and its ggml
+dependency. The inference engine does not require PyTorch.
 
 ## Citation
 

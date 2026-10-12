@@ -75,6 +75,23 @@ See [System 1 requests](../USAGE.md#system-1-decisions-with-v1systemone),
 [the decision and scoring C API](c-api.md#decisions-and-option-scoring), and the
 [Tev1 recipe](../models/tev1.md).
 
+**Diarization route availability**
+
+The server implementation has conditional `POST /v1/audio/diarizations` and
+`POST /v1/audio/sas` handlers. They require a build with diarization enabled and
+callbacks attached through `ApiServer::set_diarizer()` and `ApiServer::set_sas()`,
+respectively. The handlers read a multipart `file` upload and return JSON.
+They ignore `response_format`.
+
+**The bundled `vllm-server` does not attach either callback.** These routes remain
+unregistered and return 404. There is no startup flag to enable them. The
+[ABI 30 audio functions](c-api.md#speaker-diarization-and-attributed-transcription)
+are separate from this HTTP wiring.
+
+Sources: [callback setters](../../include/vllm/entrypoints/openai/api_server.h#L286),
+[route registration](../../src/vllm/entrypoints/openai/api_server.cpp#L1869), and
+[server startup](../../src/vllm/entrypoints/openai/server_main.cpp).
+
 `/v1/audio/speech` is registered only when you start the server with
 `--speech-model`. Without that flag, the route returns 404. MiniMax-Music3
 returns a 44.1 kHz stereo WAV. See the

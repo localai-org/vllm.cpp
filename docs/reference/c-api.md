@@ -47,7 +47,7 @@ int main(void) {
 The ABI covers engine lifecycle, completion, chat, embeddings, entity extraction,
 transcription, media generation, speech generation, decisions, option scoring, memory helpers,
 and diagnostics. It also exposes blocking, streaming, and concurrent request
-interfaces. The current version is `VLLM_ABI_VERSION 29`.
+interfaces. The current version is `VLLM_ABI_VERSION 30`.
 
 Read [`include/vllm.h`](../../include/vllm.h) for the fields and functions in
 the current ABI. Call `vllm_abi_version()` at runtime to detect a header and
@@ -82,6 +82,55 @@ individual fields.
   A non-GLiNER2 engine returns `VLLM_ERR_INVALID_ARGUMENT`.
   On failure, the function zeroes a non-null output and sets `vllm_last_error()`.
   See the [GLiNER C API example](../USAGE.md#through-the-c-abi-v27) for loading, calling, and cleanup.
+
+## Speaker diarization and attributed transcription
+
+ABI 30 declares the audio functions in
+[`include/vllm.h`](../../include/vllm.h#L1116). They use parakeet.cpp when
+[diarization is enabled at build time](../BUILD.md#diarization-dependency).
+These interfaces do not establish model accuracy or throughput parity.
+
+Load a Nemotron-3-Diarization GGUF with `vllm_diarization_load(path)`.
+The function returns a separate `vllm_engine*`, or `NULL` on failure.
+Read `vllm_last_error()` for the error detail. Free the engine with
+`vllm_engine_free()`.
+
+Call `vllm_diarize_path(engine, wav_path, &out)` for a WAV file, or
+`vllm_diarize_pcm(engine, pcm, n_samples, sample_rate, &out)` for raw audio.
+The PCM contract is mono float32 at 16 kHz. On success, `vllm_diarization`
+contains `n_segments` entries with a zero-based `speaker` ID and `start` and
+`end` times in seconds. Call `vllm_diarization_free(&out)` to free the segment
+array and zero the result. Free a previous result before reusing its struct.
+
+Speaker-attributed automatic speech recognition (ASR) combines a transcription
+engine with the separate diarization engine:
+
+| Entry point | Input | Result cleanup |
+|---|---|---|
+| `vllm_transcribe_and_diarize(asr, diar, wav_path, &out)` | WAV path | `vllm_sas_result_free(&out)` |
+| `vllm_transcribe_and_diarize_pcm(asr, diar, pcm, n_samples, sample_rate, &out)` | Mono float32 PCM at 16 kHz | `vllm_sas_result_free(&out)` |
+
+Each `vllm_sas_result` owns an utterance array. Each utterance contains
+`speaker`, `text`, `start`, `end`, and `conf`. The cleanup function frees each
+text string and the array, then zeroes the result.
+
+**Combined-ASR loader limit:** the loader uses the transcription model directory
+for both ASR implementations but does not check whether the extra context loaded.
+A successful transcription load therefore does not prove that combined ASR can run.
+There is no public parameter for a separate ASR GGUF. No verified combined-ASR
+loading recipe is available here. See the [loader](../../src/capi/vllm_c.cpp#L868).
+
+The combined WAV function reads samples after a fixed 44-byte header and passes
+16 kHz to the dependency. It does not validate the WAV format or resample.
+Do not treat it as a general WAV decoder. The PCM function forwards the supplied
+samples and sample rate. Both combined functions return `VLLM_OK` with an empty
+result when the dependency returns no result. `VLLM_OK` alone does not establish that transcription succeeded.
+
+With `VLLM_CPP_WITH_DIARIZATION=OFF`, `vllm_diarization_load()` returns `NULL`.
+The diarization and combined-ASR calls return `VLLM_ERR_INVALID_ARGUMENT` for
+otherwise valid arguments. `vllm_last_error()` reports `diarization not compiled in`.
+The cleanup functions remain usable. See the
+[C implementation](../../src/capi/vllm_c.cpp#L1532) for these error and ownership paths.
 
 ## Decisions and option scoring
 

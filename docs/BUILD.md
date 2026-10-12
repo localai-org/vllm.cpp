@@ -1,10 +1,10 @@
 # Building vllm.cpp
 
 vllm.cpp uses CMake (>= 3.24) and a C++20 compiler (gcc 13/14 and clang are
-exercised; the tree builds -Werror-clean on gcc 14.2). The core has no ML
-dependencies; the OpenAI server uses a vendored header-only HTTP transport
-(cpp-httplib). The [README](../README.md) carries the two-line quickstart; this
-page is the full build reference.
+exercised; the tree builds -Werror-clean on gcc 14.2). The default build fetches
+parakeet.cpp for diarization, including its ggml dependency. The OpenAI server
+uses the vendored header-only cpp-httplib transport. The [README](../README.md)
+carries the quickstart. This page is the full build reference.
 
 ## Build out-of-source
 
@@ -18,6 +18,37 @@ with `cannot open output file <target>: Is a directory` (issue #85).
 Configure refuses an in-source build up front and says so. If an earlier attempt
 already wrote into the checkout, clear it with
 `rm -rf CMakeCache.txt CMakeFiles`.
+
+## Diarization dependency
+
+`VLLM_CPP_WITH_DIARIZATION` defaults to `ON` for all backends. CMake fetches
+[mudler/parakeet.cpp](https://github.com/mudler/parakeet.cpp) at commit
+`394d270fabb1d6125f05c772aa3ca078a574b19d` and links its `parakeet` target.
+A fresh configure needs network access unless the dependency is already
+available to CMake. The dependency build uses static libraries and disables
+its tests, CLI, and server. CMake defaults `GGML_NATIVE` to `OFF` unless you set it.
+
+To omit this dependency, configure with:
+
+```sh
+cmake -S . -B build -DVLLM_CPP_WITH_DIARIZATION=OFF
+```
+
+The diarization and combined-ASR entry points remain in the ABI but report that
+diarization is not compiled in. See [the C API reference](reference/c-api.md#speaker-diarization-and-attributed-transcription).
+
+To use an existing parakeet.cpp checkout at the same revision, set
+`VLLM_CPP_PARAKEET_CPP_DIR`:
+
+```sh
+cmake -S . -B build -DVLLM_CPP_PARAKEET_CPP_DIR=/path/to/parakeet.cpp
+```
+
+CMake builds that source tree with `add_subdirectory()`. The override does not
+check its revision. Keep it at the pinned commit because newer parakeet.cpp
+revisions can change the C API signatures used here.
+
+Source: [the diarization CMake block](../CMakeLists.txt#L1621).
 
 ## CPU build (the correctness / CI reference)
 
@@ -46,10 +77,10 @@ them. Because building them needs nothing a CUDA build does not already have,
 carries it; `-DVLLM_CPP_TRITON=OFF` drops back to the hand C++/CUDA kernels,
 which stay the always-available fallback.
 
-### CUTLASS: the one external build dependency
+### CUTLASS dependency
 
-CUTLASS (>= 4.5.0) is header-only, and it is the only thing a CUDA build fetches
-from the network. It feeds two independent consumers:
+CUTLASS (>= 4.5.0) is header-only. A CUDA build can fetch it in addition to the
+default diarization dependency. It feeds two independent consumers:
 
 - **FlashAttention-2** prefill/decode, on every arch in `8.0 8.6 8.7 8.9 12.0a 12.1a`.
 - The **sm_12xa NVFP4 block-scaled GEMM**, on Blackwell only.
