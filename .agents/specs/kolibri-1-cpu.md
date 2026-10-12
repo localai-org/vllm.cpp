@@ -386,10 +386,18 @@ own groups under an ngram spec; qwen3.5 still widens) plus the engine e2e
 gate: spec-ON == spec-OFF BYTE-IDENTICAL on 9/9 prompts (bench prompt +
 8 W3 goldens), acceptance exactly 53/53 on the bench prompt and 146/270 on
 the goldens (the probe harness's numbers), and engine-level decode tok/s
-4.34 -> 13.39 on the bench prompt (3.08x, CLEARS the 12 tok/s target;
-harness reference 4.92 -> 14.51) and 6.80 -> 8.17 on the goldens (1.20x),
+4.53 -> 13.78 on the bench prompt (3.04x, CLEARS the 12 tok/s target;
+harness reference 4.92 -> 14.51) and 6.27 -> 8.13 on the goldens (1.30x),
 measured with the synchronous scheduler on BOTH arms (ngram forces sync;
-VT_ASYNC_SCHED=0, t32 + 32 GiB cache, under the lock). W3 unchanged: 900/900
+VT_ASYNC_SCHED=0, t32 + 32 GiB cache, under the lock). Decode tok/s uses the
+CORRECTED denominator (2026-10-12 review fix): the tokens generated inside
+the decode interval — the full count less the tokens already present when
+the first output arrived — over that interval; wall tok/s keeps the full
+count (bench wall 3.04 -> 5.89; goldens wall 5.46 -> 6.91). The first report
+divided the full count by the decode interval, overcounting decode by the
+first step's tokens (the operator's overcounted verification: 14.06 bench /
+8.60 goldens decode); the correction is reporting-only — acceptance
+(53/53, 146/270) and byte-identity (9/9) are unchanged. W3 unchanged: 900/900
 with spec off; with spec ON the chains are byte-identical to spec-OFF, so the
 torch-golden relationship (4/8 prompts end-to-end identical, 4 adjudicated
 near-tie flips) is unchanged. Owed: the engine's reject-heavy path costs more

@@ -281,6 +281,12 @@ TEST_CASE("kolibri1 ngram spec-decode e2e gate: spec-ON == spec-OFF through the 
     std::vector<std::vector<int32_t>> chains;
     std::vector<int64_t> accepted, proposed;  // per job
     std::vector<double> wall_s, decode_s;     // per job
+    // The DECODE numerator per job: the output tokens generated INSIDE the
+    // decode interval [first output, finish] — the full count less the tokens
+    // already present when the first output arrived. A spec step can emit
+    // several tokens at once, and those were generated before the interval
+    // opened, so the full count over the interval overstates decode throughput.
+    std::vector<int64_t> decode_tokens;       // per job
   };
 
   const auto run_arm = [&](bool spec_on, Arm& arm) {
@@ -302,11 +308,13 @@ TEST_CASE("kolibri1 ngram spec-decode e2e gate: spec-ON == spec-OFF through the 
     arm.proposed.assign(jobs.size(), 0);
     arm.wall_s.assign(jobs.size(), 0.0);
     arm.decode_s.assign(jobs.size(), 0.0);
+    arm.decode_tokens.assign(jobs.size(), 0);
     for (size_t j = 0; j < jobs.size(); ++j) {
       const int64_t acc0 = eng->runner().spec_drafts_accepted();
       const int64_t prop0 = eng->runner().spec_drafts_proposed();
       const auto t0 = std::chrono::steady_clock::now();
       std::optional<std::chrono::steady_clock::time_point> t_first;
+      int64_t tokens_at_first = 0;
       eng->engine().add_request("req" + std::to_string(j), jobs[j].prompt,
                                 Greedy(jobs[j].max_tokens));
       std::optional<vllm::RequestOutput> final;
@@ -315,6 +323,8 @@ TEST_CASE("kolibri1 ngram spec-decode e2e gate: spec-ON == spec-OFF through the 
           if (!t_first.has_value() && !item.outputs.empty() &&
               !item.outputs[0].token_ids.empty()) {
             t_first = std::chrono::steady_clock::now();
+            tokens_at_first =
+                static_cast<int64_t>(item.outputs[0].token_ids.size());
           }
           if (item.finished) final = item;
         }
@@ -330,6 +340,10 @@ TEST_CASE("kolibri1 ngram spec-decode e2e gate: spec-ON == spec-OFF through the 
         arm.decode_s[j] =
             std::chrono::duration<double>(t1 - *t_first).count();
       }
+      // The corrected decode numerator: tokens generated inside the decode
+      // interval only. The wall numerator keeps the FULL count (below).
+      arm.decode_tokens[j] =
+          static_cast<int64_t>(arm.chains[j].size()) - tokens_at_first;
       arm.accepted[j] = eng->runner().spec_drafts_accepted() - acc0;
       arm.proposed[j] = eng->runner().spec_drafts_proposed() - prop0;
       MESSAGE((spec_on ? "spec-ON  " : "spec-OFF ") << jobs[j].name
@@ -418,28 +432,39 @@ TEST_CASE("kolibri1 ngram spec-decode e2e gate: spec-ON == spec-OFF through the 
           << "the torch golden end to end (probe: 4/8)");
 
   // (v) ENGINE-LEVEL TOK/S, reported (never asserted: machine load may move
-  // it — the decode bench's own convention). Decode tok/s is measured from
-  // the first emitted token to finish; wall tok/s over the whole request.
-  const auto tok_s = [](double seconds, int tokens) {
+  // it — the decode bench's own convention). Wall tok/s divides the FULL
+  // output count by the whole request. Decode tok/s divides the tokens
+  // generated INSIDE the decode interval — the full count LESS the tokens
+  // already present when the first output arrived — by the interval from
+  // that first output to finish. (An earlier pairing divided the full count
+  // by that interval, billing the first step's tokens — several at once under
+  // spec decode — with no generation time; the corrected denominator counts
+  // only tokens the interval actually produced, so the corrected decode
+  // figures read modestly LOWER than the overcounted ones.)
+  const auto tok_s = [](double seconds, int64_t tokens) {
     return seconds > 0.0 ? static_cast<double>(tokens) / seconds : 0.0;
   };
   MESSAGE("ENGINE bench prompt: spec-OFF wall " << tok_s(off.wall_s[0], 64)
-          << " tok/s, decode " << tok_s(off.decode_s[0], 64)
+          << " tok/s, decode "
+          << tok_s(off.decode_s[0], off.decode_tokens[0])
           << " tok/s | spec-ON wall " << tok_s(on.wall_s[0], 64)
-          << " tok/s, decode " << tok_s(on.decode_s[0], 64)
+          << " tok/s, decode " << tok_s(on.decode_s[0], on.decode_tokens[0])
           << " tok/s (probe harness reference: 4.92 plain / 14.51 spec "
              "decode tok/s)");
   double off_g_wall = 0.0, off_g_dec = 0.0, on_g_wall = 0.0, on_g_dec = 0.0;
+  int64_t off_g_dec_tok = 0, on_g_dec_tok = 0;
   for (size_t j = 1; j < jobs.size(); ++j) {
     off_g_wall += off.wall_s[j];
     off_g_dec += off.decode_s[j];
     on_g_wall += on.wall_s[j];
     on_g_dec += on.decode_s[j];
+    off_g_dec_tok += off.decode_tokens[j];
+    on_g_dec_tok += on.decode_tokens[j];
   }
   MESSAGE("ENGINE goldens aggregate: spec-OFF wall "
           << tok_s(off_g_wall, 8 * 32) << " tok/s, decode "
-          << tok_s(off_g_dec, 8 * 32) << " tok/s | spec-ON wall "
+          << tok_s(off_g_dec, off_g_dec_tok) << " tok/s | spec-ON wall "
           << tok_s(on_g_wall, 8 * 32) << " tok/s, decode "
-          << tok_s(on_g_dec, 8 * 32)
+          << tok_s(on_g_dec, on_g_dec_tok)
           << " tok/s (probe harness reference: 6.84 plain / 8.99 spec)");
 }

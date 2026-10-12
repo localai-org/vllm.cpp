@@ -1682,14 +1682,15 @@ TEST_CASE("capi: malformed speculative_config is INVALID_ARGUMENT") {
   CHECK(eng == nullptr);
 }
 
-// A VALID draft-free ngram document is PARSED and REACHES the engine load
-// (the v24 kv_cache_dtype reach proof, applied to the speculative_config
-// field): the load of a nonexistent checkpoint fails with VLLM_ERR_MODEL_LOAD
-// — the code every FromModelDir failure reports — not VLLM_ERR_INVALID_ARGUMENT,
-// which is what the ABI layer returns for a document it rejects before any
-// model I/O. The opt-in flag is read, not merely tolerated, and the ngram
-// method is accepted at the ABI layer (the engine-level proof that the config
-// drives kolibri's spec-decode loop lives in test_kolibri1_ngram_spec).
+// A VALID draft-free ngram document is ACCEPTED at the ABI layer: the load of
+// a nonexistent checkpoint fails with VLLM_ERR_MODEL_LOAD — the code every
+// FromModelDir failure reports — not VLLM_ERR_INVALID_ARGUMENT, which is what
+// the ABI layer returns for a document it rejects before any model I/O. This
+// pins the PARSE only. A missing checkpoint fails the same way whether or not
+// the parsed config is forwarded into EngineParams, so this case cannot see a
+// dropped assignment (the review finding on this test); the FORWARDING pin is
+// the next case, and the engine-level proof that the config drives kolibri's
+// spec-decode loop lives in test_kolibri1_ngram_spec.
 TEST_CASE("capi: a valid ngram speculative_config reaches the engine load") {
   vllm_model_params p = vllm_model_params_default();
   p.model_path = "/nonexistent/vllm-cpp/model/dir";
@@ -1699,6 +1700,59 @@ TEST_CASE("capi: a valid ngram speculative_config reaches the engine load") {
   vllm_engine* eng = nullptr;
   CHECK(vllm_engine_load(&p, &eng) == VLLM_ERR_MODEL_LOAD);
   CHECK(eng == nullptr);
+}
+
+// THE FORWARDING PIN for the speculative_config field (the review finding on
+// the valid-ngram case above): that case proves only that the document PARSES.
+// This case proves the parsed document is FORWARDED into the engine, through
+// two documents a VALID model dir is not needed for:
+//
+// (a) THE PARSE PIN — an invalid n-gram window is a CALLER error: the ABI
+//     layer rejects it with VLLM_ERR_INVALID_ARGUMENT (the spec-validation
+//     error class), never VLLM_ERR_MODEL_LOAD, and the handle is null. If the
+//     field's parse were dropped, this document would fall through to the
+//     missing-directory load error instead — this assertion goes red.
+//
+// (b) THE FORWARDING PIN — a drafter-chain document is ACCEPTED by the ABI
+//     parse (the chain validates) and REFUSED BY NAME by the ENGINE's
+//     up-front ResolveSpecConfig (FromModelDir's first act, ahead of every
+//     path, config, tokenizer and weight operation — the ordering
+//     tests/vllm/entrypoints/test_drafter_chain_reach.cpp gates at the C++
+//     level). Against the same nonexistent checkpoint the load therefore
+//     fails with the SPEC-VALIDATION refusal naming "vllm_cpp.drafter_chain",
+//     NOT the "model path is not a directory" error the engine reports when
+//     it never sees the document. Engine-side spec refusals surface through
+//     the load's generic catch, so the STATUS is VLLM_ERR_MODEL_LOAD either
+//     way (pinned deliberately: a genuine std::invalid_argument out of
+//     FromModelDir keeps reporting as VLLM_ERR_MODEL_LOAD) — the MESSAGE is
+//     the discriminator, and it goes red the moment the assignment of the
+//     parsed config into EngineParams is dropped.
+TEST_CASE("capi: speculative_config is parsed AND forwarded into the engine") {
+  vllm_model_params p = vllm_model_params_default();
+  p.model_path = "/nonexistent/vllm-cpp/model/dir";
+
+  // (a) An invalid n-gram window: a spec-validation error at the ABI layer.
+  p.speculative_config =
+      "{\"method\":\"ngram\",\"num_speculative_tokens\":5,"
+      "\"prompt_lookup_min\":0,\"prompt_lookup_max\":4}";
+  vllm_engine* eng = reinterpret_cast<vllm_engine*>(0x1);
+  CHECK(vllm_engine_load(&p, &eng) == VLLM_ERR_INVALID_ARGUMENT);
+  CHECK(eng == nullptr);
+  CHECK(std::string(vllm_last_error()).find("prompt_lookup_min") !=
+        std::string::npos);
+
+  // (b) A well-formed drafter chain: parsed here, refused by the engine
+  // before any model I/O — the refusal proves the document was forwarded.
+  p.speculative_config =
+      "{\"vllm_cpp\":{\"drafter_chain\":[{\"method\":\"ngram\","
+      "\"num_speculative_tokens\":5}]}}";
+  vllm_engine* eng2 = reinterpret_cast<vllm_engine*>(0x1);
+  CHECK(vllm_engine_load(&p, &eng2) == VLLM_ERR_MODEL_LOAD);
+  CHECK(eng2 == nullptr);
+  const std::string err = vllm_last_error();
+  CHECK(err.find("vllm_cpp.drafter_chain") != std::string::npos);
+  CHECK(err.find("speculative-config") != std::string::npos);
+  CHECK(err.find("model path is not a directory") == std::string::npos);
 }
 
 // ─── version / abi ───────────────────────────────────────────────────────────

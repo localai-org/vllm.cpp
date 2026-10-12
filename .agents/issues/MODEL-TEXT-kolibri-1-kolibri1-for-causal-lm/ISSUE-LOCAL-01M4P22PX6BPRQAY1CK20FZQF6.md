@@ -50,9 +50,19 @@ into (1) a checkpoint-free seam unit (kolibri under an ngram spec config keeps
 its own 2 groups — no MambaSpec, no fa_draft, byte-identical to spec-off —
 while qwen3.5 still widens to fa+gdn+fa_draft with the conv row at
 (K-1)+k taps and num_speculative_blocks=k) and (2) the engine e2e gate.
-tests/capi/test_capi.cpp gains the ABI reach pin: a valid ngram
-speculative_config parses and reaches the engine load (MODEL_LOAD on a missing
-checkpoint, not INVALID_ARGUMENT).
+tests/capi/test_capi.cpp gains the ABI reach pin, in TWO halves (2026-10-12
+review fix — the first shape pinned only the PARSE: a missing checkpoint fails
+with VLLM_ERR_MODEL_LOAD whether or not the parsed config is forwarded, so it
+could not see a dropped assignment). The PARSE pin: a valid ngram
+speculative_config is ACCEPTED at the ABI layer (MODEL_LOAD on a missing
+checkpoint, not INVALID_ARGUMENT), and an invalid ngram window is a CALLER
+error (VLLM_ERR_INVALID_ARGUMENT, never MODEL_LOAD). The FORWARDING pin: a
+drafter-chain document the ABI layer accepts is REFUSED BY NAME by the
+engine's up-front ResolveSpecConfig, before any model I/O — so against a
+missing checkpoint the load fails with the spec-validation refusal, not the
+missing-directory error. Mutation-verified both ways: reverting the whole
+parse+assignment block fails the parse pin; dropping only the assignment into
+EngineParams fails the forwarding pin (the reviewer's exact mutation).
 
 MEASURED THROUGH THE ENGINE (LoadedEngine, t32 + 32 GiB dequant cache, under
 flock, VT_ASYNC_SCHED=0 so BOTH arms run the synchronous scheduler — ngram
@@ -67,13 +77,25 @@ is reported separately):
   harness over this tree's bf16 chain: 53/53). Goldens aggregate 146/270 —
   EXACTLY the probe harness's 146/270 (sim over torch chains: 150/297). The
   engine reproduces the harness's acceptance counts exactly, per prompt too.
-- ENGINE tok/s (decode phase, first token -> finish): bench prompt 4.34 ->
-  13.39 tok/s (3.08x; wall 2.35 -> 5.64, 2.40x) — CLEARS the 12 tok/s target
-  through the engine (harness reference: 4.92 -> 14.51, 2.95x). Goldens
-  aggregate 6.80 -> 8.17 tok/s (1.20x; harness reference: 6.84 -> 8.99, 1.31x;
-  short-prompt diluted, same shape). Default-scheduler run for the record:
-  bench 4.32 -> 13.50, goldens 7.50 -> 5.61 (the async spec-OFF arm's pipelined
-  input prep is the confound; not the A/B of record).
+- ENGINE tok/s (CORRECTED DENOMINATOR, 2026-10-12 review fix): decode tok/s
+  divides the tokens generated INSIDE the decode interval — the full output
+  count less the tokens already present when the first output arrived — by
+  the interval from that first output to finish; wall tok/s keeps the full
+  count over the whole request. (The first report divided the FULL count by
+  that interval, billing the first step's tokens with no generation time;
+  the corrected decode figures read modestly lower — the operator's
+  overcounted verification measured 14.06 bench / 8.60 goldens decode.)
+  Re-measured 2026-10-12 on this box (t32 + 32 GiB cache, under flock,
+  VT_ASYNC_SCHED=0): bench prompt decode 4.53 -> 13.78 tok/s (3.04x; wall 3.04
+  -> 5.89, 1.93x) — CLEARS the 12 tok/s target through the engine (harness
+  reference: 4.92 -> 14.51, 2.95x). Goldens aggregate decode 6.27 -> 8.13
+  tok/s (1.30x; wall 5.46 -> 6.91, 1.27x; harness reference: 6.84 -> 8.99,
+  1.31x; short-prompt diluted, same shape). Default-scheduler run for the
+  record: bench decode 4.80 -> 15.72 (wall 3.18 -> 6.34), goldens decode 6.35
+  -> 8.98 (wall 5.39 -> 7.60) — the async spec-OFF arm's pipelined input prep
+  is the confound; not the A/B of record. The denominator fix is
+  REPORTING-ONLY: acceptance (53/53 bench, 146/270 goldens) and byte-identity
+  (9/9) are unchanged.
 - W3 VERDICT: unchanged with spec off — test_kolibri1_w3 900/900 PASS (the
   default path is byte-identical; the KV-spec unit pins it too) and the decode
   bench anchor 109726 PASS. With spec ON: byte-identical to spec-OFF (9/9), so
