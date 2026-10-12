@@ -900,8 +900,8 @@ name.
 ## Kolibri-1
 
 `Kolibri1ForCausalLM` loads the mixed FP8/BF16 safetensors checkpoint from
-`Aleph-Alpha/Kolibri-1`. The recorded checkpoint contains 32 shards totaling
-78,827,029,120 bytes, indexed by `model.safetensors.index.json`.
+`Aleph-Alpha/Kolibri-1`. The recorded checkpoint contains 32 shards.
+Its `model.safetensors.index.json` records 78,827,029,120 bytes of tensor data.
 The existing record identifies revision `e52eb462` but lacks the full revision
 and shard SHA-256 hashes. This is incomplete artifact provenance, not a
 reproducible download pin. See the [checkpoint record](../.agents/specs/kolibri-1-cpu.md#the-checkpoint).

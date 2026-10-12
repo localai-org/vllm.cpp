@@ -131,3 +131,21 @@ These are environment failures, not successful gates. The final operator
 report must give the completed staged result before remote handoff.
 Logs: `/tmp/vllm-docs-preflight-impl.log` and
 `/tmp/vllm-docs-preflight-impl-staged.log`.
+
+## Review correction: checkpoint bytes
+
+The review found that the usage paragraph described tensor bytes as total shard
+file sizes. The checkpoint record at `.agents/specs/kolibri-1-cpu.md:17-22`
+identifies the value as index `metadata.total_size`. The paragraph now names
+tensor data and preserves the recorded shard count.
+
+On 2026-10-12, `/bin/bash /tmp/vllm-docs-verify.sh` exited 0 in the repair
+worktree. All seven document and record checks passed. The five existing
+mutation suites passed 19, 14, 46, 6, and 32 tests. The compile-scope check
+found no C++ sources, headers, or build files. Source review and
+`git diff --check` passed. Product mutation is not applicable to this prose
+correction. The canonical issue remains open pending landing.
+
+Pre-edit and staged preflight checks use `--role-only` for this repair. They
+check role metadata only and are not full preflight results. The operator
+retains the full baseline and implementation results described above.
