@@ -157,21 +157,68 @@ build/examples/vllm-cli \
 
 Two more example binaries ship alongside it:
 
-- `vllm-bench` ([`examples/bench/main.cpp`](../examples/bench/main.cpp)), a
-  throughput/latency harness taking `--model`, `--dataset-path`,
-  `--num-prompts`, `--input-len`, `--output-len`, `--concurrency`,
-  `--max-num-batched-tokens`, and `--num-blocks`. It pretokenizes before timing
-  and atomically publishes each concurrency wave. Set
-  `VT_BENCH_PRETOKENIZE=0` for the timed-string rollback; the report names the
-  resolved mode. Its `--output-wait` mode
-  defaults to `poll`; the explicit `blocking-c1` diagnostic is valid only with
-  `--concurrency 1` and is not a general multi-request policy.
+- `vllm-bench`, the [throughput and latency harness](#benchmark-workload-controls).
 - `tokenize` ([`examples/tokenize/main.cpp`](../examples/tokenize/main.cpp)), a
   tokenizer smoke tool taking `<tokenizer.json | model.gguf> <corpus.txt>`.
   GGUF `tokenizer.ggml.pre` names accepted: `qwen35`, `qwen2`, `llama-bpe`,
   `gpt-4o` / `llama4` / `kanana2` / `talkie` (the GPT-4o / o200k family),
   `joyai-llm`, `deepseek-llm`, `deepseek-v3`, `laguna`. Any other name is
   refused by name rather than aliased onto a near-miss regex.
+
+### Benchmark workload controls
+
+`vllm-bench` measures throughput and latency through the engine's async frontend.
+Without `--model`, it runs a tiny synthetic CPU engine. Use this command to check
+the harness. Its timings do not measure real-model performance:
+
+```sh
+build/examples/vllm-bench --num-prompts 1 --input-len 8 --output-len 2 --concurrency 1
+```
+
+For a local checkpoint that includes a chat template, this example enables
+chat formatting and natural end-of-sequence (EOS) stopping:
+
+```sh
+build/examples/vllm-bench --model /path/to/model \
+  --num-prompts 8 --input-len 128 --output-len 64 --concurrency 4 \
+  --seed 0 --temperature 0 --no-ignore-eos --no-skip-chat-template \
+  --no-enable-thinking --kv-cache-dtype auto
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `--ignore-eos`, `--no-ignore-eos` | Ignore EOS | Generate to `--output-len`, or allow earlier EOS stopping |
+| `--skip-chat-template`, `--no-skip-chat-template` | Raw prompts | Skip or apply chat formatting |
+| `--chat-template <file or template>` | Model's template when formatting is enabled | Override with an existing file or a single-line literal |
+| `--enable-thinking`, `--no-enable-thinking` | Unset | Set the template's `enable_thinking` variable to true or false |
+| `--kv-cache-dtype <dtype>` | `auto` | Select cache storage, with `auto`, `bfloat16`, `fp8`, or `fp8_e4m3` as documented choices |
+
+With `--no-skip-chat-template`, the harness renders each prompt as one user
+message and requests an assistant generation prefix. A `--chat-template` override
+requires `--no-skip-chat-template`. The harness refuses missing templates instead
+of silently changing the prompt format. The synthetic engine has no template,
+so it needs an explicit override for this mode. Unset thinking leaves the
+template variable undefined. It does not mean false.
+
+The `auto` KV dtype lets the loader resolve storage from the checkpoint.
+An explicit dtype overrides the checkpoint setting. Keep the text report with
+your results. Its `KV cache dtype (requested)` and `KV cache dtype (resolved storage)`
+fields distinguish the option from allocated storage. `Ignore EOS (resolved sampling)`,
+`Chat template`, and `Chat template kwargs` record the other workload controls.
+Check `Total input tokens` after formatting and `Total generated tokens` after EOS
+stopping. Matching these options alone does not establish a fair comparison.
+Use identical model artifacts, prompts, sampling, concurrency, and cache settings
+for each engine.
+
+Use `--dataset-path <sharegpt.json>` to load prompts from a ShareGPT dataset.
+The harness also accepts `--max-num-batched-tokens` and `--num-blocks` for engine
+sizing. It pretokenizes prompts before timing and atomically submits each
+concurrency wave. Set `VT_BENCH_PRETOKENIZE=0` to include tokenization in timing.
+The report names the resolved mode. `--output-wait` defaults to `poll`.
+The `blocking-c1` diagnostic requires `--concurrency 1`.
+
+See the [option parser](../examples/bench/main.cpp) and
+[benchmark implementation](../examples/bench/bench_core.h) for the complete behavior.
 
 ### Which HF tokenizers load
 
