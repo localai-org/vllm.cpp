@@ -16,4 +16,7 @@ The feature row still describes dequant-at-load and lists the TT arm as owed. RE
 
 ## Resolution
 
--
+2026-10-12: The documentation branch corrects the loader and device claims,
+adds CPU usage, and separates partial token agreement from full plugin parity.
+The five scoped checkers and their 117 mutation tests pass. The issue remains
+open pending independent review and upstream landing.

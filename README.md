@@ -46,6 +46,8 @@
 - **2026-10** **C ABI 30 adds speaker diarization.**
   See the [C API reference](docs/reference/c-api.md#speaker-diarization) for audio formats, cleanup,
   and the current combined-transcription limitation.
+- **2026-10** **Kolibri-1 gains CPU chat serving.** Its reasoning and tool-call parsers are available.
+  Full parity against the author's vLLM plugin remains unverified. See the [recipe and limits](docs/USAGE.md#kolibri-1).
 - **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
   blocked by missing artifacts, with no speed result. See the
   [measurement instructions and limits](docs/benchmarks/qwen38-tensorfold-gap.md#measurement-tools).
