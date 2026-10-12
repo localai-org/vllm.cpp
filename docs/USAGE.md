@@ -844,6 +844,68 @@ directory. The [CLM page](models/clm.md) has the commands.
 GGUF k-quant arms are not implemented; `ClmModel` refuses a GGUF source by
 name.
 
+## Kolibri-1
+
+`Kolibri1ForCausalLM` loads the mixed FP8/BF16 safetensors checkpoint from
+`Aleph-Alpha/Kolibri-1`. The recorded checkpoint contains 32 shards.
+Its `model.safetensors.index.json` records 78,827,029,120 bytes of tensor data.
+The existing record identifies revision `e52eb462` but lacks the full revision
+and shard SHA-256 hashes. This is incomplete artifact provenance, not a
+reproducible download pin. See the [checkpoint record](../.agents/specs/kolibri-1-cpu.md#the-checkpoint).
+
+Use an existing local checkpoint directory containing the index, its shards,
+`config.json`, `tokenizer.json`, and `tokenizer_config.json`. Allow host memory
+for the weights, temporary dequantized projections, activations, and the KV cache.
+The checkpoint size is not a peak-memory estimate.
+
+After [building the CLI and server](BUILD.md), run a raw completion on CPU:
+
+```sh
+build/examples/vllm-cli \
+  --model /path/to/Kolibri-1 --device cpu \
+  --prompt "The capital of Germany is" --max-tokens 16 --temperature 0
+```
+
+For chat, select both Kolibri parsers explicitly:
+
+```sh
+build/examples/vllm-server \
+  --model /path/to/Kolibri-1 --device cpu --served-model-name kolibri1 \
+  --host 127.0.0.1 --port 8000 \
+  --max-model-len 2048 --kv-cache-dtype bfloat16 \
+  --reasoning-parser kolibri1 --tool-call-parser kolibri1
+```
+
+The server uses the checkpoint's chat template. In another terminal, send a
+chat request with thinking disabled:
+
+```sh
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kolibri1","messages":[{"role":"user","content":"Name the capital of Germany."}],"max_tokens":16,"temperature":0,"chat_template_kwargs":{"enable_thinking":false}}'
+```
+
+This request omits `reasoning_effort`. When that template argument is non-null,
+it takes precedence over `enable_thinking`. Only the value `"none"` disables thinking.
+The explicit context limit keeps this example separate from the author's
+unverified million-token serving recipe. It does not limit weight memory.
+
+The loader retains FP8 blocks and BF16 tensors. The CPU forward dequantizes FP8
+projections when needed. Its optional dequantization cache defaults to disabled
+(`VT_KOLIBRI1_DEQUANT_CACHE_MB=0`), so enabling it adds a memory budget.
+The registry also dispatches to a Tenstorrent forward with streamed experts.
+See the [Tenstorrent measurements and remaining gaps](gap-kolibri1-tt-captured-decode.md).
+GGUF loading and other device forwards, including CUDA, are refused.
+
+The recorded CPU gate matched 141 of 145 argmax positions against a
+PyTorch transcription of the author's plugin. Four differences were accepted
+near-ties. Four of eight prompts matched token-for-token through the full
+continuation. This was not a native Transformers generation run.
+See the [CPU comparison](../.agents/specs/kolibri-1-cpu.md#now) and
+[serving validation](bench-evidence/kolibri1-serve-20261008.md).
+Full correctness and speed parity against the
+[author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) remain unverified.
+
 ## Muse Glimmer 30B from a GGUF k-quant
 
 The text tower loads from a `muse-glimmer`-architecture GGUF, so the 30B model

@@ -37,6 +37,8 @@
 
 ## News
 
+- **2026-10** **Kolibri-1 gains CPU chat serving.** Its reasoning and tool-call parsers are available.
+  Full parity against the author's vLLM plugin remains unverified. See the [recipe and limits](docs/USAGE.md#kolibri-1).
 - **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
   blocked by missing artifacts, with no speed result. See the
   [measurement instructions and limits](docs/benchmarks/qwen38-tensorfold-gap.md#measurement-tools).
