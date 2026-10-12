@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "vllm/model_executor/models/kolibri1_tt.h"
+#include "vllm/model_executor/models/kolibri1_tt_forward.h"
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vllm/model_executor/models/model_registry.h"
@@ -787,4 +788,56 @@ TEST_CASE("kolibri1 TT reset lane: the slot-table fingerprint flips on a "
   CHECK(policy.ContentChangedSince(after));
   const uint64_t after1 = policy.Fingerprint();
   CHECK_FALSE(policy.ContentChangedSince(after1));
+}
+
+TEST_CASE("kolibri1 TT memo eviction: the just-emplaced entry is never the "
+          "victim (dangling-iterator use-after-free regression)") {
+  // The memo cap is 512 on the production shape and the eviction erases the
+  // smallest key. The OLD order (emplace, then erase begin()) erased the
+  // JUST-EMPLACED entry once the memo's smallest key caught up to the
+  // current (layer, expert): the iterator the expert loop holds dangled,
+  // and the ExpertMlp read gate/up/down views plus a dequant buffer that
+  // had already been freed (be.Free inside the erase) — garbage weights,
+  // uninitialized-DRAM-scale outputs, and run-to-run nondeterministic
+  // decode. Kolibri1TTMemoEvictForEmplace evicts BEFORE the caller's
+  // emplace so the current entry is never the victim.
+  constexpr size_t kCap = 512;
+  using SlotDequant = Kolibri1TTStreamingDeviceContext::SlotDequant;
+  Kolibri1TTMemo memo;
+
+  // Fill to the cap with keys (0,1)..(0,cap): the smallest key is (0,1),
+  // the catch-up shape the bug needed (a fresh dequant whose key sorts
+  // below every resident entry).
+  for (int64_t e = 1; e <= static_cast<int64_t>(kCap); ++e)
+    memo.emplace(std::make_pair(int64_t{0}, e), SlotDequant{});
+  REQUIRE(memo.size() == kCap);
+
+  // The caller's next dequant is for the smallest key (0,0). The old
+  // emplace-then-evict order erased (0,0) itself here; the helper evicts
+  // the pre-existing smallest (0,1) instead, and the emplace that follows
+  // lands at the cap with a valid iterator.
+  Kolibri1TTMemoEvictForEmplace(memo, kCap);
+  const auto key = std::make_pair(int64_t{0}, int64_t{0});
+  auto it = memo.emplace(key, SlotDequant{}).first;
+
+  CHECK(memo.size() == kCap);
+  // The just-emplaced entry SURVIVES (the old order erased it — this is the
+  // deterministic red on the old code).
+  CHECK(memo.find(key) != memo.end());
+  // The iterator the expert loop holds stays valid and names the entry.
+  CHECK(it != memo.end());
+  CHECK(it->first == key);
+  // The victim was a PRE-EXISTING entry: (0,1) is gone, (0,0) is resident.
+  CHECK(memo.find(std::make_pair(int64_t{0}, int64_t{1})) == memo.end());
+  CHECK(memo.begin()->first == key);
+
+  // A second round on the full memo keeps the invariant: emplacing the
+  // current smallest key never destroys it either.
+  Kolibri1TTMemoEvictForEmplace(memo, kCap);
+  const auto key2 = std::make_pair(int64_t{0}, int64_t{1});
+  auto it2 = memo.emplace(key2, SlotDequant{}).first;
+  CHECK(memo.size() == kCap);
+  CHECK(memo.find(key2) != memo.end());
+  CHECK(it2 != memo.end());
+  CHECK(it2->first == key2);
 }

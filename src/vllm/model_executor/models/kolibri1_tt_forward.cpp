@@ -799,7 +799,6 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         *dsts[pi] = MakeTensor(dst, DType::kBF16, d.q.device,
                                std::vector<int64_t>{n, k});
       }
-      it = st.memo.emplace(key, std::move(dq)).first;
       // THE BOUND: the memo is a cache, and an unbounded one exhausts the
       // device (each entry owns a 3*inter*h*2 = 7.86 MB bf16 buffer at the
       // Kolibri-1 dims; a free-running decode routes to ever-new experts
@@ -808,8 +807,18 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       // resident context and the slot pool. Eviction is correctness-free
       // (a dropped entry is re-dequanted from the authoritative slot bytes
       // on the next touch), and a fresh dequant is bit-identical.
+      //
+      // EVICT BEFORE EMPLACING. The old order (emplace, then erase begin())
+      // erased the JUST-EMPLACED entry once the memo's smallest key caught
+      // up to the current (layer, expert) — from that step on, `it` dangled
+      // and the ExpertMlp below read gate/up/down views and a dequant buffer
+      // that had already been freed (be.Free inside the erase): garbage
+      // weights, uninitialized-DRAM-scale outputs, and run-to-run
+      // nondeterministic decode. Evicting first keeps the current entry out
+      // of the victim set, so `it` stays valid for the GEMM below.
       constexpr size_t kMemoMaxEntries = 512;
-      while (st.memo.size() > kMemoMaxEntries) st.memo.erase(st.memo.begin());
+      Kolibri1TTMemoEvictForEmplace(st.memo, kMemoMaxEntries);
+      it = st.memo.emplace(key, std::move(dq)).first;
     }
     const int64_t ne = static_cast<int64_t>(token_rows.size());
     DBuf gathered(d, DType::kBF16, {ne, h});
@@ -888,6 +897,14 @@ Kolibri1DebugRouteDiff Kolibri1DebugRouteCompare(
     }
   }
   return rep;
+}
+
+// ---- The memo eviction (public contract) -------------------------------------
+//
+// See the header: evict BEFORE the caller's emplace so the just-emplaced
+// entry is never the victim.
+void Kolibri1TTMemoEvictForEmplace(Kolibri1TTMemo& memo, size_t cap) {
+  while (memo.size() >= cap) memo.erase(memo.begin());
 }
 
 // ---- The routed-expert refusal (public contract) -----------------------------
@@ -1006,6 +1023,7 @@ ForwardLogits ForwardKolibri1TTResidentForward(
                  static_cast<long long>(p.num_experts),
                  static_cast<long long>(p.num_experts_per_tok));
   }
+
 
   // Embedding (bf16 table, [vocab, H] raw orientation) — the shared
   // residency seam, exactly like the CPU row.

@@ -225,6 +225,12 @@ int64_t DeviceDramTotalBytes();
 // EnsureDevice2D does (creating the slot's persistent buffer), reproducing
 // the loader's weight staging before a keep-quant matmul.
 void StageWeightBf16ForTest(const Tensor& t, MeshDevice& device);
+// Stale-serve-fix test hook: stage `t` exactly as EnsureMatmulWeightDevice
+// routes an interior bf16 weight view (a WeightViewShadows entry keyed by
+// the view's host pointer), and report the entry count, so a focused case
+// can verify that freeing the owning buffer drops the entries inside it.
+void StageWeightViewForTest(const Tensor& t);
+size_t WeightViewShadowCountForTest();
 // W4d W6: stage the keep-quant word shadow for a block-quant weight at
 // LOAD time (the residency pre-pass; no-op for non-block dtypes).
 void StageKeepQuantWordsFor(const Tensor& packed);
@@ -280,6 +286,8 @@ inline void ResetAllocTraceForTest() {}
 inline int64_t FreeDeviceDramBytesForTest() { return 0; }
 inline int64_t DeviceDramTotalBytes() { return 0; }
 inline void StageWeightBf16ForTest(const Tensor&, MeshDevice&) {}
+inline void StageWeightViewForTest(const Tensor&) {}
+inline size_t WeightViewShadowCountForTest() { return 0; }
 inline void StageKeepQuantWordsFor(const Tensor&) {}
 inline void DumpSlotCensus(const char*) {}
 inline void ReleaseWarmShapeSlots(uint32_t) {}

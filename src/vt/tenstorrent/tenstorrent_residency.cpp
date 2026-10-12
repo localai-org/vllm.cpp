@@ -646,6 +646,52 @@ std::map<uintptr_t, Bfp8WeightShadow>& Bfp8WeightShadows() {
   return *m;
 }
 
+// Invalidate every pointer-keyed weight-view shadow whose key lies within
+// the retiring allocation [host, host+bytes). These maps are keyed by the
+// VIEW's host pointer — interior offsets included — so an entry outlives
+// the buffer it was staged from unless it is dropped here. The address is
+// about to be reused (a pool re-hand, or a free whose malloc successor lands
+// on the same address), and a surviving entry would serve the PREVIOUS
+// tenant's device bytes to the new tenant's views. That is the run-to-run
+// decode nondeterminism this closes: the kolibri1 memo eviction frees 7.86 MB
+// dequant buffers whose up/down expert-weight views are interior pointers
+// cached in WeightViewShadows; malloc reuses the address for the next
+// dequant, and the new expert's GEMM stale-served the OLD expert's weights
+// (onset exactly when the memo cap is first crossed and evictions begin).
+// The dropped tensors' consumers may still be queued when `drain` is set
+// (a pool re-hand is not a drain point); the be.Free path passes false —
+// its mid-run caller is the kolibri1 memo eviction, whose queue was already
+// drained by the preceding expert's scatter readback.
+void DropWeightViewShadowsInRange(void* host, size_t bytes, bool drain) {
+  if (host == nullptr || bytes == 0) return;
+  const uintptr_t lo = reinterpret_cast<uintptr_t>(host);
+  const uintptr_t hi = lo + bytes;
+  std::vector<uintptr_t> wv_dead, bfp8_dead;
+  {
+    std::lock_guard<std::mutex> g(WeightViewMutex());
+    for (auto it = WeightViewShadows().lower_bound(lo);
+         it != WeightViewShadows().end() && it->first < hi; ++it)
+      wv_dead.push_back(it->first);
+  }
+  {
+    std::lock_guard<std::mutex> g(Bfp8WeightMutex());
+    for (auto it = Bfp8WeightShadows().lower_bound(lo);
+         it != Bfp8WeightShadows().end() && it->first < hi; ++it)
+      bfp8_dead.push_back(it->first);
+  }
+  if (wv_dead.empty() && bfp8_dead.empty()) return;
+  if (drain && !tt_capture_active())
+    SharedMeshDevice().mesh_command_queue().finish();
+  {
+    std::lock_guard<std::mutex> g(WeightViewMutex());
+    for (const uintptr_t k : wv_dead) WeightViewShadows().erase(k);
+  }
+  {
+    std::lock_guard<std::mutex> g(Bfp8WeightMutex());
+    for (const uintptr_t k : bfp8_dead) Bfp8WeightShadows().erase(k);
+  }
+}
+
 ttnn::Tensor EnsureBfp8WeightDevice(const Tensor& b, MeshDevice& device) {
   const uint32_t rows = static_cast<uint32_t>(b.shape[0]);
   const uint32_t cols = static_cast<uint32_t>(b.shape[1]);
@@ -875,6 +921,20 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
 // needs external linkage for the focused test and calls EnsureDevice2D,
 // which stays TU-internal here.)
 
+// Test surface for the stale-serve fix (external linkage, same pattern):
+// StageWeightViewForTest stages an INTERIOR bf16 weight view exactly as
+// EnsureMatmulWeightDevice routes it (a WeightViewShadows entry keyed by
+// the view's pointer), and WeightViewShadowCountForTest reports the map
+// size, so a focused case can verify that freeing the owning buffer drops
+// the entries keyed inside it.
+void StageWeightViewForTest(const Tensor& t) {
+  (void)EnsureWeightViewDevice(t, SharedMeshDevice());
+}
+size_t WeightViewShadowCountForTest() {
+  std::lock_guard<std::mutex> g(WeightViewMutex());
+  return WeightViewShadows().size();
+}
+
 // DEBUG (BACKEND-TENSTORRENT-QWEN35 W2c): ensure the tensor is staged on
 // device exactly as a consuming kernel would, then read the DEVICE copy back.
 // Comparing this against the host master exposes staging corruption that a
@@ -1047,12 +1107,23 @@ void RegisterHostBuffer(void* host, size_t bytes) {
 
 void UnregisterHostBuffer(void* host) {
   if (host == nullptr) return;
+  size_t bytes = 0;
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     if (std::getenv("VT_TT_SLOT_TRACE") != nullptr)
       std::fprintf(stderr, "[TT-SLOT] unregister %p\n", host);
+    // Immediate destroy (no drain): be.Free's mid-run caller is the kolibri1
+    // memo eviction, whose 7.86 MB shadow frees the very next GEMM
+    // allocations reuse, and whose slot's consumers are already complete (the
+    // preceding expert's scatter readback drained the queue).
+    auto it = Slots().find(reinterpret_cast<uintptr_t>(host));
+    if (it != Slots().end()) bytes = it->second.bytes;
     Slots().erase(reinterpret_cast<uintptr_t>(host));
   }
+  // The freed address is about to be reused: drop the pointer-keyed
+  // weight-view shadows keyed inside it (stale-serve fix). No drain: the
+  // queue was already drained past these shadows' consumers.
+  DropWeightViewShadowsInRange(host, bytes, /*drain=*/false);
   DropPagedKvShadow(host);
   DropEmbedTableShadow(host);
   DropDecodedWeightShadow(host);
@@ -1082,9 +1153,11 @@ void MarkHostWritten(void* host) {
 
 void MarkScratchAcquired(void* host) {
   if (host == nullptr) return;
+  size_t bytes = 0;
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     BufferSlot* s = FindSlot(host);
+    if (s != nullptr) bytes = s->bytes;
     if (s != nullptr) {
       // The state MarkHostWritten registers, plus the W7 reservation: the
       // bytes on BOTH sides belong to the previous tenant. host_current stays
@@ -1100,6 +1173,10 @@ void MarkScratchAcquired(void* host) {
   // Same drop MarkHostWritten performed for every caller — a pool block must
   // never serve a stale embed-table staging either.
   DropEmbedTableShadow(host);
+  // The re-handed address keeps its bytes: drop the pointer-keyed
+  // weight-view shadows keyed inside it (stale-serve fix). A pool re-hand
+  // is not a drain point, so the queue is drained first.
+  DropWeightViewShadowsInRange(host, bytes, /*drain=*/true);
 }
 
 // TRUSTED dump (BACKEND-TENSTORRENT-QWEN35 W2c measurement reset): whole

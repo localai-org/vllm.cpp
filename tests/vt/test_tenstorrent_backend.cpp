@@ -12489,3 +12489,39 @@ TEST_CASE("kTENSTORRENT kSigmoidBiasTopK matches the CPU reference "
     CHECK(ci[1] == 2);
   }
 }
+TEST_CASE("tt residency: freeing a buffer drops the weight-view shadows "
+          "keyed inside it (stale-serve regression)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  // A 64 KiB host allocation; the weight view is an INTERIOR bf16 window —
+  // exactly the kolibri1 memo dequant's up/down view shape (an interior
+  // pointer cached in WeightViewShadows, keyed by the view's host pointer).
+  constexpr size_t kBytes = 64 * 1024;
+  void* host = backend.Alloc(kBytes);
+  std::vector<uint16_t> pattern(kBytes / 2);
+  for (size_t i = 0; i < pattern.size(); ++i)
+    pattern[i] = static_cast<uint16_t>(i % 251);
+  std::memcpy(host, pattern.data(), kBytes);
+
+  auto* view_base = static_cast<char*>(host) + kBytes / 2;
+  Tensor view = Tensor::Contiguous(view_base, vt::DType::kBF16,
+                                   Device{DeviceType::kTENSTORRENT, 0},
+                                   {32, 32});
+  const size_t before = vt::tenstorrent::WeightViewShadowCountForTest();
+  vt::tenstorrent::StageWeightViewForTest(view);
+  // The interior view staged its own persistent shadow, keyed by its
+  // pointer (NOT the base's slot — the interior-view rule).
+  CHECK(vt::tenstorrent::WeightViewShadowCountForTest() == before + 1);
+
+  // Freeing the owning buffer must drop the entry keyed inside it: the
+  // address is about to be reused, and a surviving entry would serve the
+  // previous tenant's device bytes to the new tenant's view (the old code
+  // leaked the entry — the kolibri1 memo eviction's address reuse then
+  // stale-served the OLD expert's weights to the new expert's GEMM).
+  backend.Free(host);
+  CHECK(vt::tenstorrent::WeightViewShadowCountForTest() == before);
+}
+

@@ -160,6 +160,22 @@ struct Kolibri1TTStreamingDeviceContext {
   std::map<std::pair<int64_t, int64_t>, SlotDequant> memo;
 };
 
+// The memo container type, named for the eviction helper below.
+using Kolibri1TTMemo =
+    std::map<std::pair<int64_t, int64_t>,
+             Kolibri1TTStreamingDeviceContext::SlotDequant>;
+
+// Evicts `memo` down to `cap` - 1 entries, smallest key first, so the
+// caller's IMMEDIATELY FOLLOWING emplace lands at size <= cap and is never
+// the eviction victim. The caller must emplace right after this returns and
+// must not hold iterators across the call. Evicting AFTER the emplace (the
+// old order) erased the just-emplaced entry once the memo's smallest key
+// caught up to the current (layer, expert) — a dangling-iterator
+// use-after-free that fed freed dequant buffers to the expert GEMMs and
+// made the decode run-to-run nondeterministic (host-side testable, no
+// card: tests/vllm/models/test_kolibri1_tt.cpp).
+void Kolibri1TTMemoEvictForEmplace(Kolibri1TTMemo& memo, size_t cap);
+
 // Builds the streaming context: the B1 streaming plan over the REAL
 // checkpoint's byte shape (device_budget_bytes, kv_reserve_bytes from the
 // options), the slot pool plan, and the per-layer device pool allocations.
