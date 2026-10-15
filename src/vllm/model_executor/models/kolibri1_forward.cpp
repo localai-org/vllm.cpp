@@ -275,8 +275,7 @@ ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
   return r;
 }
 
-DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
-              int64_t t, DType out_dtype = DType::kBF16,
+DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              int64_t t, DType out_dtype = DType::kBF16,
               const char* gsite = "other") {
   if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype, gsite);
   // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land, with
@@ -319,6 +318,21 @@ DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
 // row's op sequence is byte-identical to the pre-extraction form.
 
 // ── Attention block (kolibri1.py:39-123) ────────────────────────────────────
+// Same-binary A/B knob for the dispatch batching (stage (a) routed experts,
+// stage (b) attention q/k/v). Default ON; =0 restores the per-call structure.
+bool BatchGemvOn() {
+  static const bool on = [] {
+    const char* ev = std::getenv("VT_KOLIBRI1_BATCH_GEMV");
+    return ev == nullptr || ev[0] != '0';
+  }();
+  return on;
+}
+
+// The batched q/k/v projection's output width for one projection.
+int64_t BTOutN(const Kolibri1Projection& w) {
+  return w.IsBf16() ? w.bf16.shape[0] : w.fp8_block.n;
+}
+
 DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p,
                     bool is_sliding, const Tensor& dhn, const Tensor& positions,
                     const dense_attn::StepInputs& si, const PagedKvCache& kv,
@@ -328,10 +342,33 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   const int64_t dh = p.head_dim;
   const float scale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(dh)));
 
-  // q/k/v projections (separate linears upstream, :64-79).
-  DBuf q = LinearBT(d, dhn, w.q_proj, t, DType::kBF16, "attn_q");  // [T, Hq*Dh]
-  DBuf k = LinearBT(d, dhn, w.k_proj, t, DType::kBF16, "attn_k");  // [T, Hkv*Dh]
-  DBuf v = LinearBT(d, dhn, w.v_proj, t, DType::kBF16, "attn_v");  // [T, Hkv*Dh]
+  // q/k/v projections (separate linears upstream, :64-79). Stage (b) of the
+  // GEMV-overhead restructure: one vt::MatmulBTBatch dispatch instead of
+  // three (the k/v matvecs were the two smallest kicks/layer). Same resolved
+  // weights, same rows, same MatmulOneChunk kernel — bit-identical; the knob
+  // restores the three per-call projections.
+  DBuf q(d, DType::kBF16, {t, BTOutN(w.q_proj)});
+  DBuf k(d, DType::kBF16, {t, BTOutN(w.k_proj)});
+  DBuf v(d, DType::kBF16, {t, BTOutN(w.v_proj)});
+  if (!BatchGemvOn()) {
+    q = LinearBT(d, dhn, w.q_proj, t, DType::kBF16, "attn_q");
+    k = LinearBT(d, dhn, w.k_proj, t, DType::kBF16, "attn_k");
+    v = LinearBT(d, dhn, w.v_proj, t, DType::kBF16, "attn_v");
+  } else {
+    std::vector<ResolvedBT> wq, wk, wv;
+    wq.push_back(ResolveBT(d, w.q_proj));
+    wk.push_back(ResolveBT(d, w.k_proj));
+    wv.push_back(ResolveBT(d, w.v_proj));
+    Tensor qt = q.t(), kt = k.t(), vt_t = v.t(), x = dhn;
+    std::vector<vt::MatmulBTJob> jobs{
+        {&qt, &x, &wq[0].wt}, {&kt, &x, &wk[0].wt}, {&vt_t, &x, &wv[0].wt}};
+    const uint64_t elems = static_cast<uint64_t>(t) *
+                           (BTOutN(w.q_proj) + BTOutN(w.k_proj) +
+                            BTOutN(w.v_proj)) *
+                           BTOutN(w.q_proj);  // K == Hq*Dh for all three
+    gemvprof::Call gc("attn_qkv", elems);
+    vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
+  }
 
   // Per-head qk-norm BEFORE RoPE (:107-118): RMSNorm(head_dim) per head.
   // Reshape [T, H*Dh] -> [T*H, Dh] and run the shared RmsNorm with the
@@ -531,12 +568,9 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // instead of 18). BIT-IDENTICAL by construction; gated byte-for-byte by
   // tests/vt/test_ops_matmul_batch.cpp.
   prof::Scope prof_glue("moe_glue");
-  // Same-binary A/B for the dispatch batching (VT_KOLIBRI1_BATCH_GEMV, read
-  // once; default ON). OFF restores the per-expert loop byte-for-byte.
-  static const bool kBatchGemv = [] {
-    const char* ev = std::getenv("VT_KOLIBRI1_BATCH_GEMV");
-    return ev == nullptr || ev[0] != '0';
-  }();
+  // Same-binary A/B for the dispatch batching (see BatchGemvOn). OFF restores
+  // the per-expert loop byte-for-byte.
+  const bool kBatchGemv = BatchGemvOn();
   DBuf expert_out(d, DType::kBF16, {t, top_k, h});
   expert_out.Zero(d);
   if (!kBatchGemv) {
