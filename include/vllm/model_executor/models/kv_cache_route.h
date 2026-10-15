@@ -45,6 +45,15 @@ inline bool IsFp8KvCache(const PagedKvCache& kv) {
   return fp8_kind;
 }
 
+// The dtype the ATTENTION presents for this store. An fp8 store is read through
+// the bf16 dense dequant scratch (`Fp8PagedToDenseBf16Kernel`), so it presents
+// bf16 exactly as a bf16 store does; a model that decides its query/out dtype
+// from the store's dtype must ask THIS, or an fp8 store silently falls off the
+// bf16 attention lanes (FA-2 included) onto the per-read CUDA-core path.
+inline bool KvCachePresentsBf16(const PagedKvCache& kv) {
+  return kv.dtype == vt::DType::kBF16 || IsFp8KvCache(kv);
+}
+
 // The KV STORE. `k`/`v` are the model-dtype [T, Hkv, Dh] tensors the attention
 // preamble produced; `k_cache`/`v_cache` are this layer's `KvSlice` views.
 //
