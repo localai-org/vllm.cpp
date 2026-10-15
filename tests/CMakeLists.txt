@@ -168,9 +168,14 @@ if(VLLM_CPP_XPU)
   set_tests_properties(test_xpu_exl3_direct_prepare_budget PROPERTIES
     SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external"
     ENVIRONMENT "VT_XPU_MEMORY_BUDGET_BYTES=268435456")
+  add_test(NAME test_xpu_exl3_preparation_capacity COMMAND test_xpu_exl3_direct_prepare
+    "--test-case=*Wave1:*")
+  set_tests_properties(test_xpu_exl3_preparation_capacity PROPERTIES
+    SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "xpu;external")
   if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS)
     set_tests_properties(test_xpu_exl3_direct_prepare PROPERTIES ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
     set_property(TEST test_xpu_exl3_direct_prepare_budget APPEND PROPERTY ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
+    set_property(TEST test_xpu_exl3_preparation_capacity APPEND PROPERTY ENVIRONMENT "EXL3_REQUIRE_ARTIFACTS=1")
   endif()
   vllm_cpp_add_test(test_xpu_w8a8_workspaces vt/test_xpu_w8a8_workspaces.cpp)
   target_include_directories(test_xpu_w8a8_workspaces PRIVATE ${CMAKE_SOURCE_DIR}/src)

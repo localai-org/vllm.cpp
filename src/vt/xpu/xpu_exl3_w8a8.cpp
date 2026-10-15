@@ -177,6 +177,11 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   const int m = int(in.shape[0]), k = int(in.shape[1]), n = int(out.shape[1]);
   const int groups = int(suh.shape[0]);
   auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
+  // The checked planner owns alignment and size arithmetic. Preserve its
+  // preparation prefix before compacting the model-private GEMM workspace.
+  const size_t preparation_bytes = plan.intermediate_offset;
+  const size_t qbytes = plan.row_scale_offset - plan.activation_offset;
+  const size_t sbytes = preparation_bytes - plan.row_scale_offset;
   if (activation) {
     // Only the private model descriptor omits published xq/sx storage. Keep
     // the identical padded F16 Y, weight scale/status region and panel layout.
@@ -194,7 +199,7 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
     if (args.model_map && direct_mode == "1" && k / 128 <= 144 &&
         (!prepare_setting || std::string_view(prepare_setting) == "1") &&
-        plan.intermediate_offset <= 64 * 1024 * 1024) {
+        Exl3W8A8PreparationAdmitted(preparation_bytes)) {
       const size_t compact_bytes = plan.workspace_bytes - plan.intermediate_offset;
       bool consumed = false;
       // Retain the existing workspace -> preparation lock order on all queues.
@@ -202,13 +207,13 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
       // its completion fence retires the direct view before reuse or growth.
       (void)WithExl3W8A8Workspace(q, compact_bytes + plan.weight_panel_bytes,
           [&](void* storage) {
-        consumed = WithExl3W8A8Preparation(q, plan.intermediate_offset,
+        consumed = WithExl3W8A8Preparation(q, preparation_bytes,
             [&](void* prepared) {
           auto scratch = Tensor::Contiguous(storage, DType::kI8, q.device,
                                              {int64_t(compact_bytes)});
           auto weights = Tensor::Contiguous(static_cast<uint8_t*>(storage) + compact_bytes,
               DType::kI8, q.device, {k, plan.weight_panel_columns});
-          const PreparedActivation view{prepared, plan.intermediate_offset};
+          const PreparedActivation view{prepared, preparation_bytes};
           DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args, &view);
         });
       });
@@ -274,7 +279,7 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   auto* xq = activation ? static_cast<int8_t*>(activation->storage)
                        : reinterpret_cast<int8_t*>(bytes + plan.activation_offset);
   auto* sx = activation
-      ? reinterpret_cast<float*>(static_cast<uint8_t*>(activation->storage) + size_t(groups) * plan.padded_rows * k)
+      ? reinterpret_cast<float*>(static_cast<uint8_t*>(activation->storage) + plan.row_scale_offset)
       : reinterpret_cast<float*>(bytes + plan.row_scale_offset);
   auto* y = reinterpret_cast<sycl::half*>(bytes + plan.intermediate_offset);
   auto* sw = reinterpret_cast<float*>(bytes + plan.weight_scale_offset);
@@ -297,8 +302,6 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   };
   const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
   bool prepared = false;
-  const size_t qbytes = size_t(groups) * plan.padded_rows * k;
-  const size_t sbytes = size_t(groups) * plan.padded_rows * sizeof(float);
   const auto prepare_checked = [&](void* storage) {
     auto candidate = input;
     candidate.xq = static_cast<int8_t*>(storage);

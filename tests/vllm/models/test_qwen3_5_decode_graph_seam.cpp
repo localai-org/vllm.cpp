@@ -1456,18 +1456,20 @@ struct XpuPolicyEnv {
   static constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_VERIFY",
       "VT_XPU_ATTN_SPLIT_EXTENDED", "VT_XPU_ATTN_SPLIT_SPAN", "VT_XPU_ATTN_SPLIT_MAX_PARTS",
       "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "VT_XPU_ATTN_SPLIT_REDUCE",
-      "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY"};
-  std::array<std::string, 9> values;
-  std::array<bool, 9> present{};
+      "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
+      "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32"};
+  std::array<std::string, 13> values;
+  std::array<bool, 13> present{};
   XpuPolicyEnv() {
-    for (size_t i = 0; i < 9; ++i) {
+    for (size_t i = 0; i < std::size(XpuPolicyEnv::names); ++i) {
       const char* v = std::getenv(names[i]); present[i] = v != nullptr;
       if (v) values[i] = v;
       unsetenv(names[i]);
     }
   }
   ~XpuPolicyEnv() {
-    for (size_t i = 0; i < 9; ++i)
+    for (size_t i = 0; i < std::size(XpuPolicyEnv::names); ++i)
       if (present[i]) setenv(names[i], values[i].c_str(), 1); else unsetenv(names[i]);
   }
 };
@@ -1488,8 +1490,8 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
   };
   const auto original = key();
   CHECK(key(4799) == original); CHECK(key(4800) == original); CHECK_FALSE(key(4801) == original);
-  for (size_t i = 0; i < 9; ++i) {
-    const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual"};
+  for (size_t i = 0; i < std::size(XpuPolicyEnv::names); ++i) {
+    const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual", "0", "16", "0", "0"};
     REQUIRE(setenv(XpuPolicyEnv::names[i], changed[i], 1) == 0);
     CHECK_FALSE(key() == original); unsetenv(XpuPolicyEnv::names[i]); CHECK(key() == original);
   }
@@ -1520,6 +1522,27 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
   CHECK(key(4800) == key(4801));
   REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
   CHECK_FALSE(key(4800) == key(4801));  // Packed bound still retires when generic cap is off.
+}
+
+TEST_CASE("Wave3: XPU C1 decode graph policy retains buckets and retires route transitions") {
+  XpuPolicyEnv env; char data = 0;
+  auto cache = XpuPolicyKv(&data);
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "1", 1) == 0);
+  const auto key = [&](int length) {
+    return vllm::detail::BuildXpuAttentionGraphPolicy(1, 1, length, true, {cache});
+  };
+  CHECK_FALSE(key(960) == key(961));
+  CHECK(key(4096) == key(4352)); CHECK(key(4352) == key(4800));
+  CHECK_FALSE(key(4800) == key(4801));
+  const auto previous = key(4096);
+  REQUIRE(setenv("VT_XPU_XE2_DECODE_SPLITS", "16", 1) == 0);
+  CHECK_FALSE(key(4096) == previous);
+  const auto split16 = key(4096);
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "0", 1) == 0);
+  CHECK_FALSE(key(4096) == split16);
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "1", 1) == 0);
+  cache.block_size = 1664;
+  CHECK(key(4096) == key(4992)); CHECK_FALSE(key(4992) == key(4993));
 }
 
 TEST_CASE("P1: XPU attention graph policy bounds only qualified batched packed verification") {

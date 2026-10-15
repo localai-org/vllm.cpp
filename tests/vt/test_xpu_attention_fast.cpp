@@ -1,5 +1,6 @@
 #include "xpu_test_helpers.h"
 #include "vt/xpu.h"
+#include "vt/breakable_graph.h"
 #include "vt/fp8_kv.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 #include "vt/unaligned.h"
@@ -96,6 +97,154 @@ struct Fixture {
 };
 }
 #ifdef VLLM_CPP_XPU_ONEDNN
+TEST_CASE("XPU Wave3: long C1 direct route canary"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  Queue gpu(vt::DeviceType::kXPU);
+  Fixture f(gpu.q, 1, 1, 4096, true, false, 1600,
+            DType::kF16, DType::kF16, DType::kF16, true);
+  Buffer pages(gpu.q, DType::kI32, {1, f.columns});
+  std::vector<int32_t> ids(f.columns);
+  for (int i = 0; i < f.columns; ++i) ids[i] = f.blocks - 1 - i;
+  pages.upload(ids.data());
+  auto run = [&](const char* mode) {
+    REQUIRE(setenv("VT_XPU_ATTENTION", mode, 1) == 0);
+    vt::PagedAttention(gpu.q, f.out.tensor, f.query.tensor, f.kc, f.vc,
+        pages.tensor, f.lens.tensor, f.offsets.tensor, f.args);
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+  };
+  run("reference"); const auto expected = f.result();
+  const char* old = std::getenv("VT_XPU_XE2_LONG_DECODE");
+  struct Restore {
+    bool had; std::string value;
+    ~Restore() { if (had) setenv("VT_XPU_XE2_LONG_DECODE", value.c_str(), 1);
+                 else unsetenv("VT_XPU_XE2_LONG_DECODE"); }
+  } restore{old != nullptr, old ? old : ""};
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "1", 1) == 0);
+  (void)vt::xpu::DrainProfileEvents(); run("auto");
+  Accuracy(f.result(), expected, false, true);
+  int selected = 0;
+  for (const auto& e : vt::xpu::DrainProfileEvents())
+    selected += e.stage == "attention_decode_xe2_long";
+  CHECK(selected == 1);
+}
+
+namespace {
+struct Wave3AttentionEnv {
+  static constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS"};
+  std::array<std::string,3> old;
+  std::array<bool,3> had{};
+  Wave3AttentionEnv() {
+    for (size_t i=0;i<3;++i) { const char* v=std::getenv(names[i]); had[i]=v; if(v)old[i]=v; }
+    REQUIRE(setenv(names[1],"1",1)==0);
+  }
+  ~Wave3AttentionEnv() { for(size_t i=0;i<3;++i) if(had[i])setenv(names[i],old[i].c_str(),1);else unsetenv(names[i]); }
+};
+struct Wave3AttentionFixture {
+  Fixture f;
+  Buffer pages;
+  vt::Tensor table_view;
+  std::vector<int32_t> ids{3,1,2,0,-999};
+  std::vector<unsigned char> original, current;
+  bool interleaved;
+  Wave3AttentionFixture(vt::Queue& q,int page,bool interleave)
+      : f(q,1,1,page*4,true,false,page,DType::kF16,DType::kF16,DType::kF16,true),
+        pages(q,DType::kI32,{1,5}),table_view(pages.tensor),original(f.cache.download()),interleaved(interleave) {
+    pages.upload(ids.data());
+    if(interleaved) {
+      f.kc.stride[0]=page*2048;f.kc.stride[1]=2048;f.kc.stride[2]=512;
+      f.vc=f.kc;f.vc.data=static_cast<unsigned char*>(f.kc.data)+256;
+    }
+  }
+  void Populate(int length,unsigned char poison=0x7f) {
+    current.assign(f.cache.bytes,poison);
+    for(int row=0;row<length;++row) for(int h=0;h<4;++h) {
+      const size_t block=ids[row/f.page],r=row%f.page;
+      const size_t source=block*f.page*2048+r*1024+h*256;
+      const size_t dest=interleaved?block*f.page*2048+r*2048+h*512:source;
+      const size_t voff=interleaved?256:size_t(f.page)*1024;
+      std::memcpy(current.data()+dest,original.data()+source,256);
+      std::memcpy(current.data()+dest+voff,original.data()+source+f.page*1024,256);
+    }
+    f.cache.upload(current.data());int32_t active=length;f.lens.upload(&active);f.args.max_seq_len=length;
+  }
+  void Run(const char* mode,vt::Queue* queue=nullptr,bool synchronize=true) {
+    REQUIRE(setenv("VT_XPU_ATTENTION",mode,1)==0);
+    vt::PagedAttention(queue?*queue:f.queue,f.out.tensor,f.query.tensor,f.kc,f.vc,table_view,f.lens.tensor,f.offsets.tensor,f.args);
+    if(synchronize)vt::GetBackend(f.queue.device).Synchronize(queue?*queue:f.queue);
+  }
+};
+}
+
+TEST_CASE("XPU Wave3: bounded C1 lengths splits layouts and inactive poison") {
+  Wave3AttentionEnv env; Queue gpu(vt::DeviceType::kXPU);
+  for(int page:{1600,1664}) for(bool interleaved:{false,true}) {
+    Wave3AttentionFixture c(gpu.q,page,interleaved);
+    for(int length:{960,961,1599,1600,1601,4095,4096,page*3,page*3+1}) {
+      CAPTURE(page);
+      CAPTURE(interleaved);
+      CAPTURE(length);
+      for(const char* parts:{"16","32"}) {
+        CAPTURE(parts);REQUIRE(setenv("VT_XPU_XE2_DECODE_SPLITS",parts,1)==0);
+        std::vector<unsigned char> first;
+        for(unsigned char poison:{0,0x7f}) {
+          c.Populate(length,poison);c.Run("reference");const auto expected=c.f.result();
+          (void)vt::xpu::DrainProfileEvents();c.Run("auto");Accuracy(c.f.result(),expected,false,true);
+          if(poison==0)first=c.f.out.download();else xpu_test::SameBytes(c.f.out.download(),first);
+          xpu_test::SameBytes(c.f.cache.download(),c.current);
+          if(const char* profile=std::getenv("VT_XPU_PROFILE");profile&&std::string_view(profile)=="1") {
+            int selected=0;for(const auto& e:vt::xpu::DrainProfileEvents())selected+=e.stage=="attention_decode_xe2_long";
+            CHECK(selected==int(length>960&&length<=page*3));
+          }
+        }
+      }
+    }
+    c.Populate(4096);c.f.args.k_scale=.5f;
+    c.Run("reference");const auto expected=c.f.result();
+    (void)vt::xpu::DrainProfileEvents();c.Run("auto");Accuracy(c.f.result(),expected,false,true);
+    int selected=0;for(const auto& e:vt::xpu::DrainProfileEvents())selected+=e.stage=="attention_decode_xe2_long";
+    CHECK(selected==0);c.f.args.k_scale=1.f;
+    // A strided table remains on the generic path; unused entries need not be valid.
+    c.f.table.upload(std::vector<int32_t>{3,-999,1,-999,2,-999,0,-999,-999}.data());
+    c.table_view=c.f.table.tensor;c.Run("reference");const auto strided=c.f.result();
+    (void)vt::xpu::DrainProfileEvents();c.Run("auto");Accuracy(c.f.result(),strided,false,true);
+    selected=0;for(const auto& e:vt::xpu::DrainProfileEvents())selected+=e.stage=="attention_decode_xe2_long";
+    CHECK(selected==0);
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
+TEST_CASE("XPU Wave3: C1 graph buckets fresh metadata and shared scratch") {
+  Wave3AttentionEnv env;Queue gpu(vt::DeviceType::kXPU),other(vt::DeviceType::kXPU);
+  auto& backend=vt::GetBackend(gpu.q.device);REQUIRE(backend.SupportsGraphCapture());
+  Wave3AttentionFixture c(gpu.q,1600,true);
+  for(int bound:{960,1600,4800}) {
+    c.Populate(bound);c.Run("auto");
+    const auto memory=vt::xpu::GetMemoryInfo();vt::BreakableGraph graph;
+    {vt::GraphCaptureScope scope(backend,gpu.q,graph,vt::GraphCaptureMode::kFull);c.Run("auto",nullptr,false);}
+    REQUIRE(graph.captured());const auto held=vt::xpu::GetMemoryInfo();
+    for(int length:{bound-1,bound}) {
+      c.Populate(length);c.f.args.max_seq_len=bound;c.Run("auto",&other.q);
+      const auto expected=c.f.out.download();
+      graph.Replay(gpu.q);backend.Synchronize(gpu.q);xpu_test::SameBytes(c.f.out.download(),expected);
+      CHECK(vt::xpu::GetMemoryInfo().allocated_bytes==held.allocated_bytes);
+      CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes==held.graph_device_bytes);
+    }
+    const auto before=c.f.out.download();int32_t invalid=bound+1;c.f.lens.upload(&invalid);
+    CHECK_THROWS_AS(graph.Replay(gpu.q),std::runtime_error);xpu_test::SameBytes(c.f.out.download(),before);
+    invalid=bound;c.f.lens.upload(&invalid);
+    c.ids[0]=4;c.pages.upload(c.ids.data());
+    CHECK_THROWS_AS(graph.Replay(gpu.q),std::runtime_error);xpu_test::SameBytes(c.f.out.download(),before);
+    c.ids[0]=3;c.pages.upload(c.ids.data());
+    const int32_t bad_offsets[]={1,2};c.f.offsets.upload(bad_offsets);
+    CHECK_THROWS_AS(graph.Replay(gpu.q),std::runtime_error);xpu_test::SameBytes(c.f.out.download(),before);
+    const int32_t good_offsets[]={0,1};c.f.offsets.upload(good_offsets);
+    graph.Replay(other.q);backend.Synchronize(other.q);
+    xpu_test::SameBytes(c.f.cache.download(),c.current);
+    graph.Reset();CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes==memory.graph_device_bytes);
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
 TEST_CASE("XPU EXL3 oneDNN attention: exact page boundaries scales and query padding"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);

@@ -104,6 +104,8 @@ bool PagedAttentionXe2PrefillKernel(Queue&, Tensor&, const Tensor&, const Tensor
                                     const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 #endif
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
+bool CanUsePagedAttentionXe2Decode(Queue&, const Tensor&, const Tensor&, const Tensor&, const Tensor&,
+                                   const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 bool PagedAttentionXe2DecodeKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
                                    const Tensor&, const Tensor&, const Tensor&, const PagedAttentionArgs&);
 // C4 admission requires a uniform host offset hint, proved against device

@@ -368,12 +368,12 @@ vt::DType GdnOutDType();
 // value; the second registration of the same binary under `VT_ACT_F32=1` is what
 // exercises the other arm, as tests/CMakeLists.txt already does for
 // `VT_GDN_OUT_BF16`.
-// Values baked by the dense XPU attention graph. Device lengths/table entries
+// Values baked by the dense XPU graph, including speculative GDN. Device lengths/table entries
 // remain staged inputs; route, layout and host partition policy require retirement.
 struct XpuAttentionGraphPolicy {
   std::array<int64_t, 2> boundaries{};
-  std::array<std::string, 9> settings{};
-  std::vector<std::array<uint64_t, 13>> kv;
+  std::array<std::string, 13> settings{};
+  std::vector<std::array<uint64_t, 15>> kv;
   bool causal = false;
   bool operator==(const XpuAttentionGraphPolicy&) const = default;
 };

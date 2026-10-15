@@ -2,6 +2,8 @@
 #include "xpu_kernels.h"
 #include "xpu_fp8.h"
 #include "xpu_qk_norm.h"
+#include "vt/xpu_paged_decode_policy.h"
+#include "vt/xpu_attention_preamble_policy.h"
 #include <sycl/ext/intel/math.hpp>
 #include <algorithm>
 #include <atomic>
@@ -14,6 +16,14 @@
 
 namespace vt::xpu {
 namespace {
+float NativePreambleNormValue(float value, float inverse, float weight, bool gemma) {
+#pragma clang fp contract(off)
+  // The same materialized F32 nodes as the producer contract. This translation
+  // unit disables fast math and contraction; no multiply/add may fuse.
+  const float effective_weight = gemma ? 1.0f + weight : weight;
+  const float normalized = value * inverse;
+  return normalized * effective_weight;
+}
 int64_t Position(View pos, int64_t token) {
   return pos.dtype == DType::kI32 ? static_cast<const int32_t*>(pos.data)[token]
                                 : static_cast<const int64_t*>(pos.data)[token];
@@ -120,6 +130,10 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
   const bool shape_ok = dim == 256 && rot > 0 && rot <= dim && half % 16 == 0 &&
       qgate.dtype == DType::kF16 && kf.dtype == DType::kF16 &&
       q_out.dtype == DType::kF16 && k_out.dtype == DType::kF16;
+  const char* native_setting = std::getenv("VT_XPU_ATTN_PREAMBLE_NATIVE_FP32");
+  const std::string_view native_mode = native_setting ? native_setting : kXpuAttentionPreambleNativeFp32Default;
+  VT_CHECK(native_mode == "0" || native_mode == "1", "Invalid VT_XPU_ATTN_PREAMBLE_NATIVE_FP32");
+  const bool native_math = fp16 && native_mode == "1";
   bool subgroup = false;
   if (shape_ok && mode != PreambleMode::kReference) {
     const auto sizes = NativeQueue(q).get_device().get_info<sycl::info::device::sub_group_sizes>();
@@ -134,7 +148,7 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
     // Separate kernel instantiations preserve the producer root boundary:
     // runtime selection of rsqrt versus legacy 1/sqrt changed observed F32
     // inverses on the pinned B70 toolchain, despite identical variances.
-    const auto launch = [&]<bool Producer>() {
+    const auto launch = [&]<bool Producer, bool NativeArithmetic>() {
       return NativeQueue(q).parallel_for(
         sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
         [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
@@ -166,8 +180,11 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
       for (int j = 0; j < tile; ++j) {
         const int col = lane + lanes * j;
         const float w = Load(weight, col);
-        norm[j] = fp16 ? ProducerQkNormValue(values[j], inv, w, gemma)
-                       : values[j] * inv * (gemma ? 1.0f + w : w);
+        if constexpr (NativeArithmetic)
+          norm[j] = NativePreambleNormValue(values[j], inv, w, gemma);
+        else
+          norm[j] = fp16 ? ProducerQkNormValue(values[j], inv, w, gemma)
+                         : values[j] * inv * (gemma ? 1.0f + w : w);
         if (fp16) norm[j] = Round(DType::kF16, norm[j]);
       }
       for (int j = 0; j < tile; ++j) {
@@ -192,8 +209,11 @@ void AttnQkNormRopeGateKernel(Queue& q, Tensor& q_out, Tensor& k_out,
       }
       });
     };
-    const auto event = fp16 ? launch.operator()<true>() : launch.operator()<false>();
-    RecordProfileEvent(q, "attn_qk_norm_rope_gate_subgroup", event);
+    const auto event = fp16
+        ? (native_math ? launch.operator()<true, true>() : launch.operator()<true, false>())
+        : launch.operator()<false, false>();
+    RecordProfileEvent(q, native_math ? "attn_qk_norm_rope_gate_subgroup_native_fp32"
+                                     : "attn_qk_norm_rope_gate_subgroup", event);
     finish_probe(event);
     return;
   }
@@ -470,7 +490,7 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
   const auto* table = static_cast<const int32_t*>(block_table.data);
   const char* setting = std::getenv("VT_XPU_ATTENTION");
   const std::string_view mode = setting ? setting : "auto";
-  const int64_t max_length = args.max_seq_len;
+  int64_t max_length = args.max_seq_len;
   const auto check_metadata = [&](int64_t packed_verify_rows) {
     CheckDeviceMetadata(q, [=] {
       if (offsets[0] != 0 || offsets[requests] != tokens) return false;
@@ -527,6 +547,12 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
     const bool packed_requested = mode == "verify" ||
         (automatic && verify_setting && std::string_view(verify_setting) == "1");
+    if ((mode == "verify" || automatic) && tokens == 1 &&
+        CanUsePagedAttentionXe2Decode(q, target, query, key_cache, value_cache,
+                                     block_table, seq_lens, query_start_loc, args)) {
+      packed_verify_rows = 1;
+      max_length = XpuPagedDecodePlanFromEnvironment(args.max_seq_len, page).max_keys;
+    }
     if (requests > 1 && packed_requested &&
         CanUsePagedAttentionXe2Verify(q, target, query, key_cache, value_cache,
                                      block_table, seq_lens, query_start_loc, args))

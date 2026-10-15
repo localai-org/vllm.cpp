@@ -941,7 +941,8 @@ bool WithEagerW8A8Workspace(Queue& q, Workspace& workspace, size_t bytes,
     // independent, so eager growth cannot invalidate a captured panel.
     VT_CHECK(!c.recordings.count(&native), "XPU shared W8A8 workspace is eager-only");
     if (bytes > workspace.bytes) {
-      if (bytes - workspace.bytes > c.budget - c.allocated - c.graph_bytes) return false;
+      if (!Exl3W8A8GrowthFits(c.budget, c.allocated, c.graph_bytes,
+                              workspace.bytes, bytes)) return false;
       // Every previous lease completed before returning, including exceptions.
       // Free first to avoid retaining both the old and new high-water capacities.
       if (workspace.data) {
@@ -978,7 +979,7 @@ bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void
                                 "workspace_wait_w8a8");
 }
 bool WithExl3W8A8Preparation(Queue& q, size_t bytes, const std::function<void(void*)>& launch) {
-  if (bytes > 64 * 1024 * 1024) return false;
+  if (!Exl3W8A8PreparationAdmitted(bytes)) return false;
   return WithEagerW8A8Workspace(q, GetContext(q.device.index).w8a8_preparation, bytes, launch,
                                 "workspace_wait_w8a8_preparation");
 }

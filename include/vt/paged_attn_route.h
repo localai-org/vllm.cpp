@@ -33,6 +33,20 @@ inline bool PagedAttnXpuShortDecodeBound(int64_t max_seq_len) {
   return max_seq_len > 0 && max_seq_len <= kXpuShortDecodeMaxSeqLen;
 }
 
+struct XpuPagedDecodePlan {
+  int32_t max_keys = 0;
+  int32_t splits = 0;
+};
+// Qualified first for the P4096/O256 interval, with a stable page-sized launch
+// bucket. Other pages and lengths beyond three pages retain generic Split-K.
+inline XpuPagedDecodePlan PagedAttnXpuDecodePlan(
+    int64_t length, int64_t page, bool long_enabled, int splits = 32) {
+  if ((page != 1600 && page != 1664) || length <= 0) return {};
+  if (PagedAttnXpuShortDecodeBound(length)) return {960, 1};
+  if (!long_enabled || length > 3 * page || (splits != 16 && splits != 32)) return {};
+  return {int32_t((1 + (length - 1) / page) * page), splits};
+}
+
 // Split-K also bakes its partition count into a graph. Both its occupancy
 // threshold and active-page bound must be refreshed by retiring that graph.
 inline bool PagedAttnXpuLongSplitBound(int64_t max_seq_len) {

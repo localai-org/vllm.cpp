@@ -1,6 +1,29 @@
 #include "xpu_test_helpers.h"
 #include "vt/xpu/xpu_common.h"
+#include "vt/exl3_grouped.h"
 #include <stdexcept>
+
+TEST_CASE("XPU W8A8 workspaces: real down projection crosses preparation capacity cliff") {
+  xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  for (int rows : {129, 3839, 3840, 3841, 4095, 4096}) {
+    CAPTURE(rows);
+    const auto plan = vt::PlanExl3W8A8(rows, 17408, 5120, 1, 4, 1024);
+    const size_t bytes = plan.intermediate_offset;
+    std::array<unsigned char, 64> tail{};
+    CHECK(vt::xpu::WithExl3W8A8Preparation(gpu.q, bytes, [&](void* storage) {
+      auto* end = static_cast<unsigned char*>(storage) + bytes - tail.size();
+      vt::xpu::NativeQueue(gpu.q).memset(end, 93, tail.size());
+      vt::xpu::NativeQueue(gpu.q).memcpy(tail.data(), end, tail.size());
+    }));
+    CHECK(std::all_of(tail.begin(), tail.end(), [](unsigned char x) { return x == 93; }));
+  }
+  CHECK(vt::xpu::GetMemoryInfo().w8a8_preparation_bytes == 71319552);
+  bool published = false;
+  CHECK_FALSE(vt::xpu::WithExl3W8A8Preparation(gpu.q, 72 * 1024 * 1024 + 1,
+      [&](void*) { published = true; }));
+  CHECK_FALSE(published);
+  CHECK(vt::xpu::GetMemoryInfo().w8a8_preparation_bytes == 71319552);
+}
 
 TEST_CASE("XPU W8A8 workspaces: readers growth exceptions and queue retirement") {
   xpu_test::Queue first(vt::DeviceType::kXPU), second(vt::DeviceType::kXPU);

@@ -1203,6 +1203,15 @@ TEST_CASE("XPU P7 gated SiLU table: complete operator balanced timing") {
 }
 
 namespace {
+struct SpecSubgroupEnv {
+  const bool had = std::getenv("VT_XPU_GDN_SPEC_SUBGROUP") != nullptr;
+  const std::string old = had ? std::getenv("VT_XPU_GDN_SPEC_SUBGROUP") : "";
+  ~SpecSubgroupEnv() {
+    if (had) setenv("VT_XPU_GDN_SPEC_SUBGROUP", old.c_str(), 1);
+    else unsetenv("VT_XPU_GDN_SPEC_SUBGROUP");
+  }
+  void Select(bool on) { REQUIRE(setenv("VT_XPU_GDN_SPEC_SUBGROUP", on ? "1" : "0", 1) == 0); }
+};
 struct P7SpecSlmEnv {
   const bool had = std::getenv("VT_XPU_GDN_SPEC_SLM") != nullptr;
   const std::string old = had ? std::getenv("VT_XPU_GDN_SPEC_SLM") : "";
@@ -1258,6 +1267,7 @@ struct P7SpecOperands {
 }
 
 TEST_CASE("XPU P7 speculative GDN SLM: exact full snapshots selectors null alias and graphs") {
+  SpecSubgroupEnv subgroup; subgroup.Select(false);  // Qualify the original SLM route exactly.
   Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; auto& backend=vt::GetBackend(gpu.q.device);
   for (const auto& lengths:std::vector<std::vector<int>>{{1},{4},{4,4,4,4},{4,2,1,0}}) {
     for (auto type:{DType::kF32,DType::kF16}) {
@@ -1314,6 +1324,7 @@ TEST_CASE("XPU P7 speculative GDN SLM: exact full snapshots selectors null alias
 }
 
 TEST_CASE("XPU P7 speculative GDN SLM: default selection and WG override probe") {
+  SpecSubgroupEnv subgroup; subgroup.Select(false);  // Qualify the original SLM route exactly.
   if (!std::getenv("VT_B70_GDN_SLM_DEFAULT_PROBE")) { MESSAGE("run default probe with device profiling"); return; }
   REQUIRE(std::getenv("VT_XPU_GDN_SPEC_WG")==nullptr);
   Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecOperands c(gpu.q,{4},DType::kF32);
@@ -1330,6 +1341,7 @@ TEST_CASE("XPU P7 speculative GDN SLM: default selection and WG override probe")
 }
 
 TEST_CASE("XPU P7 speculative GDN SLM: paired complete operator timing") {
+  SpecSubgroupEnv subgroup; subgroup.Select(false);  // Qualify the original SLM route exactly.
   const char* path=std::getenv("VT_B70_GDN_SLM_OUTPUT");
   if (!path) { MESSAGE("set VT_B70_GDN_SLM_OUTPUT for focused paired timing"); return; }
   Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; auto& backend=vt::GetBackend(gpu.q.device);
@@ -1357,6 +1369,7 @@ TEST_CASE("XPU P7 speculative GDN SLM: paired complete operator timing") {
 }
 
 TEST_CASE("XPU P7 speculative GDN SLM typed: exact snapshots F16 graphs and fallback") {
+  SpecSubgroupEnv subgroup; subgroup.Select(false);  // Qualify the original SLM route exactly.
   Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecTypedEnv typed;
   auto& backend = vt::GetBackend(gpu.q.device); mode.Select(true);
   for (const auto& lengths : std::vector<std::vector<int>>{{1}, {4}, {4,4,4,4}, {4,2,1,0}}) {
@@ -1414,6 +1427,7 @@ TEST_CASE("XPU P7 speculative GDN SLM typed: exact snapshots F16 graphs and fall
 }
 
 TEST_CASE("XPU P7 speculative GDN SLM typed: paired complete operator timing") {
+  SpecSubgroupEnv subgroup; subgroup.Select(false);  // Qualify the original SLM route exactly.
   const char* path=std::getenv("VT_B70_GDN_SLM_OUTPUT");
   if (!path) { MESSAGE("set VT_B70_GDN_SLM_OUTPUT for focused paired timing"); return; }
   REQUIRE_FALSE(std::filesystem::exists(path));
@@ -1444,6 +1458,7 @@ TEST_CASE("XPU P7 speculative GDN SLM typed: paired complete operator timing") {
 }
 
 TEST_CASE("XPU P7 speculative GDN SLM typed: actual selected kernel") {
+  SpecSubgroupEnv subgroup; subgroup.Select(false);  // Qualify the original SLM route exactly.
   if (!std::getenv("VT_B70_GDN_SLM_DEFAULT_PROBE")) { MESSAGE("run selection probe with device profiling"); return; }
   REQUIRE(std::getenv("VT_XPU_GDN_SPEC_WG")==nullptr);
   Queue gpu(vt::DeviceType::kXPU); P7SpecSlmEnv mode; P7SpecTypedEnv typed;
@@ -1467,4 +1482,100 @@ TEST_CASE("XPU P7 speculative GDN SLM typed: actual selected kernel") {
                 << " selected=" << selected << " fallback=" << fallback << '\n';
     }
   }
+}
+
+TEST_CASE("XPU subgroup GDN: default selection and explicit SLM fallback") {
+  SpecSubgroupEnv subgroup; P7SpecSlmEnv slm; P7SpecTypedEnv typed;
+  slm.Select(true); typed.Select(true);
+  Queue gpu(vt::DeviceType::kXPU);
+  for (auto type : {DType::kF16, DType::kF32}) {
+    for (const auto& lengths : std::vector<std::vector<int>>{{4}, {4,2,1,0}}) {
+      P7SpecOperands c(gpu.q, lengths, type);
+      subgroup.Select(true); c.Reset(); c.Run();
+      const auto expected = c.output.download(), snapshots = c.state.download();
+      REQUIRE(unsetenv("VT_XPU_GDN_SPEC_SUBGROUP") == 0);
+      (void)vt::xpu::DrainProfileEvents(); c.Reset(); c.Run();
+      SameBytes(c.output.download(), expected); SameBytes(c.state.download(), snapshots);
+      if (const char* profiling = std::getenv("VT_XPU_PROFILE"); profiling && std::string(profiling) == "1") {
+        int selected = 0;
+        for (const auto& e : vt::xpu::DrainProfileEvents()) selected += e.stage == "gdn_spec_decode_subgroup";
+        CHECK(selected == int(type == DType::kF16));
+      }
+      subgroup.Select(false); c.Reset(); c.Run();
+      const auto control = c.output.download(), control_state = c.state.download();
+      slm.Select(false); c.Reset(); c.Run();
+      SameBytes(c.output.download(), control); SameBytes(c.state.download(), control_state);
+      slm.Select(true);
+    }
+  }
+  CHECK(vt::GetReferenceTierHits() == 0);
+}
+
+TEST_CASE("XPU subgroup GDN: selectors ownership alias and graph metadata") {
+  SpecSubgroupEnv subgroup; subgroup.Select(true);
+  P7SpecSlmEnv slm; slm.Select(true); P7SpecTypedEnv typed; typed.Select(true);
+  Queue gpu(vt::DeviceType::kXPU); auto& backend = vt::GetBackend(gpu.q.device);
+  for (const auto& lengths : std::vector<std::vector<int>>{{4}, {4,2,1,0}}) {
+    P7SpecOperands c(gpu.q, lengths, DType::kF16);
+    const auto qb=c.query.download(), kb=c.key.download(), vb=c.value.download(), gb=c.gate.download(), bb=c.beta.download();
+    vt::BreakableGraph graph;
+    if (backend.SupportsGraphCapture()) {
+      c.Reset();
+      { vt::GraphCaptureScope scope(backend,gpu.q,graph,vt::GraphCaptureMode::kFull); c.Run(); }
+      REQUIRE(graph.captured());
+    }
+    for (int pattern=0; pattern<6; ++pattern) {
+      for (int r=0; r<c.requests; ++r) c.counts[r]=1+(pattern+r)%4;
+      if (pattern==4) {
+        for (int r=0;r<c.requests;++r) for (int j=1;j<4;++j) c.indices[r*4+j]=c.indices[r*4];
+      }
+      if (pattern==5) { c.indices[0]=-1; c.counts[0]=1; }
+      c.Stage(); c.Reset(); c.Run();
+      const auto expected=c.output.download(), snapshots=c.state.download();
+      const size_t slot_bytes=size_t(48)*128*128*sizeof(float);
+      for (int slot=0;slot<c.slots;++slot) {
+        bool written=false;
+        for (int r=0;r<c.requests;++r) {
+          if (c.indices[r*4+c.counts[r]-1]<0) continue;
+          for (int t=0;t<lengths[r];++t) written |= c.indices[r*4+t]==slot;
+        }
+        if (!written) SameBytes(std::vector<unsigned char>(snapshots.begin()+slot*slot_bytes,snapshots.begin()+(slot+1)*slot_bytes),
+                                std::vector<unsigned char>(c.initial.begin()+slot*slot_bytes,c.initial.begin()+(slot+1)*slot_bytes));
+      }
+      if (pattern==5) {
+        const auto values=c.output.floats();
+        for (int i=0;i<lengths[0]*48*128;++i) REQUIRE(values[i]==0.f);
+      }
+      if (graph.captured()) {
+        c.Reset(); graph.Replay(gpu.q);
+        SameBytes(c.output.download(),expected); SameBytes(c.state.download(),snapshots);
+      }
+    }
+    // Restore valid independent slot bindings, then compare aliased output with
+    // the same subgroup computation using separate output storage.
+    constexpr int perm[4]={2,0,3,1};
+    for (int r=0;r<c.requests;++r) {
+      c.counts[r]=1;
+      for (int j=0;j<4;++j) c.indices[r*4+j]=1+(c.requests-1-r)*4+perm[j];
+    }
+    c.Stage(); c.Reset(); c.Run(); const auto expected=c.output.download(), snapshots=c.state.download();
+    c.Reset(); c.Run(&c.value.tensor);
+    SameBytes(c.value.download(),expected); SameBytes(c.state.download(),snapshots);
+    c.value.upload(vb.data());
+    SameBytes(c.query.download(),qb); SameBytes(c.key.download(),kb); SameBytes(c.value.download(),vb);
+    SameBytes(c.gate.download(),gb); SameBytes(c.beta.download(),bb);
+    if (graph.captured()) {
+      const auto before=c.state.download(), out=c.output.download();
+      c.counts[0]=0; c.Stage();
+      CHECK_THROWS_WITH_AS(graph.Replay(gpu.q),doctest::Contains("invalid offsets, accepted count or state slot"),std::runtime_error);
+      SameBytes(c.state.download(),before); SameBytes(c.output.download(),out);
+      graph.Reset(); CHECK(vt::xpu::GetMemoryInfo().graph_device_bytes==0);
+      c.counts[0]=1; c.Stage();
+    }
+    const auto before=c.state.download(), out=c.output.download();
+    REQUIRE(setenv("VT_XPU_GDN_SPEC_SUBGROUP","invalid",1)==0);
+    CHECK_THROWS_WITH_AS(c.Run(),doctest::Contains("Invalid VT_XPU_GDN_SPEC_SUBGROUP"),std::runtime_error);
+    SameBytes(c.state.download(),before); SameBytes(c.output.download(),out); subgroup.Select(true);
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
 }

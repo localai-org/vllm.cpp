@@ -11,11 +11,35 @@
 // batch must never route), and the is-prefill polarity (dropping the
 // spec-as-decode conjunct re-reds the verify-routing case).
 #include <doctest/doctest.h>
+#include <initializer_list>
 
 #include "vt/paged_attn_route.h"
 
 using vt::PagedAttnIsPrefill;
 using vt::PagedAttnUniformSpecShape;
+
+TEST_CASE("route: XPU long C1 decode buckets and bounded splits") {
+  for (int64_t page : {1600, 1664}) {
+    for (int64_t length : {1, 960}) {
+      const auto p = vt::PagedAttnXpuDecodePlan(length, page, false);
+      CHECK(p.max_keys == 960); CHECK(p.splits == 1);
+    }
+    for (int splits : {16, 32}) for (int64_t length : {961, 4095, 4096, 4352, 4800}) {
+      const auto p = vt::PagedAttnXpuDecodePlan(length, page, true, splits);
+      CHECK(p.max_keys == ((length + page - 1) / page) * page);
+      CHECK(p.splits == splits);
+      CHECK(vt::PagedAttnXpuDecodePlan(length, page, false, splits).max_keys == 0);
+    }
+    CHECK(vt::PagedAttnXpuDecodePlan(page * 3, page, true).max_keys == page * 3);
+    CHECK(vt::PagedAttnXpuDecodePlan(page * 3 + 1, page, true).max_keys == 0);
+    CHECK(vt::PagedAttnXpuDecodePlan(4096, page, true, 8).max_keys == 0);
+    CHECK(vt::PagedAttnXpuDecodePlan(INT64_MAX, page, true).max_keys == 0);
+    CHECK(vt::PagedAttnXpuDecodePlan(0, page, true).max_keys == 0);
+    CHECK(vt::PagedAttnXpuDecodePlan(-1, page, true).max_keys == 0);
+  }
+  CHECK(vt::PagedAttnXpuDecodePlan(961, 0, true).max_keys == 0);
+  CHECK(vt::PagedAttnXpuDecodePlan(961, 16, true).max_keys == 0);
+}
 
 TEST_CASE("route: XPU captured attention policy changes at actual host boundaries") {
   CHECK(vt::PagedAttnXpuShortDecodeBound(960));

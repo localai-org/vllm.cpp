@@ -25,6 +25,9 @@
 #ifdef VLLM_CPP_XPU
 #include "vt/xpu.h"
 #endif
+#include "vt/xpu_paged_decode_policy.h"
+#include "vt/xpu_gdn_policy.h"
+#include "vt/xpu_attention_preamble_policy.h"
 #include "vllm/model_executor/models/dense_fp8_block_gemm.h"  // MODEL-FP8-BLOCK-LINEAR (#1189 M4)
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
@@ -283,8 +286,12 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
   constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_VERIFY",
       "VT_XPU_ATTN_SPLIT_EXTENDED", "VT_XPU_ATTN_SPLIT_SPAN",
       "VT_XPU_ATTN_SPLIT_MAX_PARTS", "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP",
-      "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY"};
-  constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single"};
+      "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
+      "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32"};
+  constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single",
+      vt::kXpuLongDecodeDefault, vt::kXpuLongDecodeSplitsDefault, vt::kXpuGdnSpecSubgroupDefault,
+      vt::kXpuAttentionPreambleNativeFp32Default};
   for (size_t i = 0; i < key.settings.size(); ++i) {
     const char* setting = std::getenv(names[i]);
     key.settings[i] = setting ? setting : defaults[i];
@@ -299,12 +306,21 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
     // every layer and base address: an equal logical shape is not an equal binding.
     const uint32_t k_scale = std::bit_cast<uint32_t>(cache.k_scale);
     const uint32_t v_scale = std::bit_cast<uint32_t>(cache.v_scale);
+    vt::XpuPagedDecodePlan decode;
+    if (requests == 1 && query_rows == 1 && causal &&
+        (key.settings[0] == "auto" || key.settings[0] == "verify") &&
+        cache.dtype == vt::DType::kI8 && cache.fp8_kind == vt::Fp8KVCacheDataType::kFp8E4M3 &&
+        cache.num_kv_heads == 4 && cache.head_size == 256 &&
+        (cache.head_size_v == 0 || cache.head_size_v == 256) &&
+        cache.k_scale == 1.f && cache.v_scale == 1.f)
+      decode = vt::XpuPagedDecodePlanFromEnvironment(max_seq_len, cache.block_size);
     key.kv.push_back({reinterpret_cast<uintptr_t>(cache.data), uint64_t(cache.dtype),
         uint64_t(cache.num_blocks), uint64_t(cache.block_size), uint64_t(cache.num_kv_heads),
         uint64_t(cache.head_size), uint64_t(cache.head_size_v), uint64_t(cache.fp8_kind),
         k_scale, v_scale, uint64_t(cache.page_size_bytes),
         uint64_t(active_page_cap ? vt::PagedAttnXpuActivePages(max_seq_len, cache.block_size) : 0),
-        uint64_t(cache.head_size_v > 0 ? cache.head_size_v : cache.head_size)});
+        uint64_t(cache.head_size_v > 0 ? cache.head_size_v : cache.head_size),
+        uint64_t(decode.max_keys), uint64_t(decode.splits)});
   }
   return key;
 }

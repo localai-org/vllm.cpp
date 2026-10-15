@@ -1,9 +1,36 @@
 #include <doctest/doctest.h>
 #include "vt/exl3_w8a8_panel_plan.h"
 #include "vt/exl3_grouped.h"
+#include "vt/exl3_w8a8_preparation_policy.h"
 #include <cstdlib>
 #include <optional>
 #include <string>
+
+TEST_CASE("EXL3 W8A8 preparation: bounded policy and padded down projection") {
+  constexpr size_t mib = 1024 * 1024;
+  CHECK(vt::ParseExl3W8A8PreparationLimit(nullptr) == 72 * mib);
+  CHECK(vt::ParseExl3W8A8PreparationLimit("72") == 72 * mib);
+  CHECK(vt::ParseExl3W8A8PreparationLimit("64") == 64 * mib);
+  for (const char* invalid : {"", "0", "-1", "68", "73", "072", "72junk", " 72",
+                              "18446744073709551616"})
+    CHECK_THROWS(vt::ParseExl3W8A8PreparationLimit(invalid));
+  for (int m : {129, 3839, 3840, 3841, 4095, 4096}) {
+    CAPTURE(m);
+    const auto p = vt::PlanExl3W8A8(m, 17408, 5120, 1, 4, 1024);
+    CHECK(p.row_scale_offset == size_t(p.padded_rows) * 17408);
+    CHECK(p.intermediate_offset == size_t(p.padded_rows) * (17408 + 4));
+    CHECK((p.intermediate_offset <= 64 * mib) == (m <= 3840));
+    CHECK(p.intermediate_offset <= vt::ParseExl3W8A8PreparationLimit(nullptr));
+  }
+  CHECK(vt::PlanExl3W8A8(4096, 17408, 5120, 1, 4).intermediate_offset == 71319552);
+  CHECK(vt::PlanExl3W8A8(4096, 17408, 5120, 2, 4).intermediate_offset > 72 * mib);
+  CHECK(vt::Exl3W8A8GrowthFits(100, 80, 10, 20, 30));
+  CHECK_FALSE(vt::Exl3W8A8GrowthFits(100, 80, 10, 20, 31));
+  CHECK_FALSE(vt::Exl3W8A8GrowthFits(100, 101, 0, 20, 21));
+  CHECK_FALSE(vt::Exl3W8A8GrowthFits(100, 80, 21, 20, 21));
+  CHECK_FALSE(vt::Exl3W8A8GrowthFits(100, 80, SIZE_MAX, 20, 21));
+  CHECK_FALSE(vt::Exl3W8A8GrowthFits(100, 80, 10, 20, SIZE_MAX));
+}
 
 TEST_CASE("EXL3 W8A8 model selection: exact internal widths and invalid admission") {
   constexpr auto key = "VT_XPU_EXL3_W8A8_PANEL_COLUMNS";

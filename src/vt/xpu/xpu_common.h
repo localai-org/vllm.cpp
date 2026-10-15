@@ -4,6 +4,7 @@
 #include "vt/tensor.h"
 #include "vt/ops.h"
 #include "vt/xpu.h"
+#include "vt/exl3_w8a8_preparation_policy.h"
 #include <algorithm>
 #include <initializer_list>
 #include <functional>
@@ -31,8 +32,9 @@ bool WithExl3Workspace(Queue& q, size_t bytes, const std::function<void(void*)>&
 // Eager-only growable W8A8 workspace plus panel, accounted once per device.
 // Completes every consumer before reuse/growth or another queue's lease.
 bool WithExl3W8A8Workspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
-// Separate eager-only private preparation, at most64 MiB per context. False
-// means the caller should retain its original checked preparation route.
+// Separate eager-only private preparation, using the shared bounded policy
+// (72 MiB default, on demand). False means policy/device-budget refusal before
+// publication; allocation errors throw. Retain the original checked route.
 bool WithExl3W8A8Preparation(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);
 bool WithGdnNativeWorkspace(Queue& q, size_t bytes, const std::function<void(void*)>& launch);

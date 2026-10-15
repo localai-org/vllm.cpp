@@ -1,5 +1,6 @@
 #include "xpu_test_helpers.h"
 #include "vt/exl3_grouped.h"
+#include "vt/exl3_w8a8_preparation_policy.h"
 #include "vt/exl3_w8a8_panel_plan.h"
 #include "vt/breakable_graph.h"
 #include "vt/xpu.h"
@@ -66,6 +67,43 @@ TEST_CASE("EXL3 W8A8 plan: explicit boundary bounded panel and aligned regions")
   CHECK_THROWS(vt::PlanExl3W8A8(129, 5120, 16384, 2, 5));
   CHECK_THROWS(vt::PlanExl3W8A8(129, 133248, 128, 1, 4));
   CHECK_THROWS(vt::PlanExl3W8A8(4096, 2147483520LL, 2147483520LL, 32767, 6));
+}
+
+TEST_CASE("XPU EXL3 W8A8: unsupported checked producer keeps validated fallback") {
+  // 145 Hadamard blocks deliberately exceed the checked producer's 144.
+  constexpr int m = 129, k = 145 * 128, n = 128;
+  Queue gpu(vt::DeviceType::kXPU);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 128});
+  Buffer suh(gpu.q, DType::kF16, {1, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer input(gpu.q, DType::kF16, {m, k}), out(gpu.q, DType::kF16, {m, n});
+  Buffer map(gpu.q, DType::kI32, {1});
+  const auto plan = vt::PlanExl3W8A8(m, k, n, 1, 4);
+  Buffer workspace(gpu.q, DType::kI8, {int64_t(plan.workspace_bytes)});
+  Buffer panel(gpu.q, DType::kI8, {k, 128});
+  std::vector<unsigned char> packed(trellis.bytes, 0), zeros(input.bytes, 0);
+  const int32_t group = 0;
+  trellis.upload(packed.data()); map.upload(&group); input.upload(zeros.data());
+  suh.put(std::vector<float>(k, 1.f)); svh.put(std::vector<float>(n, 1.f));
+  const auto before = vt::xpu::GetMemoryInfo().w8a8_preparation_bytes;
+  const auto execute = [&] {
+    vt::Exl3GroupedW8A8(gpu.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, map.tensor, workspace.tensor, panel.tensor, {4, 2});
+  };
+  execute(); const auto expected = out.download();
+  CHECK(std::all_of(expected.begin(), expected.end(), [](unsigned char v) { return v == 0; }));
+  CHECK(vt::xpu::GetMemoryInfo().w8a8_preparation_bytes == before);
+  const uint16_t nan = 0x7e00;
+  auto invalid = zeros; std::memcpy(invalid.data() + invalid.size() - 2, &nan, 2);
+  input.upload(invalid.data());
+  const auto old_workspace = workspace.download(), old_panel = panel.download();
+  CHECK_THROWS_WITH_AS(execute(), doctest::Contains("finite inputs"), std::runtime_error);
+  xpu_test::SameBytes(out.download(), expected);
+  auto after = workspace.download();
+  std::copy_n(old_workspace.begin() + plan.weight_scale_offset + 4, 8,
+              after.begin() + plan.weight_scale_offset + 4);
+  xpu_test::SameBytes(after, old_workspace); xpu_test::SameBytes(panel.download(), old_panel);
+  input.upload(zeros.data()); execute(); xpu_test::SameBytes(out.download(), expected);
+  CHECK(vt::GetReferenceTierHits() == 0);
 }
 
 TEST_CASE("XPU EXL3 W8A8 P7: model map ownership generations public guards and queues") {
@@ -705,7 +743,10 @@ TEST_CASE("XPU EXL3 W8A8 P4: private preparation preserves failure boundaries an
   const auto f = vllm::SafetensorsFile::Open(fixture);
   int m = 129;
   if (const char* rows = std::getenv("VT_B70_EXL3_PANEL_ROWS")) {
-    REQUIRE((std::string_view(rows) == "129" || std::string_view(rows) == "1600"));
+    REQUIRE((std::string_view(rows) == "129" || std::string_view(rows) == "1600" ||
+             std::string_view(rows) == "3839" || std::string_view(rows) == "3840" ||
+             std::string_view(rows) == "3841" || std::string_view(rows) == "4095" ||
+             std::string_view(rows) == "4096"));
     m = std::atoi(rows);
   }
   const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
@@ -809,12 +850,15 @@ TEST_CASE("XPU EXL3 W8A8 P4: private preparation preserves failure boundaries an
     }
     auto values = zero, scales = ones;
     // Exact F32 product65520 at the round-to-nearest half overflow midpoint.
-    values[0] = vt::F32ToF16(21840.f); std::fill(scales.begin(), scales.end(), vt::F32ToF16(3.f));
+    const size_t last_block = size_t(m) * k - 128;
+    values[last_block] = vt::F32ToF16(21840.f);
+    scales[size_t(groups) * k - 128] = vt::F32ToF16(3.f);
     input.upload(values.data()); suh.upload(scales.data()); reject("finite inputs");
     // Every product is finite, but this block's FP16 Hadamard boundary overflows.
-    std::fill_n(values.begin(), 128, vt::F32ToF16(5792.f));
-    suh.upload(ones.data()); input.upload(values.data()); reject("finite inputs");
-    values = zero; values[0] = 0x7bff; scales = ones; scales[0] = 0x7bff;
+    std::fill_n(values.begin() + last_block, 128, vt::F32ToF16(5792.f));
+    scales = ones; std::fill_n(scales.begin(), size_t(groups - 1) * k, uint16_t{0});
+    suh.upload(scales.data()); input.upload(values.data()); reject("finite inputs");
+    values = zero; values.back() = 0x7bff; scales = ones; scales.back() = 0x7bff;
     input.upload(values.data()); suh.upload(scales.data()); reject("finite inputs");
     poison(); const auto before_alias = input.download(); auto alias = out.tensor; alias.data = input.tensor.data;
     CHECK_THROWS_WITH_AS(vt::Exl3GroupedW8A8(gpu.q, alias, input.tensor, trellis.tensor,
@@ -827,7 +871,7 @@ TEST_CASE("XPU EXL3 W8A8 P4: private preparation preserves failure boundaries an
     if (prepared) {
       const auto memory = vt::xpu::GetMemoryInfo();
       CHECK(memory.w8a8_preparation_bytes >= size_t(groups) * plan.padded_rows * (k + sizeof(float)));
-      CHECK(memory.w8a8_preparation_bytes <= 64 * 1024 * 1024);
+      CHECK(memory.w8a8_preparation_bytes <= vt::Exl3W8A8PreparationLimitBytes());
       CHECK(memory.allocated_bytes >= memory.w8a8_preparation_bytes);
     }
   }

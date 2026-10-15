@@ -13,6 +13,67 @@ using xpu_test::Buffer;
 using xpu_test::Queue;
 using vt::DType;
 
+TEST_CASE("XPU EXL3 W8A8 Wave1: isolated real capacity operator and memory") {
+  const char* fixture = exl3_test::ExternalEnvironment("VT_B70_EXL3_W8A8_DOWN_FIXTURE");
+  exl3_test::ExternalPath(fixture);
+  const auto f = vllm::SafetensorsFile::Open(fixture);
+  const int m = 4096;
+  const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
+  const auto& sv = f.Get("merged_svh"); const auto& routing = f.Get("source_map");
+  const int k = int(su.shape[1]), n = int(sv.shape[0]), groups = int(su.shape[0]);
+  const int bits = int(tr.shape[2] / 16);
+  REQUIRE(k == 17408); REQUIRE(groups == 1);
+  Queue gpu(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  Buffer trellis(gpu.q, DType::kI8, {k / 16, n / 16, 32 * bits});
+  Buffer suh(gpu.q, DType::kF16, {groups, k}), svh(gpu.q, DType::kF16, {n});
+  Buffer input(gpu.q, DType::kF16, {m, k}), out(gpu.q, DType::kF16, {m, n});
+  trellis.upload(tr.data); suh.upload(su.data); svh.upload(sv.data);
+  input.upload(f.Get("input_m4096").data);
+  auto owner = std::shared_ptr<void>(vt::Alloc(gpu.q.device, routing.nbytes),
+      [device = gpu.q.device](void* ptr) { vt::Free(device, ptr); });
+  auto map = vt::Tensor::Contiguous(owner.get(), DType::kI32, gpu.q.device, {n / 128});
+  backend.Copy(gpu.q, map.data, routing.data, routing.nbytes); backend.Synchronize(gpu.q);
+  vt::SharedPtrCache<const vt::Exl3W8A8ModelMap> cache;
+  const vt::Exl3GroupedLinearArgs args{bits, 2, "WAVE1_DOWN", 1024};
+  const auto execute = [&] {
+    vt::detail::Exl3GroupedW8A8Model(gpu.q, out.tensor, input.tensor, trellis.tensor,
+        suh.tensor, svh.tensor, map, args, owner, cache);
+    backend.Synchronize(gpu.q);
+  };
+  const auto& reference = f.Get("output_m4096");
+  const std::vector<unsigned char> expected(reference.data, reference.data + reference.nbytes);
+  for (int i = 0; i < 3; ++i) execute();
+  xpu_test::SameBytes(out.download(), expected);
+  nlohmann::json trials = nlohmann::json::array();
+  for (int i = 0; i < 12; ++i) {
+    const auto start = std::chrono::steady_clock::now();
+    execute();
+    trials.push_back(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count());
+  }
+  xpu_test::SameBytes(out.download(), expected);
+  auto enabled = [](const char* name) {
+    const char* value = std::getenv(name);
+    return !value || std::string_view(value) == "1";
+  };
+  const auto plan = vt::PlanExl3W8A8(m, k, n, groups, bits, 1024);
+  const bool prepared = enabled("VT_XPU_W8A8_PREPARE") &&
+      vt::Exl3W8A8PreparationAdmitted(plan.intermediate_offset);
+  const bool direct = prepared && enabled("VT_XPU_W8A8_DIRECT_PREPARE");
+  const auto memory = vt::xpu::GetMemoryInfo();
+  CHECK(memory.w8a8_preparation_bytes == (prepared ? plan.intermediate_offset : 0));
+  CHECK(memory.w8a8_workspace_bytes == plan.workspace_bytes + plan.weight_panel_bytes -
+      (direct ? plan.intermediate_offset : 0));
+  CHECK(memory.peak_allocated_bytes <= memory.budget_bytes);
+  CHECK(vt::GetReferenceTierHits() == 0);
+  std::cout << "WAVE1_OPERATOR " << nlohmann::json({{"rows",m},{"k",k},{"n",n},
+      {"prepared",prepared},{"direct",direct},{"trials_ms",trials},
+      {"preparation_bytes",memory.w8a8_preparation_bytes},
+      {"workspace_bytes",memory.w8a8_workspace_bytes},
+      {"peak_device_bytes",memory.peak_allocated_bytes},{"output_exact",true}}).dump() << std::endl;
+}
+
 TEST_CASE("XPU EXL3 W8A8 F2: direct preparation budget fallback and reuse") {
   const char* fixture = exl3_test::ExternalEnvironment("VT_B70_EXL3_W8A8_FIXTURE");
   exl3_test::ExternalPath(fixture);
@@ -93,7 +154,8 @@ TEST_CASE("XPU EXL3 W8A8 F2: direct preparation complete calls and queued real c
   } restore{prior != nullptr, prior ? prior : ""};
   const auto f = vllm::SafetensorsFile::Open(fixture);
   const int m = std::getenv("VT_B70_EXL3_PANEL_ROWS") ? std::atoi(std::getenv("VT_B70_EXL3_PANEL_ROWS")) : 129;
-  REQUIRE((m == 129 || m == 896 || m == 1600));
+  REQUIRE((m == 129 || m == 896 || m == 1600 || m == 3839 || m == 3840 ||
+           m == 3841 || m == 4095 || m == 4096));
   const auto& tr = f.Get("merged_trellis"); const auto& su = f.Get("stacked_suh");
   const auto& sv = f.Get("merged_svh"); const auto& routing = f.Get("source_map");
   const int k = int(su.shape[1]), n = int(sv.shape[0]), groups = int(su.shape[0]);
@@ -149,6 +211,20 @@ TEST_CASE("XPU EXL3 W8A8 F2: direct preparation complete calls and queued real c
   select(false); model_call(second.q, other.tensor, zero.tensor);
   const auto zero_expected = other.download();
   select(true); model_call(first.q, out.tensor, input.tensor);
+  xpu_test::SameBytes(out.download(), expected);
+  // A late failure on the compact private route must retire every submitted
+  // producer without publishing output; a subsequent valid call reuses it.
+  const auto original_input = input.download();
+  for (uint16_t bad : {uint16_t{0x7e00}, uint16_t{0x7c00}, uint16_t{0xfc00}}) {
+    auto invalid = original_input;
+    std::memcpy(invalid.data() + invalid.size() - 2, &bad, 2);
+    input.upload(invalid.data());
+    CHECK_THROWS_WITH_AS(model_call(first.q, out.tensor, input.tensor),
+                         doctest::Contains("finite inputs"), std::runtime_error);
+    xpu_test::SameBytes(out.download(), expected);
+  }
+  input.upload(original_input.data());
+  model_call(second.q, out.tensor, input.tensor);
   xpu_test::SameBytes(out.download(), expected);
   // Read the actual model-private preparation and compact GEMM workspace
   // after completion, before another producer can reuse either shared pool.

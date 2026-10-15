@@ -1,6 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
-#include "vt/paged_attn_route.h"
+#include "vt/xpu_paged_decode_policy.h"
 #define B70_VERIFY_MASK 1
 #include "csrc/xpu/attn/xe_2/paged_decode.hpp"
 
@@ -16,12 +16,13 @@ using DecodeQ8 = PagedDecodeConfig<Shape<_8, _64, _64>,
     void, 1, false, false, false, half_t, float_e4m3_t, float_e4m3_t, half_t>;
 }  // namespace
 
-bool PagedAttentionXe2DecodeKernel(Queue& q, Tensor& out, const Tensor& query,
+bool CanUsePagedAttentionXe2Decode(Queue& q, const Tensor& out, const Tensor& query,
     const Tensor& key_cache, const Tensor& value_cache, const Tensor& block_table,
     const Tensor& seq_lens, const Tensor& query_start_loc,
     const PagedAttentionArgs& args) {
   const auto& device = NativeQueue(q).get_device();
   const int64_t page = key_cache.shape[1];
+  const auto plan = XpuPagedDecodePlanFromEnvironment(args.max_seq_len, page);
   if (query.rank != 3 || out.rank != 3 || query.shape[0] != 1 ||
       query.dtype != DType::kF16 || out.dtype != DType::kF16 ||
       query.shape[1] != 24 || query.shape[2] != 256 ||
@@ -48,7 +49,7 @@ bool PagedAttentionXe2DecodeKernel(Queue& q, Tensor& out, const Tensor& query,
       seq_lens.rank != 1 || seq_lens.dtype != DType::kI32 || seq_lens.Numel() != 1 ||
       query_start_loc.rank != 1 || query_start_loc.dtype != DType::kI32 ||
       query_start_loc.Numel() != 2 ||
-      !PagedAttnXpuShortDecodeBound(args.max_seq_len) || block_table.shape[1] < 1 ||
+      plan.max_keys == 0 || block_table.shape[1] < (plan.max_keys + page - 1) / page ||
       !args.causal || args.window_size || args.logits_soft_cap != 0 ||
       args.k_scale != 1.0f || args.v_scale != 1.0f || args.scale != 1.0f / 16 ||
       (reinterpret_cast<uintptr_t>(query.data) & 15) ||
@@ -64,18 +65,36 @@ bool PagedAttentionXe2DecodeKernel(Queue& q, Tensor& out, const Tensor& query,
           (key_cache.stride[0] / key_cache.stride[1]))
     return false;
 
-  // One split below16 KV tiles, matching the original short-decode policy.
-  // The shared reservation remains16 MiB so later Split-K can reuse it.
-  // Queue completion owns it; no host wait, readback, Q packing or scales copy.
+  return true;
+}
+
+bool PagedAttentionXe2DecodeKernel(Queue& q, Tensor& out, const Tensor& query,
+    const Tensor& key_cache, const Tensor& value_cache, const Tensor& block_table,
+    const Tensor& seq_lens, const Tensor& query_start_loc,
+    const PagedAttentionArgs& args) {
+  if (!CanUsePagedAttentionXe2Decode(q, out, query, key_cache, value_cache,
+                                   block_table, seq_lens, query_start_loc, args)) return false;
+  const int64_t page = key_cache.shape[1];
+  const auto plan = XpuPagedDecodePlanFromEnvironment(args.max_seq_len, page);
+  const bool multiple = plan.splits > 1;
+  const size_t temp_bytes = multiple ? size_t(plan.splits) * 24 * 256 * sizeof(uint16_t) : 0;
+  const size_t stats_bytes = size_t(plan.splits) * 24 * sizeof(float);
+  VT_CHECK(temp_bytes + 2 * stats_bytes <= 16 * 1024 * 1024,
+           "XPU bounded decode scratch exceeds attention reservation");
+  // The existing16 MiB graph-owned reservation never moves. Long C1 uses
+  // disjoint partial F16 outputs / F32 sums / maxima; short C1 still aliases
+  // its sole partial to output. No per-token host length readback or allocation.
   return WithAttentionWorkspace(q, 16 * 1024 * 1024, [&](void* storage) {
-    auto* stats = static_cast<float*>(storage);
+    auto* bytes = static_cast<uint8_t*>(storage);
+    auto* sums = reinterpret_cast<float*>(bytes + temp_bytes);
+    auto* maxima = reinterpret_cast<float*>(bytes + temp_bytes + stats_bytes);
     paged_decode_args_t donor{};
     donor.query = query.data; donor.key = key_cache.data; donor.value = value_cache.data;
-    donor.out = out.data; donor.tem_out = out.data;
-    donor.exp_sums = stats; donor.max_logits = stats + 24;
+    donor.out = out.data; donor.tem_out = multiple ? storage : out.data;
+    donor.exp_sums = sums; donor.max_logits = maxima;
     donor.block_table = block_table.data;
     donor.cu_seqlens_q = query_start_loc.data; donor.cu_seqlens_k = seq_lens.data;
-    donor.max_queries = 1; donor.max_keys = args.max_seq_len;
+    donor.max_queries = 1; donor.max_keys = plan.max_keys;
     donor.total_seqlen_q = 1;
     donor.total_seqlen_k = key_cache.shape[0] *
         (key_cache.stride[0] / key_cache.stride[1]);
@@ -84,14 +103,23 @@ bool PagedAttentionXe2DecodeKernel(Queue& q, Tensor& out, const Tensor& query,
     donor.batch_size = 1; donor.num_heads_q = 24; donor.num_heads_k = 4;
     donor.head_size = 256; donor.v_head_size = 256;
     donor.max_blocks_per_seq = block_table.shape[1]; donor.block_size = page;
-    donor.is_varlen = true; donor.is_paged = true; donor.num_kv_splits = 1;
+    donor.is_varlen = true; donor.is_paged = true; donor.num_kv_splits = plan.splits;
     donor.q_stride_seq = query.stride[0]; donor.q_stride_heads = query.stride[1];
     donor.k_stride_page = key_cache.stride[0]; donor.k_stride_seq = key_cache.stride[1];
     donor.k_stride_heads = key_cache.stride[2];
     donor.v_stride_page = value_cache.stride[0]; donor.v_stride_seq = value_cache.stride[1];
     donor.v_stride_heads = value_cache.stride[2];
     donor.page_stride_elements = key_cache.stride[0] / key_cache.stride[1];
+    const bool profile = multiple && ProfileQueueEventsEnabled();
+    sycl::event begin;
+    const auto submitted = profile ? HostProfileClockNs() : 0;
+    if (profile) begin = NativeQueue(q).ext_oneapi_submit_barrier();
     DecodeQ8::kernel_dispatch(NativeQueue(q), donor);
+    if (profile) {
+      const auto end = NativeQueue(q).ext_oneapi_submit_barrier();
+      RecordProfileSpan(q, "attention_decode_xe2_long", begin, end, submitted,
+          "bound=" + std::to_string(plan.max_keys) + " splits=" + std::to_string(plan.splits));
+    }
   });
 }
 }  // namespace vt::xpu

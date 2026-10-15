@@ -1,5 +1,6 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include "vt/xpu_gdn_policy.h"
 #include <sycl/ext/intel/math.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -597,6 +598,71 @@ void GdnSpecDecodeKernel(Queue& q, Tensor& out, const Tensor& qi,
       const bool typed_selected = typed_mode == "1" && target.dtype == DType::kF16 &&
           target.IsContiguous() && qi.IsContiguous() && ki.IsContiguous() &&
           vi.IsContiguous() && g.IsContiguous() && beta.IsContiguous();
+      const char* subgroup_setting = std::getenv("VT_XPU_GDN_SPEC_SUBGROUP");
+      const std::string_view subgroup_mode = subgroup_setting ? subgroup_setting : kXpuGdnSpecSubgroupDefault;
+      VT_CHECK(subgroup_mode == "0" || subgroup_mode == "1", "Invalid VT_XPU_GDN_SPEC_SUBGROUP");
+      if (typed_selected && subgroup_mode == "1" &&
+          NativeQueue(q).get_device().get_info<sycl::info::device::max_work_group_size>() >= 256) {
+        const auto* query = static_cast<const sycl::half*>(qi.data);
+        const auto* key = static_cast<const sycl::half*>(ki.data);
+        const auto* value_in = static_cast<const sycl::half*>(vi.data);
+        const auto* gates = static_cast<const float*>(g.data);
+        const auto* betas = static_cast<const float*>(beta.data);
+        auto* output = static_cast<sycl::half*>(target.data);
+        // Normalized seam, four keys per lane and one value per subgroup.
+        // Tree sums intentionally reassociate FP32 additions; state stays FP32.
+        const auto event = NativeQueue(q).parallel_for(
+            sycl::nd_range<1>(items * 32, 256),
+            [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(32)]] {
+#pragma clang fp contract(off)
+          const auto sg = it.get_sub_group();
+          const int lane = sg.get_local_linear_id();
+          const int64_t index = it.get_global_linear_id() / 32;
+          const int64_t request = index / (hv * dv), head = (index / dv) % hv;
+          const int64_t value = index % dv, first = offsets[request], last = offsets[request + 1];
+          const int32_t initial = ids[request * cols + nat[request] - 1];
+          if (initial < 0) {
+            if (lane == 0) for (int64_t token = first; token < last; ++token)
+              output[token * hv * dv + head * dv + value] = sycl::half(0.f);
+            return;
+          }
+          float s[4];
+#pragma unroll
+          for (int j = 0; j < 4; ++j)
+            s[j] = cache[((int64_t(initial) * hv + head) * dv + value) * 128 + lane + j * 32];
+          const int64_t key_head = head / (hv / hk);
+          for (int64_t token = first; token < last; ++token) {
+            const float decay = sycl::exp(gates[token * hv + head]);
+            float keys[4], partial = 0.f;
+#pragma unroll
+            for (int j = 0; j < 4; ++j) {
+              keys[j] = float(key[(token * hk + key_head) * 128 + lane + j * 32]);
+              s[j] *= decay;
+              partial += s[j] * keys[j];
+            }
+            const float prediction = sycl::reduce_over_group(sg, partial, sycl::plus<float>());
+            const float delta = (float(value_in[token * hv * dv + head * dv + value]) - prediction) *
+                                betas[token * hv + head];
+            partial = 0.f;
+#pragma unroll
+            for (int j = 0; j < 4; ++j) {
+              s[j] += delta * keys[j];
+              const float query_value = float(query[(token * hk + key_head) * 128 + lane + j * 32]);
+              partial += s[j] * (query_value * scale);
+            }
+            const float result = sycl::reduce_over_group(sg, partial, sycl::plus<float>());
+            if (lane == 0) output[token * hv * dv + head * dv + value] = sycl::half(result);
+            const int32_t snapshot = ids[request * cols + token - first];
+            if (snapshot >= 0) {
+#pragma unroll
+              for (int j = 0; j < 4; ++j)
+                cache[((int64_t(snapshot) * hv + head) * dv + value) * 128 + lane + j * 32] = s[j];
+            }
+          }
+        });
+        RecordProfileEvent(q, "gdn_spec_decode_subgroup", event);
+        return;
+      }
       // Each WG owns 64 independent value rows within one head/request.
       // Contiguous transfers use [K,value xor low K bits] SLM so both transfer
       // and value-row accesses spread over the local addresses. Each

@@ -118,6 +118,21 @@ The existing CLI accepts `auto`, `cpu` and `cuda`; it does not accept `xpu`.
 In this XPU build with CUDA/HIP disabled, `auto` resolves the XPU platform.
 For target-only operation omit `--speculative-config`; no draft map is required.
 `EXL3_DRAFT_VOCAB` is required only when loading the compact MTP head.
+The new internal `VT_XPU_W8A8_PREPARE_MAX_MIB` experiment accepts only `64` or
+`72` (default `72`), parsed once per process and logged on first use. Both the
+private direct-route admission and preparation pool use this same policy.
+Storage grows on demand once per device context, within the accounted device
+budget; this is not a per-layer reservation. M4096/K17408/group1 needs
+71,319,552 bytes (68.015625 MiB), including row scales and planner padding.
+`64` retains the capacity-refused control; `VT_XPU_W8A8_DIRECT_PREPARE=0`
+retains checked copy-based preparation, and `VT_XPU_W8A8_PREPARE=0` retains
+the separately validated legacy producer. Validation failures preserve the
+public output/panel/workspace contract; budget refusal occurs before
+publication, while device allocation failure is reported as an error.
+The focused `test_xpu_exl3_preparation_capacity` CTest uses the separate
+`VT_B70_EXL3_W8A8_DOWN_FIXTURE` artifact (real K17408, one group, M4096).
+Absent artifacts return 77; qualification with `EXL3_REQUIRE_ARTIFACTS=1`
+fails on missing artifacts. A generic K5120 fixture cannot qualify this route.
 The checkpoint's generation configuration remains the default; the smoke below
 explicitly requests greedy sampling. Vision requests are outside this text path.
 
@@ -212,9 +227,37 @@ an available fallback or an explicit diagnostic error; never remove guards to
 advertise another device. `VT_XPU_XE2_VERIFY=1` is not ordinary-route admission.
 
 Direct model-owned W8A8 preparation defaults ON under its checked certificate,
-K/128<=144 and64MiB preparation budget. `VT_XPU_W8A8_DIRECT_PREPARE=0` is the
+K/128<=144 and the shared bounded preparation policy (72MiB maximum by default). `VT_XPU_W8A8_DIRECT_PREPARE=0` is the
 diagnostic publication fallback. This retains the original completion fence;
 the measured event-lease variant was rejected and is not implemented.
+
+Bounded C1 FP16/E4M3 decode now defaults to the32-split Xe2 route through
+three physical pages (4800 keys for page1600,4992 for page1664),under its existing
+pinned hardware/layout/unit-scale guards. The short route remains one split
+through960. Launch buckets and split controls participate in graph identity;
+fresh device metadata must fit the captured bucket. The existing16MiB attention
+workspace holds partial outputs and reduction statistics. Internal
+`VT_XPU_XE2_LONG_DECODE=0` retains the diagnostic control;
+`VT_XPU_XE2_DECODE_SPLITS` accepts16/32 (default32). Other forms retain fallback.
+See `EXL3_XPU_LONG_C1_ATTENTION_RESULT_2026-10-15.md` for bounded qualification.
+
+Speculative GDN uses the subgroup-distributed recurrence by default for the
+existing bounded typed-FP16 Q/K/V/output, FP32 gates/state admission (up to C4,
+up to four verifier rows/request,128-wide state,WG256). It reassociates FP32
+sums; it does not promise bit equality with ascending-K SLM. The developer
+approved this rounding change after bounded real-input, continuation and MTP
+checks. Longer generation-quality testing remains open. The internal
+`VT_XPU_GDN_SPEC_SUBGROUP=0` override is a comparison control; ineligible calls
+retain their existing fallback. Its value participates in graph-policy identity.
+See `EXL3_XPU_GDN_EXPERIMENT_RESULT_2026-10-15.md` for evidence and limits.
+
+The fused F16 D256 Q/K norm/RoPE/gate subgroup producer uses native FP32
+add/multiply nodes by default, preserving its reduction, inverse and explicit
+FP16 rounding boundaries. `VT_XPU_ATTN_PREAMBLE_NATIVE_FP32=0` retains the RN-helper
+comparison path. This control participates in dense graph-policy identity.
+Real-operand outputs and bounded serving checks agree exactly with that control;
+this does not broaden the separate GDN rounding approval. See
+`EXL3_XPU_QK_PREAMBLE_RESULT_2026-10-15.md` for qualification and remaining gaps.
 
 ## Diagnostic controls
 

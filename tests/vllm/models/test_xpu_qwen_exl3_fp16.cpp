@@ -31,6 +31,7 @@
 #include "vllm/v1/attention/backends/gdn_attn.h"
 #include "vllm/v1/core/kv_cache_utils.h"
 #include "vt/exl3_fixture.h"
+#include "vt/breakable_graph.h"
 #include "vt/unaligned.h"
 #include "vt/xpu_test_helpers.h"
 #include "vllm/tokenizer/tokenizer.h"
@@ -686,6 +687,7 @@ static void RunRealKvPreimage(bool benchmark) {
           double ms = 0;
           for (const auto& event : events) {
             REQUIRE((event.stage == "attn_qk_norm_rope_gate_subgroup" ||
+                     event.stage == "attn_qk_norm_rope_gate_subgroup_native_fp32" ||
                      event.stage == "attn_qk_norm_rope_gate"));
             ms += (event.end_ns - event.start_ns) / 1e6;
           }
@@ -3709,4 +3711,62 @@ TEST_CASE("XPU dense EXL3 MM: MTP3 graph owns embeddings and axes across replay 
     CHECK(graph.replay_count()>prior_replays+2);
     CHECK(vt::GetReferenceTierHits()==0);
   }
+}
+
+namespace {
+struct Wave4PreambleEnv {
+  const bool had=std::getenv("VT_XPU_ATTN_PREAMBLE_NATIVE_FP32")!=nullptr;
+  const std::string old=had?std::getenv("VT_XPU_ATTN_PREAMBLE_NATIVE_FP32"):"";
+  ~Wave4PreambleEnv(){if(had)setenv("VT_XPU_ATTN_PREAMBLE_NATIVE_FP32",old.c_str(),1);else unsetenv("VT_XPU_ATTN_PREAMBLE_NATIVE_FP32");}
+  void Set(bool native){REQUIRE(setenv("VT_XPU_ATTN_PREAMBLE_NATIVE_FP32",native?"1":"0",1)==0);}
+};
+}
+TEST_CASE("XPU Wave4: native FP32 preamble retains outputs gates and signed zeros") {
+  Wave4PreambleEnv env;xpu_test::Queue gpu(vt::DeviceType::kXPU);
+  for(int rows:{1,2,3,4,8,128}) for(bool gemma:{false,true}) {
+    CAPTURE(rows);
+    CAPTURE(gemma);
+    xpu_test::Buffer merged(gpu.q,DType::kF16,{rows,14336}),qw(gpu.q,DType::kF32,{256}),kw(gpu.q,DType::kF32,{256}),cs(gpu.q,DType::kF32,{rows,64});
+    xpu_test::Buffer q(gpu.q,DType::kF16,{rows,24,256}),k(gpu.q,DType::kF16,{rows,4,256}),g(gpu.q,DType::kF32,{rows,24,256});
+    auto input=xpu_test::Values(rows*14336,81,.05f);
+    for(size_t i=0;i<input.size();i+=29)input[i]=(i&1)?-0.f:0.f;
+    merged.put(input);auto weights=xpu_test::Values(256,82,.05f);
+    for(int i=0;i<256;i+=11)weights[i]=-1.f;
+    weights[1]=std::numeric_limits<float>::denorm_min();weights[2]=-std::numeric_limits<float>::denorm_min();
+    weights[3]=std::nextafter(-1.f,0.f);weights[4]=std::nextafter(-1.f,-2.f);
+    qw.put(weights);kw.put(weights);cs.put(xpu_test::Values(rows*64,83,.025f));
+    const auto before=merged.download(),wb=qw.download(),cache=cs.download();
+    auto query=merged.tensor.Slice(1,0,12288),key=merged.tensor.Slice(1,12288,13312);
+    vt::RopeArgs rope{10000000.f,64};rope.fp16_intermediates=true;
+    const auto run=[&]{vt::AttnQkNormRopeGate(gpu.q,q.tensor,k.tensor,g.tensor,query,key,qw.tensor,kw.tensor,cs.tensor,{1e-6f,gemma},rope);};
+    env.Set(false);run();const auto qo=q.download(),ko=k.download(),go=g.download();
+    env.Set(true);(void)vt::xpu::DrainProfileEvents();run();
+    xpu_test::SameBytes(q.download(),qo);xpu_test::SameBytes(k.download(),ko);xpu_test::SameBytes(g.download(),go);
+    xpu_test::SameBytes(merged.download(),before);xpu_test::SameBytes(qw.download(),wb);xpu_test::SameBytes(kw.download(),wb);xpu_test::SameBytes(cs.download(),cache);
+    if(const char* profile=std::getenv("VT_XPU_PROFILE");profile&&std::string(profile)=="1") {
+      int selected=0;for(const auto&e:vt::xpu::DrainProfileEvents())selected+=e.stage=="attn_qk_norm_rope_gate_subgroup_native_fp32";
+      CHECK(selected==1);
+    }
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+TEST_CASE("XPU Wave4: native FP32 preamble graph reads fresh operands") {
+  Wave4PreambleEnv env;xpu_test::Queue gpu(vt::DeviceType::kXPU);auto& backend=vt::GetBackend(gpu.q.device);REQUIRE(backend.SupportsGraphCapture());
+  for(int rows:{1,4}) {
+    xpu_test::Buffer merged(gpu.q,DType::kF16,{rows,14336}),qw(gpu.q,DType::kF32,{256}),kw(gpu.q,DType::kF32,{256}),cs(gpu.q,DType::kF32,{rows,64});
+    xpu_test::Buffer q(gpu.q,DType::kF16,{rows,24,256}),k(gpu.q,DType::kF16,{rows,4,256}),g(gpu.q,DType::kF32,{rows,24,256});
+    qw.put(xpu_test::Values(256,91,.01f));kw.put(xpu_test::Values(256,92,.01f));merged.put(xpu_test::Values(rows*14336,93,.1f));cs.put(xpu_test::Values(rows*64,94,.025f));
+    auto query=merged.tensor.Slice(1,0,12288),key=merged.tensor.Slice(1,12288,13312);vt::RopeArgs rope{10000000.f,64};rope.fp16_intermediates=true;
+    const auto run=[&]{vt::AttnQkNormRopeGate(gpu.q,q.tensor,k.tensor,g.tensor,query,key,qw.tensor,kw.tensor,cs.tensor,{1e-6f,true},rope);};
+    env.Set(true);run();backend.Synchronize(gpu.q);vt::BreakableGraph graph;
+    {vt::GraphCaptureScope scope(backend,gpu.q,graph,vt::GraphCaptureMode::kFull);run();}
+    REQUIRE(graph.captured());
+    for(int step:{0,1,2}) {
+      merged.put(xpu_test::Values(rows*14336,95+step,.1f));cs.put(xpu_test::Values(rows*64,98+step,.025f));
+      env.Set(false);run();const auto qo=q.download(),ko=k.download(),go=g.download();graph.Replay(gpu.q);
+      xpu_test::SameBytes(q.download(),qo);xpu_test::SameBytes(k.download(),ko);xpu_test::SameBytes(g.download(),go);
+    }
+    graph.Reset();
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
 }
