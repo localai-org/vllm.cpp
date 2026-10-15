@@ -17,18 +17,38 @@ scope = the kolibri1 (Kolibri1ForCausalLM) architecture only: 50-layer hybrid sl
 pin = 049a6a7bd240
 pin_label = PyPI v1.0.0 (049a6a7bd240)
 pinned_on = 2026-10-03
-gateable = no
-evidence = #3396
+gateable = yes (CPU, aarch64 — 2026-10-15)
+evidence = #3396 + ISSUE-LOCAL-01M4R8DVBMQA4WWCF9X6VG00E1-era records; see Gateability
 ```
 
 ## Gateability
 
-`gateable = no` until the plugin demonstrably builds and runs
-`Aleph-Alpha/Kolibri-1` (78.9 GB bf16, 32 shards — the weights are mirrored at
-`/mnt/models/Aleph-Alpha/Kolibri-1`). The measurement owed: `vllm serve` with
-the plugin on a GPU lease, greedy decode of a fixed prompt set, recorded per
-[the oracle rules](../../AGENTS.md). The plugin also ships fp8 variants; the
-bf16 artifact is the gate denominator.
+`gateable = yes` on CPU/aarch64 (2026-10-15, host thalia): `aleph-alpha-inference`
+1.0.0 (049a6a7bd240) via vLLM 0.31.0+cpu (built from source), greedy decode of the
+8-prompt battery, TP=4 (`distributed_executor_backend=mp`), bf16. The primary
+goldens are committed at `tests/vllm/models/kolibri1_goldens_primary.json`
+(generator `scripts/gen-kolibri1-primary-goldens.py`, smoke test
+`scripts/aleph-alpha-inference-smoke.py`; venv recipe torch==2.13.0+cpu from the
+PyTorch cpu wheel — NOT plain PyPI — plus `VLLM_TARGET_DEVICE=cpu` source build,
+~6 min at -j64).
+
+Two facts the GPU-lease framing had wrong: (1) the fp8 checkpoint is UNUSABLE on
+CPU outright — vLLM's CPU backend has no fp8 ScaledMM kernel — so the bf16
+dequant was always mandatory, not a preference; (2) the first bf16 conversion
+shipped an internally contradictory index (fp8 `weight_scale_inv` siblings left
+in place) that routed vLLM's MoE to its fp8 path — fixed by the landed
+`scripts/gen-kolibri1-bf16-reference.py` (e7bba5335); use the
+`Kolibri-1-bf16-clean` directory. `gpu_memory_utilization` is a memory FRACTION
+(re-tune per run on a shared box; 0.74 worked where 0.85/0.88 did not), and TP=4
+is required because the bf16 tower (151 GB) exceeds one 63.5 GiB node.
+
+**The transcription caveat**: the pre-existing `tests/vllm/models/kolibri1_goldens.json`
+is a PURE-TORCH TRANSCRIPTION of the plugin's math, not plugin output — and the
+plugin (the primary oracle) disagrees with it on 6/8 first tokens and 3/8 full
+sequences (measured 2026-10-15, both artifacts committed). Gates scored against
+the transcription are calibrated to a proxy; the schema decision (generated-ids
+across all three implementations vs exporting logits from the Python side) is
+recorded as open in the primary goldens' `vs_transcription_goldens` field.
 
 ## Notes for the port
 
