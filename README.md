@@ -37,6 +37,9 @@
 
 ## News
 
+- **2026-10** **Qwen3.5 dense safetensors can skip the vision tower for text-only use.**
+  Set `--language-model-only` or zero both image and video limits. See the
+  [input limits guide](docs/guides/multimodal-input.md#per-prompt-input-limits).
 - **2026-09** **Qwen3.8 gains an endpoint measurement tool.** The TensorFold comparison remains
   blocked by missing artifacts, with no speed result. See the
   [measurement instructions and limits](docs/benchmarks/qwen38-tensorfold-gap.md#measurement-tools).
