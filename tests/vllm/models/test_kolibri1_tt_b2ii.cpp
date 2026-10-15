@@ -1013,7 +1013,16 @@ TEST_CASE("SCRATCH dbg TF prompt") {
     int32_t at = static_cast<int32_t>(
         std::max_element(lt.begin(), lt.end()) - lt.begin());
     const int d = i - static_cast<int>(gp.input_ids.size());
-    MESSAGE("TFstep " << d << " tok " << seq.back() << ": max_abs=" << ma
+    // LABEL MAPPING: this forward's logits sit at context position i and
+    // predict generated_ids[d + 1], i.e. DECODE position d + 1. The last
+    // prompt token (i == input_len - 1, d == -1) therefore produces
+    // decode-position-0 logits, and the first teacher-forced feed
+    // (generated_ids[0]) produces decode-position-1 logits. Print the
+    // decode position beside the raw step counter so the log lines line
+    // up with the gate's decode-step numbering (see
+    // docs/bench-evidence/kolibri1-readjudication-20261012.md).
+    MESSAGE("TFstep " << d << " (decode position " << (d + 1)
+                      << ") tok " << seq.back() << ": max_abs=" << ma
                       << " at " << amax << " argmax cpu=" << ac
                       << " tt=" << at << " logit cpu="
                       << lc[static_cast<size_t>(ac)] << " tt="

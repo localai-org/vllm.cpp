@@ -31,6 +31,28 @@ cross-run comparison is valid.
   selection scores per layer per token (`route_scores`), so the per-layer
   top1-top2 / top6-top7 gaps are measurable against the incoming drift.
 
+## Step-label mapping (SCRATCH dbg TF walk vs the gate's decode steps)
+
+The `SCRATCH dbg TF prompt` legs print a raw `TFstep` counter that is NOT
+the gate's decode position. Walk iteration `i` feeds `input_ids[i]` for
+`i < input_len` and `generated_ids[i - input_len]` afterwards; its logits
+sit at context position `i` and therefore predict
+`generated_ids[i - input_len + 1]`. The print emitted `d = i - input_len`
+BEFORE that +1, so:
+
+    raw `TFstep N`  ==  DECODE position N + 1
+
+The last prompt token (`TFstep -1`) produces decode-position-0 logits, and
+the first teacher-forced feed (`TFstep 0`) produces decode-position-1
+logits. The gate's own `HARD flip ... step d` lines use
+`d = walk_step - input_len`, which IS the decode position (that forward
+predicts `generated_ids[d]`) — no offset there. The test now prints both
+(`TFstep N (decode position N+1)`; verified on device with a short
+prompt-4 leg), and every step number below that comes from the SCRATCH
+walk is given as a decode position. The committed parser
+`kolibri1-readj/parse_tf_origin.py` derives `tf_origin.json` under the
+corrected labels.
+
 ## Adjudication table (corrected instrument, this run)
 
 | Arm | free divergences | tf flips | near-ties | HARD | worst tf gap | chain (matched/compared) |
@@ -51,8 +73,12 @@ teacher-forced on the golden chain, per-stage bf16 bit hashes; prompts 1
 steps):
 
 - The first hash-bearing stage of every decode forward is `L0 dh2` (the L0
-  MoE input), and it diverges at EVERY decode step from step 0 on all three
-  prompts — before it, the L0 embed/attention stages match the CPU arm.
+  MoE input), and it diverges at EVERY decode position from 0 on all three
+  prompts (decode positions 0–25, 0–23, 0–10 respectively, including
+  position 0 — the last-prompt-token forward the pre-fix logs labelled
+  `TFstep -1`; see `kolibri1-readj/tf_origin.json`, where every row's
+  `l0_dh2_hash_cpu != l0_dh2_hash_tt`) — before it, the L0 embed/attention
+  stages match the CPU arm.
 - L0 `dh2` relative magnitude drift vs CPU: typically 0.03%–2.5% per step
   (outlier steps to ~10x when the sum passes near zero), consistent with the
   1-bf16-ULP-class L0 input-norm origin the 2026-10-10 record established
@@ -72,8 +98,8 @@ teacher-forced walk (1600 layer-steps per prompt):
 | 'x1 = 3…' | 3.05 | 6.4% | 9.65% |
 
 The selection disagreement is present AT EVERY LAYER including L0 (per-layer
-mean overlap 1.4–5.7 of 6; e.g. L0 step 0: CPU {47,284,19,228,359,141} vs TT
-{359,47,284,246,141,144}). The mechanism holds: a ~0.1–2.5% continuous input
+mean overlap 1.4–5.7 of 6; e.g. the walk's first forward, prompt token 1,
+at L0: CPU {47,284,19,228,359,141} vs TT {359,47,284,246,141,144}). The mechanism holds: a ~0.1–2.5% continuous input
 drift through the unit-norm-router GEMM (K=2560) injects percent-level
 absolute noise into O(1)-scale biased selection scores, and the top-6
 boundary flips 2–3 of 6 experts at nearly every layer-step.
@@ -107,27 +133,37 @@ ON arm (40 hard): 'der Mond…' 0,1; 'Australia' 0,11,14,15,16,18,21,26
 
 First-divergent-layer for every hard flip: on the three instrumented
 diverging prompts the corrected walk's first divergent stage is `L0 dh2` at
-every recorded flip step (steps 0–24, 0–22, 0–9 respectively) — there is no
+every decode position (0–25, 0–23, 0–10 respectively; corrected labels, see
+the mapping section and `kolibri1-readj/tf_origin.json`) — there is no
 late-switching localized defect layer; the drift is resident from step 0 and
 the flip step is decided by the LM-head margin at that step, not by where the
 drift begins.
 
-Concentration verdict: the flips do NOT concentrate at a single repairable
-site. They appear as opening bursts (steps 0–4) on some prompts and as
-isolated mid/late-chain flips (steps 14–26) on others, on 7 of 8 prompts, in
-BOTH arms. Under the row's band-gate question this is the STRUCTURAL class:
-the residual is the continuous bf16 device-arm drift (L0 input-norm origin)
-amplified by a high-gain router onto a top-6-of-384 boundary that is
-sub-0.05-nat at most layers — no single-layer or single-op repair clears it,
-and the arm delta (17 vs 40) shows the host-free shadow reconciliation
-remains the largest single lever.
+Concentration verdict: the flips SPREAD across prompts and decode positions
+— opening bursts (decode positions 0–4) on some prompts and isolated
+mid/late-chain flips (positions 14–26) on others, on 7 of 8 prompts, in
+BOTH arms. What the evidence supports is that this spread is CONSISTENT
+WITH the shared L0-origin drift amplification: the drift is resident at
+every decode position from 0 (Q1), and the top-6-of-384 selection boundary
+is sub-0.05-nat at most layers at every hard flip (Q2), so a boundary flip
+is expected wherever the LM-head margin is thin, not at a localised site.
+This does NOT prove that no single chain-wide change clears the residual:
+a chain-wide f32 fix of the device attention/norm chain (lever 2 below)
+addresses the shared origin itself, and the spread does not rule out that
+such a fix clears most of it. What the spread DOES rule out is a
+single-layer or single-position patch. Under the row's band-gate question
+this is the STRUCTURAL class (drift x router gain), and the arm delta
+(17 vs 40) shows the host-free shadow reconciliation remains the largest
+single lever.
 
 ## Recommended gate-standard input
 
 Keep the 2.5-nat / top-5 adjudication. Report the P150 band as STRUCTURAL
-(spread), not fixable-by-a-patch: teacher-forced hard flips 17 (OFF) / 40
-(ON) spread over prompts and step positions, driven by a step-0-resident
-1-ULP-class norm/attention-chain drift x router gain. The next levers, in
+(drift x router gain): teacher-forced hard flips 17 (OFF) / 40 (ON) spread
+over prompts and decode positions, consistent with a position-0-resident
+1-ULP-class norm/attention-chain drift amplified by the router. The spread
+is evidence against single-site patches, not against a chain-wide repair —
+lever 2 targets the origin itself and remains live. The next levers, in
 order: (1) host-free shadow reconciliation (halves the hard count), (2)
 f32-enabling the device attention/norm chain (removes the origin), (3) any
 future router-margin widening is a model change, not a backend repair — out
@@ -135,7 +171,30 @@ of scope for this row.
 
 ## Raw evidence
 
-`/tmp/readj/`: `arm-off.log` (OFF, full stage dump), `arm-on3.log` (ON, full
-stage dump, reproduces the clean ON counts exactly), `arm-on2.log` (ON, clean
-counts), `tf-p{1,5,4}.log` (CPU-vs-TT teacher-forced drift origin), parsed
-tables `off.json`, `on.json`, `tf_origin.json`.
+Committed, in `docs/bench-evidence/kolibri1-readj/` (a sibling directory of
+this file):
+
+- `OFF.json`, `ON.json` — the parsed adjudication tables (summary, argmax
+  chain, and per-hard-flip route_scores gap records).
+- `tf_origin.json` — the L0 drift-origin table under CORRECTED decode
+  position labels (see the mapping section; includes decode position 0).
+- `tf-p{1,5,4}.log.gz` — the raw CPU-vs-TT teacher-forced stage-dump legs
+  (9.3 MB each uncompressed, 2.2 MB gzipped).
+- The parsers that turn the logs into every table above:
+  `parse_adjudication.py` (`OFF`/`ON.json`), `parse_tf_origin.py`
+  (`tf_origin.json`), `parse_overlap.py` (the Q2 overlap table). Rerun
+  from the repo root:
+
+  ```sh
+  python3 docs/bench-evidence/kolibri1-readj/parse_tf_origin.py
+  python3 docs/bench-evidence/kolibri1-readj/parse_overlap.py
+  python3 docs/bench-evidence/kolibri1-readj/parse_adjudication.py \
+    <arm-log> OFF
+  ```
+
+Not committed — the full-gate arm logs are too large: `arm-off.log`
+95.7 MB, `arm-on3.log` 97.7 MB (the ON leg that reproduces the clean ON
+counts exactly), `arm-on.log` 22.0 MB, `arm-on2.log` 3.4 MB. They remain
+under `/tmp/readj/` on the measurement host and are regenerable with the
+run recipe in `## Runs` plus the `parse_adjudication.py` invocations in
+its docstring.
