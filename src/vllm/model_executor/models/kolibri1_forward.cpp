@@ -299,12 +299,32 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   return out;
 }
 
-// SwiGLU expert MLP: silu(x @ gate^T) * (x @ up^T), then down. Routed experts
-// and the shared expert share the shape.
+// SwiGLU expert MLP: silu(x @ gate^T) * (x @ up^T), then down. The shared
+bool BatchGemvOn();  // defined with the attention block; the A/B knob
+
+// expert uses this (the routed experts ride the batched path in MoeBlock).
+// With the batching knob on, gate+up share ONE dispatch (stage (b) sweep);
+// same rows, same kernel — bit-identical.
 DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
                int64_t t, int64_t inter, const char* gsite = "expert") {
   std::string sg = std::string(gsite) + "_gate", su = std::string(gsite) + "_up",
               sd = std::string(gsite) + "_down";
+  if (BatchGemvOn()) {
+    std::vector<ResolvedBT> wg, wu;
+    wg.push_back(ResolveBT(d, e.gate_proj));
+    wu.push_back(ResolveBT(d, e.up_proj));
+    DBuf g(d, DType::kBF16, {t, inter});
+    DBuf u(d, DType::kBF16, {t, inter});
+    Tensor gt = g.t(), ut = u.t(), xx = x;
+    std::vector<vt::MatmulBTJob> jobs{{&gt, &xx, &wg[0].wt},
+                                      {&ut, &xx, &wu[0].wt}};
+    gemvprof::Call gc(sg.c_str(), static_cast<uint64_t>(t) * inter *
+                                      wg[0].wt.shape[1] * 2);
+    vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
+    DBuf a(d, DType::kBF16, {t, inter});
+    vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
+    return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());
+  }
   DBuf g = LinearBT(d, x, e.gate_proj, t, DType::kBF16, sg.c_str());  // [t, I]
   DBuf u = LinearBT(d, x, e.up_proj, t, DType::kBF16, su.c_str());    // [t, I]
   DBuf a(d, DType::kBF16, {t, inter});
