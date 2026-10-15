@@ -13,17 +13,15 @@
 // to produce a MultiModalInputs (placeholder-expanded prompt ids + mm_features).
 // It runs entirely on CPU with only the processor CONFIG (no model weights).
 //
-// NAMED RESIDUALS (out of this brick):
-//   - the container-format image decode (PNG/JPEG -> RGB + dims): no codec is
-//     vendored (the single-sequence e2e path itself consumes pre-decoded raw RGB),
-//     so RouteImageRgb takes the raw RGB the processor expects;
-//   - fetching an http(s) media URL (vs an inline data: URI);
-//   - plumbing the produced MultiModalInputs into the engine request (the engine
-//     add_request has no mm-features overload yet) and the mm model forward (GPU).
+// Optional native PNG/JPEG decoding lives in image_codec.cpp and is shared by
+// the HTTP and C API entrypoints. Architecture-specific processor/model hooks
+// still determine whether an image can reach a model. HTTP(S) fetching remains
+// unsupported; decoding a data URI never introduces outbound access.
 #ifndef VLLM_ENTRYPOINTS_OPENAI_CHAT_MM_H_
 #define VLLM_ENTRYPOINTS_OPENAI_CHAT_MM_H_
 
 #include <cstdint>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -52,6 +50,12 @@ struct DecodedMedia {
   std::vector<uint8_t> bytes;  // raw decoded bytes
 };
 
+// Compressed/container input and decoded RGB are bounded separately from the
+// processor's processed-image area cap. These are native input admission limits.
+inline constexpr std::size_t kMaxImageContainerBytes = 32 * 1024 * 1024;
+inline constexpr uint64_t kMaxDecodedImagePixels = 16 * 1024 * 1024;
+inline constexpr uint64_t kMaxDecodedImageExtent = 32768;
+
 // Standard base64 decode (RFC 4648 alphabet, '=' padding). ASCII whitespace
 // (space/tab/CR/LF) is ignored so wrapped payloads decode. Throws
 // std::runtime_error on an invalid character or a truncated group.
@@ -66,8 +70,8 @@ DecodedMedia DecodeDataUri(const std::string& uri);
 bool HasMultiModalParts(const ChatMessage& m);
 
 // Decode an image_url content part's `url` (a data: URI) to its raw bytes. The
-// bytes are the container-format payload (PNG/JPEG/…); turning them into RGB +
-// dims is the NAMED codec residual — RouteImageRgb consumes the raw RGB directly.
+// bytes are the container-format payload; DefaultImageCodec produces RGB and
+// dimensions. Invalid/overlimit image URLs raise InputValidationError (HTTP 400).
 DecodedMedia DecodeImageUrlPart(const ChatContentPart& part);
 
 // Decode an input_audio content part's base64 `data` to raw bytes (a container
@@ -86,7 +90,7 @@ multimodal::MultiModalInputs RouteAudioWav(
 
 // Route already-decoded RGB image bytes (HWC uint8, height*width*3) through the
 // EXISTING Qwen3-VL image processor (ProcessImage -> ExpandImagePlaceholders).
-// The container-format decode (PNG/JPEG -> this RGB + dims) is the NAMED residual.
+// DefaultImageCodec supplies the container decode before this processor call.
 // `prompt_ids` carries one image_token_id per image item.
 multimodal::MultiModalInputs RouteImageRgb(
     const multimodal::Qwen3VLImageProcessor& proc, const uint8_t* rgb,
@@ -208,10 +212,8 @@ std::map<std::string, std::optional<int>> Qwen3VLChatSupportedMmLimits();
 
 // ── The multimodal chat SEAM BODY (MM-SERVE-E2E) ───────────────────────────
 //
-// A decoded RGB image: raw HWC uint8 (height*width*3) + dims. Turning the
-// container-format `image_url` bytes (PNG/JPEG/…) into this is the NAMED codec
-// residual (no codec is vendored — the single-sequence e2e path itself consumes
-// pre-decoded raw RGB); the production wiring supplies the codec.
+// A decoded RGB image: raw HWC uint8 (height*width*3) and dimensions, after the
+// reference HTTP media loader's orientation and default color conversion.
 struct DecodedImageRgb {
   std::vector<uint8_t> rgb;
   int64_t height = 0;
@@ -219,17 +221,14 @@ struct DecodedImageRgb {
 };
 
 // Image codec seam: decoded media bytes -> raw RGB + dims. Throws on an
-// unsupported container. The default production codec rejects PNG/JPEG with a
-// clear "codec residual" message; the e2e/test path supplies a raw-RGB
-// passthrough (dims known from the fixture), exactly as the M2c single-sequence
-// gate consumes raw 448x448x3 RGB (test_qwen3vl_e2e.cpp:116).
+// unsupported/malformed/overlimit container with InputValidationError. Native
+// PNG/JPEG support is optional at build time; diagnostic raw RGB remains usable.
 using ImageCodecFn = std::function<DecodedImageRgb(const DecodedMedia&)>;
 
 // THE PRODUCTION CODEC, and there is exactly one.
 //
-// It decodes the raw-RGB container (`image/x-raw-rgb`) and REFUSES every
-// container format by name: no PNG/JPEG decoder is vendored, and that is the
-// NAMED MM-SERVE residual this header has recorded since ROAD-V1-MM W1.
+// VLLM_CPP_IMAGE_CODECS=ON selects system libpng/libjpeg. The default OFF build
+// refuses PNG/JPEG by name; raw RGB still works with the same bounded inputs.
 //
 // It lives here rather than as a lambda inside `server_main.cpp` because it is
 // not the server BINARY's, it is the LIBRARY's: `vllm_chat` installs the same
@@ -258,9 +257,9 @@ using ChatPromptRenderFn = std::function<std::string(
 //      single <|image_pad|> marker to ONE `proc.config().image_token_id`
 //      (tokenizer.h EncodeWithSpecialTokens, added tokens matched
 //      leftmost-longest);
-//   3. decode the image bytes (`codec`) and RouteImageRgb → EXPAND that single
-//      id to N = prod(grid_thw)/merge^2 copies + build the mm_features handle
-//      the engine mm generate overload carries onto Request.mm_features.
+//   3. decode/preprocess each image serially, expand all marker ids to their
+//      ordered grid/merge^2 spans and retain every image's patch owner/hash in
+//      the mm_features the engine carries onto Request.mm_features.
 // Returns nullopt when no message carries an image part (the text path stays
 // byte-identical). `proc`, `tokenizer` and `info` must outlive the returned
 // function (the server owns them for the process lifetime, like
@@ -270,7 +269,8 @@ using ChatPromptRenderFn = std::function<std::string(
 // messages). IMAGE-only is no longer a silent truncation — a request carrying
 // more images than `info` allows, or any video/audio part, is REFUSED with
 // upstream's message and reaches the client as HTTP 400. `info`'s supported
-// limits are this seam's own (Qwen3VLChatSupportedMmLimits); its MultiModalConfig
+// limits are model-scoped (legacy Qwen3VLChatSupportedMmLimits is one image,
+// native Qwen3.5 supplies two); its MultiModalConfig
 // is where `--limit-mm-per-prompt` / `--language-model-only` land, so
 // --language-model-only makes this seam answer every image request with
 // "At most 0 image(s) may be provided in one prompt."
@@ -286,6 +286,18 @@ MakeQwen3VLImageChatFn(const multimodal::Qwen3VLImageProcessor& proc,
                        const vllm::tok::Tokenizer& tokenizer,
                        ChatPromptRenderFn prompt_fn, ImageCodecFn codec,
                        const multimodal::BaseProcessingInfo& info);
+
+// Same image processor/limits, preserving per-request tools/template options.
+// The messages-only function above wraps this with empty options for existing
+// direct callers; production Qwen chat seams install this form.
+std::function<std::optional<multimodal::MultiModalInputs>(
+    const std::vector<ChatMessage>&,
+    const std::vector<ChatCompletionToolsParam>&,
+    const nlohmann::ordered_json&)>
+MakeQwen3VLImageRequestChatFn(const multimodal::Qwen3VLImageProcessor& proc,
+                            const vllm::tok::Tokenizer& tokenizer,
+                            ChatPromptRenderFn prompt_fn, ImageCodecFn codec,
+                            const multimodal::BaseProcessingInfo& info);
 
 }  // namespace vllm::entrypoints::openai
 

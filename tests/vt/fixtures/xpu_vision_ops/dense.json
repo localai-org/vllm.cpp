@@ -1,0 +1,85 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "device": "Intel(R) Arc(TM) Pro B70 Graphics",
+  "operator": "torch.nn.functional.linear",
+  "dtype": "float16",
+  "contract": {
+    "rel_l2": 0.0003,
+    "max_abs": 0.02
+  },
+  "cases": [
+    {
+      "m": 5,
+      "k": 37,
+      "n": 19,
+      "bias": true,
+      "files": {
+        "input": {
+          "file": "dense-0-input.bin",
+          "sha256": "6e30e8f3a22820cb50b2d276013a8c9b5ae0c6add90f6609010bb83dfd05b927"
+        },
+        "weight": {
+          "file": "dense-0-weight.bin",
+          "sha256": "96a98650aa498f1ac029d212fe2d796baac1096366b05dc5f7d9d38b4fbba1c9"
+        },
+        "bias": {
+          "file": "dense-0-bias.bin",
+          "sha256": "67e7ce0d336892f2bdc24126886fb6b0364f3421ed96f4862b51be704adb21a9"
+        },
+        "expected": {
+          "file": "dense-0-expected.bin",
+          "sha256": "70cac8574d01dcc41f072888f264d5da84c863f62f1dc6b869366855feb761e2"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "m": 3,
+      "k": 1536,
+      "n": 16,
+      "bias": false,
+      "files": {
+        "input": {
+          "file": "dense-1-input.bin",
+          "sha256": "b281b7c87ed96800a89e34f822c327402ec5565017a170dc93d3a56a5819283a"
+        },
+        "weight": {
+          "file": "dense-1-weight.bin",
+          "sha256": "63861647bd23bc510c76383e803c9850f39a11408e2795e679b77b94c49ad579"
+        },
+        "expected": {
+          "file": "dense-1-expected.bin",
+          "sha256": "f7d7a1bac7b1f5921445fcb0c36f75f0e83c44a91ce7342b18b889a43c97444f"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "m": 3,
+      "k": 4304,
+      "n": 16,
+      "bias": true,
+      "files": {
+        "input": {
+          "file": "dense-2-input.bin",
+          "sha256": "45a051f628f233fcfb86ad9f483b6ec866430d0d471a843c40a6df434a2dc438"
+        },
+        "weight": {
+          "file": "dense-2-weight.bin",
+          "sha256": "84acca08e03f7879763df7f324593622b6ceccc683f0f939be857272887f6e3f"
+        },
+        "bias": {
+          "file": "dense-2-bias.bin",
+          "sha256": "38c6638c5d14113cec40eed66e15390a40086a6c547e022d663798f67884c650"
+        },
+        "expected": {
+          "file": "dense-2-expected.bin",
+          "sha256": "e153bf4f5f4b11038428e72fee69afdcbe09052a824390cff9f5c1aa42990b5f"
+        }
+      },
+      "repeat_exact": true
+    }
+  ]
+}

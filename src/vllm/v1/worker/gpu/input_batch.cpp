@@ -31,6 +31,7 @@ CachedRequestState CachedRequestState::from_new_request(
   // ENG-MM-INPUT-PIPELINE P2 (#2379), the worker end of the hop
   // NewRequestData opened (gpu_model_runner.py:1293). Empty on text.
   state.mm_features = new_req.mm_features;
+  state.prompt_block_hashes = new_req.prompt_block_hashes;
   state.finalize();
 
   // MRV2 contract: prefill_token_ids == all_token_ids (prompt + output at
@@ -413,6 +414,14 @@ const SamplingMetadata& InputBatch::make_sampling_metadata() const {
       !bad_words_token_ids.empty() || !logits_processors.empty()) {
     sampling_metadata_cache_ = build_sampling_metadata();
     sampling_metadata_dirty_ = false;
+  }
+  // Sampling offsets change even when all other metadata remains cached. Use
+  // the logical accepted token count, never a sampling-call counter: chunked
+  // prefill draws that are discarded must not advance a seeded request.
+  auto& positions = sampling_metadata_cache_.output_token_positions;
+  positions.resize(static_cast<size_t>(num_reqs()));
+  for (int i = 0; i < num_reqs(); ++i) {
+    positions[size_t(i)] = static_cast<uint64_t>(std::max(0, num_tokens_no_spec[size_t(i)] - num_prompt_tokens[size_t(i)]));
   }
   return sampling_metadata_cache_;
 }

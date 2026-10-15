@@ -21,8 +21,36 @@
 #define VLLM_CPP_INCLUDE_VT_PAGED_ATTN_ROUTE_H_
 
 #include <cstdint>
+#include <limits>
 
 namespace vt {
+
+// Shared host bound for the original one-split B70 C1 decode policy.
+// A graph captured below this boundary must be retired before crossing it;
+// the device sequence length changes on replay, but host dispatch does not.
+inline constexpr int64_t kXpuShortDecodeMaxSeqLen = 15 * 64;
+inline bool PagedAttnXpuShortDecodeBound(int64_t max_seq_len) {
+  return max_seq_len > 0 && max_seq_len <= kXpuShortDecodeMaxSeqLen;
+}
+
+// Split-K also bakes its partition count into a graph. Both its occupancy
+// threshold and active-page bound must be refreshed by retiring that graph.
+inline bool PagedAttnXpuLongSplitBound(int64_t max_seq_len) {
+  return max_seq_len >= 4096;
+}
+inline int64_t PagedAttnXpuActivePages(int64_t max_seq_len, int64_t page) {
+  return max_seq_len > 0 && page > 0 ? 1 + (max_seq_len - 1) / page : 0;
+}
+
+// Packed batched metadata validation bakes this upper bound into a graph. Keep it
+// stable within a page; the model retires the graph at active-page boundaries.
+// This sizes the kernel, not the request/context limit or allocated cache.
+inline int32_t PagedAttnXpuPackedVerifyBound(int32_t max_seq_len, int64_t page) {
+  if (max_seq_len <= 0 || page <= 0) return max_seq_len;
+  const int64_t pages = 1 + (int64_t(max_seq_len) - 1) / page;
+  if (page > std::numeric_limits<int32_t>::max() / pages) return max_seq_len;
+  return static_cast<int32_t>(pages * page);
+}
 
 // The shape-consistency guard for a CLASSIFIED uniform speculative batch:
 // `uniform_spec_query_len` (PagedAttentionArgs) is trusted for uniformity —

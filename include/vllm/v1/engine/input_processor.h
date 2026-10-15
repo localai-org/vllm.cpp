@@ -156,6 +156,13 @@ class InputProcessor {
     return num_prompt_encodes_.load(std::memory_order_relaxed);
   }
 
+  // The same resolved model EOS set used for request stop handling. Grammar
+  // backends must recognize secondary/chat EOS ids too, even when the tokenizer
+  // JSON has no EOS post-processor.
+  const std::vector<int32_t>& eos_token_ids() const {
+    return generation_config_eos_ids_;
+  }
+
  private:
   // _validate_params: runs SamplingParams::PostInit() (normalize + Verify) —
   // this closes the M1.1 deferred-__post_init__ carry.

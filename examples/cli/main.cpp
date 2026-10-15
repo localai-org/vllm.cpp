@@ -22,6 +22,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -32,6 +35,10 @@ struct Args {
   std::string tokenizer_config;  // optional override
   std::string prompt;
   bool have_prompt = false;
+  std::string prompt_file;
+  int max_model_len = 0;
+  int max_num_batched_tokens = 0;
+  int num_blocks = 0;
   int max_tokens = 16;
   float temperature = 0.0f;  // default: greedy (deterministic).
   float top_p = 1.0f;
@@ -76,11 +83,13 @@ void Usage(const char* argv0, std::FILE* out) {
   std::fprintf(
       out,
       "usage: %s --model <dir> --prompt \"<text>\"\n"
+      "          [--prompt-file PATH (instead of --prompt)]\n"
       "          [--tokenizer-config <path>] [--device auto|cpu|cuda]\n"
       "          [--max-tokens N] [--temperature T] [--top-p P] [--top-k K]\n"
       "          [--seed S] [--stream] [--repeat N]\n"
       "          [--gpu-memory-utilization F] [--kv-cache-memory BYTES]\n"
       "          [--max-num-seqs N]\n"
+      "          [--max-model-len N] [--max-num-batched-tokens N] [--num-blocks N]\n"
       "          [--kv-cache-dtype auto|bfloat16|fp8|fp8_e4m3]\n"
       "          [--speculative-config '<json>'] [--offload-config '<json>']\n"
       "\n"
@@ -113,6 +122,23 @@ bool ParseArgs(int argc, char** argv, Args& a, int& exit_code) {
     } else if (flag == "--prompt") {
       a.prompt = NextArg(argc, argv, i);
       a.have_prompt = true;
+    } else if (flag == "--prompt-file") {
+      a.prompt_file = NextArg(argc, argv, i);
+    } else if (flag == "--max-model-len" || flag == "--max-num-batched-tokens" ||
+               flag == "--num-blocks") {
+      const std::string value = NextArg(argc, argv, i);
+      size_t used = 0;
+      long long n = 0;
+      try { n = std::stoll(value, &used); } catch (...) { used = 0; }
+      if (used != value.size() || used == 0 || n <= 0 ||
+          n > std::numeric_limits<int>::max()) {
+        std::fprintf(stderr, "vllm-cli: %s requires a positive int\n", flag.c_str());
+        exit_code = 2;
+        return false;
+      }
+      if (flag == "--max-model-len") a.max_model_len = static_cast<int>(n);
+      else if (flag == "--max-num-batched-tokens") a.max_num_batched_tokens = static_cast<int>(n);
+      else a.num_blocks = static_cast<int>(n);
     } else if (flag == "--max-tokens") {
       a.max_tokens = std::atoi(NextArg(argc, argv, i));
     } else if (flag == "--temperature") {
@@ -177,6 +203,26 @@ bool ParseArgs(int argc, char** argv, Args& a, int& exit_code) {
     Usage(argv[0], stderr);
     exit_code = 2;
     return false;
+  }
+  if (!a.prompt_file.empty()) {
+    if (a.have_prompt) {
+      std::fprintf(stderr, "vllm-cli: choose --prompt or --prompt-file\n");
+      exit_code = 2;
+      return false;
+    }
+    std::ifstream input(a.prompt_file, std::ios::binary);
+    if (!input) {
+      std::fprintf(stderr, "vllm-cli: cannot read prompt file %s\n", a.prompt_file.c_str());
+      exit_code = 2;
+      return false;
+    }
+    a.prompt.assign(std::istreambuf_iterator<char>(input), {});
+    if (input.bad() || a.prompt.find('\0') != std::string::npos) {
+      std::fprintf(stderr, "vllm-cli: prompt file must be readable text without NUL\n");
+      exit_code = 2;
+      return false;
+    }
+    a.have_prompt = true;
   }
   if (!a.have_prompt) {
     std::fprintf(stderr, "vllm-cli: --prompt \"<text>\" is required\n");
@@ -243,6 +289,9 @@ int main(int argc, char** argv) {
   mp.gpu_memory_utilization = args.gpu_memory_utilization;
   mp.kv_cache_memory_bytes = args.kv_cache_memory_bytes;
   if (args.max_num_seqs > 0) mp.max_num_seqs = args.max_num_seqs;
+  if (args.max_model_len > 0) mp.max_model_len = args.max_model_len;
+  if (args.max_num_batched_tokens > 0) mp.max_num_batched_tokens = args.max_num_batched_tokens;
+  if (args.num_blocks > 0) mp.num_blocks = args.num_blocks;
   if (!args.kv_cache_dtype.empty()) mp.kv_cache_dtype = args.kv_cache_dtype.c_str();
 
   vllm_engine* engine = nullptr;

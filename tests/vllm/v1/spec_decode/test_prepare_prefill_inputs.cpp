@@ -26,6 +26,9 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <numeric>
 #include <vector>
 
@@ -213,4 +216,26 @@ TEST_CASE("prepare_prefill: pads request-indexed arrays to max_num_reqs") {
   CHECK(out.query_start_loc == std::vector<int32_t>{0, 2, 2, 2, 2});
   CHECK(out.seq_lens == std::vector<int32_t>{20, 0, 0, 0});
   CHECK(out.last_token_indices == std::vector<int64_t>{1, 0, 0, 0});
+}
+
+
+TEST_CASE("prepare_prefill: executed native vision MTP1 input contract") {
+  std::ifstream stream(std::filesystem::path(__FILE__).parent_path() /
+                       "fixtures/native_vision_mtp/transition.json");
+  REQUIRE(stream.good());
+  const auto fixture = nlohmann::json::parse(stream);
+  const auto ids = fixture.at("input_ids").get<std::vector<int32_t>>();
+  const auto positions = fixture.at("positions").get<std::vector<int64_t>>();
+  const int32_t tokens = static_cast<int32_t>(ids.size());
+  const auto prepared = prepare_prefill_inputs(
+      ids, positions, {0, tokens}, {tokens}, Identity(1),
+      fixture.at("last_sampled").get<std::vector<int32_t>>(),
+      fixture.at("next_prefill_tokens").get<std::vector<int32_t>>(),
+      fixture.at("num_sampled").get<std::vector<int32_t>>(),
+      fixture.at("num_rejected").get<std::vector<int32_t>>(), 1);
+  CHECK(prepared.input_ids == fixture.at("expected_draft_input_ids").get<std::vector<int32_t>>());
+  CHECK(prepared.positions == fixture.at("expected_draft_positions").get<std::vector<int64_t>>());
+  CHECK(prepared.last_token_indices == std::vector<int64_t>{tokens - 1});
+  CHECK(prepared.query_start_loc == std::vector<int32_t>{0, tokens});
+  CHECK(prepared.seq_lens == std::vector<int32_t>{tokens});
 }

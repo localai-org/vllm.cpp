@@ -1602,12 +1602,12 @@ void Scheduler::update_draft_token_ids(const DraftTokenIds& draft_token_ids) {
       continue;
     }
 
-    // Add the newly generated spec token ids to the request. A structured-output
-    // request first validates them against its grammar (should_advance); deferred
-    // here (no per-request grammar validate_tokens seam yet) — the manager gates
-    // it so a non-structured request is unaffected. When wired, this drops draft
-    // tokens that do not conform to the schema (upstream scheduler.py:1953-1956).
     request->spec_token_ids = draft_token_ids.draft_token_ids[i];
+    if (structured_output_manager_ != nullptr &&
+        structured_output_manager_->should_advance(*request)) {
+      request->spec_token_ids = request->structured_output_request->grammar
+                                   ->validate_tokens(request->spec_token_ids);
+    }
     static const bool spec_trace = std::getenv("VT_SPEC_TRACE") != nullptr;
     if (spec_trace) {
       std::fprintf(stderr, "[spec-install] req=%s installed=%zu lookahead=%d\n",
@@ -1623,10 +1623,7 @@ void Scheduler::update_draft_token_ids_in_output(
   // variant: under async scheduling the request state carries only -1
   // placeholders, so the drafts are rewritten INTO the SchedulerOutput the
   // deferred (structured-output) sampling path is about to consume. The
-  // grammar validate_tokens arm (:2096-2098) is deferred exactly as in
-  // update_draft_token_ids above (no per-request validate seam yet); the -1
-  // pad stays REACHABLE without it, because a worker can deliver fewer drafts
-  // than were scheduled.
+  // Validate the draft prefix before padding back to the scheduled row count.
   std::map<std::string, int> num_invalid_spec_tokens;
   std::map<std::string, std::vector<int32_t>>& sched_spec_tokens =
       scheduler_output.scheduled_spec_decode_tokens;
@@ -1647,6 +1644,11 @@ void Scheduler::update_draft_token_ids_in_output(
     if (spec_token_ids.size() > orig_num_spec_tokens) {
       // Trim to the scheduled count (the chunked-prefill case, :2091-2094).
       spec_token_ids.resize(orig_num_spec_tokens);
+    }
+    if (structured_output_manager_ != nullptr &&
+        structured_output_manager_->should_advance(*req_it->second)) {
+      spec_token_ids = req_it->second->structured_output_request->grammar
+                           ->validate_tokens(spec_token_ids);
     }
     if (spec_token_ids.size() < orig_num_spec_tokens) {
       // Pad back to the scheduled count with -1 and record the invalid tail;

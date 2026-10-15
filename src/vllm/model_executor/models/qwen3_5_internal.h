@@ -6,6 +6,9 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "vt/dtype.h"
@@ -21,12 +24,14 @@ class Backend;
 namespace vllm {
 
 struct GdnStateCache;
+struct PagedKvCache;
 struct HfConfig;
 struct GdnLayerWeights;
 struct OwnedTensor;
 
 namespace v1 {
 struct GDNAttentionMetadata;
+struct CommonAttentionMetadata;
 }  // namespace v1
 
 // Test-only entry point (SPEC-MTP I5a): run one GDN layer's paged forward over a
@@ -160,6 +165,17 @@ inline DenseFa2Class ClassifyDenseFa2(const DenseFa2Eligibility& e) {
 }  // namespace vllm
 
 namespace vllm::detail {
+
+// Borrow a validated model-owned contiguous dim0 interval, preserving the
+// producer row stride. Other token maps/layouts retain the checked gather.
+std::optional<vt::Tensor> GdnContiguousTokenRowsView(
+    const vt::Tensor& source, const std::vector<int32_t>& indices);
+
+// Two writable views must exactly partition a contiguous model-owned output.
+// Any gap, overlap, permutation or unsupported layout keeps checked scatter.
+std::optional<std::array<vt::Tensor, 2>> GdnContiguousTokenOutputViews(
+    const vt::Tensor& output, const std::vector<int32_t>& spec_indices,
+    const std::vector<int32_t>& prefill_indices);
 
 struct GdnPackedDecodeEligibility {
   bool runtime_enabled = false;
@@ -352,6 +368,21 @@ vt::DType GdnOutDType();
 // value; the second registration of the same binary under `VT_ACT_F32=1` is what
 // exercises the other arm, as tests/CMakeLists.txt already does for
 // `VT_GDN_OUT_BF16`.
+// Values baked by the dense XPU attention graph. Device lengths/table entries
+// remain staged inputs; route, layout and host partition policy require retirement.
+struct XpuAttentionGraphPolicy {
+  std::array<int64_t, 2> boundaries{};
+  std::array<std::string, 9> settings{};
+  std::vector<std::array<uint64_t, 13>> kv;
+  bool causal = false;
+  bool operator==(const XpuAttentionGraphPolicy&) const = default;
+};
+XpuAttentionGraphPolicy BuildXpuAttentionGraphPolicy(
+    int64_t requests, int64_t query_rows, int32_t max_seq_len, bool causal,
+    const std::vector<PagedKvCache>& kv);
+int32_t XpuBatchedVerifyContextBound(const PagedKvCache& kv, bool fp16,
+    int64_t query_heads, int64_t tokens, const v1::CommonAttentionMetadata& meta);
+
 bool ActF32FlagIsOn(const char* env_value);
 vt::DType ActDType(vt::DeviceType dev_type);
 

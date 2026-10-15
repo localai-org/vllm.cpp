@@ -132,6 +132,9 @@ struct MultiModalChatContext {
   // Nemotron Nano VL's dynamic tiler sizes every image from
   // `max_model_len - text_len - 4` (processors/nano_nemotron_vl.py:330-331).
   int64_t max_model_len = 0;
+  // Resolved execution device. Native device-specific processors refuse at
+  // install when it is absent or unsupported, before entering the busy loop.
+  std::optional<vt::Device> device;
 };
 
 // What a factory returns. `chat_fn` OWNS whatever processor state it needs —
@@ -144,6 +147,9 @@ struct MultiModalChatSeam {
   std::map<std::string, int> allowed_limits;
   // One line naming what was installed and from where, for the startup log.
   std::string detail;
+  // Optional additive request-aware seam. Factories choose exactly one of the
+  // two callback forms; the installer owns and forwards the request context.
+  MultiModalRequestChatFn request_chat_fn;
 };
 
 // A plain function pointer, exactly like every hook on `ModelFactory`.

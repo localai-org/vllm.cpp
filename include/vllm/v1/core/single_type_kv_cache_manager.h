@@ -335,6 +335,8 @@ class MambaManager : public SingleTypeKVCacheManager {
 
   void new_step_starts() override;
 
+  std::shared_ptr<RecurrentPrefixSnapshotIndex> prefix_snapshots;
+
   // --- Mamba-specific state (mirrors upstream). ------------------------------
   std::unordered_set<BlockHashWithGroupId> cached_blocks_this_step;
   std::string mamba_cache_mode;

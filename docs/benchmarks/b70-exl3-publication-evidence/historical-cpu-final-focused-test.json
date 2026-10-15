@@ -1,0 +1,24 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "plan-a/cpu-final-focused-test-exit.json",
+      "sha256": "1dd671371528b92f62aed967cfd84d77b6c4ca8dfd17c3483f94e53e41d68e5f",
+      "bytes": 668
+    },
+    {
+      "artifact_id": "plan-a/cpu-final-focused-test.log",
+      "sha256": "5b12ed487b331bee68d7c7a2d39f9fb02cc21f156c471de93f8f17d5a580220b",
+      "bytes": 2482
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "exit": {
+      "command": ["ctest","--test-dir","<CPU_BUILD>","--output-on-failure","-R","^(test_hf_config|test_qwen35_exl3|test_exl3_native_loader|test_exl3_linear_method|test_qwen_exl3_precision|test_kv_cache_manager|test_kv_cache_utils|test_single_type_kv_cache_manager|test_hybrid_kv_budget|test_kv_state_budget|test_sampler|test_input_batch|test_mtp_speculator|test_apply_grammar_bitmask|test_backend_native|test_exl3_external_artifacts|test_shared_ptr_cache|test_gptq4_weight|test_exl3_w8a8_panel_plan|test_recurrent_prefix_snapshot)$"],
+      "exit_code": 0,
+      "elapsed_s": 0.2877865890004614
+    },
+    "log": "Test project <CPU_BUILD>\n      Start   6: test_exl3_external_artifacts\n 1/20 Test   #6: test_exl3_external_artifacts ........   Passed    0.07 sec\n      Start  12: test_shared_ptr_cache\n 2/20 Test  #12: test_shared_ptr_cache ...............   Passed    0.00 sec\n      Start  13: test_exl3_w8a8_panel_plan\n 3/20 Test  #13: test_exl3_w8a8_panel_plan ...........   Passed    0.00 sec\n      Start  26: test_hf_config\n 4/20 Test  #26: test_hf_config ......................   Passed    0.00 sec\n      Start 308: test_kv_cache_utils\n 5/20 Test #308: test_kv_cache_utils .................   Passed    0.00 sec\n      Start 309: test_kv_state_budget\n 6/20 Test #309: test_kv_state_budget ................   Passed    0.00 sec\n      Start 310: test_recurrent_prefix_snapshot\n 7/20 Test #310: test_recurrent_prefix_snapshot ......   Passed    0.00 sec\n      Start 311: test_hybrid_kv_budget\n 8/20 Test #311: test_hybrid_kv_budget ...............   Passed    0.00 sec\n      Start 316: test_single_type_kv_cache_manager\n 9/20 Test #316: test_single_type_kv_cache_manager ...   Passed    0.01 sec\n      Start 318: test_kv_cache_manager\n10/20 Test #318: test_kv_cache_manager ...............   Passed    0.00 sec\n      Start 411: test_input_batch\n11/20 Test #411: test_input_batch ....................   Passed    0.00 sec\n      Start 414: test_sampler\n12/20 Test #414: test_sampler ........................   Passed    0.00 sec\n      Start 443: test_mtp_speculator\n13/20 Test #443: test_mtp_speculator .................   Passed    0.01 sec\n      Start 464: test_apply_grammar_bitmask\n14/20 Test #464: test_apply_grammar_bitmask ..........   Passed    0.00 sec\n      Start 465: test_backend_native\n15/20 Test #465: test_backend_native .................   Passed    0.01 sec\n      Start 598: test_exl3_linear_method\n16/20 Test #598: test_exl3_linear_method .............   Passed    0.01 sec\n      Start 599: test_exl3_native_loader\n17/20 Test #599: test_exl3_native_loader .............   Passed    0.04 sec\n      Start 602: test_qwen_exl3_precision\n18/20 Test #602: test_qwen_exl3_precision ............   Passed    0.00 sec\n      Start 607: test_qwen35_exl3\n19/20 Test #607: test_qwen35_exl3 ....................   Passed    0.11 sec\n      Start 786: test_gptq4_weight\n20/20 Test #786: test_gptq4_weight ...................   Passed    0.00 sec\n\n100% tests passed out of 20\n\nTotal Test time (real) =   0.28 sec\n"
+  }
+}

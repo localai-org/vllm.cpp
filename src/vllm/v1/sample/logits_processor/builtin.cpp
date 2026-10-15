@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "vllm/v1/sample/device_scratch.h"
+#include "vllm/v1/sample/ops/bad_words.h"
+#include "vllm/v1/sample/ops/penalties.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
@@ -62,6 +64,176 @@ void apply_logit_bias(vt::Queue& q, vt::Tensor& logits,
   DeviceScratch c(logits.device, q, cols.data(), vt::DType::kI32, {m});
   DeviceScratch b(logits.device, q, biases.data(), vt::DType::kF32, {m});
   vt::ApplyLogitBias(q, logits, r.tensor(), c.tensor(), b.tensor());
+}
+
+void apply_speculative_logit_filters(
+    vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
+    const std::vector<int32_t>& cu_num_logits) {
+  if (!metadata.allowed_token_ids_mask.has_value() &&
+      metadata.logit_bias.empty() && metadata.min_tokens.empty()) return;
+  VT_CHECK(logits.rank == 2 && logits.dtype == vt::DType::kF32,
+           "speculative logit processors require [rows, vocab] F32 logits");
+  VT_CHECK(cu_num_logits.size() >= 2 && cu_num_logits.front() == 0 &&
+               cu_num_logits.back() == logits.shape[0],
+           "speculative logit processors require valid row offsets");
+  const size_t num_reqs = cu_num_logits.size() - 1;
+  VT_CHECK(!metadata.allowed_token_ids_mask.has_value() ||
+               metadata.allowed_token_ids_mask->size() == num_reqs,
+           "speculative allowed-token mask requires one row per request");
+  VT_CHECK(metadata.min_tokens.empty() ||
+               metadata.output_token_positions.size() == num_reqs,
+           "speculative min-tokens requires accepted output positions");
+  std::vector<std::vector<uint8_t>> allowed_rows;
+  if (metadata.allowed_token_ids_mask.has_value())
+    allowed_rows.reserve(static_cast<size_t>(logits.shape[0]));
+  std::vector<int32_t> bias_rows, bias_cols, mask_rows, mask_cols;
+  std::vector<float> biases;
+  for (size_t req = 0; req < num_reqs; ++req) {
+    const int32_t begin = cu_num_logits[req], end = cu_num_logits[req + 1];
+    VT_CHECK(begin >= 0 && end >= begin && end <= logits.shape[0],
+             "speculative logit row offsets must be monotonic");
+    const auto bias = metadata.logit_bias.find(static_cast<int>(req));
+    const auto floor = metadata.min_tokens.find(static_cast<int>(req));
+    for (int32_t row = begin; row < end; ++row) {
+      if (metadata.allowed_token_ids_mask.has_value())
+        allowed_rows.push_back((*metadata.allowed_token_ids_mask)[req]);
+      if (bias != metadata.logit_bias.end()) {
+        for (const auto& [token, value] : bias->second) {
+          bias_rows.push_back(row);
+          bias_cols.push_back(token);
+          biases.push_back(value);
+        }
+      }
+      if (floor != metadata.min_tokens.end() &&
+          metadata.output_token_positions[req] + uint64_t(row - begin) <
+              static_cast<uint64_t>(floor->second.min_tokens)) {
+        for (int32_t token : floor->second.stop_token_ids) {
+          mask_rows.push_back(row);
+          mask_cols.push_back(token);
+        }
+      }
+    }
+  }
+  if (!allowed_rows.empty())
+    apply_allowed_token_ids(q, logits, allowed_rows);
+  if (!bias_rows.empty()) {
+    const int64_t count = static_cast<int64_t>(bias_rows.size());
+    DeviceScratch r(logits.device, q, bias_rows.data(), vt::DType::kI32, {count});
+    DeviceScratch c(logits.device, q, bias_cols.data(), vt::DType::kI32, {count});
+    DeviceScratch b(logits.device, q, biases.data(), vt::DType::kF32, {count});
+    vt::ApplyLogitBias(q, logits, r.tensor(), c.tensor(), b.tensor());
+  }
+  if (!mask_rows.empty()) {
+    const int64_t count = static_cast<int64_t>(mask_rows.size());
+    DeviceScratch r(logits.device, q, mask_rows.data(), vt::DType::kI32, {count});
+    DeviceScratch c(logits.device, q, mask_cols.data(), vt::DType::kI32, {count});
+    vt::ApplyTokenMask(q, logits, r.tensor(), c.tensor());
+  }
+}
+
+void apply_speculative_logits_processors(
+    vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
+    const std::vector<int32_t>& cu_num_logits,
+    const std::vector<int32_t>& draft_input_ids) {
+  const bool history_needed = !metadata.no_penalties ||
+      !metadata.bad_words_token_ids.empty() || !metadata.logits_processors.empty();
+  if (!history_needed && !metadata.allowed_token_ids_mask.has_value() &&
+      metadata.logit_bias.empty() && metadata.min_tokens.empty()) return;
+  VT_CHECK(logits.rank == 2 && logits.dtype == vt::DType::kF32 &&
+               logits.IsContiguous(),
+           "speculative processors require contiguous [rows, vocab] F32 logits");
+  VT_CHECK(cu_num_logits.size() >= 2 && cu_num_logits.front() == 0 &&
+               cu_num_logits.back() == logits.shape[0],
+           "speculative processors require valid row offsets");
+  const size_t requests = cu_num_logits.size() - 1;
+  for (size_t i = 0; i < requests; ++i)
+    VT_CHECK(cu_num_logits[i] >= 0 && cu_num_logits[i + 1] >= cu_num_logits[i],
+             "speculative processor row offsets must be monotonic");
+  VT_CHECK(!history_needed ||
+               (metadata.output_token_ids.size() == requests &&
+                draft_input_ids.size() == static_cast<size_t>(logits.shape[0])),
+           "speculative history processors require committed histories and draft inputs");
+  VT_CHECK(!metadata.allowed_token_ids_mask.has_value() ||
+               metadata.allowed_token_ids_mask->size() == requests,
+           "speculative allowed-token mask requires one row per request");
+  VT_CHECK(metadata.min_tokens.empty() ||
+               metadata.output_token_positions.size() == requests,
+           "speculative min-tokens requires accepted output positions");
+  VT_CHECK(metadata.no_penalties ||
+               (metadata.prompt_token_ids.has_value() &&
+                metadata.prompt_token_ids->size() == requests &&
+                metadata.presence_penalties.size() == requests &&
+                metadata.frequency_penalties.size() == requests &&
+                metadata.repetition_penalties.size() == requests),
+           "speculative penalties require per-request prompts and penalty values");
+  const auto check_keys = [&](const auto& map) {
+    for (const auto& entry : map)
+      VT_CHECK(entry.first >= 0 && static_cast<size_t>(entry.first) < requests,
+               "speculative processor request index out of range");
+  };
+  check_keys(metadata.bad_words_token_ids); check_keys(metadata.logits_processors);
+  check_keys(metadata.logit_bias); check_keys(metadata.min_tokens);
+
+  SamplingMetadata expanded;
+  if (metadata.allowed_token_ids_mask.has_value())
+    expanded.allowed_token_ids_mask.emplace();
+  if (!metadata.no_penalties) expanded.prompt_token_ids.emplace();
+  std::vector<int32_t> mask_rows, mask_cols;
+  for (size_t req = 0; req < requests; ++req) {
+    const int32_t begin = cu_num_logits[req], end = cu_num_logits[req + 1];
+    std::vector<int32_t> history;
+    if (history_needed) history = metadata.output_token_ids[req];
+    for (int32_t row = begin; row < end; ++row) {
+      if (history_needed) {
+        if (row > begin) history.push_back(draft_input_ids[static_cast<size_t>(row)]);
+        expanded.output_token_ids.push_back(history);
+      }
+      if (expanded.allowed_token_ids_mask)
+        expanded.allowed_token_ids_mask->push_back((*metadata.allowed_token_ids_mask)[req]);
+      if (const auto it = metadata.bad_words_token_ids.find(static_cast<int>(req));
+          it != metadata.bad_words_token_ids.end()) expanded.bad_words_token_ids[row] = it->second;
+      if (const auto it = metadata.logits_processors.find(static_cast<int>(req));
+          it != metadata.logits_processors.end()) expanded.logits_processors[row] = it->second;
+      if (const auto it = metadata.logit_bias.find(static_cast<int>(req));
+          it != metadata.logit_bias.end()) expanded.logit_bias[row] = it->second;
+      if (const auto it = metadata.min_tokens.find(static_cast<int>(req));
+          it != metadata.min_tokens.end()) {
+        VT_CHECK(it->second.min_tokens >= 0, "speculative min_tokens must be nonnegative");
+        const uint64_t floor = static_cast<uint64_t>(it->second.min_tokens);
+        const uint64_t position = metadata.output_token_positions[req];
+        // Subtraction after the range check avoids position+depth overflow.
+        if (position < floor && static_cast<uint64_t>(row - begin) < floor - position)
+          for (int32_t token : it->second.stop_token_ids) {
+            mask_rows.push_back(row); mask_cols.push_back(token);
+          }
+      }
+      if (!metadata.no_penalties) {
+        expanded.prompt_token_ids->push_back((*metadata.prompt_token_ids)[req]);
+        expanded.presence_penalties.push_back(metadata.presence_penalties[req]);
+        expanded.frequency_penalties.push_back(metadata.frequency_penalties[req]);
+        expanded.repetition_penalties.push_back(metadata.repetition_penalties[req]);
+      }
+    }
+  }
+  // Same order as Sampler::forward: allowed, bad words, min-tokens, bias,
+  // custom processors, then penalties. Only registered host callbacks stage
+  // logits to the host; builtins keep their existing native device operations.
+  if (expanded.allowed_token_ids_mask && !expanded.allowed_token_ids_mask->empty())
+    apply_allowed_token_ids(q, logits, *expanded.allowed_token_ids_mask);
+  if (!expanded.bad_words_token_ids.empty())
+    apply_bad_words(q, logits, expanded.bad_words_token_ids, expanded.output_token_ids);
+  if (!mask_rows.empty()) {
+    const int64_t count = static_cast<int64_t>(mask_rows.size());
+    DeviceScratch r(logits.device, q, mask_rows.data(), vt::DType::kI32, {count});
+    DeviceScratch c(logits.device, q, mask_cols.data(), vt::DType::kI32, {count});
+    vt::ApplyTokenMask(q, logits, r.tensor(), c.tensor());
+  }
+  apply_logit_bias(q, logits, expanded.logit_bias);
+  apply_logits_processors(q, logits, expanded.logits_processors, expanded.output_token_ids);
+  if (!metadata.no_penalties)
+    apply_all_penalties(q, logits, *expanded.prompt_token_ids,
+                        expanded.presence_penalties, expanded.frequency_penalties,
+                        expanded.repetition_penalties, expanded.output_token_ids);
 }
 
 void apply_min_p(vt::Queue& q, vt::Tensor& logits, const std::vector<float>& min_p) {

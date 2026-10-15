@@ -782,6 +782,17 @@ struct ModelForwardInput {
 // architecture, so the runner here does not either: `MmEncoderOutput` carries
 // exactly one tensor, and what a model chooses to stash beside it is its own.
 
+// Optional asynchronous ownership for encoder tensors and their borrowed row
+// slices. A GPU encoder retains its input/output and completion events here;
+// the shared embed seam orders consumers and retains owners through their use.
+class MmEncoderLifetime {
+ public:
+  virtual ~MmEncoderLifetime() = default;
+  virtual const vt::Tensor& tensor() const = 0;
+  virtual void WaitOn(vt::Queue& queue) const = 0;
+  virtual void RecordUse(vt::Queue& queue) const = 0;
+};
+
 // One multimodal item's encoder output — the mirror of one element of
 // `MultiModalEmbeddings` (`embed_multimodal`'s return).
 struct MmEncoderOutput {
@@ -791,6 +802,7 @@ struct MmEncoderOutput {
   std::shared_ptr<void> storage;
   // [num_embeds, hidden] in the model dtype.
   vt::Tensor embeds;
+  std::shared_ptr<MmEncoderLifetime> lifetime;
 };
 
 // What the runner hands the model's `embed_input_ids` mirror for ONE step.
@@ -801,6 +813,10 @@ struct MmEmbedInputs {
   // The gathered encoder-output ROW SLICES, in the order their `true` positions
   // appear in `is_mm_embed` — upstream's `multimodal_embeddings` list.
   const std::vector<vt::Tensor>* mm_embeds = nullptr;
+  // One optional parent owner per borrowed row slice, in the same order.
+  // Null preserves existing synchronous encoder hooks. Native asynchronous
+  // hooks require owners for their nonempty source slices.
+  const std::vector<std::shared_ptr<MmEncoderLifetime>>* mm_lifetimes = nullptr;
   // [num_scheduled_tokens] upstream's `is_multimodal` bool mask. `char` rather
   // than `bool` because `std::vector<bool>` has no contiguous buffer to upload.
   const std::vector<char>* is_mm_embed = nullptr;
@@ -843,6 +859,8 @@ struct MmEmbedInputs {
   // every image request reaches its first token through such a step, so a guard
   // that ignored this term would take multimodal serving away entirely.
   bool host_token_ids_stale = false;
+  // Diagnostic distinction only; merge math is identical for target and draft.
+  bool draft_prefill = false;
 };
 
 // The per-step device buffers the model staged, plus the seam view over them.

@@ -96,7 +96,12 @@ void BlockPool::cache_full_blocks(
         "(block_size != hash_block_size) not yet ported");
   }
   const std::vector<BlockHash>& block_hashes = request.block_hashes;
-  assert(static_cast<int>(block_hashes.size()) >= num_full_blocks);
+  if (static_cast<int>(block_hashes.size()) < num_full_blocks ||
+      static_cast<int>(blocks_arg.size()) < num_full_blocks) {
+    throw std::runtime_error(
+        "BlockPool::cache_full_blocks: full pages require committed hashes "
+        "and allocated blocks");
+  }
 
   // new_block_hashes = block_hashes[num_cached_blocks:]; indexed as
   // block_hashes[num_cached_blocks + i] below.

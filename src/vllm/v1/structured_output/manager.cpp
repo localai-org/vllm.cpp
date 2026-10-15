@@ -2,8 +2,10 @@
 // See include/vllm/v1/structured_output/manager.h for scope + T0 simplifications.
 #include "vllm/v1/structured_output/manager.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <stdexcept>
 #include <utility>
 
 #include "vllm/v1/request.h"
@@ -74,11 +76,20 @@ std::optional<TokenBitmask> StructuredOutputManager::grammar_bitmask(
     return std::nullopt;
   }
 
-  // __init__.py:217-226: allocate the reusable bitmask once. num_speculative_tokens
-  // == 0 at T0, so one row per request (the `1 + max_num_spec_tokens` factor is 1).
-  if (!grammar_bitmask_.has_value()) {
+  // A structured request contributes one row per draft plus its bonus row.
+  // Grow on demand; max_num_seqs alone is insufficient for MTP verification.
+  int required_rows = static_cast<int>(structured_output_request_ids.size());
+  for (const auto& req_id : structured_output_request_ids) {
+    const auto it = scheduled_spec_decode_tokens.find(req_id);
+    if (it != scheduled_spec_decode_tokens.end()) {
+      required_rows += static_cast<int>(it->second.size());
+    }
+  }
+  if (!grammar_bitmask_.has_value() ||
+      grammar_bitmask_->num_seqs < required_rows) {
     assert(backend_ != nullptr);
-    grammar_bitmask_ = backend_->allocate_token_bitmask(max_num_seqs_);
+    grammar_bitmask_ = backend_->allocate_token_bitmask(
+        std::max(max_num_seqs_, required_rows));
   }
 
   // __init__.py:232, 263-294: serial fill (the >128-req parallel fast path is
@@ -93,9 +104,7 @@ std::optional<TokenBitmask> StructuredOutputManager::grammar_bitmask(
 
     bool apply_bitmask = should_fill_bitmask(request);
 
-    // __init__.py:276-282: token_iter = spec-decode tokens ++ (-1). At T0
-    // scheduled_spec_decode_tokens is empty (num_speculative_tokens == 0), so
-    // req_tokens is empty and token_iter is exactly {-1} (diffusion deferred).
+    // __init__.py:276-282: spec-decode tokens followed by the bonus row.
     std::vector<int32_t> token_iter;
     auto spec_it = scheduled_spec_decode_tokens.find(req_id);
     if (spec_it != scheduled_spec_decode_tokens.end()) {
@@ -104,19 +113,26 @@ std::optional<TokenBitmask> StructuredOutputManager::grammar_bitmask(
     token_iter.push_back(-1);  // the bonus / non-speculative placeholder.
 
     int state_advancements = 0;
-    for (const int32_t token : token_iter) {
-      fill_bitmask_row(grammar, cumulative_index, apply_bitmask);
-      if (token == -1) {
-        // __init__.py:285-287: stop advancing once we hit the padding token.
-        apply_bitmask = false;
+    try {
+      for (const int32_t token : token_iter) {
+        fill_bitmask_row(grammar, cumulative_index, apply_bitmask);
+        if (token == -1) {
+          // __init__.py:285-287: stop advancing once we hit the padding token.
+          apply_bitmask = false;
+        }
+        if (apply_bitmask && !grammar.is_terminated()) {
+          const bool accepted = grammar.accept_tokens(req_id, {token});
+          if (!accepted) {
+            throw std::runtime_error(
+                "grammar rejected a scheduled spec-decode token for " + req_id);
+          }
+          ++state_advancements;
+        }
+        ++cumulative_index;
       }
-      if (apply_bitmask && !grammar.is_terminated()) {
-        const bool accepted = grammar.accept_tokens(req_id, {token});
-        assert(accepted && "grammar rejected a scheduled spec-decode token");
-        (void)accepted;
-        ++state_advancements;
-      }
-      ++cumulative_index;
+    } catch (...) {
+      grammar.rollback(state_advancements);
+      throw;
     }
     if (state_advancements > 0) {
       // __init__.py:293-294: undo the FSM advances made purely to fill the

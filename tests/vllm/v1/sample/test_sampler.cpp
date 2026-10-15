@@ -13,6 +13,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -41,6 +42,39 @@ Tensor Logits(std::vector<float>& v, int64_t n, int64_t vocab) {
   return Tensor::Contiguous(v.data(), DType::kF32, Cpu(), {n, vocab});
 }
 }  // namespace
+
+TEST_CASE("PR11 seeded sampling follows accepted positions across batch permutations") {
+  Sampler sampler;
+  Queue q = Q();
+  constexpr int V = 31;
+  auto draw = [&](const std::vector<uint64_t>& positions) {
+    std::vector<float> logits(positions.size() * V, 0);
+    auto t = Logits(logits, positions.size(), V);
+    SamplingMetadata sm; sm.all_greedy = false; sm.all_random = true;
+    sm.temperature = std::vector<float>(positions.size(), 1);
+    sm.output_token_positions = positions;
+    for (size_t i = 0; i < positions.size(); ++i) sm.generators[int(i)] = 719;
+    return sampler.forward(q, t, sm).sampled_token_ids;
+  };
+  const auto first = draw({0, 1, 2, 3});
+  const auto reordered = draw({3, 1, 0, 2});
+  CHECK(first[0] == reordered[2]); CHECK(first[1] == reordered[1]);
+  CHECK(first[2] == reordered[3]); CHECK(first[3] == reordered[0]);
+  for (int i = 0; i < 4; ++i) CHECK(draw({uint64_t(i)})[0] == first[i]);
+  CHECK(first == draw({0, 1, 2, 3}));
+  CHECK_FALSE((first[0] == first[1] && first[0] == first[2] && first[0] == first[3]));
+}
+
+TEST_CASE("PR11 unseeded sampling advances its stream") {
+  Sampler sampler; Queue q = Q(); std::vector<int32_t> tokens;
+  for (int step = 0; step < 32; ++step) {
+    std::vector<float> logits(128, 0); auto t = Logits(logits, 1, 128);
+    SamplingMetadata sm; sm.all_greedy = false; sm.all_random = true;
+    sm.temperature = std::vector<float>{1};
+    tokens.push_back(sampler.forward(q, t, sm).sampled_token_ids[0][0]);
+  }
+  CHECK_FALSE(std::all_of(tokens.begin(), tokens.end(), [&](int32_t token) { return token == tokens.front(); }));
+}
 
 // ---------------------------------------------------------------------------
 // All-greedy batch: argmax, bit-exact; no logprobs when not requested.
