@@ -6,6 +6,20 @@ Row: `BACKEND-TENSTORRENT`. Issue:
 `row/tt-kolibri-capture`. Read-only study plus one contained eager
 prototype; no capture wiring landed.
 
+## Status after the 12 October 2026 fixes
+
+This study records the 11 October prototype, before the decode fixes in
+`ad8d9b45b` and the golden-index correction in `50d425bec`.
+The [follow-up issue](../.agents/issues/BACKEND-TENSTORRENT/ISSUE-LOCAL-01M4P21TZ1Q9CA7P66XBH0BQTX.md)
+attributes nondeterminism to memo eviction and stale weight-view shadows.
+It records three identical 65-token chains within each host-free arm after
+the cache-lifetime fixes. The two arms produced different chains.
+
+Repeatability does not establish oracle correctness. After the golden-index
+correction, the recorded gate still fails in both arms, with two identical
+runs per arm. The timings below remain historical measurements, not current
+performance evidence. This correction adds no benchmark run or capture wiring.
+
 ## Symptom
 
 kolibri1 P150 decode: ~960 ms/step over 50 layers (~19 ms/layer, ~10
@@ -154,7 +168,7 @@ compounds with any later capture work:
   non-first-touch) or device-side dequant removes most of it without
   touching numerics-critical paths.
 
-## Prototype result
+## Historical prototype result
 
 `tests/vllm/models/test_kolibri1_tt_decode_bench.cpp` (cherry-picked
 clean from 4dab09abd on `row/tt-kolibri-decode-bench`) measured on the
@@ -167,25 +181,28 @@ P150, same recipe (tt-smi reset, cache/shm clean,
 | baseline run 2 (origin/main, control) | 149.693 s | 80.225 s | **1254** | 0.798 |
 | bias host cache (prototype) | 165.979 s | 73.701 s | **1152** | 0.868 |
 
-**Verdict: no measurable win.** The prototype sits inside the
+**Original observation: no measurable win.** The prototype sat inside the
 run-to-run noise band of the baseline itself (1077-1254 ms/step across
-two identical-baseline runs, ~+-10%), and the greedy chains are NOT
-reproducible run-to-run in any arm (all three chains differ from the
-first token — consistent with the B2b-ii record's state-dependent
-7-flip residue; the bench prints, it does not adjudicate).
+two identical-baseline runs, ~+-10%), and the greedy chains differed in all three runs from the first token.
+The original study associated this with the B2b-ii record's seven-flip
+residue. The later investigation identified two cache-lifetime bugs instead,
+as described in the status note. The bench prints tokens but does not
+adjudicate correctness.
 
-**Finding (more valuable than the prototype): the per-layer bias copy
-is NOT a decode lever.** Removing 50 blocking `Synchronize` points per
-step moved nothing, so those syncs were cheap — each waits only on the
-tiny router GEMM tail, not the queue. The step's serialization lives
-in the round-trips that wait on the FULL layer tail: the router-logits
+**Original interpretation, not established by these runs:** bias caching
+was not a decode lever. The study inferred that removing 50 blocking
+`Synchronize` calls changed little because each waited only for the router
+GEMM tail. The nondeterministic chains prevent these runs from establishing
+that conclusion for the corrected path. The study instead prioritized the
+round-trips that wait on the full layer tail: the router-logits
 `Download` (kolibri1_tt_forward.cpp:478, one full-tail drain per
 layer) and the streaming expert path (per-miss full-slot D2H readback +
-byte-exact verify + CPU dequant, :693-701). The re-ranked eager levers
-are therefore: (1) the expert fetch path's readback/verify cost per
+byte-exact verify + CPU dequant, :693-701). The original study ranked the
+eager levers as: (1) the expert fetch path's readback/verify cost per
 miss, (2) device-side routing (`vt::MoeRouterTopK` TT port) to remove
 the per-layer full-tail download, (3) cache block_size 32 to un-decline
-the device RAC/PA arms. The prototype edit is kept (it removes real
-work and is inert to numerics — cached bytes are identical) but is not
-a perf result.
+the device RAC/PA arms. The bias cache remains in `BiasCache()` and removes
+repeated copies of a
+static weight. These historical runs establish neither its current speed
+benefit nor a passing correctness gate.
 
