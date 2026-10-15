@@ -71,10 +71,21 @@ def main() -> int:
           f"{len(todo)} to go", flush=True)
 
     census: Counter[str] = Counter()
+    # The F32 weight_scale_inv siblings are consumed by `dequantize` and must not survive
+    # into the output. They describe an fp8 encoding this directory no longer has: writing
+    # them leaves the result internally contradictory - config.json has no
+    # quantization_config, so a loader reads bf16 weights, but the index still advertises
+    # 57,950 fp8 scale tensors, so vLLM routes the MoE to its fp8 path and fails with
+    # "Layer ... has no parameter 'w2_weight_scale_inv'". Drop them from both the shards and
+    # the index.
+    written_index: dict[str, str] = {}
     for shard in todo:
         tensors: dict[str, torch.Tensor] = {}
         with safe_open(src_dir / shard, framework="pt") as f:
             for name in shard_names[shard]:
+                if name.endswith("_scale_inv"):
+                    census["scale_dropped"] += 1
+                    continue
                 tensor = f.get_tensor(name)
                 if tensor.dtype == torch.float8_e4m3fn:
                     scale_name = name + "_scale_inv"
@@ -86,13 +97,19 @@ def main() -> int:
                 else:
                     census[str(tensor.dtype)] += 1
                 tensors[name] = tensor
+                written_index[name] = shard
         # A bf16 shard is ~2x the fp8 shard; write once, keep the name.
         save_file(tensors, dst_dir / shard, metadata={"format": "pt"})
         print(f"{shard}: {len(tensors)} tensors written", flush=True)
         del tensors
 
+    for name, shard in weight_map.items():
+        if not name.endswith("_scale_inv"):
+            written_index.setdefault(name, shard)
+
     (dst_dir / "model.safetensors.index.json").write_text(
-        json.dumps(index, indent=2) + "\n"
+        json.dumps({"metadata": index.get("metadata", {}), "weight_map": written_index},
+                   indent=2) + "\n"
     )
     print(f"census: {dict(census)}")
     print(f"wrote {dst_dir} ({len(shard_names)} shards, quantization_config stripped)")
