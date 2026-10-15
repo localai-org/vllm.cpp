@@ -108,6 +108,8 @@ def run(args, report):
         before = after
     keys = {k for k in initial | after if k.startswith('vllm:spec_decode_num_draft_tokens')}
     report['draft_tokens'] = sum(after.get(k, 0) - initial.get(k, 0) for k in keys)
+    report['initial_metrics'] = initial
+    report['final_metrics'] = after
     require(report['draft_tokens'] > 0 if args.spec_depth else report['draft_tokens'] == 0, 'unexpected/missing speculation')
     report['warm_medians'] = {k: statistics.median(s[k] for s in report['samples'][1:]) for k in
         ('client_total_s', 'server_ttft_s', 'server_prefill_s', 'server_decode_s',
