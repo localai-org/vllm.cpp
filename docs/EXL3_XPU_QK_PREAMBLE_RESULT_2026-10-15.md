@@ -135,7 +135,8 @@ No broad vision matrix or vision-performance parity campaign was repeated.
 The final remaining gaps are measured, not strict or near parity. Relative to
 the earlier Wave 3 snapshot, changes in both native and reference measurements
 also contribute to the observed gap; only paired controls attribute the Q/K gain.
-No further variant or conditional backlog was started after this selected wave.
+This closes the selected Q/K wave. A subsequently authorized section9.3 panel
+comparison is recorded in `EXL3_XPU_W8A8_PANEL_RESULT_2026-10-15.md`.
 
 This wave selected the measured Q/K producer; the alternative Gemma mapping was
 rejected. Large-M panel policy was inspected, not changed: the native bounded

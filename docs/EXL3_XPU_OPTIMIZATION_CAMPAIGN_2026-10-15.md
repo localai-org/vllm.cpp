@@ -23,3 +23,14 @@ The configured maximum context and all workload/concurrency shapes are not
 qualified by these bounded scores. The subgroup long natural-generation quality
 check remains deferred by the developer. The campaign ends with measured
 remaining gaps; strict or near parity was not achieved.
+
+## Subsequent bounded panel-policy comparison
+
+After checkpoint `48c3cfb76` was pushed, the developer authorized continued plan
+work. Section9.3's existing2048-column candidate was checked in three fresh paired
+blocks per mode, focused exact-intermediate/operator tests and separate live
+shape/memory diagnostics. It gives a small MTP3 benefit but no consistent
+target-only serving improvement, and adds5MiB tracked peak in the full-model
+probe. The1024 default is retained. See
+[the panel report](EXL3_XPU_W8A8_PANEL_RESULT_2026-10-15.md) for every measured
+scope and the distinction between numerical PASS and adoption.
