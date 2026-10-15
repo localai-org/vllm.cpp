@@ -3426,6 +3426,12 @@ target_link_libraries(rocm_quant_wmma_capture PRIVATE vllm)
 # domain. Reaches src/ for the tier header and the threadpool test hook.
 vllm_cpp_add_test(test_ops_matmul_elem vt/test_ops_matmul_elem.cpp)
 target_include_directories(test_ops_matmul_elem PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 (kolibri1 CPU decode GEMV dispatch batching): the
+# bit-identity gate for vt::MatmulBTBatch — the batched run must reproduce the
+# per-job vt::MatmulBT loop BYTE-FOR-BYTE at every worker count (see the file's
+# header for the mutation contract).
+vllm_cpp_add_test(test_ops_matmul_batch vt/test_ops_matmul_batch.cpp)
+target_include_directories(test_ops_matmul_batch PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # LTX25-CONNECTOR-REPAIR (#2434): the M-BLOCKING half of the same contract.
 # `MatmulOneChunk` now pads its 16-row activation tile up to a whole number of
 # `mr` blocks, so the rows that used to fall through to the one-row kernel are

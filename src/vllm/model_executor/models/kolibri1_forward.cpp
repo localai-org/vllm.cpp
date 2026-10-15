@@ -245,6 +245,36 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
   return out;
 }
 
+// One MatmulBT weight, resolved the way LinearBT resolves it (bf16 arm
+// resident; fp8 block arm through the dequant cache lease or the threaded
+// decode — the same ownership comment as LinearBT's applies: the lease/buffer
+// must outlive every GEMV that reads wt).
+struct ResolvedBT {
+  Tensor wt;
+  DBuf wt_buf;
+  kolibri1_dequant_cache::Lease dequant_lease;
+};
+
+ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
+  ResolvedBT r;
+  if (w.IsBf16()) {
+    r.wt = ResidentWeight(d, w.bf16);
+    return r;
+  }
+  if (kolibri1_dequant_cache::ProcessCache().enabled()) {
+    prof::Scope prof("dequant_fp8_block");  // cache lookups + cold decodes
+    r.dequant_lease =
+        kolibri1_dequant_cache::ProcessCache().GetOrDequant(w.fp8_block);
+    r.wt = dense_attn::MakeTensor(const_cast<uint16_t*>(r.dequant_lease.data()),
+                                  DType::kBF16, d.q.device,
+                                  {w.fp8_block.n, w.fp8_block.k});
+  } else {
+    r.wt_buf = DequantFp8Block(d, w.fp8_block);
+    r.wt = r.wt_buf.t();
+  }
+  return r;
+}
+
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
               int64_t t, DType out_dtype = DType::kBF16,
               const char* gsite = "other") {
@@ -261,25 +291,12 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
   // corruption). Budget 0 (the default) DISABLES the cache and keeps the
   // original threaded pool decode, so main-line behavior is byte-for-byte
   // unchanged unless the env var is set.
-  Tensor wt;
-  DBuf wt_buf;
-  kolibri1_dequant_cache::Lease dequant_lease;
-  if (kolibri1_dequant_cache::ProcessCache().enabled()) {
-    prof::Scope prof("dequant_fp8_block");  // cache lookups + cold decodes
-    dequant_lease =
-        kolibri1_dequant_cache::ProcessCache().GetOrDequant(w.fp8_block);
-    wt = dense_attn::MakeTensor(const_cast<uint16_t*>(dequant_lease.data()),
-                                DType::kBF16, d.q.device,
-                                {w.fp8_block.n, w.fp8_block.k});
-  } else {
-    wt_buf = DequantFp8Block(d, w.fp8_block);
-    wt = wt_buf.t();
-  }
   prof::Scope prof("linear_gemm");
+  ResolvedBT r = ResolveBT(d, w);
   DBuf out(d, out_dtype, {t, w.fp8_block.n});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * w.fp8_block.n *
                                w.fp8_block.k);
-  vt::MatmulBT(d.q, out.t(), x, wt);
+  vt::MatmulBT(d.q, out.t(), x, r.wt);
   return out;
 }
 
@@ -504,54 +521,212 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   StageDump("moe_shared", layer, shared, d);
 
   // Routed experts: the CPU-reference per-expert gather/scatter loop (the
-  // mimo-v2 MoeBlock pattern).
+  // mimo-v2 MoeBlock pattern), restructured for dispatch batching
+  // (row MODEL-TEXT-kolibri-1, stage (a) of the GEMV-overhead restructure).
+  // The gather order, the per-expert token/slot mapping, the per-row GEMV
+  // math (same MatmulOneChunk kernel, same sequential-over-K accumulation)
+  // and the scatter are EXACTLY the per-expert loop's; the only change is
+  // which pool dispatch carries the rows: all active experts' gate+up GEMVs
+  // ride ONE vt::MatmulBTBatch, the down GEMVs another (2 kicks/layer
+  // instead of 18). BIT-IDENTICAL by construction; gated byte-for-byte by
+  // tests/vt/test_ops_matmul_batch.cpp.
   prof::Scope prof_glue("moe_glue");
+  // Same-binary A/B for the dispatch batching (VT_KOLIBRI1_BATCH_GEMV, read
+  // once; default ON). OFF restores the per-expert loop byte-for-byte.
+  static const bool kBatchGemv = [] {
+    const char* ev = std::getenv("VT_KOLIBRI1_BATCH_GEMV");
+    return ev == nullptr || ev[0] != '0';
+  }();
   DBuf expert_out(d, DType::kBF16, {t, top_k, h});
   expert_out.Zero(d);
-  for (int64_t ex = 0; ex < e; ++ex) {
+  if (!kBatchGemv) {
+    // The CPU-reference per-expert gather/scatter loop (the mimo-v2 MoeBlock
+    // pattern), unchanged.
+    for (int64_t ex = 0; ex < e; ++ex) {
+      std::vector<int32_t> token_rows;
+      std::vector<int32_t> slot_rows;
+      for (int64_t i = 0; i < t; ++i) {
+        for (int64_t kk = 0; kk < top_k; ++kk) {
+          const int64_t idx = i * top_k + kk;
+          if (route.ids[static_cast<size_t>(idx)] == static_cast<int32_t>(ex)) {
+            token_rows.push_back(static_cast<int32_t>(i));
+            slot_rows.push_back(static_cast<int32_t>(idx));
+            break;
+          }
+        }
+      }
+      if (token_rows.empty()) continue;
+      const int64_t ne = static_cast<int64_t>(token_rows.size());
+      DBuf gathered(d, DType::kBF16, {ne, h});
+      {
+        const size_t rb = static_cast<size_t>(h) * vt::SizeOf(DType::kBF16);
+        auto* dp = static_cast<char*>(gathered.ptr());
+        const auto* sp = static_cast<const char*>(dhn.data);
+        for (size_t s = 0; s < token_rows.size(); ++s)
+          d.b.Copy(d.q, dp + s * rb,
+                   sp + static_cast<size_t>(token_rows[s]) * rb, rb);
+      }
+      DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(),
+                         ne, inter, "routed");
+      for (int64_t i = 0; i < ne; ++i) {
+        d.b.Copy(d.q,
+                 static_cast<char*>(expert_out.ptr()) +
+                     static_cast<size_t>(slot_rows[static_cast<size_t>(i)]) *
+                         static_cast<size_t>(h) * vt::SizeOf(DType::kBF16),
+                 static_cast<const char*>(o.ptr()) +
+                     static_cast<size_t>(i) * static_cast<size_t>(h) *
+                         vt::SizeOf(DType::kBF16),
+                 static_cast<size_t>(h) * vt::SizeOf(DType::kBF16));
+      }
+    }
+  } else {
+  // Routed experts: the CPU-reference per-expert gather/scatter loop (the
+  // mimo-v2 MoeBlock pattern), restructured for dispatch batching
+  // (row MODEL-TEXT-kolibri-1, stage (a) of the GEMV-overhead restructure).
+  // The gather order, the per-expert token/slot mapping, the per-row GEMV
+  // math (same MatmulOneChunk kernel, same sequential-over-K accumulation)
+  // and the scatter are EXACTLY the per-expert loop's; the only change is
+  // which pool dispatch carries the rows: all active experts' gate+up GEMVs
+  // ride ONE vt::MatmulBTBatch, the down GEMVs another (2 kicks/layer
+  // instead of 18). BIT-IDENTICAL by construction; gated byte-for-byte by
+  // tests/vt/test_ops_matmul_batch.cpp.
+  struct RoutedRun {
+    int64_t ex;
     std::vector<int32_t> token_rows;
     std::vector<int32_t> slot_rows;
+    int64_t row0;  // this run's rows inside the batched gather/act/out buffers
+  };
+  std::vector<RoutedRun> runs;
+  int64_t total_rows = 0;
+  for (int64_t ex = 0; ex < e; ++ex) {
+    RoutedRun run;
+    run.ex = ex;
     for (int64_t i = 0; i < t; ++i) {
       for (int64_t kk = 0; kk < top_k; ++kk) {
         const int64_t idx = i * top_k + kk;
         if (route.ids[static_cast<size_t>(idx)] == static_cast<int32_t>(ex)) {
-          token_rows.push_back(static_cast<int32_t>(i));
-          slot_rows.push_back(static_cast<int32_t>(idx));
+          run.token_rows.push_back(static_cast<int32_t>(i));
+          run.slot_rows.push_back(static_cast<int32_t>(idx));
           break;
         }
       }
     }
-    if (token_rows.empty()) continue;
-    const int64_t ne = static_cast<int64_t>(token_rows.size());
-    DBuf gathered(d, DType::kBF16, {ne, h});
-    {
+    if (run.token_rows.empty()) continue;
+    run.row0 = total_rows;
+    total_rows += static_cast<int64_t>(run.token_rows.size());
+    runs.push_back(std::move(run));
+  }
+  if (!runs.empty()) {
+    // A rank-2 row slice [nrows, cols] of `src` starting at `row0`. Views
+    // only — the underlying DBuf owns the bytes and outlives the batch call.
+    auto rows_view = [](const Tensor& src, int64_t row0, int64_t nrows) {
+      Tensor v = src;
+      v.rank = 2;
+      v.shape[0] = nrows;
+      v.shape[1] = src.shape[1];
+      v.stride[0] = src.stride[0];
+      v.stride[1] = src.stride[1];
+      v.data = static_cast<char*>(v.data) +
+               row0 * src.stride[0] * vt::SizeOf(src.dtype);
+      return v;
+    };
+
+    DBuf gathered(d, DType::kBF16, {total_rows, h});
+    for (const RoutedRun& run : runs) {
       const size_t rb = static_cast<size_t>(h) * vt::SizeOf(DType::kBF16);
-      auto* dp = static_cast<char*>(gathered.ptr());
+      auto* dp = static_cast<char*>(gathered.ptr()) +
+                 static_cast<size_t>(run.row0) * rb;
       const auto* sp = static_cast<const char*>(dhn.data);
-      for (size_t s = 0; s < token_rows.size(); ++s)
+      for (size_t s = 0; s < run.token_rows.size(); ++s)
         d.b.Copy(d.q, dp + s * rb,
-                 sp + static_cast<size_t>(token_rows[s]) * rb, rb);
+                 sp + static_cast<size_t>(run.token_rows[s]) * rb, rb);
     }
-    DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(), ne,
-                       inter, "routed");
+
+    // Resolve every active expert's weights BEFORE the first batch call: the
+    // dequant-cache leases must outlive both dispatches.
+    std::vector<ResolvedBT> wg, wu, wd;
+    wg.reserve(runs.size());
+    wu.reserve(runs.size());
+    wd.reserve(runs.size());
+    for (const RoutedRun& run : runs) {
+      const Kolibri1ExpertWeights& exw = w.experts[static_cast<size_t>(run.ex)];
+      wg.push_back(ResolveBT(d, exw.gate_proj));
+      wu.push_back(ResolveBT(d, exw.up_proj));
+      wd.push_back(ResolveBT(d, exw.down_proj));
+    }
+
+    DBuf gout(d, DType::kBF16, {total_rows, inter});
+    DBuf uout(d, DType::kBF16, {total_rows, inter});
     {
-      char tag[32];
-      std::snprintf(tag, sizeof tag, "moe_gath#%d", static_cast<int>(ex));
-      StageDump(tag, layer, gathered, d);
-      std::snprintf(tag, sizeof tag, "moe_ex#%d", static_cast<int>(ex));
-      StageDump(tag, layer, o, d);
+      std::vector<Tensor> ag, au, og, ou;
+      ag.reserve(runs.size());
+      au.reserve(runs.size());
+      og.reserve(runs.size());
+      ou.reserve(runs.size());
+      std::vector<vt::MatmulBTJob> jobs;
+      jobs.reserve(runs.size() * 2);
+      uint64_t elems = 0;
+      for (size_t i = 0; i < runs.size(); ++i) {
+        const int64_t ne =
+            static_cast<int64_t>(runs[i].token_rows.size());
+        ag.push_back(rows_view(gathered.t(), runs[i].row0, ne));
+        au.push_back(rows_view(gathered.t(), runs[i].row0, ne));
+        og.push_back(rows_view(gout.t(), runs[i].row0, ne));
+        ou.push_back(rows_view(uout.t(), runs[i].row0, ne));
+        jobs.push_back({&og.back(), &ag.back(), &wg[i].wt});
+        jobs.push_back({&ou.back(), &au.back(), &wu[i].wt});
+        elems += static_cast<uint64_t>(ne) * inter * h;
+      }
+      gemvprof::Call gc("routed_gate", elems);  // gate+up share the dispatch
+      vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
     }
-    for (int64_t i = 0; i < ne; ++i) {
-      d.b.Copy(d.q,
-               static_cast<char*>(expert_out.ptr()) +
-                   static_cast<size_t>(slot_rows[static_cast<size_t>(i)]) *
-                       static_cast<size_t>(h) * vt::SizeOf(DType::kBF16),
-               static_cast<const char*>(o.ptr()) +
-                   static_cast<size_t>(i) * static_cast<size_t>(h) *
-                       vt::SizeOf(DType::kBF16),
-               static_cast<size_t>(h) * vt::SizeOf(DType::kBF16));
+
+    // silu(x @ gate^T) * (x @ up^T) per expert run — the same MoeSiluMul on
+    // the same operand rows as the per-expert loop, one call per run.
+    DBuf act(d, DType::kBF16, {total_rows, inter});
+    for (RoutedRun& run : runs) {
+      const int64_t ne = static_cast<int64_t>(run.token_rows.size());
+      Tensor ag = rows_view(gout.t(), run.row0, ne);
+      Tensor au = rows_view(uout.t(), run.row0, ne);
+      Tensor aa = rows_view(act.t(), run.row0, ne);
+      vt::MoeSiluMul(d.q, aa, ag, au);
+    }
+
+    DBuf dout(d, DType::kBF16, {total_rows, h});
+    {
+      std::vector<Tensor> aa, od;
+      aa.reserve(runs.size());
+      od.reserve(runs.size());
+      std::vector<vt::MatmulBTJob> jobs;
+      jobs.reserve(runs.size());
+      uint64_t elems = 0;
+      for (size_t i = 0; i < runs.size(); ++i) {
+        const int64_t ne =
+            static_cast<int64_t>(runs[i].token_rows.size());
+        aa.push_back(rows_view(act.t(), runs[i].row0, ne));
+        od.push_back(rows_view(dout.t(), runs[i].row0, ne));
+        jobs.push_back({&od.back(), &aa.back(), &wd[i].wt});
+        elems += static_cast<uint64_t>(ne) * inter * h;
+      }
+      gemvprof::Call gc("routed_down", elems);
+      vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
+    }
+
+    // Scatter each run's rows to their (token, top-k) slots — unchanged.
+    for (const RoutedRun& run : runs) {
+      for (int64_t i = 0; i < static_cast<int64_t>(run.slot_rows.size()); ++i) {
+        d.b.Copy(d.q,
+                 static_cast<char*>(expert_out.ptr()) +
+                     static_cast<size_t>(run.slot_rows[static_cast<size_t>(i)]) *
+                         static_cast<size_t>(h) * vt::SizeOf(DType::kBF16),
+                 static_cast<const char*>(dout.ptr()) +
+                     static_cast<size_t>(run.row0 + i) *
+                         static_cast<size_t>(h) * vt::SizeOf(DType::kBF16),
+                 static_cast<size_t>(h) * vt::SizeOf(DType::kBF16));
+      }
     }
   }
+  }  // kBatchGemv batched path
 
   // Weighted combine + the always-added shared term. routed_scale 1.0: the
   // router weights ARE the mixture weights (no renormalisation, no scaling).

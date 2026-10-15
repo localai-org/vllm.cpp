@@ -468,6 +468,8 @@ const char* OpNameImpl(OpId op) {
       return "RmsNormGatedQuantFp8";
     case OpId::kMatmulBT:
       return "MatmulBT";
+    case OpId::kMatmulBTBatch:
+      return "MatmulBTBatch";
     case OpId::kMatmulBTQuant:
       return "MatmulBTQuant";
     case OpId::kMatmulBTQuantGrouped:

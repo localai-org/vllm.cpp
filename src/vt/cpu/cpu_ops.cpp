@@ -469,6 +469,116 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   MatmulChunked<true>(out, a, b);
 }
 
+// vt::MatmulBTBatch CPU kernel (OpId::kMatmulBTBatch): N independent
+// MatmulChunked<true> jobs flattened into ONE Threadpool::Run. The chunk grid
+// of each job is built EXACTLY as MatmulChunked builds it for that job alone
+// (same chunk_size rule, same collapse rule), so a job's outputs see the same
+// kernel over the same rows — and because every output element's K reduction
+// is local and strictly sequential (MatmulOneChunk), which worker carries
+// which output cannot move a bit. Bit-identical to the per-job kMatmulBT
+// loop by construction.
+void MatmulBTBatchKernel(Queue&, const MatmulBTJob* jobs, int64_t nj) {
+  struct BatchJob {
+    Tensor out, a, b;
+    int64_t m, k, n;
+    bool bt;  // true: b is [N,K] elementwise; false: b is a repacked [K,N] view
+  };
+  std::vector<BatchJob> js;
+  js.reserve(static_cast<size_t>(nj));
+  for (int64_t j = 0; j < nj; ++j) {
+    BatchJob bj{*jobs[j].out, *jobs[j].a, *jobs[j].b,
+                jobs[j].a->shape[0], jobs[j].a->shape[1], jobs[j].b->shape[0],
+                /*bt=*/true};
+    // Same loader-repacked [K,N] byte layout handling as MatmulBTKernel: the
+    // repacked weight is presented as the [K,N] tensor it literally is and
+    // takes the transpose-free orientation.
+    if (bj.b.elem_kn_repacked) {
+      Tensor bkn = bj.b;
+      bkn.shape[0] = bj.b.shape[1];
+      bkn.shape[1] = bj.b.shape[0];
+      bkn.stride[0] = bj.b.shape[0];
+      bkn.stride[1] = 1;
+      bj.b = bkn;
+      bj.bt = false;
+    }
+    js.push_back(std::move(bj));
+  }
+  if (js.empty()) {
+    return;
+  }
+
+  Threadpool& tp = CurrentThreadpool();
+  tp.Run([&](int ith, int nth) {
+    vt::cpu::GemvProfState& gp = vt::cpu::GemvProfStateForOps();
+    const bool prof = gp.on;
+    uint64_t busy = 0;
+
+    // Per-job chunk grids, exactly MatmulChunked's.
+    struct Grid {
+      int64_t nchunk0, nchunk1, dr0, dr1, total;
+    };
+    std::vector<Grid> grids(js.size());
+    int64_t total_chunks = 0;
+    const bool steal = MatmulStealEnabled();
+    for (size_t j = 0; j < js.size(); ++j) {
+      const int64_t nr0 = js[j].n, nr1 = js[j].m;
+      int chunk_size = 16;
+      if (nr0 == 1 || nr1 == 1) chunk_size = 64;
+      int64_t nchunk0 = (nr0 + chunk_size - 1) / chunk_size;
+      int64_t nchunk1 = (nr1 + chunk_size - 1) / chunk_size;
+      if ((nchunk0 * nchunk1 < nth * 4 && !steal) || IsNuma()) {
+        nchunk0 = nr0 > nr1 ? nth : 1;
+        nchunk1 = nr0 > nr1 ? 1 : nth;
+      }
+      Grid g{nchunk0, nchunk1,
+             (nr0 + nchunk0 - 1) / nchunk0, (nr1 + nchunk1 - 1) / nchunk1,
+             nchunk0 * nchunk1};
+      // The per-job early break (`nth >= total && !steal`) executes only the
+      // first `nth` chunks of the job; replicate the same executed-chunk set.
+      if (nth >= g.total && !steal) g.total = std::min(g.total, static_cast<int64_t>(nth));
+      grids[j] = g;
+      total_chunks += g.total;
+    }
+
+    if (ith == 0) {
+      tp.ChunkSet(nth);
+    }
+    tp.Barrier();
+
+    auto serve = [&](int64_t c) {
+      // Map a global chunk to its job and in-job (ith0, ith1).
+      int64_t off = 0;
+      size_t j = 0;
+      for (; j + 1 < js.size(); ++j) {
+        if (c < off + grids[j].total) break;
+        off += grids[j].total;
+      }
+      const Grid& g = grids[j];
+      const int64_t lc = c - off;
+      const int64_t ir0_start = g.dr0 * (lc % g.nchunk0);
+      const int64_t ir0_end = std::min(ir0_start + g.dr0, js[j].n);
+      const int64_t ir1_start = g.dr1 * (lc / g.nchunk0);
+      const int64_t ir1_end = std::min(ir1_start + g.dr1, js[j].m);
+      const uint64_t tb0 = prof ? vt::cpu::ProfNowNs() : 0;
+      if (js[j].bt) {
+        MatmulOneChunk<true>(js[j].out, js[j].a, js[j].b, js[j].k, js[j].n,
+                             ir0_start, ir0_end, ir1_start, ir1_end);
+      } else {
+        MatmulOneChunk<false>(js[j].out, js[j].a, js[j].b, js[j].k, js[j].n,
+                              ir0_start, ir0_end, ir1_start, ir1_end);
+      }
+      if (prof) busy += vt::cpu::ProfNowNs() - tb0;
+    };
+
+    int64_t current_chunk = ith;
+    while (current_chunk < total_chunks) {
+      serve(current_chunk);
+      current_chunk = tp.ChunkAdd(1);
+    }
+    if (prof) gp.busy_ns.fetch_add(busy, std::memory_order_relaxed);
+  });
+}
+
 // vt::BatchedMatmul (`torch.bmm`) CPU reference — out[G,M,N] = a[G,M,K] @
 // b[G,K,N]. Sequential f32 accumulation over K, exactly like MatmulOneChunk's
 // per-element dot, so the reference and the cuBLASLt CUDA path share the same
@@ -4438,6 +4548,9 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<MatmulFn>(&MatmulKernel)));
     RegisterOp(OpId::kMatmulBT, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<MatmulFn>(&MatmulBTKernel)));
+    RegisterOp(OpId::kMatmulBTBatch, DeviceType::kCPU,
+               reinterpret_cast<void*>(
+                   static_cast<MatmulBTBatchFn>(&MatmulBTBatchKernel)));
     RegisterOp(OpId::kBatchedMatmul, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<BatchedMatmulFn>(&BatchedMatmulKernel)));
     RegisterOp(

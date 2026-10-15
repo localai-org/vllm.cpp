@@ -209,6 +209,19 @@ enum class OpId : uint8_t {
   // kMatmulBTQuant kernel per group). Mirrors kMoeGroupedGemmBf16's expert-index
   // structure for the keep-quant (IQ2_XXS/Q2_K/Q8_0) tower.
   kMatmulBTQuantGrouped,
+  // N independent kMatmulBT jobs in ONE dispatch (kolibri1 CPU decode GEMV
+  // dispatch batching, row MODEL-TEXT-kolibri-1). Each job is a full
+  // `out[m,n] = a[m,k] @ b[n,k]^T` with its own weight tensor; the CPU kernel
+  // flattens the jobs' output grids into one threadpool kickoff and serves
+  // every output element through the SAME MatmulOneChunk kernel the per-job
+  // kMatmulBT uses. Per-output reduction is local and sequential over K, so
+  // which worker carries which output changes nothing — BIT-IDENTICAL to the
+  // per-job loop by the argument at cpu_ops.cpp (MatmulChunked comment).
+  // Removes per-call dispatch+sync for small same-layer GEMVs (routed-expert
+  // gate/up, attention q/k/v). Elementwise bf16/f32 weights only (the fp8
+  // block arm resolves to bf16 before this op; block-quant weights are
+  // refused). CPU provider only today.
+  kMatmulBTBatch,
   // W0-only raw-signature probe for the shared drop-in adapter boundary. It is
   // not a production kernel-family migration.
   kDropinProbe,
@@ -2364,6 +2377,16 @@ using MoeCombinePreweightedFn =
 // expert_ids[P] i32 — weight row for (p,n) is expert_ids[p]*N + n.
 using MatmulBTQuantGroupedFn =
     void (*)(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&);
+// One kMatmulBT job: independent activation/weight/output triple, all on the
+// queue device. Pointers must stay valid for the duration of the batch call.
+struct MatmulBTJob {
+  const Tensor* out;  // [m, n]
+  const Tensor* a;    // [m, k]
+  const Tensor* b;    // [n, k] elementwise (bf16/f32), the Linear weight
+};
+// kMatmulBTBatch: N independent MatmulBT jobs in one dispatch.
+using MatmulBTBatchFn =
+    void (*)(Queue&, const MatmulBTJob* /*jobs*/, int64_t /*n*/);
 // kMoeGateUpSwiGLUGrouped: out[P,N] f32 adown, act[Pa,K] (Pa==1 broadcast),
 // gate_w/up_w[E*N,K] SAME block-quant dtype, expert_ids[P] i32, float limit. See
 // vt::MoeGateUpSwiGLUGrouped / OpId::kMoeGateUpSwiGLUGrouped.
@@ -2884,6 +2907,13 @@ void MatmulBTQuant(Queue& q, Tensor& out, const Tensor& a, const Tensor& b);
 // occupancy). act f32/bf16, weight Q8_K-family block-quant, expert_ids i32.
 void MatmulBTQuantGrouped(Queue& q, Tensor& out, const Tensor& act,
                           const Tensor& weight, const Tensor& expert_ids);
+
+// vt::MatmulBTBatch — run `n` independent MatmulBT jobs in ONE dispatch. See
+// OpId::kMatmulBTBatch. Bit-identity contract: every output element is
+// computed by the same per-element kernel with the same sequential-over-K
+// accumulation as `vt::MatmulBT` on that job alone; only the call structure
+// (which dispatch carries which rows) changes.
+void MatmulBTBatch(Queue& q, const MatmulBTJob* jobs, int64_t n);
 
 // vt::MoeGateUpSwiGLUGrouped — SHARED fused routed-MoE gate+up+SwiGLU keep-quant
 // epilogue (OpId::kMoeGateUpSwiGLUGrouped). out[P,N] f32 = per (p,j):
