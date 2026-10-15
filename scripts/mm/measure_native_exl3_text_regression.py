@@ -20,6 +20,13 @@ import urllib.request
 from measure_native_exl3_vision_http import GAUGES, TIMINGS, require
 
 
+def require_usage(usage, prompt_tokens, completion_tokens):
+    expected = {'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens,
+                'total_tokens': prompt_tokens + completion_tokens}
+    require(isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] == v
+                                          for k, v in expected.items()), 'wrong usage')
+
+
 def run(args, report):
     url = args.url.rstrip('/')
 
@@ -76,11 +83,11 @@ def run(args, report):
         response = api('/v1/completions', {'model': args.model, 'prompt': prompt,
             'temperature': 0., 'max_tokens': 256, 'ignore_eos': True, 'logprobs': 0})
         wall = time.perf_counter() - start
+        report['last_response'] = response  # Preserve a rejected API payload for diagnosis.
         require(response['model'] == args.model and len(response['choices']) == 1, 'wrong response identity')
         choice = response['choices'][0]
         require(choice['index'] == 0 and choice['finish_reason'] == 'length', 'wrong finish')
-        require(response['usage'] == {'prompt_tokens': 4096, 'completion_tokens': 256,
-                                      'total_tokens': 4352}, 'wrong usage')
+        require_usage(response['usage'], 4096, 256)
         require(choice['text'] and len(choice['logprobs']['tokens']) == 256, 'missing per-token output')
         after = metrics()
         deadline = time.monotonic() + 5
