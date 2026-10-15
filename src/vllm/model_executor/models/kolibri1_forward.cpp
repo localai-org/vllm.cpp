@@ -120,6 +120,78 @@ void Report(int64_t calls) {
 
 }  // namespace prof
 
+// ── SCRATCH GEMV-site profiler (VT_GEMV_PROF; row/kolibri-gemv-overhead) ────
+// Not for landing. Per-GEMV-site attribution: calls, elements, total wall in
+// MatmulBT, and (from the pool counters in cpu_threadpool.cpp) the busy compute
+// inside the kick vs the dispatch+sync remainder.
+namespace gemvprof {
+
+struct Rec {
+  uint64_t calls = 0, elems = 0, wall_ns = 0, pool_ns = 0, busy_ns = 0, kicks = 0;
+};
+std::map<std::string, Rec>& Map() {
+  static std::map<std::string, Rec> m;
+  return m;
+}
+bool On() { static const bool on = std::getenv("VT_GEMV_PROF") != nullptr; return on; }
+uint64_t NowNs() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+struct Call {  // wraps ONE MatmulBT; destructs right after it returns
+  const char* site;
+  uint64_t elems, t0;
+  vt::cpu::GemvProfSnap s0;
+  Call(const char* s, uint64_t e)
+      : site(s), elems(e), t0(NowNs()), s0(vt::cpu::GemvProfTake()) {}
+  ~Call() {
+    if (!On()) return;
+    auto s1 = vt::cpu::GemvProfTake();
+    Rec& r = Map()[site];
+    r.calls++;
+    r.elems += elems;
+    r.wall_ns += NowNs() - t0;
+    r.pool_ns += s1.pool_ns - s0.pool_ns;
+    r.busy_ns += s1.busy_ns - s0.busy_ns;
+    r.kicks += s1.kicks - s0.kicks;
+  }
+};
+void Reset() { Map().clear(); vt::cpu::GemvProfReset(); }
+void Report() {
+  std::fprintf(stderr,
+               "[gemvprof] %-12s %8s %14s %10s %10s %10s %8s\n", "site",
+               "calls", "Melem", "wall-ms", "busy-ms", "disp-ms", "kicks");
+  uint64_t c = 0, e = 0, w = 0, b = 0, k = 0;
+  for (const auto& [s, r] : Map()) {
+    uint64_t disp = r.pool_ns > r.busy_ns ? r.pool_ns - r.busy_ns : 0;
+    std::fprintf(stderr,
+                 "[gemvprof] %-12s %8llu %14.2f %10.2f %10.2f %10.2f %8llu\n",
+                 s.c_str(), (unsigned long long)r.calls, r.elems / 1e6,
+                 r.wall_ns / 1e6, r.busy_ns / 1e6, disp / 1e6,
+                 (unsigned long long)r.kicks);
+    c += r.calls; e += r.elems; w += r.wall_ns; b += r.busy_ns;
+    k += r.kicks;
+    uint64_t d = r.pool_ns > r.busy_ns ? r.pool_ns - r.busy_ns : 0;
+    (void)d;
+  }
+  uint64_t disp = w > b ? w - b : 0;
+  std::fprintf(stderr,
+               "[gemvprof] %-12s %8llu %14.2f %10.2f %10.2f %10.2f %8llu\n",
+               "TOTAL", (unsigned long long)c, e / 1e6, w / 1e6, b / 1e6,
+               disp / 1e6, (unsigned long long)k);
+  std::fprintf(stderr,
+               "[gemvprof] Gelem/s: wall=%.2f busy=%.2f\n",
+               e / (double)w, b ? e / (double)b : 0.0);
+}
+void ExitReport() { std::fprintf(stderr, "[gemvprof] ---- atexit ----\n"); Report(); }
+bool RegisterExit() {
+  if (On()) std::atexit(ExitReport);
+  return On();
+}
+
+}  // namespace gemvprof
+
 // ── FP8 block dequant (R1 disposition: dequant-to-bf16 scratch) ─────────────
 // w[n, k] = fp8_e4m3(packed[n, k]) * scale_inv[n / block_n, k / block_k].
 // Dequant happens in f32 per element and rounds ONCE to bf16 on store — the
@@ -163,17 +235,20 @@ DBuf DequantFp8Block(Dev d, const Fp8BlockWeight& w) {
 // stores every projection in the raw [N, K] on-disk orientation). The bf16
 // arm (the router gate) and the fp8-block arm (everything else) resolve here.
 DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
-                 DType out_dtype = DType::kBF16) {
+                 DType out_dtype = DType::kBF16,
+                 const char* gsite = "other_bf16") {
   prof::Scope prof("linear_gemm");
   Tensor wt = ResidentWeight(d, wt_raw);
   DBuf out(d, out_dtype, {t, wt.shape[0]});
+  gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * wt.shape[0] * wt.shape[1]);
   vt::MatmulBT(d.q, out.t(), x, wt);
   return out;
 }
 
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
-              int64_t t, DType out_dtype = DType::kBF16) {
-  if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype);
+              int64_t t, DType out_dtype = DType::kBF16,
+              const char* gsite = "other") {
+  if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype, gsite);
   // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land, with
   // the 2026-10-08 review repair ISSUE-LOCAL-01M4CVDDHAFD7R1QCK9F493SWZ).
   // The cache is the fp8 decode path when enabled; the decoded block comes
@@ -202,6 +277,8 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
   }
   prof::Scope prof("linear_gemm");
   DBuf out(d, out_dtype, {t, w.fp8_block.n});
+  gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * w.fp8_block.n *
+                               w.fp8_block.k);
   vt::MatmulBT(d.q, out.t(), x, wt);
   return out;
 }
@@ -209,12 +286,14 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,
 // SwiGLU expert MLP: silu(x @ gate^T) * (x @ up^T), then down. Routed experts
 // and the shared expert share the shape.
 DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
-               int64_t t, int64_t inter) {
-  DBuf g = LinearBT(d, x, e.gate_proj, t);  // [t, I]
-  DBuf u = LinearBT(d, x, e.up_proj, t);    // [t, I]
+               int64_t t, int64_t inter, const char* gsite = "expert") {
+  std::string sg = std::string(gsite) + "_gate", su = std::string(gsite) + "_up",
+              sd = std::string(gsite) + "_down";
+  DBuf g = LinearBT(d, x, e.gate_proj, t, DType::kBF16, sg.c_str());  // [t, I]
+  DBuf u = LinearBT(d, x, e.up_proj, t, DType::kBF16, su.c_str());    // [t, I]
   DBuf a(d, DType::kBF16, {t, inter});
   vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
-  return LinearBT(d, a.t(), e.down_proj, t);  // [t, H]
+  return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());  // [t, H]
 }
 
 // ── Router: sigmoid-logit-add (kolibri1.py:126-142) ─────────────────────────
@@ -233,9 +312,9 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
   const float scale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(dh)));
 
   // q/k/v projections (separate linears upstream, :64-79).
-  DBuf q = LinearBT(d, dhn, w.q_proj, t);  // [T, Hq*Dh]
-  DBuf k = LinearBT(d, dhn, w.k_proj, t);  // [T, Hkv*Dh]
-  DBuf v = LinearBT(d, dhn, w.v_proj, t);  // [T, Hkv*Dh]
+  DBuf q = LinearBT(d, dhn, w.q_proj, t, DType::kBF16, "attn_q");  // [T, Hq*Dh]
+  DBuf k = LinearBT(d, dhn, w.k_proj, t, DType::kBF16, "attn_k");  // [T, Hkv*Dh]
+  DBuf v = LinearBT(d, dhn, w.v_proj, t, DType::kBF16, "attn_v");  // [T, Hkv*Dh]
 
   // Per-head qk-norm BEFORE RoPE (:107-118): RMSNorm(head_dim) per head.
   // Reshape [T, H*Dh] -> [T*H, Dh] and run the shared RmsNorm with the
@@ -317,7 +396,7 @@ DBuf AttentionBlock(Dev d, const Kolibri1AttnWeights& w, const Kolibri1Params& p
     for (int64_t i = 0; i < n; ++i) s += val(bf[i]);
     std::fprintf(stderr, "[STAGE][CPU] pa_out sum=%.6f first=%.6f\n", s, val(bf[0]));
   }
-  return LinearBT(d, o_in, w.o_proj, t);  // [T, H]
+  return LinearBT(d, o_in, w.o_proj, t, DType::kBF16, "attn_o");  // [T, H]
 }
 
 // ── MoE block (kolibri1.py:126-207) ─────────────────────────────────────────
@@ -337,7 +416,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   const int64_t inter = p.moe_intermediate_size;
 
   // Router logits, f32 (:171-177).
-  DBuf dlog = LinearBTRaw(d, dhn, w.router_gate, t, DType::kF32);
+  DBuf dlog = LinearBTRaw(d, dhn, w.router_gate, t, DType::kF32, "router");
   std::vector<float> logits(static_cast<size_t>(t * e));
   {
     prof::Scope prof("moe_d2h");
@@ -421,7 +500,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
             const_cast<int32_t*>(route.ids.data()));
   // Shared expert: UNGATED, always added (:146-188).
   DBuf shared = ExpertMlp(d, w.shared_experts, dhn, t,
-                          p.shared_expert_intermediate_size);
+                          p.shared_expert_intermediate_size, "shared");
   StageDump("moe_shared", layer, shared, d);
 
   // Routed experts: the CPU-reference per-expert gather/scatter loop (the
@@ -454,7 +533,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
                  sp + static_cast<size_t>(token_rows[s]) * rb, rb);
     }
     DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(), ne,
-                       inter);
+                       inter, "routed");
     {
       char tag[32];
       std::snprintf(tag, sizeof tag, "moe_gath#%d", static_cast<int>(ex));
@@ -737,6 +816,7 @@ ForwardLogits ForwardKolibri1Forward(
   DBuf logits(d, DType::kF32, {n_out, vocab});
   {
     prof::Scope prof("lm_head");
+    gemvprof::Call gc("lm_head", static_cast<uint64_t>(n_out) * vocab * h);
     vt::MatmulBT(d.q, logits.t(), src, lm);
   }
 
@@ -745,6 +825,22 @@ ForwardLogits ForwardKolibri1Forward(
   fl.vocab = vocab;
   fl.device_tensor = logits.t();
   fl.device_storage = logits.ReleaseShared();
+  if (gemvprof::On()) {
+    static bool exit_registered = gemvprof::RegisterExit();
+    (void)exit_registered;
+    if (t > 1) {
+      gemvprof::Reset();  // drop the prefill; count decode steps only
+    } else {
+      static int64_t steps = 0;
+      if (++steps % 16 == 0) {
+        std::fprintf(stderr, "[gemvprof] ---- window after %lld decode steps "
+                             "(cumulative since last reset) ----\n",
+                     static_cast<long long>(steps));
+        gemvprof::Report();
+        gemvprof::Reset();
+      }
+    }
+  }
   if (prof::On()) {
     prof::Acc()["total_forward"] += prof::Now() - prof_t0;
     static int64_t calls = 0;

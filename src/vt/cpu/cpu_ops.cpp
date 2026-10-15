@@ -366,6 +366,10 @@ void MatmulChunked(Tensor& out, const Tensor& a, const Tensor& b) {
 
   Threadpool& tp = CurrentThreadpool();
   tp.Run([&](int ith, int nth) {
+    // SCRATCH (VT_GEMV_PROF): per-worker compute time in the chunk loop.
+    vt::cpu::GemvProfState& gp = vt::cpu::GemvProfStateForOps();
+    const bool prof = gp.on;
+    uint64_t busy = 0;
     if (ith == 0) {
       // Every thread starts at ith, so the first unprocessed chunk is nth.
       tp.ChunkSet(nth);
@@ -423,7 +427,9 @@ void MatmulChunked(Tensor& out, const Tensor& a, const Tensor& b) {
       const int64_t ir1_start = dr1 * ith1;
       const int64_t ir1_end = std::min(ir1_start + dr1, nr1);
 
+      const uint64_t tb0 = prof ? vt::cpu::ProfNowNs() : 0;
       MatmulOneChunk<kBT>(out, a, b, k, n, ir0_start, ir0_end, ir1_start, ir1_end);
+      if (prof) busy += vt::cpu::ProfNowNs() - tb0;
 
       // Same switch: the early break is what makes the collapsed grid a pure
       // static partition. With stealing enabled we keep pulling chunks.
@@ -433,6 +439,7 @@ void MatmulChunked(Tensor& out, const Tensor& a, const Tensor& b) {
 
       current_chunk = tp.ChunkAdd(1);
     }
+    if (prof) gp.busy_ns.fetch_add(busy, std::memory_order_relaxed);
   });
 }
 
