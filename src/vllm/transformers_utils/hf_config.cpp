@@ -37,6 +37,16 @@ std::string GetString(const nlohmann::json& doc, const char* key) {
   return it->get<std::string>();
 }
 
+std::string CanonicalDType(std::string dtype) {
+  if (dtype == "half" || dtype == "fp16" || dtype == "torch.float16")
+    return "float16";
+  if (dtype == "bf16" || dtype == "torch.bfloat16")
+    return "bfloat16";
+  if (dtype == "float" || dtype == "fp32" || dtype == "torch.float32")
+    return "float32";
+  return dtype;
+}
+
 std::vector<std::string> GetStringArray(const nlohmann::json& doc,
                                         const char* key) {
   auto it = doc.find(key);
@@ -665,11 +675,31 @@ HfConfig ParseHfConfigDoc(nlohmann::json doc, const std::string& path,
 
     cfg.rms_norm_eps = GetDouble(text, "rms_norm_eps", 0.0);
     cfg.max_position_embeddings = GetInt(text, "max_position_embeddings", 0);
-    // torch_dtype lives under the text config for nested wrappers, but some
-    // wrappers only declare it at the top level -- fall back to the wrapper doc.
-    cfg.torch_dtype = GetString(text, "torch_dtype");
-    if (cfg.torch_dtype.empty() && &text != &doc) {
-      cfg.torch_dtype = GetString(doc, "torch_dtype");
+    // Modern HF configs declare `dtype`; older ones use `torch_dtype`.
+    // Resolve once for the text model and reject conflicting declarations,
+    // including disagreements between a wrapper and its nested text config.
+    const auto read_dtype = [&cfg, &path](const nlohmann::json& owner,
+                                          const char* key,
+                                          const std::string& source) {
+      const std::string value = CanonicalDType(GetString(owner, key));
+      if (value.empty()) return;
+      if (!cfg.torch_dtype.empty() && cfg.torch_dtype != value) {
+        throw std::runtime_error(
+            "hf_config: conflicting dtype declarations in " + path +
+            " (" + cfg.dtype_source + "=" + cfg.torch_dtype + ", " +
+            source + "=" + value + ")");
+      }
+      if (cfg.torch_dtype.empty()) {
+        cfg.torch_dtype = value;
+        cfg.dtype_source = source;
+      }
+    };
+    read_dtype(text, "dtype", &text == &doc ? "dtype" : "text.dtype");
+    read_dtype(text, "torch_dtype", &text == &doc ? "torch_dtype"
+                                                     : "text.torch_dtype");
+    if (&text != &doc) {
+      read_dtype(doc, "dtype", "dtype");
+      read_dtype(doc, "torch_dtype", "torch_dtype");
     }
   } catch (const nlohmann::json::exception& e) {
     throw std::runtime_error("hf_config: bad field type in " + path + ": " +

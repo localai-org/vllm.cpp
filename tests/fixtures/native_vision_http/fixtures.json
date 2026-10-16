@@ -1,0 +1,114 @@
+[
+  {
+    "name": "orbit",
+    "size": [
+      512,
+      384
+    ],
+    "expected": [
+      "orbit",
+      "731",
+      "red",
+      "circle",
+      "blue",
+      "square"
+    ],
+    "file": "orbit.png",
+    "sha256": "9ed13de9eb9d4c68576714a041d5690ab696ba269597002b71b154c0956aebe5",
+    "sides": {
+      "left": [
+        "red",
+        "circle"
+      ],
+      "right": [
+        "blue",
+        "square"
+      ]
+    },
+    "media_type": "image/png"
+  },
+  {
+    "name": "comet",
+    "size": [
+      512,
+      384
+    ],
+    "expected": [
+      "comet",
+      "924",
+      "green",
+      "square",
+      "yellow",
+      "circle"
+    ],
+    "file": "comet.png",
+    "sha256": "0442d568bf10dffce6afdfd557fe471158a9d8ba87e95ba5029249f599418b02",
+    "sides": {
+      "left": [
+        "green",
+        "square"
+      ],
+      "right": [
+        "yellow",
+        "circle"
+      ]
+    },
+    "media_type": "image/png"
+  },
+  {
+    "name": "comet-unaligned",
+    "size": [
+      513,
+      385
+    ],
+    "expected": [
+      "comet",
+      "924",
+      "green",
+      "square",
+      "yellow",
+      "circle"
+    ],
+    "file": "comet-unaligned.png",
+    "sha256": "847dacad39d04e4f908ffac91bb157c20999c19806adc64ab8c99c0184d69e7f",
+    "sides": {
+      "left": [
+        "green",
+        "square"
+      ],
+      "right": [
+        "yellow",
+        "circle"
+      ]
+    },
+    "media_type": "image/png"
+  },
+  {
+    "name": "comet-jpeg",
+    "size": [
+      512,
+      384
+    ],
+    "expected": [
+      "comet",
+      "924",
+      "green",
+      "square",
+      "yellow",
+      "circle"
+    ],
+    "file": "comet.jpg",
+    "sha256": "710a73d1627a484d72ace66e815196c7c82ccb892a5c159580db34e78e5602b3",
+    "sides": {
+      "left": [
+        "green",
+        "square"
+      ],
+      "right": [
+        "yellow",
+        "circle"
+      ]
+    },
+    "media_type": "image/jpeg"
+  }
+]

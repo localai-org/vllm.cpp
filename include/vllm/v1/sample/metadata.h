@@ -59,6 +59,11 @@ struct SamplingMetadata {
   // from the map (upstream NOTE at gpu_input_batch.py:251-252).
   std::map<int, uint64_t> generators;
 
+  // Accepted output position for each live request. Seeded draws are keyed by
+  // (request seed, position), independent of batch row, chunking and reordering.
+  // Empty is position zero for direct, single-step sampler callers.
+  std::vector<uint64_t> output_token_positions;
+
   // None => no logprobs; 0 => sampled-token logprob only; k => top-k; -1 => all.
   std::optional<int> max_num_logprobs;
 

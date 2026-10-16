@@ -42,6 +42,22 @@ void apply_min_tokens(vt::Queue& q, vt::Tensor& logits,
 void apply_logit_bias(vt::Queue& q, vt::Tensor& logits,
                       const std::map<int, std::map<int32_t, float>>& logit_bias);
 
+// Active GPU sampler's expanded verification rows: allowed-token masking,
+// logit bias, then the min-token stop mask. `cu_num_logits` maps requests to rows;
+// `output_token_positions[r] + row_depth` is the provisional output length.
+void apply_speculative_logit_filters(
+    vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
+    const std::vector<int32_t>& cu_num_logits);
+
+// Full target processor order for verification. Row depth d sees the committed
+// output history followed by exactly d provisional drafts; the anchor at each
+// request's first row is already in the committed history and is not appended.
+// EOS masking uses accepted output positions, rather than an optimistic length.
+void apply_speculative_logits_processors(
+    vt::Queue& q, vt::Tensor& logits, const SamplingMetadata& metadata,
+    const std::vector<int32_t>& cu_num_logits,
+    const std::vector<int32_t>& draft_input_ids);
+
 // MinPLogitsProcessor.apply. Per row: mask tokens whose softmax probability is
 // below min_p[i] * max_prob to -inf. Rows with min_p[i] == 0 are unaffected.
 void apply_min_p(vt::Queue& q, vt::Tensor& logits, const std::vector<float>& min_p);

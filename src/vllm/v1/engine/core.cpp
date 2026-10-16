@@ -78,11 +78,9 @@ std::pair<std::map<int, EngineCoreOutputs>, bool> EngineCore::step() {
   // core.py:504-506 engine_core_outputs = scheduler.update_from_output(...).
   // Our update_from_output returns a single flat EngineCoreOutputs (T0 single
   // client); wrap it in the per-client map to keep the upstream return shape.
-  // Upstream builds dict[client_index, EngineCoreOutputs] only for clients that
-  // produced outputs this step (the dict comprehension over `outputs.items()`),
-  // so a 0-output step (e.g. a finished-req flush) yields an empty map. We drop
-  // the finished_requests-only entries (that DP-signalling field is deferred),
-  // so the entry is present iff there are token outputs.
+  // A chunked prefill can perform a prefix lookup without producing tokens.
+  // Keep that stats-only observation so the frontend does not lose its query
+  // and hit counters. Finished-request-only entries remain deferred.
   EngineCoreOutputs engine_core_outputs =
       scheduler_.update_from_output(scheduler_output, *model_output);
   // Attach this step's scheduler snapshot + the engine_core_timestamp the
@@ -92,7 +90,8 @@ std::pair<std::map<int, EngineCoreOutputs>, bool> EngineCore::step() {
   engine_core_outputs.scheduler_stats = scheduler_.make_stats();
   engine_core_outputs.timestamp = MonotonicSeconds();
   std::map<int, EngineCoreOutputs> outputs_by_client;
-  if (!engine_core_outputs.outputs.empty()) {
+  if (!engine_core_outputs.outputs.empty() ||
+      engine_core_outputs.scheduler_stats.prefix_cache_stats.queries > 0) {
     const int client_index = engine_core_outputs.engine_index;
     outputs_by_client.emplace(client_index, std::move(engine_core_outputs));
   }
@@ -263,7 +262,8 @@ EngineCore::step_with_batch_queue() {
   engine_core_outputs.timestamp = MonotonicSeconds();
 
   std::map<int, EngineCoreOutputs> outputs_by_client;
-  if (!engine_core_outputs.outputs.empty()) {
+  if (!engine_core_outputs.outputs.empty() ||
+      engine_core_outputs.scheduler_stats.prefix_cache_stats.queries > 0) {
     const int client_index = engine_core_outputs.engine_index;
     outputs_by_client.emplace(client_index, std::move(engine_core_outputs));
   }

@@ -1,0 +1,34 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "publication/rebase-binary-identities.json",
+      "sha256": "e95ea4f199598058646df4dd2f31f70dea8202662dcb504e9f36be4f0ff98b3b",
+      "bytes": 1015
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "server": {
+      "path": "<XPU_BUILD>/examples/vllm-server",
+      "bytes": 31372120,
+      "sha256": "ffe4a9f0afc639862064e2968e34828a6238fc75fe260a378df20c0e225c6cd8"
+    },
+    "model_test": {
+      "path": "<XPU_BUILD>/tests/test_xpu_exl3_mtp",
+      "bytes": 32209600,
+      "sha256": "933b5263b3c2a8b3b91b2249fecaa089f76c9ccdb33f195d0fd6dd25c612fcef"
+    },
+    "control": {
+      "path": "<UNCHANGED_CONTROL>",
+      "bytes": 34290464,
+      "sha256": "ff93fa545177d91dc02760c75ae6f711df1ea41528d3a6d4b04e4ac984beb66d"
+    },
+    "onednn": {
+      "path": "<ONEDNN>/lib/libdnnl.so.3.13",
+      "bytes": 43182192,
+      "sha256": "ee8fc42adcf851ea0f8013ebda24f07629f49ca6ed815835a16da45ad718ca20"
+    },
+    "tested_code_head": "11cb381f61b37c9aba88ca63d8f60180e4cf5ef2"
+  }
+}

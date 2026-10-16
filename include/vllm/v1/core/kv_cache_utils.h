@@ -409,8 +409,13 @@ std::vector<BlockHash> hash_request_tokens(
 // full blocks only; a partial trailing block is left unhashed. Request stores
 // this closure as _block_hasher and calls it from update_block_hashes() at
 // construction and after each append.
+// `mtp_shifted_boundary` additionally keys each block on the following token:
+// MTP KV at the final position combines target hidden with that next token's
+// embedding. A full block is deferred until that token is known. The default
+// ordinary hasher and its pinned byte-level keys remain unchanged.
 BlockHasher get_request_block_hasher(int hash_block_size,
-                                     const HashFn& caching_hash_fn);
+                                     const HashFn& caching_hash_fn,
+                                     bool mtp_shifted_boundary = false);
 
 // Resolve (scheduler_block_size, hash_block_size) for a KV cache config.
 // Ported 1:1 from vllm/v1/core/kv_cache_utils.py:626-688

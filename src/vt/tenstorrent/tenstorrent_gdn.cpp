@@ -19,7 +19,7 @@ void GdnPostConvKernel(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
                        Tensor& g_out, Tensor& beta_out, const Tensor& conv,
                        const Tensor& araw, const Tensor& braw,
                        const Tensor& a_log, const Tensor& dt_bias,
-                       const L2NormArgs& args) {
+                       const GdnPostConvArgs& args) {
   TT_OP_TRACE("GdnPostConv");
   VT_CHECK((q_out.dtype == DType::kF32 || q_out.dtype == DType::kBF16) &&
                k_out.dtype == q_out.dtype && v_out.dtype == q_out.dtype,

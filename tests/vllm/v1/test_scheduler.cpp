@@ -34,6 +34,7 @@
 
 #include "vllm/config/scheduler.h"
 #include "vllm/config/speculative.h"
+#include "vllm/entrypoints/model_loader.h"
 #include "vllm/sampling_params.h"
 #include "vllm/v1/core/kv_cache_utils.h"
 #include "vllm/v1/core/sched/scheduler.h"
@@ -1752,6 +1753,145 @@ TEST_CASE("Scheduler.schedule: a text step schedules NO encoder input and frees 
   CHECK(out.total_num_scheduled_tokens == 16);
   // The payload hop is a no-op for a text request rather than absent.
   for (const auto& n : out.scheduled_new_reqs) CHECK(n.mm_features.empty());
+}
+
+TEST_CASE("Native Qwen3.5 encoder admission: scope preserves other engines") {
+  vllm::HfConfig config;
+  config.hidden_size = 5120;
+  config.raw["quantization_config"] = {{"quant_method", "exl3"}};
+  vllm::MultiModalConfig mm;
+  const auto apply = [&](std::string_view arch, vt::DeviceType device) {
+    SchedulerConfig cfg;
+    cfg.max_num_seqs = 4;
+    cfg.max_num_batched_tokens = 1600;
+    vllm::entrypoints::ConfigureNativeQwen3_5EncoderBudget(cfg, config, arch, device, mm);
+    return cfg;
+  };
+  const auto unchanged = [&](const SchedulerConfig& cfg) {
+    CHECK(cfg.max_num_encoder_input_tokens == 2048);
+    CHECK(cfg.encoder_cache_size == 2048);
+    CHECK(cfg.max_num_batched_tokens == 1600);
+  };
+  unchanged(apply("Qwen3_5ForCausalLM", vt::DeviceType::kXPU));
+  unchanged(apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kCPU));
+  mm.language_model_only = true;
+  unchanged(apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU));
+  mm.language_model_only = false;
+  mm.limit_per_prompt["image"] = 0;
+  unchanged(apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU));
+  mm.limit_per_prompt["image"] = 2;
+  config.raw["quantization_config"]["quant_method"] = "gptq";
+  unchanged(apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU));
+  config.raw["quantization_config"]["quant_method"] = "exl3";
+  const auto enabled = apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU);
+  CHECK(enabled.max_num_encoder_input_tokens == 8192);
+  CHECK(enabled.encoder_cache_size == 32768);
+  CHECK(enabled.max_num_batched_tokens == 1600);
+  mm.limit_per_prompt["image"] = 1;
+  const auto single = apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU);
+  CHECK(single.max_num_encoder_input_tokens == 4096);
+  CHECK(single.encoder_cache_size == 16384);
+  config.raw["vision_config"]["patch_size"] = 0;
+  CHECK_THROWS_AS(apply("Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU),
+                  std::runtime_error);
+}
+
+TEST_CASE("Native Qwen3.5 encoder admission: C4 limit queues excess image and text clients") {
+  vllm::HfConfig config;
+  config.raw["quantization_config"]={{"quant_method","exl3"}};
+  vllm::MultiModalConfig mm;
+  const auto resolve=[&](int count, std::string_view arch, vt::DeviceType device) {
+    return vllm::entrypoints::ResolveNativeQwen3_5MaxNumSeqs(count,config,arch,device,mm);
+  };
+  const std::string arch="Qwen3_5ForConditionalGeneration";
+  for (int count : {1,2,4,5,32}) {
+    CAPTURE(count);
+    CHECK(resolve(count,arch,vt::DeviceType::kXPU)==std::min(count,4));
+  }
+  CHECK(resolve(32,"Qwen3_5ForCausalLM",vt::DeviceType::kXPU)==32);
+  CHECK(resolve(32,arch,vt::DeviceType::kCPU)==32);
+  mm.language_model_only=true;
+  CHECK(resolve(32,arch,vt::DeviceType::kXPU)==32);
+  mm.language_model_only=false;
+  mm.limit_per_prompt["image"]=0;
+  CHECK(resolve(32,arch,vt::DeviceType::kXPU)==32);
+  mm.limit_per_prompt["image"]=2;
+  config.raw["quantization_config"]["quant_method"]="gptq";
+  CHECK(resolve(32,arch,vt::DeviceType::kXPU)==32);
+  config.raw["quantization_config"]["quant_method"]="exl3";
+  CHECK_THROWS_AS(resolve(0,arch,vt::DeviceType::kXPU),std::runtime_error);
+  SchedulerConfig cfg;
+  cfg.max_num_seqs=resolve(32,arch,vt::DeviceType::kXPU);
+  cfg.max_num_batched_tokens=1600; cfg.max_model_len=64;
+  vllm::entrypoints::ConfigureNativeQwen3_5EncoderBudget(cfg,config,arch,vt::DeviceType::kXPU,mm);
+  CHECK(cfg.encoder_cache_size==32768);
+  KVCacheConfig kv; kv.num_blocks=128;
+  kv.kv_cache_groups.emplace_back(std::vector<std::string>{"layer"},
+      std::make_shared<FullAttentionSpec>(16,1,1,DType::kF32));
+  Scheduler scheduler(cfg,kv,16,/*enable_caching=*/false);
+  for (int i=0;i<6;++i) {
+    const auto id=std::to_string(i);
+    AddRequest(scheduler,MmRequest(id,16,i%2==0 ?
+        std::vector<vllm::multimodal::MultiModalFeatureSpec>{Item(id,4,4)} :
+        std::vector<vllm::multimodal::MultiModalFeatureSpec>{}));
+  }
+  const auto first=scheduler.schedule();
+  REQUIRE(first.scheduled_new_reqs.size()==4);
+  CHECK(first.total_num_scheduled_tokens==64);
+  CHECK(first.scheduled_encoder_inputs.size()==2);
+  for (const auto& request : first.scheduled_new_reqs)
+    scheduler.finish_requests(request.req_id,RequestStatus::kFinishedStopped);
+  const auto second=scheduler.schedule();
+  REQUIRE(second.scheduled_new_reqs.size()==2);
+  CHECK(second.total_num_scheduled_tokens==32);
+  CHECK(second.scheduled_encoder_inputs.size()==1);
+  for (const auto& request : second.scheduled_new_reqs)
+    scheduler.finish_requests(request.req_id,RequestStatus::kFinishedStopped);
+  CHECK(scheduler.schedule().total_num_scheduled_tokens==0);
+}
+
+TEST_CASE("Native Qwen3.5 encoder admission: maximum images progress through 1600-token chunks") {
+  for (const int concurrency : {1, 4}) {
+    CAPTURE(concurrency);
+    SchedulerConfig cfg;
+    cfg.max_num_seqs = concurrency;
+    cfg.max_num_batched_tokens = 1600;
+    cfg.max_model_len = 16384;
+    vllm::HfConfig config;
+    config.hidden_size = 5120;
+    config.raw["quantization_config"] = {{"quant_method", "exl3"}};
+    vllm::MultiModalConfig mm;
+    mm.limit_per_prompt["image"] = 2;
+    vllm::entrypoints::ConfigureNativeQwen3_5EncoderBudget(
+        cfg, config, "Qwen3_5ForConditionalGeneration", vt::DeviceType::kXPU, mm);
+    KVCacheConfig kv;
+    kv.num_blocks = 10000;
+    kv.kv_cache_groups.emplace_back(std::vector<std::string>{"layer"},
+        std::make_shared<FullAttentionSpec>(16, 1, 1, DType::kF32));
+    Scheduler scheduler(cfg, kv, 16, /*enable_caching=*/false);
+    std::vector<Request*> requests;
+    for (int i = 0; i < concurrency; ++i) {
+      const auto id = std::to_string(i);
+      requests.push_back(AddRequest(scheduler, MmRequest(id, 8400,
+          {Item(id + "-first", 4, 4096), Item(id + "-second", 4110, 4096)})));
+    }
+    int encoded = 0;
+    int scheduled = 0;
+    // Bounded deterministic scheduler steps, no execution thread or host wait.
+    for (int step = 0; step < 24 && scheduled < concurrency * 8400; ++step) {
+      CAPTURE(step);
+      CAPTURE(scheduled);
+      const auto out = scheduler.schedule();
+      REQUIRE(out.total_num_scheduled_tokens > 0);
+      CHECK(out.total_num_scheduled_tokens <= 1600);
+      scheduled += out.total_num_scheduled_tokens;
+      for (const auto& [id, inputs] : out.scheduled_encoder_inputs)
+        encoded += static_cast<int>(inputs.size());
+    }
+    CHECK(scheduled == concurrency * 8400);
+    CHECK(encoded == concurrency * 2);
+    for (const auto* request : requests) CHECK(request->num_computed_tokens == 8400);
+  }
 }
 
 TEST_CASE("Scheduler.schedule: an image request carries mm_features to the worker") {

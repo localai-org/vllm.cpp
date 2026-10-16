@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "scope": "Exact FP16 regression for the source-grounded normalized FP32 divide repair. Minimal R output/statistics verified against original full-shape worker row; no substituted production values.",
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "cases": [
+    {
+      "label": "block26-norm1",
+      "shape": [
+        1,
+        1,
+        1152
+      ],
+      "eps": 1e-06,
+      "files": {
+        "input": {
+          "file": "block26-norm1-input.bin",
+          "sha256": "36c8bd3788b33ab3eae11bd3d447b48e2d16619ff3cbc286f4accbb5e1313ba3",
+          "bytes": 2304
+        },
+        "weight": {
+          "file": "block26-norm1-weight.bin",
+          "sha256": "99e5c41b3ce3df5fe38423ba6f1d8f97bd9b9164b7c0502b94676e79f647a7bf",
+          "bytes": 2304
+        },
+        "bias": {
+          "file": "block26-norm1-bias.bin",
+          "sha256": "cb8a82f135f5f2b4a904c3e3c655e986a1d64f9e08e7738a4c71cc97400949c0",
+          "bytes": 2304
+        },
+        "expected": {
+          "file": "block26-norm1-expected.bin",
+          "sha256": "ac170c79f5aae594d8efea8daabff70e12a5742bd3ff531a8aa435a0e68297bb",
+          "bytes": 2304
+        }
+      },
+      "original_full_shape": [
+        768,
+        1,
+        1152
+      ],
+      "original_row": 68,
+      "original_failing_channel": 955,
+      "minimal_R_matches_original_full_shape_row": true
+    },
+    {
+      "label": "block26-norm2",
+      "shape": [
+        1,
+        1,
+        1152
+      ],
+      "eps": 1e-06,
+      "files": {
+        "input": {
+          "file": "block26-norm2-input.bin",
+          "sha256": "5fc601b67a357ff9adc83d7c3ebd008b4748d063550d47135c015fa4afce05d2",
+          "bytes": 2304
+        },
+        "weight": {
+          "file": "block26-norm2-weight.bin",
+          "sha256": "2a25afaebc0c6e5b9c24ef8c80eeb00e5a190533821502cbd8e76eb552becbeb",
+          "bytes": 2304
+        },
+        "bias": {
+          "file": "block26-norm2-bias.bin",
+          "sha256": "d833e109c62398b81d5182cbcd99e8145b4366dd08969fc7e80791d5876634ff",
+          "bytes": 2304
+        },
+        "expected": {
+          "file": "block26-norm2-expected.bin",
+          "sha256": "56365af5b0b3f321c2469c2e8460c8f1d35ebaec191e660adcb8871b4ad1d8da",
+          "bytes": 2304
+        }
+      },
+      "original_full_shape": [
+        768,
+        1,
+        1152
+      ],
+      "original_row": 78,
+      "original_failing_channel": 649,
+      "minimal_R_matches_original_full_shape_row": true
+    }
+  ]
+}

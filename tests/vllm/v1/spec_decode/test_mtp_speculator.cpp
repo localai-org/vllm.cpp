@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <cstdlib>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -19,10 +22,13 @@
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"
 #include "vllm/model_executor/models/qwen3_5_mtp.h"
+#include "vllm/model_executor/model_loader/safetensors_reader.h"
+#include "vllm/transformers_utils/hf_config.h"
 #include "vllm/v1/attention/backend.h"
 #include "vllm/v1/worker/gpu/spec_decode/mtp/speculator.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
+#include "vt/xpu.h"
 
 namespace {
 
@@ -477,6 +483,282 @@ vt::Tensor Row(const OwnedTensor& owned, int64_t r, int64_t H) {
 }
 }  // namespace
 
+TEST_CASE("B70 GPTQ checkpoint loads its real BF16 MTP draft tensors") {
+  const char* model_dir = std::getenv("VT_B70_GPTQ_MODEL_DIR");
+  if (model_dir == nullptr) {
+    MESSAGE("set VT_B70_GPTQ_MODEL_DIR to run the local B70 checkpoint load");
+    return;
+  }
+  const std::filesystem::path base(model_dir);
+  const HfConfig config = vllm::LoadHfConfig((base / "config.json").string());
+  std::vector<vllm::SafetensorsFile> shards;
+  shards.push_back(vllm::SafetensorsFile::Open(
+      (base / "model-00005-of-00005.safetensors").string()));
+  auto weights = vllm::LoadQwen3_5MTP(
+      shards, config, Qwen3_5MTPKind::kDense);
+  CHECK(weights.NumLayers() == 1);
+  CHECK(weights.fc.dtype == vt::DType::kBF16);
+  CHECK(weights.fc.shape[0] == config.hidden_size);
+  CHECK(weights.fc.shape[1] == 2 * config.hidden_size);
+  CHECK(weights.dense_layers[0].attn.q_proj.shape[0] ==
+        2 * config.num_attention_heads * config.head_dim);
+  CHECK(weights.dense_layers[0].mlp.down_proj.shape[1] ==
+        config.intermediate_size);
+}
+
+TEST_CASE("B70 GPTQ MTP draft runs native XPU paged forward and real head logits") {
+  const char* model_dir = std::getenv("VT_B70_GPTQ_MODEL_DIR");
+  if (model_dir == nullptr) {
+    MESSAGE("set VT_B70_GPTQ_MODEL_DIR to run the local B70 draft forward");
+    return;
+  }
+  const std::filesystem::path base(model_dir);
+  const HfConfig config = vllm::LoadHfConfig((base / "config.json").string());
+  std::vector<vllm::SafetensorsFile> shards;
+  shards.push_back(vllm::SafetensorsFile::Open(
+      (base / "model-00005-of-00005.safetensors").string()));
+  auto weights = vllm::LoadQwen3_5MTP(
+      shards, config, Qwen3_5MTPKind::kDense);
+
+  // Borrow the target-shared embedding and head. Below, the GPTQ draft packs
+  // its own INT4 head while this target FP16 owner remains unchanged.
+  const auto embed_shard = vllm::SafetensorsFile::Open(
+      (base / "model-00001-of-00005.safetensors").string());
+  const auto& src = embed_shard.Get("model.language_model.embed_tokens.weight");
+  REQUIRE(src.dtype == "F16");
+  REQUIRE(src.shape == std::vector<int64_t>{config.vocab_size, config.hidden_size});
+  Qwen3_5DenseWeights target;
+  target.embed_tokens.dtype = vt::DType::kF16;
+  target.embed_tokens.rank = 2;
+  target.embed_tokens.shape[0] = config.vocab_size;
+  target.embed_tokens.shape[1] = config.hidden_size;
+  target.embed_tokens.bytes = vllm::OwnedBytes::Borrow(
+      src.data, src.nbytes, src.mapping);
+  const auto head_shard = vllm::SafetensorsFile::Open(
+      (base / "model-00002-of-00005.safetensors").string());
+  const auto& head = head_shard.Get("lm_head.weight");
+  REQUIRE(head.dtype == "F16");
+  REQUIRE(head.shape == std::vector<int64_t>{config.vocab_size, config.hidden_size});
+  target.lm_head.dtype = vt::DType::kF16;
+  target.lm_head.rank = 2;
+  target.lm_head.shape[0] = config.vocab_size;
+  target.lm_head.shape[1] = config.hidden_size;
+  target.lm_head.nk = true;
+  target.lm_head.bytes = vllm::OwnedBytes::Borrow(
+      head.data, head.nbytes, head.mapping);
+  const Qwen3_5MTPModel draft(weights, target, config);
+
+  vt::Backend& backend = vt::GetBackend(vt::DeviceType::kXPU);
+  vt::Queue queue = backend.CreateQueue();
+  std::vector<uint16_t> input(static_cast<size_t>(config.hidden_size));
+  for (size_t i = 0; i < input.size(); ++i)
+    input[i] = vt::F32ToF16((static_cast<int>(i % 29) - 14) * 0.003F);
+  void* hidden_ptr = backend.Alloc(input.size() * sizeof(uint16_t));
+  backend.Copy(queue, hidden_ptr, input.data(), input.size() * sizeof(uint16_t));
+  vt::Tensor target_hidden = vt::Tensor::Contiguous(
+      hidden_ptr, vt::DType::kF16, queue.device, {1, config.hidden_size});
+
+  constexpr int64_t block_size = 16;
+  const size_t kv_bytes = static_cast<size_t>(2 * block_size *
+      config.num_key_value_heads * config.head_dim * sizeof(uint16_t));
+  void* kv_ptr = backend.Alloc(kv_bytes);
+  backend.Memset(queue, kv_ptr, 0, kv_bytes);
+  vllm::PagedKvCache kv;
+  kv.data = kv_ptr;
+  kv.dtype = vt::DType::kF16;
+  kv.num_blocks = 1;
+  kv.block_size = block_size;
+  kv.num_kv_heads = config.num_key_value_heads;
+  kv.head_size = config.head_dim;
+
+  {
+    const auto output = draft.ForwardPaged(
+        {100}, {0}, target_hidden, MtpMeta(1, 1, 0, block_size), kv, queue);
+    REQUIRE(output.tensor.dtype == vt::DType::kF16);
+    REQUIRE(output.tensor.shape[0] == 1);
+    REQUIRE(output.tensor.shape[1] == config.hidden_size);
+    std::vector<uint16_t> host(static_cast<size_t>(config.hidden_size));
+    backend.Copy(queue, host.data(), output.tensor.data,
+                 host.size() * sizeof(uint16_t));
+    backend.Synchronize(queue);
+    CHECK(std::all_of(host.begin(), host.end(), [](uint16_t x) {
+      return std::isfinite(vt::F16ToF32(x));
+    }));
+    CHECK(std::any_of(host.begin(), host.end(), [](uint16_t x) {
+      return vt::F16ToF32(x) != 0.0F;
+    }));
+    const auto logits = draft.ComputeLogits(output.tensor, queue);
+    REQUIRE(logits.on_device());
+    REQUIRE(logits.rows == 1);
+    REQUIRE(logits.vocab == config.vocab_size);
+    std::vector<float> host_logits(static_cast<size_t>(config.vocab_size));
+    backend.Copy(queue, host_logits.data(), logits.device_tensor.data,
+                 host_logits.size() * sizeof(float));
+    backend.Synchronize(queue);
+    CHECK(std::all_of(host_logits.begin(), host_logits.end(), [](float x) {
+      return std::isfinite(x);
+    }));
+    CHECK(std::any_of(host_logits.begin(), host_logits.end(), [](float x) {
+      return x != 0.0F;
+    }));
+    CHECK(vt::GetReferenceTierHits() == 0);
+
+    // The second draft step consumes the first step's hidden row and KV.
+    // Compare that continuation with one causal two-row forward using the
+    // exact same token and hidden inputs. Both use the real MTP weights.
+    const int32_t next_id = static_cast<int32_t>(
+        std::max_element(host_logits.begin(), host_logits.end()) -
+        host_logits.begin());
+    const auto carry = draft.GatherHiddenRows(output.tensor, {0}, queue);
+    REQUIRE(carry.tensor.dtype == vt::DType::kF16);
+    const auto continued = draft.ForwardPaged(
+        {next_id}, {1}, carry.tensor, MtpMeta(1, 2, 1, block_size), kv,
+        queue);
+    std::vector<uint16_t> continued_host(input.size());
+    backend.Copy(queue, continued_host.data(), continued.tensor.data,
+                 continued_host.size() * sizeof(uint16_t));
+
+    void* pair_hidden_ptr = backend.Alloc(2 * input.size() * sizeof(uint16_t));
+    backend.Copy(queue, pair_hidden_ptr, hidden_ptr,
+                 input.size() * sizeof(uint16_t));
+    backend.Copy(queue,
+                 static_cast<uint8_t*>(pair_hidden_ptr) +
+                     input.size() * sizeof(uint16_t),
+                 output.tensor.data, input.size() * sizeof(uint16_t));
+    const vt::Tensor pair_hidden = vt::Tensor::Contiguous(
+        pair_hidden_ptr, vt::DType::kF16, queue.device,
+        {2, config.hidden_size});
+    void* pair_kv_ptr = backend.Alloc(kv_bytes);
+    backend.Memset(queue, pair_kv_ptr, 0, kv_bytes);
+    vllm::PagedKvCache pair_kv = kv;
+    pair_kv.data = pair_kv_ptr;
+    const auto pair = draft.ForwardPaged(
+        {100, next_id}, {0, 1}, pair_hidden,
+        MtpMeta(2, 2, 0, block_size), pair_kv, queue);
+    std::vector<uint16_t> pair_host(2 * input.size());
+    backend.Copy(queue, pair_host.data(), pair.tensor.data,
+                 pair_host.size() * sizeof(uint16_t));
+    backend.Synchronize(queue);
+    float worst = 0.0F;
+    bool finite = true;
+    for (size_t i = 0; i < input.size(); ++i) {
+      const float a = vt::F16ToF32(continued_host[i]);
+      const float b = vt::F16ToF32(pair_host[input.size() + i]);
+      finite = finite && std::isfinite(a) && std::isfinite(b);
+      worst = std::max(worst, std::abs(a - b));
+    }
+    MESSAGE("real MTP draft KV continuation vs two-row forward max|diff|="
+            << worst);
+    CHECK(finite);
+    CHECK(worst < 0.05F);
+
+    // Red control: the same second step without its preceding KV row must
+    // diverge. Otherwise matching the two-row forward would not prove the
+    // continuation actually read the first step's cache.
+    backend.Memset(queue, pair_kv_ptr, 0, kv_bytes);
+    const auto fresh = draft.ForwardPaged(
+        {next_id}, {1}, carry.tensor, MtpMeta(1, 2, 1, block_size),
+        pair_kv, queue);
+    std::vector<uint16_t> fresh_host(input.size());
+    backend.Copy(queue, fresh_host.data(), fresh.tensor.data,
+                 fresh_host.size() * sizeof(uint16_t));
+    backend.Synchronize(queue);
+    float fresh_worst = 0.0F;
+    for (size_t i = 0; i < input.size(); ++i) {
+      fresh_worst = std::max(fresh_worst,
+          std::abs(vt::F16ToF32(continued_host[i]) -
+                   vt::F16ToF32(fresh_host[i])));
+    }
+    MESSAGE("real MTP draft missing-KV red control max|diff|=" << fresh_worst);
+    CHECK(fresh_worst > 0.0F);
+
+    // The production serving recipe uses FP8 KV. Exercise the same two-step
+    // draft route with an independent E4M3 cache and compare the decoded row
+    // with the FP16-KV result above. This checks FP8 write/read boundaries;
+    // a Python oracle comparison is still required for a quality claim.
+    void* fp8_kv_ptr = backend.Alloc(kv_bytes / 2);
+    backend.Memset(queue, fp8_kv_ptr, 0, kv_bytes / 2);
+    vllm::PagedKvCache fp8_kv = kv;
+    fp8_kv.data = fp8_kv_ptr;
+    fp8_kv.dtype = vt::DType::kI8;
+    fp8_kv.fp8_kind = vt::Fp8KVCacheDataType::kFp8E4M3;
+    const auto fp8_first = draft.ForwardPaged(
+        {100}, {0}, target_hidden, MtpMeta(1, 1, 0, block_size),
+        fp8_kv, queue);
+    const auto fp8_carry = draft.GatherHiddenRows(
+        fp8_first.tensor, {0}, queue);
+    const auto fp8_second = draft.ForwardPaged(
+        {next_id}, {1}, fp8_carry.tensor,
+        MtpMeta(1, 2, 1, block_size), fp8_kv, queue);
+    std::vector<uint16_t> fp8_host(input.size());
+    backend.Copy(queue, fp8_host.data(), fp8_second.tensor.data,
+                 fp8_host.size() * sizeof(uint16_t));
+    backend.Synchronize(queue);
+    float fp8_worst = 0.0F;
+    bool fp8_finite = true;
+    for (size_t i = 0; i < input.size(); ++i) {
+      const float value = vt::F16ToF32(fp8_host[i]);
+      fp8_finite = fp8_finite && std::isfinite(value);
+      fp8_worst = std::max(fp8_worst,
+          std::abs(vt::F16ToF32(continued_host[i]) - value));
+    }
+    MESSAGE("real MTP draft FP8 E4M3 KV vs FP16 KV max|diff|=" << fp8_worst);
+    CHECK(fp8_finite);
+    CHECK(fp8_worst < 0.5F);
+    backend.Free(fp8_kv_ptr);
+    backend.Free(pair_kv_ptr);
+    backend.Free(pair_hidden_ptr);
+
+    // Convert the same checkpoint's BF16 draft linears and a separate FP16
+    // head copy once, exactly as the serving load path does. The target head
+    // owner remains FP16 and must not be replaced by the draft's packed copy.
+    vllm::PackQwen3_5MTPGptqDraft(weights, head);
+    REQUIRE(weights.IsGptq4Draft());
+    CHECK(weights.fc.bytes.empty());
+    CHECK(weights.dense_layers[0].gptq4.attn_qkv.k == config.hidden_size);
+    CHECK(weights.draft_lm_head_gptq4.n == config.vocab_size);
+    CHECK(target.lm_head.dtype == vt::DType::kF16);
+    CHECK(target.lm_head.bytes.data() == head.data);
+    backend.Memset(queue, kv_ptr, 0, kv_bytes);
+    const auto packed_hidden = draft.ForwardPaged(
+        {100}, {0}, target_hidden, MtpMeta(1, 1, 0, block_size), kv, queue);
+    std::vector<uint16_t> packed_hidden_host(host.size());
+    backend.Copy(queue, packed_hidden_host.data(), packed_hidden.tensor.data,
+                 packed_hidden_host.size() * sizeof(uint16_t));
+    backend.Synchronize(queue);
+    float hidden_worst = 0.0F;
+    for (size_t i = 0; i < host.size(); ++i)
+      hidden_worst = std::max(hidden_worst,
+          std::abs(vt::F16ToF32(host[i]) - vt::F16ToF32(packed_hidden_host[i])));
+    MESSAGE("real MTP draft dense/INT4 hidden max|diff|=" << hidden_worst);
+    const auto packed_logits = draft.ComputeLogits(packed_hidden.tensor, queue);
+    std::vector<float> packed_host(static_cast<size_t>(config.vocab_size));
+    backend.Copy(queue, packed_host.data(), packed_logits.device_tensor.data,
+                 packed_host.size() * sizeof(float));
+    backend.Synchronize(queue);
+    CHECK(std::all_of(packed_host.begin(), packed_host.end(),
+                      [](float value) { return std::isfinite(value); }));
+    const int32_t packed_next_id = static_cast<int32_t>(
+        std::max_element(packed_host.begin(), packed_host.end()) -
+        packed_host.begin());
+    const auto packed_head_on_dense = draft.ComputeLogits(output.tensor, queue);
+    std::vector<float> packed_head_host(packed_host.size());
+    backend.Copy(queue, packed_head_host.data(),
+                 packed_head_on_dense.device_tensor.data,
+                 packed_head_host.size() * sizeof(float));
+    backend.Synchronize(queue);
+    const int32_t packed_head_next_id = static_cast<int32_t>(
+        std::max_element(packed_head_host.begin(), packed_head_host.end()) -
+        packed_head_host.begin());
+    MESSAGE("real MTP draft dense/INT4 top1 (dense/packed-head/full-packed): "
+            << next_id << "/" << packed_head_next_id << "/" << packed_next_id);
+    CHECK(vt::GetReferenceTierHits() == 0);
+  }
+  backend.Free(kv_ptr);
+  backend.Free(hidden_ptr);
+  backend.DestroyQueue(queue);
+}
+
 // CORE I5c PROOF: the PAGED MTP forward over a single-request 1-block KV with a
 // trivial slot map reproduces the STANDALONE (dense) forward's logits/argmax —
 // the paged rewrite did not change the head math (mtp-spec-decode.md §5 I5c gate).
@@ -514,6 +796,35 @@ TEST_CASE("i5c paged MTP forward equals standalone (dense head)") {
   CHECK(d < 1e-2);
   for (int64_t t = 0; t < T; ++t)
     CHECK(ArgmaxRow(logits_paged, t, vocab) == ArgmaxRow(logits_std, t, vocab));
+  backend.DestroyQueue(queue);
+}
+
+TEST_CASE("paged MTP keeps the BF16 CPU contract and refuses an FP16 tap") {
+  const HfConfig config = MakeConfig(Qwen3_5MTPKind::kDense);
+  TensorStore store;
+  AddDenseMtp(store, config);
+  const Qwen3_5MTPWeights weights = vllm::LoadQwen3_5MTP(
+      store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense);
+  const Qwen3_5DenseWeights target = MakeDenseTarget(config);
+  const Qwen3_5MTPModel model(weights, target, config);
+
+  vt::Backend& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  vt::Queue queue = backend.CreateQueue();
+  const int64_t T = 4, H = config.hidden_size;
+  OwnedTensor target_f16 = MakeOwned({T, H}, 31);
+  target_f16.dtype = vt::DType::kF16;
+  auto* halves = reinterpret_cast<uint16_t*>(target_f16.bytes.data());
+  for (int64_t i = 0; i < T * H; ++i) {
+    const float value = static_cast<float>(i - 8) * 0.0031F;
+    halves[i] = vt::F32ToF16(value);
+  }
+
+  const std::vector<int32_t> ids = {1, 5, 2, 9};
+  const std::vector<int32_t> positions = {0, 1, 2, 3};
+  const CommonAttentionMetadata am = MtpMeta(T, T, 0, 8);
+  DraftKvPool pool(config, 1, 8);
+  CHECK_THROWS(model.ForwardPaged(
+      ids, positions, target_f16.View(), am, pool.kv, queue));
   backend.DestroyQueue(queue);
 }
 
@@ -713,4 +1024,107 @@ TEST_CASE("i5d-pre LoadedModel::BuildMtpDraft builds a Qwen3.5 draft, null other
       non_mtp.AttachMtpDraftWeights(
           vllm::LoadQwen3_5MTP(store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense)),
       std::runtime_error);
+}
+
+
+TEST_CASE("paged MTP consumes supplied merged embeddings and preserves lookup defaults") {
+  const auto config = MakeConfig(Qwen3_5MTPKind::kDense);
+  TensorStore store;
+  AddDenseMtp(store, config);
+  const auto weights = vllm::LoadQwen3_5MTP(
+      store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense);
+  const auto target = MakeDenseTarget(config);
+  const Qwen3_5MTPModel model(weights, target, config);
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  auto queue = backend.CreateQueue();
+  const int64_t tokens = 4, hidden = config.hidden_size;
+  const std::vector<int32_t> ids{1, 5, 2, 9}, positions{0, 1, 2, 3};
+  auto feedback = MakeOwned({tokens, hidden}, 41);
+  auto merged = MakeOwned({tokens, hidden}, 0);
+  const size_t row_bytes = static_cast<size_t>(hidden) * sizeof(uint16_t);
+  for (size_t row = 0; row < ids.size(); ++row)
+    std::copy_n(target.embed_tokens.bytes.begin() + ids[row] * row_bytes,
+                row_bytes, merged.bytes.begin() + row * row_bytes);
+  const auto initial = merged.bytes;
+  const auto embed_view = merged.View();
+  const auto metadata = MtpMeta(tokens, tokens, 0, 8);
+  DraftKvPool ordinary(config, 1, 8), supplied(config, 1, 8);
+  const auto expected = model.ForwardPaged(ids, positions, feedback.View(), metadata, ordinary.kv, queue);
+  // Out-of-vocabulary placeholders prove the provided rows bypass lookup.
+  const auto actual = model.ForwardPaged({999, 999, 999, 999}, positions,
+      feedback.View(), metadata, supplied.kv, queue, 0, &embed_view);
+  const auto expected_logits = HostLogits(model.ComputeLogits(expected.tensor, queue), backend, queue);
+  const auto actual_logits = HostLogits(model.ComputeLogits(actual.tensor, queue), backend, queue);
+  CHECK(actual_logits == expected_logits);
+  CHECK(merged.bytes == initial);
+  const size_t cache_bytes = 2 * 8 * config.num_key_value_heads * config.head_dim * sizeof(uint16_t);
+  CHECK(std::memcmp(ordinary.kv.data, supplied.kv.data, cache_bytes) == 0);
+  const auto cache_before = std::vector<uint8_t>(static_cast<uint8_t*>(supplied.kv.data),
+                                               static_cast<uint8_t*>(supplied.kv.data) + cache_bytes);
+  auto invalid = embed_view;
+  invalid.shape[0]--;
+  CHECK_THROWS(model.ForwardPaged(ids, positions, feedback.View(), metadata, supplied.kv, queue, 0, &invalid));
+  invalid = embed_view;
+  invalid.dtype = vt::DType::kF16;
+  CHECK_THROWS(model.ForwardPaged(ids, positions, feedback.View(), metadata, supplied.kv, queue, 0, &invalid));
+  invalid = embed_view;
+  invalid.data = nullptr;
+  CHECK_THROWS(model.ForwardPaged(ids, positions, feedback.View(), metadata, supplied.kv, queue, 0, &invalid));
+  CHECK(std::equal(cache_before.begin(), cache_before.end(), static_cast<uint8_t*>(supplied.kv.data)));
+  backend.DestroyQueue(queue);
+}
+
+// The caller merges shifted visual rows before proposal, matching the executed
+// V2 input contract. Only the first forward uses these rows: k>1 must embed
+// its generated tokens normally, rather than reuse a verify-sized image batch.
+TEST_CASE("MTP proposer consumes merged prefill rows only at the first draft step") {
+  const auto config = MakeConfig(Qwen3_5MTPKind::kDense);
+  TensorStore store;
+  AddDenseMtp(store, config);
+  const auto weights = vllm::LoadQwen3_5MTP(
+      store.Resolver(), store.Exists(), config, Qwen3_5MTPKind::kDense);
+  const auto target = MakeDenseTarget(config);
+  const Qwen3_5MTPModel model(weights, target, config);
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  auto queue = backend.CreateQueue();
+  auto feedback = MakeOwned({2, config.hidden_size}, 51);
+  auto merged = MakeOwned({2, config.hidden_size}, 0);
+  const size_t row_bytes = config.hidden_size * sizeof(uint16_t);
+  const std::vector<int32_t> shifted_ids{9, 7};
+  for (size_t row = 0; row < shifted_ids.size(); ++row)
+    std::copy_n(target.embed_tokens.bytes.begin() + shifted_ids[row] * row_bytes,
+                row_bytes, merged.bytes.begin() + row * row_bytes);
+  const auto original = merged.bytes;
+  auto embeds = merged.View();
+  const auto metadata = MtpMeta(2, 2, 0, 8);
+  for (int depth : {1, 3}) {
+    CAPTURE(depth);
+    DraftKvPool expected(config, 1, 8), supplied(config, 1, 8);
+    const auto normal = vllm::v1::MtpProposeDrafts(
+        model, metadata, expected.kv, feedback.View(), {5, 9}, {0, 1},
+        {0}, {7}, {0}, {1}, {0}, 1, depth, 8, 8, queue);
+    const auto actual = vllm::v1::MtpProposeDrafts(
+        model, metadata, supplied.kv, feedback.View(), {999, 999}, {0, 1},
+        {0}, {7}, {0}, {1}, {0}, 1, depth, 8, 8, queue, &embeds);
+    CHECK(actual.draft_tokens == normal.draft_tokens);
+    CHECK(actual.num_draft_decode_forwards == depth - 1);
+    CHECK(supplied.buf == expected.buf);
+    CHECK(merged.bytes == original);
+    if (depth == 1) {
+      DraftKvPool direct(config, 1, 8);
+      CHECK(vllm::v1::MtpProposePrefill(
+          model, metadata, direct.kv, feedback.View(), {999, 999}, {0, 1},
+          {0}, {7}, {0}, {1}, {0}, 1, queue, &embeds) == normal.draft_tokens);
+      CHECK(direct.buf == expected.buf);
+    }
+  }
+  DraftKvPool invalid_pool(config, 1, 8);
+  const auto untouched = invalid_pool.buf;
+  auto invalid = embeds;
+  invalid.shape[0] = 1;
+  CHECK_THROWS(vllm::v1::MtpProposeDrafts(
+      model, metadata, invalid_pool.kv, feedback.View(), {5, 9}, {0, 1},
+      {0}, {7}, {0}, {1}, {0}, 1, 3, 8, 8, queue, &invalid));
+  CHECK(invalid_pool.buf == untouched);
+  backend.DestroyQueue(queue);
 }

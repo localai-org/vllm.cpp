@@ -105,12 +105,18 @@ AsyncGPUModelRunnerOutput::~AsyncGPUModelRunnerOutput() { ReleaseSlot(); }
 
 void AsyncGPUModelRunnerOutput::ReleaseSlot() {
   if (slot_ != nullptr && pool_ != nullptr) {
+    // Cancellation can destroy an output before get_output() waits its DMA.
+    // Reusing either buffer or re-recording the events before that wait races
+    // the old copy with the next batch, even though no caller wants its ids.
+    if (!consumed_) backend_->SynchronizeEvent(slot_->ready_event);
     pool_->Release(slot_);
     slot_ = nullptr;
   }
 }
 
 ModelRunnerOutput AsyncGPUModelRunnerOutput::get_output() {
+  VT_CHECK(!consumed_ && slot_ != nullptr,
+           "async output has already been consumed; sampled tokens may be gathered only once");
   // async_utils.py:48 self.copy_event.synchronize(): the ONE blocking wait, and
   // it waits the COPY queue's event — the main queue was never blocked, so the
   // next step's forward overlaps this copy.

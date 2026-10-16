@@ -18,12 +18,18 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "vllm/multimodal/inputs.h"
 
 namespace vllm::multimodal {
+
+// Shared native Qwen3.5 admission/processor envelope. Encoder rows are the
+// spatially merged patches, not the decoder's chunked-prefill token budget.
+inline constexpr int64_t kNativeQwen3_5MaxImagePixels = 4194304;
+inline constexpr int64_t kNativeQwen3_5MaxImagePatches = 16384;
 
 // The subset of preprocessor_config.json + config.vision_config the image path
 // needs. mean/std/rescale are fused into the (x - shift)/scale normalize.
@@ -42,6 +48,13 @@ struct Qwen3VLProcessorConfig {
   int32_t vision_end_token_id = 151653;
 
   std::string model_id = "Qwen/Qwen3-VL-4B-Instruct";  // for the mm-hash
+  // Additive selection: existing BF16/aligned-image callers keep their contract.
+  bool torchvision_bicubic_resize = false;
+  ImagePixelDType pixel_dtype = ImagePixelDType::kBF16;
+  bool retain_pixel_values_f32 = true;
+  // Empty means broadcast the scalar fields above (legacy callers).
+  std::optional<std::array<double, 3>> channel_mean;
+  std::optional<std::array<double, 3>> channel_std;
 };
 
 // Load from the two HF json files (preprocessor_config.json + config.json).
@@ -81,9 +94,8 @@ class Qwen3VLImageProcessor {
 
   // Preprocess ONE RGB image (HWC uint8, height*width*3) into ImageKwargs:
   // pixel_values [num_patches, channel*temporal*patch*patch] + image_grid_thw,
-  // plus the mm-hash. Assumes the image dimensions require no resize when they
-  // already satisfy smart_resize (the fixture case); a genuine resize path
-  // (bicubic) is deferred — see ProcessImage for the guard.
+  // plus the mm-hash. Native EXL3 selects torchvision_bicubic_resize and FP16;
+  // legacy callers retain the aligned-image guard and BF16 output by default.
   ImageKwargs ProcessImage(const uint8_t* rgb, int64_t height,
                            int64_t width) const;
 

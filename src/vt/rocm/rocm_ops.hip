@@ -138,7 +138,7 @@ void CausalConv1dUpdateKernelRocm(Queue& q, Tensor& out, const Tensor& x, const 
 void GdnPostConvKernelRocm(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
                            Tensor& g_out, Tensor& beta_out, const Tensor& conv,
                            const Tensor& araw, const Tensor& braw, const Tensor& a_log,
-                           const Tensor& dt_bias, const L2NormArgs& args);
+                           const Tensor& dt_bias, const GdnPostConvArgs& args);
 // BACKEND-ROCM-GDN-KERNELS family 4 (rocm_gdn_scan.hip): the gated-delta
 // recurrence over the portable scan (gdn-semantics §7/§8).
 void GdnPrefillKernelRocm(Queue& q, Tensor& out, const Tensor& q_in, const Tensor& k,

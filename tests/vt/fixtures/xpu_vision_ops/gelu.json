@@ -1,0 +1,138 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "torch_xpu_ops_git": "bc294243807debb350dca694049ba7a806dfdceb",
+  "device": "Intel(R) Arc(TM) Pro B70 Graphics",
+  "operator": "torch.nn.functional.gelu",
+  "cases": [
+    {
+      "shape": [
+        3,
+        4304
+      ],
+      "dtype": "float16",
+      "approximate": "tanh",
+      "repeat_exact": true,
+      "files": {
+        "input": {
+          "file": "gelu-0-input.bin",
+          "sha256": "22cbb945defc7b1642fd285d860d661f6b9b81c41e4a24debaf9e85798254a09"
+        },
+        "expected": {
+          "file": "gelu-0-expected.bin",
+          "sha256": "07a8fe6ac9dbf77eb934d041f1305877393a63a468aec42e3e63bf64edb1b41c"
+        }
+      }
+    },
+    {
+      "shape": [
+        3,
+        72
+      ],
+      "dtype": "bfloat16",
+      "approximate": "tanh",
+      "repeat_exact": true,
+      "files": {
+        "input": {
+          "file": "gelu-1-input.bin",
+          "sha256": "3919167590a6843b133029f350cce55214aa3fdb2da1c1ca2ed3cfa8f1e33ed2"
+        },
+        "expected": {
+          "file": "gelu-1-expected.bin",
+          "sha256": "7cb6f4877f6fab96ce5361c8cdada879e2d6d0a6591e558b85f253e804e9fc39"
+        }
+      }
+    },
+    {
+      "shape": [
+        3,
+        37
+      ],
+      "dtype": "float32",
+      "approximate": "tanh",
+      "repeat_exact": true,
+      "files": {
+        "input": {
+          "file": "gelu-2-input.bin",
+          "sha256": "d834b5946dcb48a5c4731228c629bfd0a70a6c710d4e7baa419241da35bc189f"
+        },
+        "expected": {
+          "file": "gelu-2-expected.bin",
+          "sha256": "b496ebaa5968d2dc7920e06793fdef777a6316142126f989a6ef5b6b42b74077"
+        }
+      }
+    },
+    {
+      "shape": [
+        3,
+        4304
+      ],
+      "dtype": "float16",
+      "approximate": "none",
+      "repeat_exact": true,
+      "files": {
+        "input": {
+          "file": "gelu-3-input.bin",
+          "sha256": "22cbb945defc7b1642fd285d860d661f6b9b81c41e4a24debaf9e85798254a09"
+        },
+        "expected": {
+          "file": "gelu-3-expected.bin",
+          "sha256": "9c9a9ce5501502283ff8b9770e5c7ec0beb40e4e23f6e77899c3e710637c4d0c"
+        }
+      }
+    },
+    {
+      "shape": [
+        3,
+        72
+      ],
+      "dtype": "bfloat16",
+      "approximate": "none",
+      "repeat_exact": true,
+      "files": {
+        "input": {
+          "file": "gelu-4-input.bin",
+          "sha256": "3919167590a6843b133029f350cce55214aa3fdb2da1c1ca2ed3cfa8f1e33ed2"
+        },
+        "expected": {
+          "file": "gelu-4-expected.bin",
+          "sha256": "a02c4f32d85aadea4293c05c72b8e3fd93f00f645a47a0059d4bdbc48aae137c"
+        }
+      }
+    },
+    {
+      "shape": [
+        3,
+        37
+      ],
+      "dtype": "float32",
+      "approximate": "none",
+      "repeat_exact": true,
+      "files": {
+        "input": {
+          "file": "gelu-5-input.bin",
+          "sha256": "d834b5946dcb48a5c4731228c629bfd0a70a6c710d4e7baa419241da35bc189f"
+        },
+        "expected": {
+          "file": "gelu-5-expected.bin",
+          "sha256": "57407b9dfa3ba1ddfbe7462b713a57de2a6f3c226d9894eb590bce52aa072d46"
+        }
+      }
+    }
+  ],
+  "contract": {
+    "float16": {
+      "rel_l2": 0.0003,
+      "max_abs": 0.002
+    },
+    "bfloat16": {
+      "rel_l2": 0.003,
+      "max_abs": 0.03125
+    },
+    "float32": {
+      "rel_l2": 1e-05,
+      "max_abs": 1e-05
+    }
+  }
+}

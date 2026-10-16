@@ -225,3 +225,27 @@ TEST_CASE("apply_grammar_bitmask: multi-word vocab indexes the right word/bit") 
   auto out = sampler.forward(q, tl, sm);
   CHECK(out.sampled_token_ids[0][0] == K);
 }
+
+TEST_CASE("apply_grammar_bitmask: mixed MTP batch masks every verify and bonus row") {
+  constexpr int vocab = 16;
+  // Dense order: plain k2 (rows 0..2), B k1 (3..4), A k3 (5..8).
+  std::vector<float> logits(9 * vocab, 3.0f);
+  Tensor tl = Logits(logits, 9, vocab);
+  GrammarOutput go;
+  go.structured_output_request_ids = {"A", "B"};
+  go.grammar_bitmask = ZeroBitmask(6, vocab);
+  for (int row = 0; row < 6; ++row) Allow(go.grammar_bitmask, row, row + 1);
+  const std::map<std::string, std::vector<int32_t>> spec = {
+      {"plain", {10, 11}}, {"B", {12}}, {"A", {13, 14, 15}}};
+  Queue q = Q();
+  apply_grammar_bitmask(go, {"plain", "B", "A"}, spec, q, tl);
+  const std::vector<int> allowed{-1, -1, -1, 5, 6, 1, 2, 3, 4};
+  for (int row = 0; row < 9; ++row)
+    for (int token = 0; token < vocab; ++token) {
+      const float value = logits[row * vocab + token];
+      if (allowed[row] == -1 || allowed[row] == token)
+        CHECK(value == 3.0f);
+      else
+        CHECK(IsNegInf(value));
+    }
+}

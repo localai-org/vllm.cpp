@@ -129,6 +129,8 @@ struct CachedRequestState {
   // request that decodes for a thousand steps still costs one int here.
   int64_t mrope_position_delta = 0;
 
+  std::vector<std::string> prompt_block_hashes;
+
   // Build a CachedRequestState from the MRV2 NewRequestData contract. The seed
   // is prefill_token_ids (= all_token_ids): prompt_token_ids is the prompt,
   // output_token_ids is the tail of prefill_token_ids beyond the prompt. This

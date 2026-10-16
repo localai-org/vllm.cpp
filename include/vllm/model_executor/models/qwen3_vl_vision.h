@@ -25,9 +25,12 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "vt/backend.h"
+#include "vt/tensor.h"
 
 namespace vllm::multimodal {
 
@@ -113,6 +116,13 @@ struct Qwen3VLVisionCapture {
   std::vector<float> block0_out;                  // [L, hidden]
   std::vector<float> merger_out;                  // [Nmerge, out_hidden]
   std::vector<std::vector<float>> deepstack_out;  // 3 x [Nmerge, out_hidden]
+  // Optional typed-route attribution boundaries, empty in the legacy helper.
+  std::vector<float> merger_input, merger_norm_out, merger_fc1_out, merger_gelu_out;
+  std::vector<std::vector<float>> block_outputs;  // typed-route attribution only
+  // Empty preserves historical all-block output capture. Nonempty captures
+  // only these output slots and their suboperations; production passes nullptr.
+  std::vector<int64_t> selected_blocks;
+  std::map<int64_t, std::map<std::string, std::vector<float>>> block_boundaries;
 };
 
 // Runs the tower on one image. pixel_values is [L, C*tp*p*p] host bf16 bits
@@ -136,8 +146,67 @@ std::vector<float> Qwen3VLVisionForward(const std::vector<uint16_t>& pixel_value
 // BIT-IDENTICAL to the host overload (same bf16 weight bytes, same GEMM order).
 struct Qwen3VLVisionDeviceWeights;
 
+// The default preserves the existing BF16 tower. Explicit XPU FP16 preparation
+// numerically converts checkpoint BF16 values and uploads a typed position
+// table as well; it is not accepted by the legacy BF16-input/host-output forward
+// below. Backend ownership must outlive the prepared weights.
 std::shared_ptr<Qwen3VLVisionDeviceWeights> PrepareVisionDeviceWeights(
-    const Qwen3VLVisionWeights& host_w, const Qwen3VLVisionConfig& cfg, vt::Backend& backend);
+    const Qwen3VLVisionWeights& host_w, const Qwen3VLVisionConfig& cfg, vt::Backend& backend,
+    vt::DType execution_dtype = vt::DType::kBF16);
+
+// Fixed-grid, queue-bound FP16 XPU scratch, reused across images and all blocks.
+// The backend must outlive the workspace and every output. Destroying scratch
+// waits its latest encode event; ordinary forward submission is asynchronous.
+struct Qwen3VLVisionWorkspace;
+std::shared_ptr<Qwen3VLVisionWorkspace> PrepareVisionWorkspace(
+    const std::array<int64_t,3>& grid_thw, const Qwen3VLVisionConfig& cfg,
+    vt::Backend& backend, vt::Queue& queue);
+
+// Owned [visual_tokens,out_hidden_size] FP16 device output. Before consumption
+// on another queue call WaitOn; after submitting each consumer call RecordUse.
+// The shared owner retains weights/output until encode and all consumers finish.
+// It does not retain scratch; independent outputs survive workspace reuse.
+class Qwen3VLVisionDeviceOutput {
+ public:
+  struct State;
+  explicit Qwen3VLVisionDeviceOutput(std::shared_ptr<State> state);
+  const vt::Tensor& tensor() const;
+  void WaitOn(vt::Queue& queue) const;
+  void RecordUse(vt::Queue& queue) const;
+ private:
+  std::shared_ptr<State> state_;
+};
+
+// Native image-only route (t=1), without DeepStack. Input is a contiguous FP16
+// device tensor, retained by the caller through encode completion. Optional
+// captures download intermediates for tests; nullptr performs no readbacks.
+Qwen3VLVisionDeviceOutput Qwen3VLVisionForwardDevice(
+    const vt::Tensor& pixel_values,
+    std::shared_ptr<const Qwen3VLVisionDeviceWeights> weights,
+    Qwen3VLVisionWorkspace& workspace, vt::Backend& backend, vt::Queue& queue,
+    Qwen3VLVisionCapture* capture = nullptr);
+
+// Synchronous diagnostic only: run one existing typed block on an exact device
+// input, using the production block implementation and workspace RoPE. Does
+// not accept test operands in serving or replace any production activation.
+// Optional reference outputs replace scratch AFTER recording each native
+// stage, isolating the next operator from upstream drift. Caller owns tensors.
+void Qwen3VLVisionReplayBlockDevice(
+    const vt::Tensor& block_input,
+    std::shared_ptr<const Qwen3VLVisionDeviceWeights> weights,
+    Qwen3VLVisionWorkspace& workspace, vt::Backend& backend, vt::Queue& queue,
+    int64_t block, Qwen3VLVisionCapture& capture,
+    const std::map<std::string, vt::Tensor>* reference_outputs = nullptr);
+
+// Synchronous diagnostic of the shared typed merger on an exact tower output.
+// Optional norm/fc1/gelu references replace scratch AFTER native capture to
+// isolate the following operator. Normal inference cannot supply references.
+void Qwen3VLVisionReplayMergerDevice(
+    const vt::Tensor& merger_input,
+    std::shared_ptr<const Qwen3VLVisionDeviceWeights> weights,
+    Qwen3VLVisionWorkspace& workspace, vt::Backend& backend, vt::Queue& queue,
+    Qwen3VLVisionCapture& capture,
+    const std::map<std::string, vt::Tensor>* reference_outputs = nullptr);
 
 std::vector<float> Qwen3VLVisionForward(const std::vector<uint16_t>& pixel_values_bf16,
                                         const std::array<int64_t, 3>& grid_thw,

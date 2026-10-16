@@ -1,0 +1,28 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "publication/control-sentinel-rebase.json",
+      "sha256": "f5bafaa0b8b426f02c396755cf5ec8dfe5a660ae2991a46759f158b1dd6e328a",
+      "bytes": 114704
+    },
+    {
+      "artifact_id": "publication/contribution-sentinel-rebase.json",
+      "sha256": "bb992567ef0e5c20d5fbdfed96d16b9c47a5a163c432bbfbe81891ca70fc89e5",
+      "bytes": 114724
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "status": "PASS",
+    "control_ids_sha256": "21e1040929c2d570d34639efc6ef902d56538ea31dfd017f6dad4344c4a9e4e0",
+    "contribution_ids_sha256": "21e1040929c2d570d34639efc6ef902d56538ea31dfd017f6dad4344c4a9e4e0",
+    "output_ids": 256,
+    "same_non_timing_cycles": true,
+    "cycles": 113,
+    "same_launch": true,
+    "control_wall_s": 8.169094966,
+    "contribution_wall_s": 8.174623742,
+    "interpretation": "One serial native continuity pair; timing is not a speedup, a HTTP result or a Python-parity gate."
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "device": "Intel(R) Arc(TM) Pro B70 Graphics",
+  "class": "vllm.model_executor.layers.rotary_embedding.common.ApplyRotaryEmb",
+  "selected_method": "CustomOp.forward_xpu",
+  "is_neox_style": true,
+  "enable_fp32_compute": false,
+  "contract": {
+    "rel_l2": 0,
+    "max_abs": 0,
+    "bytes": "exact"
+  },
+  "cases": [
+    {
+      "shape": [
+        3,
+        2,
+        8
+      ],
+      "files": {
+        "q": {
+          "file": "vision-rope-0-q.bin",
+          "sha256": "fdb91f01ecff54ca2d168f2458c5195b3d2430a868eef37bb262e466049296b5"
+        },
+        "k": {
+          "file": "vision-rope-0-k.bin",
+          "sha256": "1dcea3bc946c89caec193ebd005ca7971bdce79f8f928d86c6d6b5ad3451bd78"
+        },
+        "cache": {
+          "file": "vision-rope-0-cache.bin",
+          "sha256": "0f9a4f0432f74a42ee735def9e73633d46d665bb00091ad61d9e596dd96eff8c"
+        },
+        "q_out": {
+          "file": "vision-rope-0-q_out.bin",
+          "sha256": "dddf31441042474b00eb8dd16bd9ba38b86b6b27996d6728d1b741abbeb1e9ee"
+        },
+        "k_out": {
+          "file": "vision-rope-0-k_out.bin",
+          "sha256": "c0840e85e5e3cfecb2af86e1d91c8efac94ac76ed9f8a5d1f6be2a466f032ed2"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "shape": [
+        2,
+        1,
+        10
+      ],
+      "files": {
+        "q": {
+          "file": "vision-rope-1-q.bin",
+          "sha256": "bd17f85706f31568cbe73d068bad84208fe8f1ced0faa2f57c6f3726d3da2feb"
+        },
+        "k": {
+          "file": "vision-rope-1-k.bin",
+          "sha256": "67ecd3cfcf0b8e74dd05f97a1ca0c50dfd23cfda7660f96dfc6e02bac3c59c1a"
+        },
+        "cache": {
+          "file": "vision-rope-1-cache.bin",
+          "sha256": "7d104de22f1647dfdb5b2c3389208762838b05c58656234ecb0629feb1c6eabc"
+        },
+        "q_out": {
+          "file": "vision-rope-1-q_out.bin",
+          "sha256": "10272ffd749d3a0ac153b595bc139d4f03762813b6d20daa2ba55ac8b1671311"
+        },
+        "k_out": {
+          "file": "vision-rope-1-k_out.bin",
+          "sha256": "6cc7ce15c8a08290b2ff95cbbdf1141716b679e6b35fb37f278a9984b5021a8c"
+        }
+      },
+      "repeat_exact": true
+    },
+    {
+      "shape": [
+        5,
+        16,
+        72
+      ],
+      "files": {
+        "q": {
+          "file": "vision-rope-2-q.bin",
+          "sha256": "84100b94a7194c2789f4a227e4f1518aed32d3b7f72c06f8b34085cc6a7dfec5"
+        },
+        "k": {
+          "file": "vision-rope-2-k.bin",
+          "sha256": "a6288e2c4a955360da977d664c05e29c54837c16c6383a31fab6c99873da768b"
+        },
+        "cache": {
+          "file": "vision-rope-2-cache.bin",
+          "sha256": "8499e47a8d7f599705cf5b3da71743440735d2abd6932429ab0d9cc1f53a9302"
+        },
+        "q_out": {
+          "file": "vision-rope-2-q_out.bin",
+          "sha256": "80e8db7ae21895f0117a9b7afe2f0c9de373dfffeb5470b7074e57cd372fbc12"
+        },
+        "k_out": {
+          "file": "vision-rope-2-k_out.bin",
+          "sha256": "8b5213a080100a557e5e2113cf3ab885c50b673ff51ecde5d61c10704167c2ba"
+        }
+      },
+      "repeat_exact": true
+    }
+  ]
+}

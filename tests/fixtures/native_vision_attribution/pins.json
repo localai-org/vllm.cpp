@@ -1,0 +1,86 @@
+{
+  "scope": "Frozen external alpha attribution artifact identities only; no tensors, paths, outcome waiver or changed numerical gates.",
+  "first_mtp_metadata": [
+    {
+      "file": "prefix-0.json",
+      "sha256": "89c8d9c6e30d9963c3d758ab0b00247605ce41d23768191689b1959a92c129cf",
+      "payload_bytes": 158476288
+    },
+    {
+      "file": "prefix-1.json",
+      "sha256": "ee9324975c1de6177a4c1a55f5f1b81c10f8b3f8e1ad48ab5fdd90d65df381ca",
+      "payload_bytes": 166414336
+    },
+    {
+      "file": "prefix-2.json",
+      "sha256": "643642500f28fa585e68978ed07806a4e7e48505be56f0e2a0af99ab69e39c45",
+      "payload_bytes": 158476288
+    },
+    {
+      "file": "prefix-3.json",
+      "sha256": "474e2bd1e5ec2d549daa3e2b0ddfcbb75218566cff39d6409c15b23f96498a99",
+      "payload_bytes": 162482176
+    }
+  ],
+  "adjacent_metadata": [
+    {
+      "file": "prefix-0.json",
+      "sha256": "11f8e82413271dd67413af5bea09df963913a647ac26c04fb886c8ecf711beb2",
+      "payload_bytes": 160114688
+    },
+    {
+      "file": "prefix-1.json",
+      "sha256": "f4e7440b1d4828fc551068b3e43b6b44408d5aa47871fb20651ef5fec638300f",
+      "payload_bytes": 160147456
+    },
+    {
+      "file": "prefix-2.json",
+      "sha256": "4e6b1e5929c7a91024865aa1047e6641aa27e599edbeaf6cb6c128c40e386532",
+      "payload_bytes": 156182528
+    },
+    {
+      "file": "prefix-3.json",
+      "sha256": "eaeab4a4f49a42db9da9d83af19fdc3f237ad2530e79e6c2672f9e8a80d0e409",
+      "payload_bytes": 156215296
+    }
+  ],
+  "original_last_prefix_metadata": [
+    {
+      "file": "prefix-0.json",
+      "sha256": "d8f7c643f4c0da1137d9ed72e4221cbd1f7fa44eab41d17662654f5c024b7326",
+      "payload_bytes": 158181376
+    },
+    {
+      "file": "prefix-1.json",
+      "sha256": "03d6a3b6b577eed7ade39d33aa039c4fce61c207ee9742d25e4da8d6b4e4cede",
+      "payload_bytes": 160147456
+    },
+    {
+      "file": "prefix-2.json",
+      "sha256": "b5251de7e2fbbf6d5d9a040cee3a99c4e749f673a95a7ff16e71c0c095219d21",
+      "payload_bytes": 156215296
+    }
+  ],
+  "original_mixed_result_sha256": "2390d071a9d3ea2e141497d4829db43eefa6d815b4cdfa393f1ad9f643614b70",
+  "checkpoint": {
+    "index_sha256": "c3111b8308db5396b1eed054967cf7dfbfc2508764f8813aebbaaf4a05860bc2",
+    "whole_checkpoint_shards": [
+      {
+        "file": "model-00001-of-00002.safetensors",
+        "bytes": 8471336006,
+        "sha256": "b1e7fcc53a2bb211460ebb65e329cdb7a5af8bd819dcbcd89e06f0ccc041e590"
+      },
+      {
+        "file": "model-00002-of-00002.safetensors",
+        "bytes": 8389473789,
+        "sha256": "c6d72f51b0cd99510239b264fef37bc26c950e6843f35421ce4830d4f87f8c05"
+      }
+    ]
+  },
+  "derived_from": {
+    "EXL3_XPU_VISION_ACTUAL_MTP_STATE_CAPTURE_2026-10-09.json": "66210236736b00ed76c91da43d57cffc906dcee4711b20f25643ea8cf37c47f8",
+    "EXL3_XPU_VISION_ADJACENT_PREFIX_STATE_CAPTURE_2026-10-09.json": "c551cc1f1510bfefb700498234fe23736b2d97583f1388ff5d4fa44dbf8c7918",
+    "EXL3_XPU_VISION_MIXED_IDENTICAL_PREFIX_2026-10-09.json": "fad8fc2099b06f4e5588c8f9515847268ff370cf646f9a159a5471503d505752",
+    "EXL3_XPU_VISION_FULL_TARGET_ADJACENT_REPLAY_2026-10-09.json": "667de1fde437759f96410b8b42322c6ad80a94888b7ad1e9725018570da75081"
+  }
+}

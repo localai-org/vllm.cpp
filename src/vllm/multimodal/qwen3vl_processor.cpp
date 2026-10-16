@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vllm/multimodal/hasher.h"
+#include "vllm/multimodal/torchvision_resize.h"
 #include "vt/dtype.h"
 
 namespace vllm::multimodal {
@@ -36,8 +37,24 @@ Qwen3VLProcessorConfig LoadQwen3VLProcessorConfig(
   cfg.temporal_patch_size =
       pp.value("temporal_patch_size", cfg.temporal_patch_size);
   cfg.merge_size = pp.value("merge_size", cfg.merge_size);
-  if (pp.contains("image_mean")) cfg.image_mean = pp["image_mean"][0].get<double>();
-  if (pp.contains("image_std")) cfg.image_std = pp["image_std"][0].get<double>();
+  auto channels = [](const nlohmann::json& value) -> std::array<double, 3> {
+    if (value.is_number()) {
+      const double scalar = value.get<double>();
+      return {scalar, scalar, scalar};
+    }
+    if (!value.is_array() || value.size() != 3)
+      throw std::runtime_error("Qwen image processor: normalization must be scalar or three RGB channels");
+    return value.get<std::array<double, 3>>();
+  };
+  if (pp.contains("image_mean")) {
+    cfg.channel_mean = channels(pp["image_mean"]);
+    cfg.image_mean = (*cfg.channel_mean)[0];
+  }
+  if (pp.contains("image_std")) {
+    cfg.channel_std = channels(pp["image_std"]);
+    cfg.image_std = (*cfg.channel_std)[0];
+  }
+  cfg.rescale_factor = pp.value("rescale_factor", cfg.rescale_factor);
   if (pp.contains("size")) {
     const auto& sz = pp["size"];
     cfg.min_pixels = sz.value("shortest_edge", cfg.min_pixels);
@@ -62,10 +79,18 @@ Qwen3VLProcessorConfig LoadQwen3VLProcessorConfig(
 
 std::array<int64_t, 2> SmartResize(int64_t height, int64_t width, int64_t factor,
                                    int64_t min_pixels, int64_t max_pixels) {
+  // Input geometry errors are distinct from a misconfigured processor, so
+  // the image chat route can report them as client errors before scheduling.
+  if (height <= 0 || width <= 0 || height > 32768 || width > 32768 ||
+      height * width > 16777216)
+    throw std::invalid_argument("smart_resize: invalid image geometry");
+  if (factor <= 0 || factor > 32768 || min_pixels <= 0 ||
+      max_pixels < min_pixels || max_pixels > 16777216)
+    throw std::runtime_error("smart_resize: invalid pixel budget");
   const int64_t hi = std::max(height, width);
   const int64_t lo = std::min(height, width);
   if (lo <= 0 || static_cast<double>(hi) / static_cast<double>(lo) > 200.0) {
-    throw std::runtime_error("smart_resize: aspect ratio must be < 200");
+    throw std::invalid_argument("smart_resize: aspect ratio must be < 200");
   }
   auto round_by = [factor](int64_t v) -> int64_t {
     // python round(v/factor)*factor with round-half-to-even (banker's rounding).
@@ -101,19 +126,29 @@ ImageKwargs Qwen3VLImageProcessor::ProcessImage(const uint8_t* rgb,
   const int patch = cfg_.patch_size;
   const int merge = cfg_.merge_size;
   const int tp = cfg_.temporal_patch_size;
+  if (!rgb || patch <= 0 || patch > 256 || merge <= 0 || merge > 32 ||
+      tp <= 0 || tp > 16 ||
+      (cfg_.pixel_dtype != ImagePixelDType::kBF16 && cfg_.pixel_dtype != ImagePixelDType::kF16))
+    throw std::runtime_error("Qwen image processor: invalid RGB/patch geometry/dtype");
   const int64_t factor = static_cast<int64_t>(patch) * merge;
 
   const auto rs = SmartResize(height, width, factor, cfg_.min_pixels,
                               cfg_.max_pixels);
   const int64_t rh = rs[0], rw = rs[1];
+  if (rh <= 0 || rw <= 0 || rh > 32768 || rw > 32768 ||
+      rh * rw > cfg_.max_pixels || rh * rw > 16777216)
+    throw std::runtime_error("Qwen image processor: resized image exceeds pixel budget");
+  std::vector<uint8_t> resized;
   if (rh != height || rw != width) {
-    // A genuine bicubic resize is required. That path (torchvision bicubic) is
-    // deferred to a later increment; the M1 gate uses already-conformant images.
-    throw std::runtime_error(
+    // Native vision explicitly selects the pinned torchvision v2 CPU path.
+    // Existing aligned-image callers retain their previous refusal contract.
+    if (!cfg_.torchvision_bicubic_resize) throw std::runtime_error(
         "Qwen3VLImageProcessor: image requires resize (" +
         std::to_string(width) + "x" + std::to_string(height) + " -> " +
         std::to_string(rw) + "x" + std::to_string(rh) +
         "); bicubic resize path is deferred (M1 uses conformant images)");
+    resized = TorchvisionResizeBicubicRgb(rgb, height, width, rh, rw);
+    rgb = resized.data();
   }
 
   const int64_t grid_h = rh / patch;
@@ -123,25 +158,45 @@ ImageKwargs Qwen3VLImageProcessor::ProcessImage(const uint8_t* rgb,
   const int64_t Gw = grid_w / merge;
   const int64_t num_patches = grid_t * grid_h * grid_w;
   const int64_t feat = static_cast<int64_t>(3) * tp * patch * patch;
+  if (num_patches > 100663296 / feat)
+    throw std::runtime_error("Qwen image processor: patch allocation budget exceeded");
 
   // Fused rescale+normalize shift/scale: (x - mean/rescale) / (std/rescale).
   // For mean=std=0.5, rescale=1/255 this is exactly (x - 127.5f) / 127.5f (f32).
-  const float shift = static_cast<float>(cfg_.image_mean / cfg_.rescale_factor);
-  const float scale = static_cast<float>(cfg_.image_std / cfg_.rescale_factor);
+  if (!std::isfinite(cfg_.rescale_factor) || cfg_.rescale_factor <= 0.0)
+    throw std::runtime_error("Qwen image processor: invalid rescale factor");
+  std::array<float, 3> shifts{}, scales{};
+  const float inverse_rescale = static_cast<float>(1.0 / cfg_.rescale_factor);
+  for (size_t c = 0; c < 3; ++c) {
+    // The pinned Torch backend first creates float32 channel tensors, then
+    // multiplies by inverse rescale; keep that rounding boundary explicitly.
+    shifts[c] = cfg_.channel_mean
+        ? static_cast<float>((*cfg_.channel_mean)[c]) * inverse_rescale
+        : static_cast<float>(cfg_.image_mean / cfg_.rescale_factor);
+    scales[c] = cfg_.channel_std
+        ? static_cast<float>((*cfg_.channel_std)[c]) * inverse_rescale
+        : static_cast<float>(cfg_.image_std / cfg_.rescale_factor);
+    if (!std::isfinite(shifts[c]) || !std::isfinite(scales[c]) || scales[c] <= 0.0f)
+      throw std::runtime_error("Qwen image processor: invalid normalization channels");
+  }
 
   ImageKwargs out;
   out.num_patches = num_patches;
   out.patch_feature_dim = feat;
   out.image_grid_thw = {grid_t, grid_h, grid_w};
-  out.pixel_values_f32.resize(static_cast<size_t>(num_patches * feat));
-  out.pixel_values_bf16.resize(static_cast<size_t>(num_patches * feat));
+  out.pixel_dtype = cfg_.pixel_dtype;
+  const size_t values = static_cast<size_t>(num_patches * feat);
+  if (cfg_.retain_pixel_values_f32) out.pixel_values_f32.resize(values);
+  auto& production = cfg_.pixel_dtype == ImagePixelDType::kF16
+      ? out.pixel_values_f16 : out.pixel_values_bf16;
+  production.resize(values);
 
   // Patchify with the exact transformers permute ordering
   // (_preprocess :196-217). Row index and column index (temporal duplicates):
   //   r = ((gh*Gw + gw)*merge + mh)*merge + mw
   //   k = ((c*tp + t)*patch + ph)*patch + pw
   //   src pixel  H = (gh*merge + mh)*patch + ph ; W = (gw*merge + mw)*patch + pw
-  const int64_t rowstride = width * 3;  // HWC uint8 source stride
+  const int64_t rowstride = rw * 3;  // resized HWC uint8 source stride
   for (int64_t gh = 0; gh < Gh; ++gh) {
     for (int64_t gw = 0; gw < Gw; ++gw) {
       for (int64_t mh = 0; mh < merge; ++mh) {
@@ -154,13 +209,14 @@ ImageKwargs Qwen3VLImageProcessor::ProcessImage(const uint8_t* rgb,
               for (int64_t pw = 0; pw < patch; ++pw) {
                 const int64_t W = Wbase + pw;
                 const uint8_t raw = rgb[H * rowstride + W * 3 + c];
-                const float v = (static_cast<float>(raw) - shift) / scale;
-                const uint16_t bf = vt::F32ToBF16(v);
+                const float v = (static_cast<float>(raw) - shifts[c]) / scales[c];
+                const uint16_t encoded = cfg_.pixel_dtype == ImagePixelDType::kF16
+                    ? vt::F32ToF16(v) : vt::F32ToBF16(v);
                 for (int64_t t = 0; t < tp; ++t) {
                   const int64_t k = ((c * tp + t) * patch + ph) * patch + pw;
                   const size_t idx = static_cast<size_t>(r * feat + k);
-                  out.pixel_values_f32[idx] = v;
-                  out.pixel_values_bf16[idx] = bf;
+                  if (cfg_.retain_pixel_values_f32) out.pixel_values_f32[idx] = v;
+                  production[idx] = encoded;
                 }
               }
             }

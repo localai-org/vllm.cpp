@@ -1,0 +1,132 @@
+{
+  "schema": "b70-publication-evidence-manifest-v1",
+  "base": "452617154b8231a0fea4b5331b246427d96622b8",
+  "tested_code_head": "11cb381f61b37c9aba88ca63d8f60180e4cf5ef2",
+  "self_hash": "Excluded to avoid recursion; final source/export manifests hash this file.",
+  "files": {
+    "README.md": {
+      "bytes": 3728,
+      "sha256": "45a6e9efd8022980056a69a1eea16d8233f971a63c5b63cb960308345a15a37a"
+    },
+    "code-range-style.json": {
+      "bytes": 889,
+      "sha256": "b731159e43c2e14e82638c4efc1fb6a6b0b46e545e26bde284a480461e23819c"
+    },
+    "code-range-trailers.json": {
+      "bytes": 912,
+      "sha256": "dcd40aa8b21bffa9568e5066b8439022b78498899e4fdd42452c03aab451735d"
+    },
+    "contribution-lifecycle-rebase.json": {
+      "bytes": 21345,
+      "sha256": "d09add465be2dcf9521746926dd7a73e3823d844aee2e38e61177a9702d39b6c"
+    },
+    "contribution-sentinel-rebase.json": {
+      "bytes": 94071,
+      "sha256": "5a4685b9d8ce09cbbbef030f43d21e32a1f12182ed509850cb65f7f383e39ceb"
+    },
+    "control-sentinel-rebase.json": {
+      "bytes": 93946,
+      "sha256": "36541e720dc1003021c69efabad5b49e6ccb44704971f3587b70d13c2110d250"
+    },
+    "draft-map-provenance.json": {
+      "bytes": 1216,
+      "sha256": "4a002aa62804cd4fd46e13f556938f83b9eacd28d1060aac835f988f466a9cd6"
+    },
+    "failure-classification.json": {
+      "bytes": 3373,
+      "sha256": "d2f8de5a5d05b48c0430780fb4980570d33d36fb0abb7e65a8f1ea41ff64384e"
+    },
+    "historical-cpu-configure.json": {
+      "bytes": 1767,
+      "sha256": "c6fa8837e612c169aaf66c6714e147304957c8df5cdc2ff7ed2904b9f4bc3aed"
+    },
+    "historical-cpu-final-focused-test.json": {
+      "bytes": 3727,
+      "sha256": "29acf4892fa95b971e79a7f9e1e1d461e47be42a042dc9ed85cb110e0e8b713c"
+    },
+    "historical-prefix-metric-failure.json": {
+      "bytes": 40204,
+      "sha256": "4ead48c0403d24b756ffde0ebdd6fe306e2b650d91b57b96fc6521fd35ef32b8"
+    },
+    "historical-prefix-trace.json": {
+      "bytes": 915,
+      "sha256": "0e153f9c1d728cbcc1ad570f1ad2f7b859e0f27a8836fbe07c7dc53185496ff5"
+    },
+    "historical-preflight-comparison.json": {
+      "bytes": 67073,
+      "sha256": "c5cdc4ba4fd04ec3344f90bbaefc754be2821ab0fb7911f115346a0593da0907"
+    },
+    "historical-pristine-failures.json": {
+      "bytes": 16289,
+      "sha256": "a4217393bceabfcde5bd731fd97fb0d38f10e0f855db6dcc31c700e51d76cd62"
+    },
+    "historical-product-final-staged-failures.json": {
+      "bytes": 17183,
+      "sha256": "afa998f713f46025b3ec51dfecbdfd5465779d69859dfd08ca6732a55c1161ac"
+    },
+    "historical-tools-diagnostic.json": {
+      "bytes": 14960,
+      "sha256": "8144d96cc9789683f1f8ca3682242296bcdc17fab1de6c7e1a0019d75b3aedfd"
+    },
+    "historical-windows-portability-focused.json": {
+      "bytes": 1011,
+      "sha256": "ebd775f1ce1b4de02ac7d808e3044352f2d252b897a531b5974b5525fe9e7297"
+    },
+    "historical-xpu-server-build-v2.json": {
+      "bytes": 1002,
+      "sha256": "2f080fa7990f25320904e716f764c2878adc2ba6e84a1e987b96272ee1e910af"
+    },
+    "http-mtp3-r1.json": {
+      "bytes": 45791,
+      "sha256": "1fc4575eecd4743aeba6932c76a50d8133ee20f0aa97b8a2a28ee074ca1a29fe"
+    },
+    "http-target-r1.json": {
+      "bytes": 83073,
+      "sha256": "d45ee6f25d462758df59e69a3dbafdae0ed36655020e1974c0132ed5137f316f"
+    },
+    "r1-cpu-config.json": {
+      "bytes": 1037,
+      "sha256": "ae5575b4369837f8d7f806bcc2e6f9074514e8ea295e05dceab6c93f3a1a6127"
+    },
+    "r1-ctest.json": {
+      "bytes": 1036,
+      "sha256": "07a230544d3e362676b7e627c40ecd1a53b95109fb0b33437f036e115a545f74"
+    },
+    "r1-green.json": {
+      "bytes": 1651,
+      "sha256": "7bbd47fc9b16c14a85d9716df1aa2de2333e37a94aea89e78e8bf917e9aec835"
+    },
+    "r1-red.json": {
+      "bytes": 1938,
+      "sha256": "b7226ff297571ab43051b7770f1924bff763d4a56bb9b1c3c670a2660b822c84"
+    },
+    "rebase-binary-identities.json": {
+      "bytes": 1264,
+      "sha256": "abf2d4728be81130832254842725f492ce8dfe0eea6a54e97f603d1870fc5cc1"
+    },
+    "rebase-continuity-comparison.json": {
+      "bytes": 1188,
+      "sha256": "c2c4a87966e6cd0b7b16c95399486b3687de083fdece8953da545c1de32366fd"
+    },
+    "rebase-cpu-build.json": {
+      "bytes": 36784,
+      "sha256": "94f776d439672f28e65db31c438e69c2a1e512f6a314369dcccd1e0301a81316"
+    },
+    "rebase-cpu-test.json": {
+      "bytes": 1178,
+      "sha256": "e47cff16a8447fe2b8995e663f05994605727b99dbaaf1c686601ff248f49d09"
+    },
+    "rebase-lifecycle-comparison.json": {
+      "bytes": 1185,
+      "sha256": "1da345bb0fbe18201d3b731126364a10732b0dc385f523645e4efcc023cc2c18"
+    },
+    "rebase-xpu-build.json": {
+      "bytes": 39673,
+      "sha256": "467e1f84afe5a55cdf95503b6d0f16206e49327f84d66376c5d79daca2390825"
+    },
+    "upstream-compatibility.json": {
+      "bytes": 976,
+      "sha256": "407b78b7b51acf57abe574f061856e16a2bd6a0517f3211386f1ee75d8c2d494"
+    }
+  }
+}

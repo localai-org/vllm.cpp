@@ -51,6 +51,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "vllm/model_executor/models/qwen3_5.h"          // GdnStateCache
@@ -97,11 +98,14 @@ GdnStepInputs BuildGdnStepInputs(vt::Queue& queue,
 // the fp8 input-projection tower consumes (nullptr on every other arm). Which
 // arm runs — decode, prefill, spec-decode, packed, fp8 — is decided inside the
 // block by `gdn_meta` and the weight set, identically for both callers.
+// A caller with an explicit model precision passes activation_dtype, as the
+// native dense layer does through Dev. Unspecified preserves the legacy policy.
 GdnBlockOutput RunGdnBlockPaged(vt::Queue& queue, const GdnLayerWeights& weights,
                                 const HfConfig& config, const vt::Tensor& dh,
                                 const GdnStepInputs& step,
                                 const v1::GDNAttentionMetadata& gdn_meta,
                                 const GdnStateCache& state, int64_t T,
-                                const vt::Tensor* dh_fp8 = nullptr);
+                                const vt::Tensor* dh_fp8 = nullptr,
+                                std::optional<vt::DType> activation_dtype = std::nullopt);
 
 }  // namespace vllm

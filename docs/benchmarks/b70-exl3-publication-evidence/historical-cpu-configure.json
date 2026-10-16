@@ -1,0 +1,25 @@
+{
+  "evidence_schema": "b70-publication-derivative-v1",
+  "sources": [
+    {
+      "artifact_id": "plan-a/cpu-configure-exit.json",
+      "sha256": "1eca0a08570af8b2c7ea7b9425079890e7a04ffa68a7ea9f709d2b56bd52c106",
+      "bytes": 226
+    },
+    {
+      "artifact_id": "plan-a/cpu-configure.log",
+      "sha256": "05219bdb0d1829cd3d45660473bddcea0e6869039b7a2c59371f96c00716c175",
+      "bytes": 1056
+    }
+  ],
+  "transformation": "Local filesystem paths are replaced with logical IDs; ANSI color is removed. Historical sources are unchanged. Scalar arrays are serialized on one line; no result values are omitted.",
+  "data": {
+    "exit": {
+      "exit_code": 0,
+      "elapsed_s": 0.813010410998686,
+      "source": "<PR_SOURCE>",
+      "build": "<CPU_BUILD>"
+    },
+    "log": "-- The CXX compiler identification is GNU 16.2.1\n-- Detecting CXX compiler ABI info\n-- Detecting CXX compiler ABI info - done\n-- Check for working CXX compiler: /usr/bin/c++ - skipped\n-- Detecting CXX compile features\n-- Detecting CXX compile features - done\n-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF\n-- The C compiler identification is GNU 16.2.1\n-- Detecting C compiler ABI info\n-- Detecting C compiler ABI info - done\n-- Check for working C compiler: /usr/bin/cc - skipped\n-- Detecting C compile features\n-- Detecting C compile features - done\n-- Found Python3: <OTHER_LOCAL_PATH> (found version \"3.11.16\") found components: Interpreter\n-- Performing Test CMAKE_HAVE_LIBC_PTHREAD\n-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success\n-- Found Threads: TRUE\n-- CUDA FA2 compiled-arch manifest: []\n-- Configuring done (0.4s)\n-- Generating done (0.4s)\n-- Build files have been written to: <CPU_BUILD>\n"
+  }
+}

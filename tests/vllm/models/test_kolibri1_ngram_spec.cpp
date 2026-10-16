@@ -166,6 +166,44 @@ vllm::HfConfig MakeQwen35Config() {
 
 }  // namespace
 
+TEST_CASE("KV seam: EXL3 shares draft pages only for MTP after model dispatch") {
+  auto config = MakeQwen35Config();
+  config.torch_dtype = "float16";
+  config.mamba_ssm_dtype = "float32";
+  config.raw["quantization_config"] = {{"quant_method", "exl3"}};
+  ScaffoldModel model(vllm::ModelRegistry::Resolve(config));
+
+  for (const bool mtp : {false, true}) {
+    CAPTURE(mtp);
+    const auto spec = mtp ? vllm::SpeculativeConfig::ResolveMtp(1, 3)
+                          : vllm::SpeculativeConfig::ResolveNgram(3, 1, 4);
+    const auto kv = vllm::entrypoints::LoadedEngine::MakeKVCacheMaybeSpec(
+        model, config, /*block_size=*/32, /*num_blocks=*/8, spec);
+    CHECK(kv.mtp_draft_shares_target_pages == mtp);
+    REQUIRE(kv.kv_cache_groups.size() == (mtp ? 2 : 3));
+    const auto* gdn = dynamic_cast<const vllm::v1::MambaSpec*>(
+        kv.kv_cache_groups[1].kv_cache_spec.get());
+    REQUIRE(gdn != nullptr);
+    CHECK(gdn->num_speculative_blocks == 3);
+    CHECK(gdn->shapes[0] == std::vector<int64_t>{80, 6});
+    CHECK(gdn->mamba_cache_mode == (mtp ? "align" : "none"));
+    const auto& draft_names = kv.kv_cache_groups[mtp ? 0 : 2].layer_names;
+    REQUIRE_FALSE(draft_names.empty());
+    CHECK(draft_names.back() == "model.layers.4.self_attn.attn");
+  }
+
+  const auto target = vllm::entrypoints::LoadedEngine::MakeKVCacheMaybeSpec(
+      model, config, /*block_size=*/32, /*num_blocks=*/8, std::nullopt);
+  CHECK_FALSE(target.mtp_draft_shares_target_pages);
+  REQUIRE(target.kv_cache_groups.size() == 2);
+  const auto* gdn = dynamic_cast<const vllm::v1::MambaSpec*>(
+      target.kv_cache_groups[1].kv_cache_spec.get());
+  REQUIRE(gdn != nullptr);
+  CHECK(gdn->num_speculative_blocks == 0);
+  CHECK(gdn->shapes[0] == std::vector<int64_t>{80, 3});
+  CHECK(gdn->mamba_cache_mode == "align");
+}
+
 // ── (1) THE SEAM UNIT ────────────────────────────────────────────────────────
 TEST_CASE("kolibri1 KV seam: ngram spec keeps the model's own groups; qwen3.5 still widens") {
   using vllm::v1::KVCacheSpecKind;

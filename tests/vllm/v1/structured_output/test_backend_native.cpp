@@ -24,6 +24,7 @@
 #include "vllm/tokenizer/tokenizer.h"
 #include "vllm/v1/structured_output/backend_native.h"
 #include "vllm/v1/structured_output/backend_types.h"
+#include "vllm/v1/engine/input_processor.h"
 
 using nlohmann::json;
 using vllm::tok::MapBytesToUnicode;
@@ -168,6 +169,30 @@ TEST_CASE("native GBNF: yes/no allows only valid prefixes, terminates on match")
   CHECK(g->is_terminated());
   // After a full match EOS is the only continuation (fill even when terminated).
   CHECK(Allowed(*g, kEos));
+}
+
+TEST_CASE("native grammar: resolved model primary and chat EOS remain valid stops") {
+  vllm::HfConfig config;
+  config.max_position_embeddings = 32;
+  config.raw = {{"eos_token_id", kEos}};
+  config.generation_config_eos_ids = {kEos, 41};
+  vllm::v1::InputProcessor input(Fixture(), config);
+  REQUIRE(input.eos_token_ids() == std::vector<int32_t>{kEos, 41});
+  auto factory = vllm::v1::MakeNativeBackendFactory(
+      Fixture(), VocabSize(), input.eos_token_ids());
+  auto backend = factory();
+  for (int32_t eos : input.eos_token_ids()) {
+    auto grammar = backend->compile_grammar(StructuredOutputOptions::kGrammar,
+                                           R"(root ::= "yes")");
+    auto& native = static_cast<NativeGrammar&>(*grammar);
+    CHECK_FALSE(Allowed(native, eos));
+    CHECK_FALSE(native.accept_tokens("r", {eos}));
+    REQUIRE(native.accept_tokens("r", {7}));
+    CHECK(Allowed(native, eos));
+    CHECK(native.accept_tokens("r", {eos}));
+    CHECK(native.is_terminated());
+    CHECK_FALSE(native.accept_tokens("r", {7}));
+  }
 }
 
 // (d) byte-alignment across a token boundary: "ye" then "s".

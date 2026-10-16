@@ -91,6 +91,13 @@ using ChatPromptFn = std::function<std::string(
 using MultiModalChatFn = std::function<std::optional<multimodal::MultiModalInputs>(
     const std::vector<ChatMessage>&)>;
 
+// Request-aware counterpart: forwards the same enabled tools and template
+// options as the text renderer. Legacy architecture callbacks remain supported.
+using MultiModalRequestChatFn = std::function<std::optional<multimodal::MultiModalInputs>(
+    const std::vector<ChatMessage>&,
+    const std::vector<ChatCompletionToolsParam>&,
+    const nlohmann::ordered_json&)>;
+
 // The T0 fallback template (marked seam). Concatenates "<role>: <content>\n"
 // for each message; when add_generation_prompt, appends "assistant:". Ignores
 // `tools` (the fallback is not a model template). Exposed for unit testing.
@@ -254,6 +261,11 @@ class OpenAIServingChat {
   // mm add_request/generate overload with the seam's MultiModalInputs.
   void set_multimodal_chat_fn(MultiModalChatFn fn) {
     mm_chat_fn_ = std::move(fn);
+    mm_request_chat_fn_ = {};
+  }
+  void set_request_multimodal_chat_fn(MultiModalRequestChatFn fn) {
+    mm_request_chat_fn_ = std::move(fn);
+    mm_chat_fn_ = {};
   }
 
   // The chat-prompt renderer this handler applies to `messages` (the same seam
@@ -310,6 +322,7 @@ class OpenAIServingChat {
   // Multimodal chat seam (see set_multimodal_chat_fn). Null => the text-only
   // path runs unchanged (mm parts drop to the joined-text content).
   MultiModalChatFn mm_chat_fn_;
+  MultiModalRequestChatFn mm_request_chat_fn_;
   // request_id is "chatcmpl-<counter>" (upstream f"chatcmpl-{random_uuid()}").
   std::atomic<int64_t> request_counter_{0};
   // See num_beam_prompt_encodes().

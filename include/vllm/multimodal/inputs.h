@@ -21,15 +21,21 @@ namespace vllm::multimodal {
 // MultiModalKwargs (vllm/multimodal/inputs.py). `pixel_values` is the flattened
 // patch matrix [num_patches, patch_feature_dim]; `image_grid_thw` = [t, h, w]
 // (post-merge grid is h/merge x w/merge). vLLM casts mm_kwargs to the model
-// dtype (bf16) in processing/context.py::call_hf_processor -> _postprocess_output;
-// we keep BOTH the pre-cast float32 (exact HF-processor output) and the bf16
-// production bytes (what the encoder consumes) so the parity gate can check both.
+// dtype in processing/context.py::call_hf_processor -> _postprocess_output.
+// Existing callers retain pre-cast float32 and BF16. The native EXL3 vision
+// processor selects FP16 directly from float32, without a BF16 intermediate.
+// Only the selected production vector is populated; float32 retention is
+// optional for diagnostic comparisons. Consumers must check pixel_dtype.
+enum class ImagePixelDType { kBF16, kF16 };
+
 struct ImageKwargs {
   std::vector<float> pixel_values_f32;      // [num_patches * patch_feature_dim]
   std::vector<uint16_t> pixel_values_bf16;  // round-to-nearest-even of the above
   int64_t num_patches = 0;
   int64_t patch_feature_dim = 0;
   std::array<int64_t, 3> image_grid_thw{0, 0, 0};  // [grid_t, grid_h, grid_w]
+  ImagePixelDType pixel_dtype = ImagePixelDType::kBF16;
+  std::vector<uint16_t> pixel_values_f16;  // direct FP32 -> FP16, nearest even
 
   bool empty() const { return num_patches == 0; }
 };

@@ -218,10 +218,10 @@ extern "C" {
  *     like a working engine.
  * The image bytes travel in the request JSON itself, as an OpenAI `image_url`
  * content part; there is no new ABI symbol and no struct field for media.
- * The CONTAINER-FORMAT decode (PNG/JPEG -> RGB) and the http(s) fetch are NAMED
- * residuals: the one codec this library ships decodes raw RGB
- * (`image/x-raw-rgb`) and refuses everything else by name. A request that hits
- * either is a caller error and is reported as one.
+ * The default build decodes diagnostic raw RGB (`image/x-raw-rgb`). Optional
+ * VLLM_CPP_IMAGE_CODECS builds also decode bounded PNG/JPEG data URIs using
+ * system libpng/libjpeg. Other containers and http(s) fetching are refused
+ * explicitly. See docs/EXL3_XPU_VISION_SERVING.md for the tested codec/input envelope.
  * That is pinned behaviourally by tests/capi/test_capi.cpp ("capi: a multimodal
  * chat request is ANSWERED or REFUSED, never silently served as text"), so this
  * paragraph cannot silently become false.

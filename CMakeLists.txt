@@ -52,6 +52,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/fp:strict>)
 else()
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    # icpx defaults to unsafe reassociation/reciprocal transforms even without
+    # -ffast-math. Disabling contraction alone does not preserve the CPU oracle's
+    # sequential FP32 reductions (observed in the real Qwen input RMSNorm).
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-fast-math>)
+  endif()
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 endif()
 
@@ -68,6 +74,37 @@ if(NOT MSVC)
 endif()
 
 option(VLLM_CPP_BUILD_TESTS "Build tests" ON)
+option(VLLM_CPP_XPU "Build the native SYCL/Level Zero XPU backend (requires icpx)" OFF)
+option(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS "Require external EXL3 SmallM qualification inputs instead of skipping" OFF)
+if(VLLM_CPP_REQUIRE_EXL3_TEST_ARTIFACTS AND (NOT VLLM_CPP_BUILD_TESTS OR NOT VLLM_CPP_XPU))
+  message(FATAL_ERROR "Required EXL3 tests need VLLM_CPP_BUILD_TESTS=ON and VLLM_CPP_XPU=ON")
+endif()
+option(VLLM_CPP_XPU_ONEDNN "Enable pinned oneDNN XPU EXL3 W8A8, attention and dense F16 operators" OFF)
+option(VLLM_CPP_XPU_GPTQ4 "Compatibility alias enabling VLLM_CPP_XPU_ONEDNN (GPTQ remains diagnostic)" OFF)
+# Derived capability: either option enables the same implementation. Preserve
+# both cache values so removing the legacy alias does not leave a sticky ON.
+set(VLLM_CPP_XPU_ONEDNN_ENABLED OFF)
+if(VLLM_CPP_XPU_ONEDNN OR VLLM_CPP_XPU_GPTQ4)
+  set(VLLM_CPP_XPU_ONEDNN_ENABLED ON)
+endif()
+set(VLLM_CPP_SYCL_TLA_DIR "" CACHE PATH "Pinned SYCL-TLA checkout for B70 Xe2 kernels")
+set(_vt_xe2_prefill_default OFF)
+if(VLLM_CPP_XPU AND VLLM_CPP_SYCL_TLA_DIR)
+  set(_vt_xe2_prefill_default ON)
+endif()
+option(VLLM_CPP_XPU_XE2_PREFILL "Build B70 Xe2 FP8 prefill when the pinned SYCL-TLA checkout is provided" ${_vt_xe2_prefill_default})
+unset(_vt_xe2_prefill_default)
+option(VLLM_CPP_XPU_XE2_GDN "Build B70 Xe2 GDN independently of FP8 prefill" OFF)
+option(VLLM_CPP_XPU_XE2_PREFILL_PREFETCH "Keep explicit prefetch in the Xe2 FP8 policy" OFF)
+if(VLLM_CPP_XPU_ONEDNN_ENABLED AND NOT VLLM_CPP_XPU)
+  message(FATAL_ERROR "XPU oneDNN (VLLM_CPP_XPU_ONEDNN or legacy VLLM_CPP_XPU_GPTQ4) requires VLLM_CPP_XPU=ON")
+endif()
+if(VLLM_CPP_XPU_XE2_PREFILL AND NOT VLLM_CPP_XPU)
+  message(FATAL_ERROR "VLLM_CPP_XPU_XE2_PREFILL requires VLLM_CPP_XPU=ON")
+endif()
+if(VLLM_CPP_XPU_XE2_GDN AND NOT VLLM_CPP_XPU)
+  message(FATAL_ERROR "VLLM_CPP_XPU_XE2_GDN requires VLLM_CPP_XPU=ON")
+endif()
 option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # The OpenAI HTTP server (M3.1 Task 4) is gated so the core build stays lean when
 # the vendored cpp-httplib transport header is absent. cpp-httplib is a
@@ -75,6 +112,8 @@ option(VLLM_CPP_BUILD_EXAMPLES "Build examples" ON)
 # deviation, NOT a compute/ML dependency (consistent with the no-pytorch/no-ggml
 # rule).
 option(VLLM_CPP_SERVER "Build the OpenAI HTTP server (needs third_party/httplib/httplib.h)" ON)
+option(VLLM_CPP_IMAGE_CODECS
+  "Enable native image container decoding using system libpng/libjpeg" OFF)
 option(VLLM_CPP_LITERAL_STATIC
   "Link the CPU-only server as a literal static executable (experimental musl release lane only)"
   OFF)
@@ -775,6 +814,7 @@ add_library(vllm STATIC
   src/vllm/transformers_utils/hf_cache.cpp
   src/vllm/model_executor/model_loader/read_only_file_mapping.cpp
   src/vllm/model_executor/model_loader/safetensors_reader.cpp
+  src/vllm/model_executor/model_loader/gptq4_weight.cpp
   src/vllm/model_executor/model_loader/gguf_reader.cpp
   src/vllm/model_executor/model_loader/gguf_dequant.cpp
   src/vllm/model_executor/model_loader/gguf_keep_quant.cpp
@@ -1181,6 +1221,7 @@ add_library(vllm STATIC
   # Pillow's BICUBIC resampler, which is NOT torchvision's and NOT a four-tap
   # cubic (dots3-note W6c, #2537).
   src/vllm/multimodal/pil_resize.cpp
+  src/vllm/multimodal/torchvision_resize.cpp
   src/vllm/multimodal/qwen3vl_processor.cpp
   # Nemotron Nano VL / Omni dynamic-resolution tiler and torch's antialiased
   # bicubic resize (a third algorithm beside Pillow's and torchvision's).
@@ -1353,6 +1394,7 @@ add_library(vllm STATIC
   src/capi/chat_prompt.cpp
   src/vllm/entrypoints/openai/protocol.cpp
   src/vllm/entrypoints/openai/chat_mm.cpp
+  src/vllm/entrypoints/openai/image_codec.cpp
   # ENG-MM-INPUT-PIPELINE (#2475): the per-architecture multimodal chat seam
   # registry, and Qwen3-VL's registration into it. The registration TU is
   # SELF-REGISTERING and is reached through vllm's INTERFACE --whole-archive.
@@ -1361,6 +1403,7 @@ add_library(vllm STATIC
   src/vllm/entrypoints/openai/mm_chat_nano_nemotron_vl.cpp
   src/vllm/entrypoints/openai/mm_chat_dots3note.cpp
   src/vllm/entrypoints/openai/mm_chat_qwen3vl.cpp
+  src/vllm/entrypoints/openai/mm_chat_qwen3_5.cpp
   src/vllm/entrypoints/openai/serving_utils.cpp
   src/vllm/entrypoints/openai/serving_completion.cpp
   src/vllm/entrypoints/openai/serving_chat.cpp
@@ -1441,11 +1484,13 @@ add_library(vllm STATIC
   src/vt/breakable_graph.cpp
   src/vt/persistent_step_input.cpp
   src/vt/tensor.cpp
+  src/vt/copy.cpp
   src/vt/arena.cpp
   src/vt/op_provider.cpp
   src/vt/communicator.cpp
   src/vt/ops.cpp
   src/vt/exl3_policy.cpp
+  src/vt/exl3_grouped.cpp
   src/vt/fused_ops.cpp
   src/vt/merged_gemm.cpp
   src/vt/cpu/cpu_backend.cpp
@@ -1589,6 +1634,13 @@ target_include_directories(vllm PRIVATE src)
 # engine <minja/chat-template.hpp> / <minja/minja.hpp> that backs
 # src/vllm/entrypoints/chat_template.cpp.
 target_include_directories(vllm SYSTEM PUBLIC third_party)
+if(VLLM_CPP_IMAGE_CODECS)
+  find_package(PNG 1.6 REQUIRED)
+  find_package(JPEG REQUIRED)
+  target_link_libraries(vllm PRIVATE PNG::PNG JPEG::JPEG)
+  set_source_files_properties(src/vllm/entrypoints/openai/image_codec.cpp
+    PROPERTIES COMPILE_DEFINITIONS VLLM_CPP_IMAGE_CODECS)
+endif()
 vllm_cpp_set_warnings(vllm)
 # SYSTEM covers the FRONT-END diagnostics from those vendored headers, but not
 # the ones the OPTIMIZER raises after inlining: those are attributed to the TU
@@ -1817,6 +1869,161 @@ if(VLLM_CPP_VULKAN)
     # ONE TU's compile time instead of every TU that includes the table.
     src/vt/vulkan/vulkan_spirv.cpp)
   target_link_libraries(vllm PUBLIC ${CMAKE_DL_LIBS})
+endif()
+if(VLLM_CPP_XPU)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-fsycl")
+  check_cxx_source_compiles("#include <sycl/sycl.hpp>\nint main() { sycl::queue q; q.wait(); }"
+    VLLM_CPP_SYCL_COMPILER_WORKS)
+  unset(CMAKE_REQUIRED_FLAGS)
+  if(NOT VLLM_CPP_SYCL_COMPILER_WORKS)
+    message(FATAL_ERROR "VLLM_CPP_XPU=ON requires a SYCL compiler/runtime. Configure with -DCMAKE_CXX_COMPILER=icpx.")
+  endif()
+  add_library(vllm_xpu_backend OBJECT src/vt/xpu/xpu_backend.cpp)
+  add_library(vllm_xpu OBJECT
+    src/vt/xpu/xpu_elementwise.cpp src/vt/xpu/xpu_norm.cpp src/vt/xpu/xpu_vision_ops.cpp
+    src/vt/xpu/xpu_sampling.cpp src/vt/xpu/xpu_ops.cpp src/vt/xpu/xpu_exl3.cpp
+    src/vt/xpu/xpu_gdn.cpp src/vt/xpu/xpu_attention.cpp src/vt/xpu/xpu_exl3_prefill.cpp
+    src/vt/xpu/xpu_exl3_smallm.cpp
+    src/vt/xpu/xpu_exl3_w8a8.cpp
+    src/vt/xpu/xpu_gdn_chunked.cpp src/vt/xpu/xpu_attention_split.cpp
+    src/vt/xpu/xpu_attention_prefill.cpp)
+  # The pinned producer builds these ESIMD kernels with -ffast-math. Scope it
+  # to this port; unrelated native model/operators retain their own numerics.
+  set_source_files_properties(src/vt/xpu/xpu_exl3_smallm.cpp
+    src/vt/xpu/xpu_exl3_w8a8.cpp PROPERTIES
+    COMPILE_OPTIONS "-ffast-math")
+  # Vision uses FP16 Xe2 attention independently of text FP8 prefill.
+  set(_vt_xe2_vision OFF)
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED AND VLLM_CPP_SYCL_TLA_DIR)
+    set(_vt_xe2_vision ON)
+  endif()
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN OR _vt_xe2_vision)
+    if(NOT EXISTS "${VLLM_CPP_SYCL_TLA_DIR}/include/cutlass/cutlass.h")
+      message(FATAL_ERROR "VLLM_CPP_SYCL_TLA_DIR must name the pinned SYCL-TLA checkout")
+    endif()
+    execute_process(COMMAND git -c "safe.directory=${VLLM_CPP_SYCL_TLA_DIR}"
+      -C "${VLLM_CPP_SYCL_TLA_DIR}" rev-parse HEAD
+      OUTPUT_VARIABLE _vt_sycl_tla_commit OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if(NOT _vt_sycl_tla_commit STREQUAL "87f6850680a580654b9ea2c80dbc01aeb36ad231")
+      message(FATAL_ERROR "Xe2 kernels require SYCL-TLA 87f6850680a580654b9ea2c80dbc01aeb36ad231")
+    endif()
+    target_link_options(vllm PUBLIC -flink-huge-device-code -Xspirv-translator
+      "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate")
+  endif()
+  if(VLLM_CPP_XPU_XE2_PREFILL)
+    add_library(vllm_xpu_xe2_prefill OBJECT src/vt/xpu/xpu_attention_xe2.cpp)
+    set_target_properties(vllm_xpu_xe2_prefill PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_prefill PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_prefill SYSTEM PRIVATE
+      third_party/b70_xe2_prefill
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_prefill PRIVATE
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET CUTLASS_VERSIONS_GENERATED)
+    if(NOT VLLM_CPP_XPU_XE2_PREFILL_PREFETCH)
+      target_compile_definitions(vllm_xpu_xe2_prefill PRIVATE VT_XE2_PREFILL_NO_PREFETCH)
+    endif()
+    target_compile_options(vllm_xpu_xe2_prefill PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_PREFILL)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_prefill>)
+  endif()
+  if(_vt_xe2_vision)
+    add_library(vllm_xpu_xe2_vision OBJECT src/vt/xpu/xpu_vision_attention_xe2.cpp)
+    # Preserve the tested contracted base2 softmax; other vision ops stay strict.
+    set_source_files_properties(src/vt/xpu/xpu_vision_attention_xe2.cpp PROPERTIES
+      COMPILE_OPTIONS "-fp-model=fast")
+    set_target_properties(vllm_xpu_xe2_vision PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_vision PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_vision SYSTEM PRIVATE
+      third_party/b70_xe2_prefill
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_vision PRIVATE
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET CUTLASS_VERSIONS_GENERATED)
+    target_compile_options(vllm_xpu_xe2_vision PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_VISION)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_vision>)
+  endif()
+  unset(_vt_xe2_vision)
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
+    # Short FP16 decode shares the Torch-free XMX policy with verification;
+    # it does not require the experimental long-prefill route.
+    add_library(vllm_xpu_xe2_verify OBJECT src/vt/xpu/xpu_attention_verify_xe2.cpp
+      src/vt/xpu/xpu_attention_decode_xe2.cpp)
+    # Match the pinned original icpx math model for these C1 XMX producers.
+    # Packed verification preserves its FP16 probabilities and F32 reductions.
+    set_source_files_properties(src/vt/xpu/xpu_attention_decode_xe2.cpp
+      src/vt/xpu/xpu_attention_verify_xe2.cpp PROPERTIES
+      COMPILE_OPTIONS "-fp-model=fast")
+    set_target_properties(vllm_xpu_xe2_verify PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_verify PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_verify SYSTEM PRIVATE
+      third_party/b70_xe2_verify
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_verify PRIVATE
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET
+      CUTLASS_VERSIONS_GENERATED VLLM_XPU_ENABLE_XE2)
+    target_compile_options(vllm_xpu_xe2_verify PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_VERIFY)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_verify>)
+  endif()
+  # Preserve the existing prefill build while allowing focused GDN builds.
+  if(VLLM_CPP_XPU_XE2_PREFILL OR VLLM_CPP_XPU_XE2_GDN)
+    # Torch-free GDN experiment from the same pinned Xe2/SYCL-TLA stack.
+    # Its runtime selector is off until the real-layer and model gates pass.
+    add_library(vllm_xpu_xe2_gdn OBJECT src/vt/xpu/xpu_gdn_xe2.cpp
+      src/vt/xpu/xpu_gdn_fp16_producer.cpp)
+    # Match the original icpx default math model (verified with -###).
+    # Scope it to this producer port; norm and other ops stay strict.
+    set_source_files_properties(src/vt/xpu/xpu_gdn_fp16_producer.cpp PROPERTIES
+      COMPILE_OPTIONS "-fp-model=fast")
+    set_target_properties(vllm_xpu_xe2_gdn PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(vllm_xpu_xe2_gdn PRIVATE include src)
+    target_include_directories(vllm_xpu_xe2_gdn SYSTEM PRIVATE
+      third_party/b70_gdn_xe2
+      "${VLLM_CPP_SYCL_TLA_DIR}/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/tools/util/include"
+      "${VLLM_CPP_SYCL_TLA_DIR}/applications")
+    target_compile_definitions(vllm_xpu_xe2_gdn PRIVATE
+      CUTLASS_ENABLE_HEADERS_ONLY CUTLASS_ENABLE_SYCL SYCL_INTEL_TARGET
+      CUTLASS_VERSIONS_GENERATED VLLM_XPU_ENABLE_XE2)
+    target_compile_options(vllm_xpu_xe2_gdn PRIVATE -fsycl)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_XE2_GDN)
+    target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu_xe2_gdn>)
+  endif()
+  if(VLLM_CPP_XPU_ONEDNN_ENABLED)
+    find_package(dnnl 3.13.0 EXACT CONFIG REQUIRED)
+    target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_gptq4.cpp
+      src/vt/xpu/xpu_exl3_attention.cpp)
+    target_sources(vllm_xpu PRIVATE src/vt/xpu/xpu_vision_attention.cpp)
+    target_compile_definitions(vllm_xpu PRIVATE VLLM_CPP_XPU_ONEDNN)
+    target_compile_definitions(vllm_xpu_backend PRIVATE VLLM_CPP_XPU_ONEDNN)
+    target_link_libraries(vllm_xpu PRIVATE DNNL::dnnl)
+    target_link_libraries(vllm PUBLIC DNNL::dnnl)
+  endif()
+  foreach(xpu_target vllm_xpu vllm_xpu_backend)
+    set_target_properties(${xpu_target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(${xpu_target} PRIVATE include src)
+    target_include_directories(${xpu_target} SYSTEM PRIVATE third_party)
+    target_compile_options(${xpu_target} PRIVATE -fsycl)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      # Device division/sqrt approximations are a separate icpx default from
+      # host fast math and can flip BF16 rounding at layer boundaries.
+      target_compile_options(${xpu_target} PRIVATE
+        -foffload-fp32-prec-div -foffload-fp32-prec-sqrt)
+    endif()
+    vllm_cpp_set_warnings(${xpu_target})
+  endforeach()
+  target_sources(vllm PRIVATE $<TARGET_OBJECTS:vllm_xpu> $<TARGET_OBJECTS:vllm_xpu_backend>
+    src/vllm/platforms/xpu.cpp)
+  target_compile_definitions(vllm PUBLIC VLLM_CPP_XPU)
+  target_link_options(vllm PUBLIC -fsycl)
 endif()
 if(NOT WIN32)
   # The persistent cache is also exercised by CPU-only NVFP4 emulation. Its

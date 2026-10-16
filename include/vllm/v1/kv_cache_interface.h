@@ -87,6 +87,8 @@
 
 namespace vllm::v1 {
 
+class RecurrentPrefixSnapshotIndex;
+
 // Upstream KVCacheSpecKind (str Enum). Ported as a plain enum; the T1/T2 kinds
 // are listed for fidelity; kFullAttention / kSlidingWindow / kMamba are
 // currently produced here.
@@ -564,6 +566,15 @@ struct KVCacheConfig {
   // initialization of KVCacheConfig valid (the field is optional) AND suppresses
   // -Wmissing-field-initializers, so this addition is source-compatible too.
   std::vector<std::shared_ptr<AttentionSpec>> per_layer_attn_specs = {};
+
+  // Optional bounded, immutable recurrent prefix rows shared by scheduler and runner.
+  std::shared_ptr<RecurrentPrefixSnapshotIndex> recurrent_prefix_snapshots = {};
+
+  // Native EXL3 MTP uses the target's physical page IDs for a separate draft
+  // KV buffer. The draft layer therefore belongs to the target attention
+  // group (and its layer count/byte budget), not a second page allocator.
+  // False retains the existing topology for other checkpoints.
+  bool mtp_draft_shares_target_pages = false;
 
   // Upstream property has_mamba_layers.
   bool has_mamba_layers() const;

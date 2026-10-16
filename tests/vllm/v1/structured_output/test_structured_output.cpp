@@ -111,6 +111,43 @@ class MockBackend : public StructuredOutputBackend {
 
 }  // namespace
 
+namespace {
+// A stateful sequence grammar: a rejected draft leaves the accepted prefix
+// intact, and validation must leave the real state untouched.
+class SequenceGrammar : public StructuredOutputGrammar {
+ public:
+  bool accept_tokens(const std::string&,
+                     const std::vector<int32_t>& tokens) override {
+    for (int32_t token : tokens) {
+      if (state >= sequence.size() || token != sequence[state]) return false;
+      ++state;
+    }
+    return true;
+  }
+  std::vector<int32_t> validate_tokens(
+      const std::vector<int32_t>& tokens) override {
+    std::vector<int32_t> prefix;
+    for (int32_t token : tokens) {
+      const size_t pos = state + prefix.size();
+      if (pos >= sequence.size() || token != sequence[pos]) break;
+      prefix.push_back(token);
+    }
+    return prefix;
+  }
+  void rollback(int n) override { state -= static_cast<size_t>(n); }
+  void fill_bitmask(TokenBitmask& mask, int row) override {
+    for (int w = 0; w < mask.num_words; ++w)
+      mask.data[row * mask.num_words + w] = 0;
+    if (state < sequence.size())
+      mask.data[row * mask.num_words] = 1 << sequence[state];
+  }
+  bool is_terminated() override { return state == sequence.size(); }
+  void reset() override { state = 0; }
+  const std::vector<int32_t> sequence{7, 8, 9, 10, 11};
+  size_t state = 0;
+};
+}  // namespace
+
 TEST_CASE("get_structured_output_key maps each option to its (type, spec) key") {
   SUBCASE("json") {
     StructuredOutputsParams p;
@@ -468,4 +505,79 @@ TEST_CASE("Scheduler.update_from_output calls grammar.accept_tokens on sampled t
   CHECK(grammar->accepted_request_ids[0] == "0");
   REQUIRE(grammar->accepted_tokens[0].size() == 1);
   CHECK(grammar->accepted_tokens[0][0] == 7);
+}
+
+TEST_CASE("Structured MTP: scheduler validates the draft prefix without advancing") {
+  ManagerFixture fx;
+  auto scheduler = CreateScheduler(&fx.manager);
+  auto req = MakeStructuredRequest("0");
+  fx.manager.grammar_init(*req);
+  auto grammar = std::make_unique<SequenceGrammar>();
+  auto* state = grammar.get();
+  auto* request = req.get();
+  req->structured_output_request->grammar = std::move(grammar);
+  auto plain = MakePlainRequest("1");
+  auto* plain_request = plain.get();
+  scheduler->add_request(std::move(req));
+  scheduler->add_request(std::move(plain));
+  vllm::v1::DraftTokenIds drafts;
+  drafts.req_ids = {"0", "1"};
+  drafts.draft_token_ids = {{7, 8, 14}, {7, 8, 14}};
+  scheduler->update_draft_token_ids(drafts);
+  CHECK(request->spec_token_ids == std::vector<int32_t>{7, 8});
+  CHECK(plain_request->spec_token_ids == std::vector<int32_t>{7, 8, 14});
+  CHECK(state->state == 0);
+
+  SchedulerOutput out;
+  out.scheduled_spec_decode_tokens = {{"0", {-1, -1, -1}},
+                                    {"1", {-1, -1, -1}}};
+  scheduler->update_draft_token_ids_in_output(drafts, out);
+  CHECK(out.scheduled_spec_decode_tokens.at("0") ==
+        std::vector<int32_t>{7, 8, -1});
+  CHECK(out.scheduled_spec_decode_tokens.at("1") ==
+        std::vector<int32_t>{7, 8, 14});
+  CHECK(out.num_invalid_spec_tokens.at("0") == 1);
+  CHECK(out.num_invalid_spec_tokens.count("1") == 0);
+  CHECK(state->state == 0);
+}
+
+TEST_CASE("Structured MTP: expanded masks grow and restore each grammar state") {
+  StructuredOutputManager manager(1, [] {
+    return std::make_unique<MockBackend>(kVocab);
+  });
+  std::map<std::string, std::unique_ptr<Request>> requests;
+  std::vector<SequenceGrammar*> grammars;
+  for (const auto& id : {"0", "1"}) {
+    auto req = MakeStructuredRequest(id);
+    manager.grammar_init(*req);
+    auto grammar = std::make_unique<SequenceGrammar>();
+    grammars.push_back(grammar.get());
+    req->structured_output_request->grammar = std::move(grammar);
+    requests[id] = std::move(req);
+  }
+  // First allocate a single row, then grow beyond both that capacity and C2.
+  REQUIRE(manager.grammar_bitmask(requests, {"0"}, {})->num_seqs == 1);
+  const auto mask = manager.grammar_bitmask(
+      requests, {"1", "0"}, {{"1", {7, 8, 9}}, {"0", {7, 8}}});
+  REQUIRE(mask.has_value());
+  REQUIRE(mask->num_seqs == 7);
+  const std::vector<int> allowed{7, 8, 9, 10, 7, 8, 9};
+  for (size_t row = 0; row < allowed.size(); ++row) {
+    CHECK(mask->data[row * mask->num_words] == (1 << allowed[row]));
+    for (int w = 1; w < mask->num_words; ++w)
+      CHECK(mask->data[row * mask->num_words + w] == 0);
+  }
+  for (auto* grammar : grammars) CHECK(grammar->state == 0);
+  const auto padded = manager.grammar_bitmask(
+      requests, {"0"}, {{"0", {7, -1, -1}}});
+  REQUIRE(padded->num_seqs == 4);
+  CHECK(padded->data[0] == (1 << 7));
+  CHECK(padded->data[padded->num_words] == (1 << 8));
+  for (int row = 2; row < 4; ++row)
+    for (int w = 0; w < padded->num_words; ++w)
+      CHECK(padded->data[row * padded->num_words + w] == -1);
+  CHECK(grammars[0]->state == 0);
+  CHECK_THROWS_AS(manager.grammar_bitmask(requests, {"0"},
+                                        {{"0", {7, 14}}}), std::runtime_error);
+  CHECK(grammars[0]->state == 0);
 }

@@ -13,11 +13,13 @@
 // `tests/vt/test_exl3_gemm.cpp` already states for exactly this comparison
 // (2.0e-3 relative RMS), not a number discovered when the gate first ran.
 //
-// CPU-only, runs in CI.
+// CPU reference cases; the explicit FP16 gate/up policy runs on XPU, where
+// the public SwiGLU operator supports FP16 output.
 #include <doctest/doctest.h>
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,7 @@
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#include "vt/op_provider.h"
 
 // The shared EXL3 fixture, at tests/vt/exl3_fixture.h. The three other users
 // live in tests/vt/ and write the plain `"exl3_fixture.h"`, which resolves
@@ -262,6 +265,153 @@ TEST_CASE("exl3 linear method: a mismatched activation width REFUSES BY NAME") {
 
   vt::GetBackend(vt::DeviceType::kCPU).DestroyQueue(q);
 }
+
+TEST_CASE("exl3 merge: packed K rows and independent transforms are byte exact") {
+  for (int bits : {4, 6}) {
+    CAPTURE(bits);
+    auto a = WrapFixture(MakeFixture(256, 128, bits, 0x1111u));
+    auto b = WrapFixture(MakeFixture(256, 256, bits, 0x2222u));
+    auto c = WrapFixture(MakeFixture(256, 128, bits, 0x3333u));
+    a.codebook = b.codebook = c.codebook = 2;
+    auto group = vllm::MergeExl3Weights({&a, &b, &c}, "three_sources");
+    CHECK(group.output_offsets == std::vector<int64_t>{0, 128, 384, 512});
+    REQUIRE(group.trellis.bytes.size() == 16 * 32 * 32 * bits);
+    REQUIRE(group.suh.bytes.size() == 3 * 256 * 2);
+    REQUIRE(group.svh.bytes.size() == 512 * 2);
+    REQUIRE(group.source_map.bytes.size() == 4 * 4);
+    const std::vector<const vllm::Exl3Weight*> sources{&a, &b, &c};
+    for (size_t s = 0; s < sources.size(); ++s) {
+      const auto& w = *sources[s];
+      const size_t source_row = static_cast<size_t>(w.OutFeatures() / 16) * 32 * bits;
+      for (int kt = 0; kt < 16; ++kt)
+        CHECK(std::memcmp(group.trellis.bytes.data() + kt * 32 * 32 * bits +
+                              group.output_offsets[s] / 16 * 32 * bits,
+                          w.trellis.bytes.data() + kt * source_row, source_row) == 0);
+      CHECK(std::memcmp(group.suh.bytes.data() + s * 256 * 2, w.suh.bytes.data(), 256 * 2) == 0);
+      CHECK(std::memcmp(group.svh.bytes.data() + group.output_offsets[s] * 2,
+                        w.svh.bytes.data(), w.OutFeatures() * 2) == 0);
+    }
+    const int32_t map[] = {0, 1, 1, 2};
+    CHECK(std::memcmp(group.source_map.bytes.data(), map, sizeof(map)) == 0);
+    // The result has independent ownership, including across a move/source loss.
+    const auto expected = group.trellis.bytes;
+    auto moved = std::move(group);
+    a = {}; b = {}; c = {};
+    CHECK(moved.trellis.bytes == expected);
+  }
+  auto a = WrapFixture(MakeFixture(128, 128, 4, 1));
+  auto b = WrapFixture(MakeFixture(128, 128, 4, 2));
+  a.codebook = b.codebook = 2;
+  CHECK_THROWS(vllm::MergeExl3Weights({}, "empty"));
+  CHECK_THROWS(vllm::MergeExl3Weights({nullptr}, "null"));
+  auto bad = b;
+  bad.codebook = 1;
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "codebook"));
+  bad = WrapFixture(MakeFixture(128, 128, 6, 2)); bad.codebook = 2;
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "bits"));
+  bad = WrapFixture(MakeFixture(256, 128, 4, 2)); bad.codebook = 2;
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "K"));
+  bad = b; bad.trellis.shape[1] = 4;
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "boundary"));
+  bad = b; bad.trellis.bytes.resize(1);
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "span"));
+  bad = b; bad.trellis.shape[0] = INT64_MAX;
+  CHECK_THROWS(vllm::MergeExl3Weights({&bad}, "K overflow"));
+  bad = b; bad.trellis.shape[1] = INT64_MAX;
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "N overflow"));
+  bad = b; bad.suh.shape[0] = 256;
+  CHECK_THROWS(vllm::MergeExl3Weights({&a, &bad}, "transform shape"));
+}
+
+#ifdef VLLM_CPP_XPU
+TEST_CASE("exl3 gate up: explicit FP16 policy preserves both projection boundaries (XPU)") {
+  vt::Backend& b = vt::GetBackend(vt::DeviceType::kXPU);
+  vt::Queue q = b.CreateQueue();
+  {
+    vllm::dense_attn::Dev d{b, q, DType::kF16};
+    const Exl3Fixture gf = MakeFixture(128, 128, 4, 0x1234u);
+    const Exl3Fixture uf = MakeFixture(128, 128, 4, 0x5678u);
+    vllm::Exl3Weight gate = WrapFixture(gf), up = WrapFixture(uf);
+    gate.codebook = up.codebook = 2;  // mul1, as in the B70 checkpoint
+    OwnedTensor dense;
+    vllm::Exl3GroupedWeight grouped;
+    auto method = layers::MakeMlpGateUpMethod(dense, gate, up, 128, &grouped);
+    vt::EnableOpProviderCallStats(true);
+    const void* packed_resident = nullptr;
+    const void* map_resident = nullptr;
+    for (int64_t m : {1, 4}) {
+      CAPTURE(m);
+      Rng rng;
+      std::vector<uint16_t> x(static_cast<size_t>(m * 128));
+      for (auto& v : x) v = vt::F32ToF16(rng.next(0.05f));
+      vllm::dense_attn::DBuf xb(d, DType::kF16, {m, 128}, x.data());
+      const auto calls = vt::GetOpProviderStats(vt::OpId::kExl3GroupedLinear, vt::DeviceType::kXPU).selections;
+      auto out = method->Apply(d, xb.t());
+      CHECK(vt::GetOpProviderStats(vt::OpId::kExl3GroupedLinear, vt::DeviceType::kXPU).selections == calls + 1);
+      REQUIRE(grouped.suh.shape[0] == 2);
+      REQUIRE(grouped.trellis.d_dev != nullptr);
+      REQUIRE(grouped.source_map.d_dev != nullptr);
+      CHECK(grouped.trellis.host_released);
+      CHECK(grouped.suh.host_released);
+      CHECK(grouped.svh.host_released);
+      CHECK(grouped.source_map.host_released);
+      if (packed_resident) {
+        CHECK(grouped.trellis.d_dev.get() == packed_resident);
+        CHECK(grouped.source_map.d_dev.get() == map_resident);
+      } else {
+        CHECK(gate.trellis.d_dev == nullptr);
+        CHECK(up.trellis.d_dev == nullptr);
+        packed_resident = grouped.trellis.d_dev.get();
+        map_resident = grouped.source_map.d_dev.get();
+      }
+      REQUIRE(out.t().dtype == DType::kF16);
+      REQUIRE(out.t().shape[0] == m);
+      REQUIRE(out.t().shape[1] == 128);
+
+      // Public kernel outputs bypass the gate/up seam. This checks its dtype
+      // propagation and SwiGLU rounding, not independent checkpoint parity.
+      vllm::dense_attn::DBuf g(d, DType::kF16, {m, 128});
+      vllm::dense_attn::DBuf u(d, DType::kF16, {m, 128});
+      const auto plan = vt::PlanExl3SmallM(m, 128, 128, 4);
+      vllm::dense_attn::DBuf had(d, DType::kF16, {1, 8, plan.padded_rows, 16});
+      vllm::dense_attn::DBuf parts(d, DType::kF32, {plan.splits, m, 128});
+      vllm::dense_attn::DBuf shard(d, DType::kI32, {1});
+      shard.Zero(d);
+      const auto gt = vllm::dense_attn::ResidentWeight(d, gate.trellis);
+      const auto gsuh = vllm::dense_attn::Reshape(
+          vllm::dense_attn::ResidentWeight(d, gate.suh), {1, 128});
+      const auto gsvh = vllm::dense_attn::ResidentWeight(d, gate.svh);
+      const auto ut = vllm::dense_attn::ResidentWeight(d, up.trellis);
+      const auto usuh = vllm::dense_attn::Reshape(
+          vllm::dense_attn::ResidentWeight(d, up.suh), {1, 128});
+      const auto usvh = vllm::dense_attn::ResidentWeight(d, up.svh);
+      vt::Exl3GroupedLinear(q, g.t(), xb.t(), gt, gsuh, gsvh, shard.t(),
+                            had.t(), parts.t(), {4, 2});
+      vt::Exl3GroupedLinear(q, u.t(), xb.t(), ut, usuh, usvh, shard.t(),
+                            had.t(), parts.t(), {4, 2});
+      std::vector<uint16_t> gb(x.size()), ub(x.size()), got(x.size());
+      g.Download(d, gb.data());
+      u.Download(d, ub.data());
+      out.Download(d, got.data());
+      bool nonzero = false;
+      for (size_t i = 0; i < got.size(); ++i) {
+        const float gv = vt::F16ToF32(gb[i]);
+        const float silu = vt::F16ToF32(vt::F32ToF16(gv / (1.0f + std::exp(-gv))));
+        const uint16_t expected = vt::F32ToF16(silu * vt::F16ToF32(ub[i]));
+        CHECK(std::isfinite(vt::F16ToF32(got[i])));
+        CHECK(got[i] == expected);
+        nonzero |= vt::F16ToF32(got[i]) != 0.0f;
+      }
+      CHECK(nonzero);
+      vllm::dense_attn::Dev legacy{b, q};
+      auto bf16_out = method->Apply(legacy, xb.t());
+      CHECK(bf16_out.t().dtype == DType::kBF16);
+      b.Synchronize(q);
+    }
+  }
+  b.DestroyQueue(q);
+}
+#endif
 
 TEST_CASE("exl3 linear method: the f16 OUT arm is the kernel's own, and is executed") {
   // The f16 arm is the one `Exl3Gemm` writes natively, and it was the arm no

@@ -1,0 +1,197 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "device": "Intel(R) Arc(TM) Pro B70 Graphics",
+  "class": "vllm.model_executor.layers.rotary_embedding.mrope.MRotaryEmbedding",
+  "selected_method": "forward_xpu",
+  "cache_construction_device": "xpu",
+  "scope": "bounded executed operator; full language-model worker cache initialization not witnessed",
+  "source_sha256": "7a9383944326ece13f659d051ec1433a0b5e2a14b4a95e903b3c30f26bdfc6a2",
+  "head_size": 256,
+  "rotary_dim": 64,
+  "base": 10000000.0,
+  "is_neox_style": true,
+  "cache_dtype": "float16",
+  "contract": {
+    "bytes": "exact"
+  },
+  "cases": [
+    {
+      "section": [
+        11,
+        11,
+        10
+      ],
+      "interleaved": true,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 16384,
+      "files": {
+        "positions": {
+          "file": "language-mrope-0-positions.bin",
+          "sha256": "5fa0914407c2ddb8eb8b5b302d05c3c26f5ef3c3765b79d36c8056ee25598c5e"
+        },
+        "expected": {
+          "file": "language-mrope-0-cache.bin",
+          "sha256": "5cc040860025e2e86641d52c8cc65efb775d1fc35791547b03320fc303acb708"
+        }
+      }
+    },
+    {
+      "section": [
+        11,
+        11,
+        10
+      ],
+      "interleaved": false,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 16384,
+      "files": {
+        "positions": {
+          "file": "language-mrope-1-positions.bin",
+          "sha256": "5fa0914407c2ddb8eb8b5b302d05c3c26f5ef3c3765b79d36c8056ee25598c5e"
+        },
+        "expected": {
+          "file": "language-mrope-1-cache.bin",
+          "sha256": "10d61857766f32f94d4defc5ff463638acd31823a16a9a28b295492267333a23"
+        }
+      }
+    },
+    {
+      "section": [
+        11,
+        11,
+        10
+      ],
+      "interleaved": true,
+      "tokens": 8,
+      "equal_axes": true,
+      "positions_dtype": "int64",
+      "cache_rows": 16384,
+      "files": {
+        "positions": {
+          "file": "language-mrope-2-positions.bin",
+          "sha256": "0ee7b599d46f27aa135839d6699e08d292ae10ca6410c2d6a25dd432133378a2"
+        },
+        "expected": {
+          "file": "language-mrope-2-cache.bin",
+          "sha256": "6648975c30ae0758badaba37eedd738d8dafdb2d24e6326b54663ff3e1394699"
+        }
+      }
+    },
+    {
+      "section": [
+        1,
+        20,
+        11
+      ],
+      "interleaved": false,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 16384,
+      "files": {
+        "positions": {
+          "file": "language-mrope-3-positions.bin",
+          "sha256": "5fa0914407c2ddb8eb8b5b302d05c3c26f5ef3c3765b79d36c8056ee25598c5e"
+        },
+        "expected": {
+          "file": "language-mrope-3-cache.bin",
+          "sha256": "28690633e624506cd94d3c23f632b64a6c4c9dd111c9fa9b51b0e91ecb5d2890"
+        }
+      }
+    },
+    {
+      "section": [
+        32,
+        0,
+        0
+      ],
+      "interleaved": true,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 16384,
+      "files": {
+        "positions": {
+          "file": "language-mrope-4-positions.bin",
+          "sha256": "5fa0914407c2ddb8eb8b5b302d05c3c26f5ef3c3765b79d36c8056ee25598c5e"
+        },
+        "expected": {
+          "file": "language-mrope-4-cache.bin",
+          "sha256": "6648975c30ae0758badaba37eedd738d8dafdb2d24e6326b54663ff3e1394699"
+        }
+      }
+    },
+    {
+      "section": [
+        0,
+        16,
+        16
+      ],
+      "interleaved": false,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 16384,
+      "files": {
+        "positions": {
+          "file": "language-mrope-5-positions.bin",
+          "sha256": "5fa0914407c2ddb8eb8b5b302d05c3c26f5ef3c3765b79d36c8056ee25598c5e"
+        },
+        "expected": {
+          "file": "language-mrope-5-cache.bin",
+          "sha256": "bd18c2b5b48738b1b20da52374608d404518e944ccf8b461b0a3042ebc3505b9"
+        }
+      }
+    },
+    {
+      "section": [
+        11,
+        11,
+        10
+      ],
+      "interleaved": true,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 262144,
+      "files": {
+        "positions": {
+          "file": "language-mrope-6-positions.bin",
+          "sha256": "201b92bc3de4bb9810340a8f819d94993cd26c8d3e8fc1c1b8de974fb593e0c8"
+        },
+        "expected": {
+          "file": "language-mrope-6-cache.bin",
+          "sha256": "77b264d8673c91b65e01149fcae8eac7d35b5343586f3e4494f1e0c2c800ab45"
+        }
+      }
+    },
+    {
+      "section": [
+        11,
+        11,
+        10
+      ],
+      "interleaved": false,
+      "tokens": 8,
+      "equal_axes": false,
+      "positions_dtype": "int64",
+      "cache_rows": 262144,
+      "files": {
+        "positions": {
+          "file": "language-mrope-7-positions.bin",
+          "sha256": "201b92bc3de4bb9810340a8f819d94993cd26c8d3e8fc1c1b8de974fb593e0c8"
+        },
+        "expected": {
+          "file": "language-mrope-7-cache.bin",
+          "sha256": "e4bc4c07f44aa14b60a1fa7ac95beaa16d798ef9dc7c58aad65da43213ac8688"
+        }
+      }
+    }
+  ]
+}

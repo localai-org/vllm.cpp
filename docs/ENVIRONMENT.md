@@ -127,6 +127,96 @@ These change how the engine runs and have no CLI flag (or complement one).
 | `VLLM_CPP_MUSIC3_DIT_SPANS` | unset (off) | Splits `VLLM_CPP_MUSIC3_PROFILE`'s single `denoise.dit_device` row into sixteen SPANS inside the flow-matching transformer forward — the host packing, the input projections, the timestep embedding, the rotary tables, nine per-layer spans and the output projections and readback — plus `dit.seq_sum` and `dit.length_sum`, the summed window geometry the split has to be read against. Ignored unless `VLLM_CPP_MUSIC3_PROFILE` is also on: it refines a table, it cannot create one. **It is a SECOND flag rather than more detail on the first, and that is a property of the measurement rather than caution.** The forward's operations are asynchronous on one stream, so a bracket that does not drain the queue times the LAUNCH — it would report every matrix multiply as free and charge its cost to whichever bracket happened to contain the next synchronize — so the drain is mandatory for the split to mean anything, and it perturbs the very total it splits. With this unset the forward is exactly the path every recorded `denoise.dit_device` figure was taken on ([.agents/specs/minimax-music3.md](../.agents/specs/minimax-music3.md) §15.7, §20), so read the SPLIT from a run with the flag and the TOTAL from a run without it. The spans are printed and never summed, so `sum(leaf)`, `unattributed` and every recorded stage total are unchanged either way. Same value grammar as `VLLM_CPP_MUSIC3_PROFILE`: `1`, `true`, `on`, `yes`, case-insensitive, and anything else including a near miss leaves it off ([#1542](https://github.com/mudler/vllm.cpp/issues/1542)) |
 | `VT_ENABLE_JUMP_FORWARD` | off | Opt-in to jump-forward constrained decoding (SGLang parity SW3): when a grammar/structured-output request reaches a state with exactly one valid next token, that token is emitted without a model step. Currently drives only the standalone driver (`DrainForcedTokens`); output-identical by construction (it fires only where the constrained sampler already has a single valid token), so it changes speed, never tokens. Off by default until the production scheduler splice (jumped-token KV recompute) lands. Set `1`/`true`/`on` to enable |
 
+## Experimental EXL3/XPU controls
+
+These variables belong to the experimental single-device text path described in
+[EXL3_XPU.md](EXL3_XPU.md). Their presence is not reference qualification. The
+recipe there fixes the tested settings; changing a route requires a new scoped
+comparison. Some readers cache their setting on first use, so restart the process
+between diagnostic arms. The exact grammars below override the general flag
+convention at the top of this page.
+
+### Backend, preparation and sampling
+
+| Variable | Unset behavior / accepted setting | Scope |
+|---|---|---|
+| `VT_XPU_MEMORY_BUDGET_BYTES` | Physical device memory; positive decimal bytes no greater than that memory | Bounds tracked XPU device allocation; this does not change the hardware capacity. |
+| `VT_XPU_GRAPH` | Off; exactly `1` enables | Enables XPU static-graph support when the backend supports capture; the engine's graph settings still apply. |
+| `VT_XPU_W8A8_MODEL_MAP` | `1`; `0` or `1` | Uses allocation-generation ownership for immutable model maps in grouped W8A8 preparation. Public tensor inputs retain content validation. |
+| `VT_XPU_SMALLM_MODEL_MAP` | `1`; `0` or `1` | Selects the corresponding immutable model-map preparation for grouped SmallM. |
+| `VT_XPU_W8A8_DIRECT_PREPARE` | `1`; model-map routes accept `0` or `1` | Allows direct preparation of eligible model-map activation panels. |
+| `VT_XPU_W8A8_PREPARE` | Eligible preparation enabled; exactly `1` selects it when set | Selects prepared W8A8 inputs where the shape and memory guards permit them. |
+| `VT_XPU_EXL3_W8A8_PANEL_COLUMNS` | `1024`; `128`, `1024` or `2048` | Sets model W8A8 reconstruction-panel width. |
+| `VT_XPU_EXL3_STRATEGY` | `auto`; `reference`, `packed`, `fused`, `prefill`, `panel`, `prefill_all_rows` or `auto` | Selects EXL3 linear dispatch. Forced modes remain subject to their shape and backend guards. |
+| `VT_XPU_EXL3_PANEL_KERNEL` | `auto`; `auto`, `reference` or `register` | Selects the EXL3 prefill-panel kernel. |
+| `VT_XPU_EXL3_CAST_FUSION` | Enabled; literal `0` disables | Allows XPU EXL3 attention-block cast fusion. |
+| `VT_XPU_SILU_FP16_TYPED` | Enabled; literal `0` disables | Allows the typed FP16 SiLU route for eligible contiguous prefill shapes. |
+| `VT_XPU_SILU_FP16_TABLE` | `1`; `0` or `1` | Selects the device-generated FP16 SiLU table on the eligible typed route. |
+| `VT_B70_FAST_TOPK20` | Enabled; literal `0` disables | Allows the XPU top-k20/top-p route only when all active top-k values are 20. |
+
+### Attention routing
+
+| Variable | Unset behavior / accepted setting | Scope |
+|---|---|---|
+| `VT_XPU_ATTENTION` | `auto`; `auto`, `reference`, `split`, `prefill`, `verify` or `exl3_onednn` | Selects paged-attention dispatch; the source validates its available modes and each forced route's shape. See the experimental recipe for the tested `auto` configuration. |
+| `VT_XPU_XE2_VERIFY` | Off; exactly `1` requests the route in `auto` | Enables the compiled Xe2 verification route for eligible shapes. Existing numeric qualification gaps remain open. |
+| `VT_XPU_XE2_PREFILL` | Eligible route enabled; values other than `1` disable | Allows Xe2 prefill only when compiled and shape/device guards pass. |
+| `VT_XPU_XE2_CONTINUATION` | Eligible route enabled; values other than `1` disable | Allows Xe2 continuation under its existing guards. |
+| `VT_XPU_ATTN_PREAMBLE` | `auto`; `auto`, `reference` or `subgroup` | Chooses attention normalization/rotary preamble dispatch. |
+| `VT_XPU_ATTN_PREFILL_TILE` | `auto`; `auto`, `q16`, `q32` or `q64` | Selects the prefill query tile. |
+| `VT_XPU_ATTN_PROBABILITY` | `single`; `single` or `residual` | Selects probability materialization for eligible prefill tiles. |
+| `VT_XPU_ATTN_SPLIT_EXTENDED` | Enabled; exactly `1` retains it when set | Allows extended split-attention query shapes under the B70 FP8 guards. |
+| `VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP` | Enabled; exactly `1` retains it when set | Caps eligible split work to active pages. |
+| `VT_XPU_ATTN_SPLIT_SPAN` | Shape-dependent; `32`, `64`, `128` or `256` | Overrides the split-attention span. |
+| `VT_XPU_ATTN_SPLIT_MAX_PARTS` | Shape/context-dependent; `32`, `64`, `128` or `256` | Overrides the maximum number of split-attention parts. |
+| `VT_XPU_ATTN_SPLIT_REDUCE` | `auto`; `auto`, `scalar` or `cooperative` | Chooses split-attention reduction dispatch. |
+
+### Recurrent GDN routing
+
+| Variable | Unset behavior / accepted setting | Scope |
+|---|---|---|
+| `VT_XPU_CONV_PREFILL_PARALLEL` | Enabled; literal `0` disables | Allows the parallel convolution prefill route for eligible single-sequence shapes. |
+| `VT_XPU_GDN_DECODE` | `auto`; `auto`, `reference` or `subgroup` | Chooses GDN decode dispatch; forced subgroup requires FP16 Dk=Dv=128 and SG16. |
+| `VT_XPU_GDN_GATED_NORM` | `auto`; `auto`, `reference` or `subgroup` | Chooses gated-normalization dispatch. |
+| `VT_XPU_GDN_GATED_SILU_TABLE` | `1`; `0` or `1` | Selects the exact FP32 SiLU intermediate table for eligible FP16 gates. |
+| `VT_XPU_GDN_PREFILL` | `auto`; `auto`, `reference` or `chunked` | Chooses GDN prefill dispatch under the compiled-kernel and shape guards. |
+| `VT_XPU_GDN_NATIVE` | `0`; `0` or `1` | Requests the native producer for eligible prefill shapes. |
+| `VT_XPU_GDN_QK` | `xmx`; `reference` or `xmx` | Chooses chunked GDN Q/K matrix computation. |
+| `VT_XPU_GDN_INVERSE` | `blocked`; `slm`, `reference` or `blocked` | Chooses chunked GDN inverse computation. |
+| `VT_XPU_GDN_BATCH` | `2` where compatible; `1` or `2` | Chooses one or two chunks. Explicit `2` requires XMX Q/K and blocked inverse. |
+| `VT_XPU_GDN_DELTA_CROSS` | `tile4`; `reference` or `tile4` | Chooses chunked GDN cross-delta computation. |
+| `VT_XPU_GDN_INTRA_STATE` | `tile4`; `reference` or `tile4` | Chooses chunked GDN intra-state computation. |
+| `VT_XPU_GDN_WU` | `auto`; `auto`, `reference`, `tile4` or `xmx` | Chooses W/U computation; `auto` uses XMX for FP16 and tile4 otherwise. Forced XMX requires FP16. |
+| `VT_XPU_GDN_STATE` | `auto`; `auto`, `tile4` or `xmx` | Chooses state-update computation with the same FP16 XMX restriction. |
+| `VT_XPU_GDN_POSTCONV_SUBGROUP` | Eligible route enabled; exactly `1` retains it when set | Allows the subgroup post-convolution route under its device guards. |
+| `VT_XPU_GDN_MIXED_TOKEN_VIEWS` | `1`; `0` or `1` | Allows direct token views in mixed target/MTP execution. |
+| `VT_XPU_GDN_MIXED_OUTPUT_VIEWS` | `1`; `0` or `1` | Allows direct output views in mixed target/MTP execution. |
+| `VT_XPU_GDN_SPEC_SLM` | `1`; `0` or `1` | Allows guarded shared-local-memory speculative GDN execution. |
+| `VT_XPU_GDN_SPEC_SLM_TYPED` | `1`; `0` or `1` | Allows the typed-memory route when the SLM route and FP16 guards pass. |
+| `VT_XPU_GDN_SPEC_WG` | Shape-dependent; `0`, `32`, `64`, `128` or `256` | Overrides speculative GDN workgroup size; setting it also declines the SLM route. `0` selects a range launch. |
+
+### Diagnostics and retained INT4 support
+
+These instruments can change timing or write diagnostic output. Leave them unset
+for serving comparisons unless the measurement explicitly needs them. GPTQ stays
+diagnostic; its retained routes do not qualify a GPTQ deployment.
+
+| Variable | Enable / accepted setting | Scope |
+|---|---|---|
+| `VT_OP_PROVIDER_TRACE` | Nonempty output-file path | Appends shared operation-provider dispatch records to that file. |
+| `VT_PREFIX_SNAPSHOT_TRACE` | Any present value, including `0` | Writes recurrent prefix publish/restore events to stderr; these events are distinct from HTTP cached-token metrics. |
+| `VT_XPU_PROFILE` | Exactly `1` | Enables profiling queues and device event records. |
+| `VT_XPU_GRAPH_PROFILE` | Exactly `1`; requires `VT_XPU_PROFILE=1` | Enables graph profiling. |
+| `VT_XPU_HOST_PROFILE` | Exactly `1` | Enables host profiling spans. |
+| `VT_XPU_EXL3_TRACE` | Exactly `1` | Writes EXL3 dispatch diagnostics. |
+| `VT_XPU_TRACE_FAST_PATH` | Use `1` | Writes eligible/fallback dispatch diagnostics; readers differ in strictness. |
+| `VT_XPU_TRACE_SPLIT_PLAN` | Exactly `1` | Writes split-attention planning diagnostics. |
+| `VT_XPU_ATTN_NORM_PROBE` | Output-prefix path | Captures attention normalization probes; enabling it adds allocation and synchronization. |
+| `VT_B70_FAST_TOPK_TRACE` | Any present value, including `0` | Writes top-k20 fallback diagnostics. The route already synchronizes its fallback check. |
+| `VLLM_CPP_GPTQ4_TRACE_ROUTE` | Exactly `1` | Writes retained GPTQ route diagnostics. |
+| `VT_GPTQ4_GRAPH` | Off; exactly `1` enables | Opts the retained GPTQ path into graphs; eager remains its default. |
+| `VT_GPTQ4_LM_HEAD_ROUTE` | `onednn_f16_cast`; `onednn_f16_cast` or `reference_matmul_bt` | Selects the retained XPU GPTQ full-head route. |
+
 ## GGUF loading
 
 Behavior of the GGUF weight loader (CPU path). See the

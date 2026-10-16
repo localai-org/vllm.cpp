@@ -208,6 +208,36 @@ TEST_CASE("LoadHfConfig resolves nested text_config for a wrapper config") {
   CHECK(cfg.raw.at("text_config").at("num_hidden_layers").get<int64_t>() == 40);
 }
 
+TEST_CASE("LoadHfConfig resolves modern dtype without changing legacy defaults") {
+  auto plain = nlohmann::json::parse(kLlamaJson);
+  const auto legacy = vllm::ParseHfConfig(plain, "legacy");
+  CHECK(legacy.torch_dtype == "float16");
+  CHECK(legacy.dtype_source == "torch_dtype");
+
+  plain.erase("torch_dtype");
+  plain["dtype"] = "float16";
+  const auto modern = vllm::ParseHfConfig(plain, "modern");
+  CHECK(modern.torch_dtype == "float16");
+  CHECK(modern.dtype_source == "dtype");
+
+  auto wrapper = nlohmann::json::parse(kNestedWrapperJson);
+  wrapper.erase("torch_dtype");
+  wrapper["text_config"]["dtype"] = "float16";
+  const auto nested = vllm::ParseHfConfig(wrapper, "nested");
+  CHECK(nested.torch_dtype == "float16");
+  CHECK(nested.dtype_source == "text.dtype");
+
+  plain["torch_dtype"] = "bfloat16";
+  CHECK_THROWS_WITH_AS(vllm::ParseHfConfig(plain, "conflict"),
+                       doctest::Contains("conflicting dtype declarations"),
+                       std::runtime_error);
+  plain.erase("torch_dtype");
+  plain.erase("dtype");
+  const auto missing = vllm::ParseHfConfig(plain, "missing");
+  CHECK(missing.torch_dtype.empty());
+  CHECK(missing.dtype_source.empty());
+}
+
 TEST_CASE("LoadHfConfig resolves llm_config alias and thinker_config.text_config") {
   SUBCASE("llm_config alias (upstream _CONFIG_ATTRS_MAPPING)") {
     TempJson f(R"({

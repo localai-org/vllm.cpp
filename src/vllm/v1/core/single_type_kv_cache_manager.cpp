@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/core/single_type_kv_cache_manager.py @ e24d1b24
 // See include/vllm/v1/core/single_type_kv_cache_manager.h for the scope /
 // deferred list and the FullAttention-vs-Mamba difference this task turns on.
@@ -189,7 +190,12 @@ void SingleTypeKVCacheManager::cache_blocks(
     std::optional<int> retention_interval) {
   auto it = num_cached_block.find(request.request_id);
   int num_cached_blocks = it != num_cached_block.end() ? it->second : 0;
-  int num_full_blocks = num_tokens / block_size;
+  // A shifted MTP boundary hash needs the following committed token. A full
+  // computed page can therefore precede its hash by one decode token. Defer
+  // publishing that page; do not index a missing hash or count it as cached.
+  const int hashed_tokens = static_cast<int>(request.block_hashes.size()) *
+                            block_pool.hash_block_size;
+  const int num_full_blocks = std::min(num_tokens, hashed_tokens) / block_size;
 
   if (num_cached_blocks >= num_full_blocks) {
     return;
@@ -658,7 +664,7 @@ MambaManager::MambaManager(std::shared_ptr<KVCacheSpec> kv_cache_spec,
 std::vector<std::vector<KVCacheBlock*>> MambaManager::find_longest_cache_hit(
     const std::vector<BlockHash>& block_hashes, int max_length,
     const std::vector<int>& kv_cache_group_ids, BlockPool& pool,
-    const KVCacheSpec& spec, bool /*drop_eagle_block*/,
+    const KVCacheSpec& spec, bool drop_eagle_block,
     int alignment_tokens, int dcp_world_size, int pcp_world_size) {
   assert(spec.kind() == KVCacheSpecKind::kMamba &&
          "MambaManager can only be used for mamba groups");
@@ -670,12 +676,17 @@ std::vector<std::vector<KVCacheBlock*>> MambaManager::find_longest_cache_hit(
       kv_cache_group_ids.size());
 
   int effective_block_size = spec.block_size;
-  int max_num_blocks = max_length / effective_block_size;
+  // Match the production B70 drop guard: a draft-bearing final page may
+  // contain state from tokens that were subsequently rejected. Exclude it
+  // before searching, so a miss cannot fall back to that same unsafe page.
+  // This implementation exposes block-granular snapshots only.
+  int max_num_blocks = std::max(0, max_length / effective_block_size - (drop_eagle_block ? 1 : 0));
   // Search from right to left and early stop when a match is found.
   for (int i = max_num_blocks - 1; i >= 0; --i) {
     if (i >= static_cast<int>(block_hashes.size())) {
       continue;
     }
+    if (prefix_snapshots && !prefix_snapshots->Contains(block_hashes[i])) continue;
     std::optional<std::vector<KVCacheBlock*>> cached_block =
         pool.get_cached_block(block_hashes[i], kv_cache_group_ids);
     if (cached_block.has_value()) {

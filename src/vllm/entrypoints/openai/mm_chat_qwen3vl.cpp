@@ -95,11 +95,15 @@ MultiModalChatSeam MakeQwen3VLChatSeam(const MultiModalChatContext& ctx) {
   MultiModalChatSeam seam;
   seam.allowed_limits = info->AllowedMmLimits();
   seam.detail = "Qwen3-VL processor from " + preprocessor_config_path;
-  MultiModalChatFn body = MakeQwen3VLImageChatFn(
+  MultiModalRequestChatFn body = MakeQwen3VLImageRequestChatFn(
       *proc, *ctx.tokenizer, ctx.prompt_fn, ctx.codec, *info);
-  seam.chat_fn = [proc, info, body = std::move(body)](
-                     const std::vector<ChatMessage>& messages)
-      -> std::optional<multimodal::MultiModalInputs> { return body(messages); };
+  seam.request_chat_fn = [proc, info, body = std::move(body)](
+      const std::vector<ChatMessage>& messages,
+      const std::vector<ChatCompletionToolsParam>& tools,
+      const nlohmann::ordered_json& kwargs)
+      -> std::optional<multimodal::MultiModalInputs> {
+    return body(messages, tools, kwargs);
+  };
   return seam;
 }
 

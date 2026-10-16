@@ -654,6 +654,24 @@ TEST_CASE("make_sampling_metadata stays fresh when penalties are active") {
   CHECK(md.repetition_penalties.size() == 1);
 }
 
+TEST_CASE("PR11 sampling positions survive progress, reorder and resume") {
+  InputBatch batch = make_batch();
+  SamplingParams params; params.seed = 123;
+  auto a = make_req("a", {1, 2}, {8, 9}, {1}, params);
+  auto b = make_req("b", {3}, {}, {2}, params);
+  batch.add_request(a); batch.add_request(b);
+  CHECK(batch.make_sampling_metadata().output_token_positions == std::vector<uint64_t>{2, 0});
+  ++batch.num_tokens_no_spec[0]; // accepted token, with unchanged static sampling metadata
+  CHECK(batch.make_sampling_metadata().output_token_positions == std::vector<uint64_t>{3, 0});
+  batch.swap_states(0, 1);
+  CHECK(batch.make_sampling_metadata().output_token_positions == std::vector<uint64_t>{0, 3});
+  batch.remove_request("b"); batch.condense();
+  CHECK(batch.make_sampling_metadata().output_token_positions == std::vector<uint64_t>{3});
+  batch.remove_request("a"); batch.condense();
+  a.output_token_ids.push_back(10); batch.add_request(a);
+  CHECK(batch.make_sampling_metadata().output_token_positions == std::vector<uint64_t>{3});
+}
+
 // ===========================================================================
 // SPEC-MTP (I2) InputBatch spec-decode ABI: num_accepted_tokens (seeded to 1)
 // and update_req_spec_token_ids. These are the fields/updaters the rejection

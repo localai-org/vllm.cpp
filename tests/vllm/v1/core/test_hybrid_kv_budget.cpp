@@ -123,6 +123,23 @@ TEST_CASE("hybrid budget: the 27B arithmetic, term by term") {
   CHECK(ClampMaxNumSeqsToStateBudget(4, b) == 4);
 }
 
+TEST_CASE("hybrid budget: XPU FP8 Qwen page follows Python MTP depth") {
+  HfConfig c = Qwen27bConfig();
+  c.torch_dtype = "float16";
+  c.raw = {{"quantization_config", {{"quant_method", "gptq"}}}};
+  for (int depth : {0, 4}) {
+    auto kv = MakeQwen3_5KVCacheSpec(c, /*block_size=*/64,
+                                    /*num_blocks=*/1, depth);
+    const auto dtype = vllm::v1::ParseCacheDType("fp8", vt::DType::kF16);
+    vllm::v1::ApplyCacheDType(kv, dtype, 1.0F, 1.0F);
+    const HybridKvBudget b = ComputeHybridKvBudget(kv, /*alignment=*/64);
+    CAPTURE(depth);
+    CHECK(b.attn_bytes_per_token == 2048);
+    CHECK(b.mamba_page_bytes == MambaPageBytes(depth));
+    CHECK(b.unified_block_tokens == (depth == 4 ? 1664 : 1600));
+  }
+}
+
 TEST_CASE("hybrid budget: the SPEC-OFF 27B engine is not clamped at all") {
   // The defect is a speculation-x-concurrency product. Without speculation each
   // sequence owns ONE state slot and the same pool holds far more of them than

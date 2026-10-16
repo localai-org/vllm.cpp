@@ -368,6 +368,11 @@ void ResolveKVCacheGroupLayerNames(
     }
     if (!group.is_eagle_group && !target_named) {
       group.layer_names = attention;
+      if (config.mtp_draft_shares_target_pages) {
+        group.layer_names.push_back("model.layers." +
+                                   std::to_string(num_hidden_layers) +
+                                   ".self_attn.attn");
+      }
       target_named = true;
     } else if (!draft_named) {
       // The speculative draft layer. Upstream registers the MTP head as one

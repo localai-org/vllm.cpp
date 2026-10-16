@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "vllm/tokenizer/tokenizer.h"
+#include "vllm/v1/engine/input_processor.h"
 
 namespace vllm::entrypoints::openai {
 
@@ -118,7 +119,23 @@ bool HasMultiModalParts(const ChatMessage& m) {
 }
 
 DecodedMedia DecodeImageUrlPart(const ChatContentPart& part) {
-  return DecodeDataUri(part.url);
+  // Bound the encoded allocation BEFORE DecodeDataUri copies the payload and
+  // DecodeBase64 reserves its output. No image URL triggers outbound I/O.
+  constexpr std::size_t max_uri = ((kMaxImageContainerBytes + 2) / 3) * 4 + 256;
+  if (part.url.size() > max_uri) {
+    throw vllm::v1::InputValidationError("multimodal image: encoded input exceeds byte limit");
+  }
+  try {
+    DecodedMedia media = DecodeDataUri(part.url);
+    if (media.bytes.size() > kMaxImageContainerBytes) {
+      throw vllm::v1::InputValidationError("multimodal image: container exceeds byte limit");
+    }
+    return media;
+  } catch (const vllm::v1::InputValidationError&) {
+    throw;
+  } catch (const std::runtime_error& e) {
+    throw vllm::v1::InputValidationError(e.what());
+  }
 }
 
 DecodedMedia DecodeInputAudioPart(const ChatContentPart& part) {
@@ -166,7 +183,12 @@ multimodal::MultiModalInputs RouteImageRgb(
     int64_t height, int64_t width, const std::vector<int32_t>& prompt_ids) {
   const multimodal::Qwen3VLProcessorConfig& cfg = proc.config();
 
-  multimodal::ImageKwargs kw = proc.ProcessImage(rgb, height, width);
+  multimodal::ImageKwargs kw;
+  try {
+    kw = proc.ProcessImage(rgb, height, width);
+  } catch (const std::invalid_argument& e) {
+    throw vllm::v1::InputValidationError(e.what());
+  }
   const std::array<int64_t, 3> grid = kw.image_grid_thw;
 
   std::vector<std::array<int64_t, 3>> grids{grid};
@@ -186,34 +208,6 @@ multimodal::MultiModalInputs RouteImageRgb(
     out.mm_features.push_back(std::move(spec));
   }
   return out;
-}
-
-ImageCodecFn DefaultImageCodec() {
-  return [](const DecodedMedia& media) -> DecodedImageRgb {
-    // Raw-RGB passthrough (image/x-raw-rgb): the single-sequence e2e / gate
-    // fixture format. A square raw-RGB payload is decoded directly; any
-    // container format (PNG/JPEG) is the NAMED codec residual.
-    if (media.media_type == "image/x-raw-rgb") {
-      const std::size_t n = media.bytes.size();
-      const std::size_t px = n / 3;
-      const auto side = static_cast<int64_t>(
-          std::llround(std::sqrt(static_cast<double>(px))));
-      if (side <= 0 ||
-          static_cast<std::size_t>(side) * static_cast<std::size_t>(side) * 3 !=
-              n) {
-        throw std::runtime_error(
-            "image/x-raw-rgb payload is not a square HxWx3 buffer");
-      }
-      DecodedImageRgb out;
-      out.rgb = media.bytes;
-      out.height = side;
-      out.width = side;
-      return out;
-    }
-    throw std::runtime_error(
-        "multimodal image: container-format decode (PNG/JPEG -> RGB) is a "
-        "named MM-SERVE residual; supply raw RGB (image/x-raw-rgb)");
-  };
 }
 
 std::string ImagePlaceholderString() {
@@ -332,29 +326,42 @@ MakeQwen3VLImageChatFn(const multimodal::Qwen3VLImageProcessor& proc,
                        const vllm::tok::Tokenizer& tokenizer,
                        ChatPromptRenderFn prompt_fn, ImageCodecFn codec,
                        const multimodal::BaseProcessingInfo& info) {
+  auto body = MakeQwen3VLImageRequestChatFn(proc, tokenizer, std::move(prompt_fn), std::move(codec), info);
+  return [body = std::move(body)](const std::vector<ChatMessage>& messages) {
+    return body(messages, {}, nlohmann::ordered_json::object());
+  };
+}
+
+std::function<std::optional<multimodal::MultiModalInputs>(
+    const std::vector<ChatMessage>&,
+    const std::vector<ChatCompletionToolsParam>&,
+    const nlohmann::ordered_json&)>
+MakeQwen3VLImageRequestChatFn(const multimodal::Qwen3VLImageProcessor& proc,
+                            const vllm::tok::Tokenizer& tokenizer,
+                            ChatPromptRenderFn prompt_fn, ImageCodecFn codec,
+                            const multimodal::BaseProcessingInfo& info) {
   return [&proc, &tokenizer, &info, prompt_fn = std::move(prompt_fn),
-          codec = std::move(codec)](const std::vector<ChatMessage>& messages)
+          codec = std::move(codec)](const std::vector<ChatMessage>& messages,
+              const std::vector<ChatCompletionToolsParam>& tools,
+              const nlohmann::ordered_json& chat_template_kwargs)
              -> std::optional<multimodal::MultiModalInputs> {
     // STEP 0 (#607 L2, #686): the per-item limit check, BEFORE anything is
     // decoded or dropped. chat_utils.py:662 validates as it tracks, for the same
     // reason: refusing costs nothing, and truncating is invisible.
     ValidateChatMmLimits(info, messages);
 
-    // Locate the image part across the messages. At most ONE survives the check
-    // above (Qwen3VLChatSupportedMmLimits caps image at 1), so this loop no
-    // longer silently drops a second one — there cannot be one.
-    const ChatContentPart* image_part = nullptr;
+    // Preserve conversation and content-part order. The processing info keeps
+    // legacy Qwen3-VL at one image; native Qwen3.5 supplies its own ceiling.
+    std::vector<const ChatContentPart*> image_parts;
     for (const ChatMessage& m : messages) {
       if (!m.content_parts.has_value()) continue;
       for (const ChatContentPart& part : *m.content_parts) {
         if (part.type == "image_url") {
-          image_part = &part;
-          break;
+          image_parts.push_back(&part);
         }
       }
-      if (image_part != nullptr) break;
     }
-    if (image_part == nullptr) return std::nullopt;
+    if (image_parts.empty()) return std::nullopt;
 
     // 1. Render the templated prompt with the placeholder marker injected at the
     //    mm part position (the real chat template wraps <|im_start|>… around it).
@@ -365,26 +372,44 @@ MakeQwen3VLImageChatFn(const multimodal::Qwen3VLImageProcessor& proc,
         m.content_parts.reset();
       }
     }
-    // #1681: the mm chat seam is (messages) -> MultiModalInputs, so a request's
-    // chat_template_kwargs cannot reach here -- there is nothing to carry them.
-    // Recorded under `## Owed` in specs/chat-template-jinja-undefined.md rather
-    // than silently dropped; the text-only path forwards them.
     const std::string prompt =
-        prompt_fn(rendered, /*add_generation_prompt=*/true, {},
-                  nlohmann::ordered_json::object());
+        prompt_fn(rendered, /*add_generation_prompt=*/true, tools,
+                  chat_template_kwargs);
 
-    // 2. Tokenize WITH special tokens: the single <|image_pad|> marker becomes
-    //    ONE image_token_id (added tokens matched leftmost-longest).
+    // 2. Tokenize WITH special tokens: each <|image_pad|> marker becomes one
+    //    image_token_id (added tokens matched leftmost-longest).
     const std::vector<int32_t> prompt_ids =
         tokenizer.EncodeWithSpecialTokens(prompt);
 
-    // 3. Decode the image bytes + route through the processor: EXPAND the single
-    //    image_token_id to N = grid/merge^2 copies and build the mm_features the
-    //    engine mm generate overload carries onto Request.mm_features.
-    const DecodedMedia media = DecodeImageUrlPart(*image_part);
-    const DecodedImageRgb img = codec(media);
-    return RouteImageRgb(proc, img.rgb.data(), img.height, img.width,
-                         prompt_ids);
+    // 3. Preprocess serially so decoded RGB buffers do not accumulate beside
+    //    the retained typed patches. Expand all markers together, then pair
+    //    each ordered grid/hash/patch owner with its exact placeholder span.
+    multimodal::MultiModalInputs out;
+    std::vector<std::array<int64_t, 3>> grids;
+    for (const auto* part : image_parts) {
+      const DecodedMedia media = DecodeImageUrlPart(*part);
+      const DecodedImageRgb img = codec(media);
+      multimodal::MultiModalFeatureSpec feature;
+      feature.modality = "image";
+      try {
+        feature.data = std::make_shared<multimodal::ImageKwargs>(
+            proc.ProcessImage(img.rgb.data(), img.height, img.width));
+      } catch (const std::invalid_argument& e) {
+        throw vllm::v1::InputValidationError(e.what());
+      }
+      feature.mm_hash = proc.HashImage(img.rgb.data(), img.height, img.width);
+      grids.push_back(feature.data->image_grid_thw);
+      out.mm_features.push_back(std::move(feature));
+    }
+    std::vector<std::array<int, 2>> placeholders;
+    out.prompt_token_ids = multimodal::ExpandImagePlaceholders(
+        prompt_ids, proc.config().image_token_id, proc.config().merge_size,
+        grids, &placeholders);
+    for (size_t i = 0; i < out.mm_features.size(); ++i) {
+      out.mm_features[i].offset = placeholders[i][0];
+      out.mm_features[i].length = placeholders[i][1];
+    }
+    return out;
   };
 }
 

@@ -23,10 +23,9 @@
 //
 // A naive four-tap cubic disagrees with this badly on any real downscale, and
 // nothing about the disagreement is visible to a shape check or to a token
-// count. `qwen3vl_processor.cpp` defers a resize of its own and names
-// TORCHVISION bicubic (`antialias=False`, no support scaling, float output with
-// no uint8 round trip). That is a different algorithm; this function does not
-// discharge that debt.
+// count. The pinned torchvision v2 CPU uint8 processor instead uses adaptive
+// signed-int16 coefficient precision. `torchvision_resize.h` implements that
+// distinct boundary; this fixed-22-bit Pillow routine is not substituted there.
 #ifndef VLLM_MULTIMODAL_PIL_RESIZE_H_
 #define VLLM_MULTIMODAL_PIL_RESIZE_H_
 

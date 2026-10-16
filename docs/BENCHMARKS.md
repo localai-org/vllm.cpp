@@ -44,6 +44,7 @@ registry-bound list in [FEATURES.md](FEATURES.md).
 | `memory` | `PASS`: peak PSS/RSS/GPU-memory ratios vs vLLM, 27B NVFP4 GB10 | [Memory](benchmarks/memory.md) |
 | `mlx-lm-apple-m4` | INDICATIVE: 97.6% warm total vs MLX-LM, Qwen3-0.6B | [MLX-LM, Apple M4](benchmarks/mlx-lm-apple-m4.md) |
 | `open-gaps` | ledger of open performance gaps and their next gates | [Open gaps](benchmarks/open-gaps.md) |
+| `b70-exl3-serving-continuity` | Experimental integration; same-native sentinel, no new Python or HTTP speed gate | [B70 EXL3 continuity](benchmarks/b70-exl3-serving-continuity.md) |
 | `qwen38-27b-exl3-gb10` | EXL3 3.5bpw decode, with and without the DFlash2 draft | [Qwen3.8-27B EXL3 GB10](benchmarks/qwen38-27b-exl3-gb10.md) |
 | `qwen38-27b-exl3-variadic-gb10` | EXL3 under a mixed-length serving load | [Qwen3.8-27B EXL3 variadic GB10](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
 | `qwen38-27b-q4km-gfx1151` | Q4_K_M three-engine comparison on Strix Halo | [Qwen3.8-27B Q4_K_M gfx1151](benchmarks/qwen38-27b-q4km-gfx1151.md) |

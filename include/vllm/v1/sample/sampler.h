@@ -139,6 +139,8 @@ class Sampler {
   // const and this is pure allocation state, not sampling semantics.
   struct GreedyArgmaxScratch;
   mutable std::unique_ptr<GreedyArgmaxScratch> greedy_scratch_;
+  uint64_t default_seed_ = 0;
+  mutable uint64_t random_step_ = 0;
 };
 
 }  // namespace vllm::v1

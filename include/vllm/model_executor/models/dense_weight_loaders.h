@@ -634,6 +634,78 @@ inline OwnedTensor LoadMergedBf16Vector(const TensorResolver& get,
 // per-layer scheme probe: presence of `.weight_packed` means the config group
 // matched this Linear (vLLM resolves the same thing through `find_matched_target`
 // + the `ignore` list, compressed_tensors.py:868-880).
+// Explicit FP16 model storage. F16 is retained verbatim; BF16/F32 checkpoint
+// remainders are cast straight to F16, without an intermediate BF16 rounding.
+// Callers choose this policy explicitly; existing BF16 readers stay strict.
+inline OwnedTensor LoadF16Direct(const TensorResolver& get, const std::string& name,
+                                 const std::vector<int64_t>& shape_override = {}) {
+  const StTensor& source = get(name);
+  VT_CHECK(source.dtype == "F16" || source.dtype == "BF16" || source.dtype == "F32",
+           "dense loader: expected F16/BF16/F32 source for FP16 " + name);
+  const auto numel = [&name](const std::vector<int64_t>& shape) {
+    VT_CHECK(!shape.empty() && shape.size() <= vt::kMaxRank,
+             "dense loader: invalid FP16 rank for " + name);
+    int64_t count = 1;
+    for (const int64_t dim : shape) {
+      VT_CHECK(dim > 0 && count <= std::numeric_limits<int64_t>::max() / dim,
+               "dense loader: invalid FP16 shape for " + name);
+      count *= dim;
+    }
+    return static_cast<size_t>(count);
+  };
+  const auto& shape = shape_override.empty() ? source.shape : shape_override;
+  const size_t count = numel(source.shape);
+  const size_t source_width = source.dtype == "F32" ? 4 : 2;
+  VT_CHECK(numel(shape) == count && count <= SIZE_MAX / source_width &&
+               source.nbytes == count * source_width && source.data != nullptr,
+           "dense loader: invalid FP16 source span/reshape for " + name);
+  OwnedTensor result;
+  if (source.dtype == "F16" && BorrowStTensorBytes(result, source, vt::DType::kF16, shape))
+    return result;
+  result = MakeOwned(vt::DType::kF16, shape);
+  if (source.dtype == "F16") {
+    std::memcpy(result.bytes.data(), source.data, source.nbytes);
+  } else {
+    for (size_t i = 0; i < count; ++i) {
+      const float value = source.dtype == "BF16"
+          ? vt::BF16ToF32(vt::LoadUnaligned<uint16_t>(source.data + 2 * i))
+          : vt::LoadUnaligned<float>(source.data + 4 * i);
+      const uint16_t half = vt::F32ToF16(value);
+      std::memcpy(result.bytes.data() + 2 * i, &half, sizeof(half));
+    }
+  }
+  MaybeReleaseSourcePages(source.data, source.nbytes);
+  return result;
+}
+
+// Physical merged dense parameter, in caller-specified row order. Each source
+// is converted according to the explicit FP16 policy before concatenation.
+inline OwnedTensor LoadMergedF16RawNK(const TensorResolver& get,
+                                     const std::vector<std::string>& names) {
+  VT_CHECK(!names.empty(), "dense loader: merged FP16 projection needs shards");
+  int64_t rows = 0, cols = -1;
+  for (const auto& name : names) {
+    const auto& source = get(name);
+    VT_CHECK(source.shape.size() == 2 && source.shape[0] > 0 && source.shape[1] > 0,
+             "dense loader: expected positive [N,K] FP16 source for " + name);
+    if (cols == -1) cols = source.shape[1];
+    VT_CHECK(source.shape[1] == cols && rows <= INT64_MAX - source.shape[0],
+             "dense loader: merged FP16 geometry mismatch for " + name);
+    rows += source.shape[0];
+  }
+  VT_CHECK(rows <= INT64_MAX / cols && static_cast<uint64_t>(rows * cols) <= SIZE_MAX / 2,
+           "dense loader: merged FP16 size overflows");
+  OwnedTensor merged = MakeOwned(vt::DType::kF16, {rows, cols});
+  merged.nk = true;
+  size_t offset = 0;
+  for (const auto& name : names) {
+    const OwnedTensor shard = LoadF16Direct(get, name);
+    std::memcpy(merged.bytes.data() + offset, shard.bytes.data(), shard.bytes.size());
+    offset += shard.bytes.size();
+  }
+  return merged;
+}
+
 // F16 -> BF16, for the unquantized remainder of an EXL3 checkpoint.
 //
 // WHY THIS IS SCOPED TO EXL3 RATHER THAN ADDED TO `MaterializeBf16Source`.
@@ -732,6 +804,7 @@ inline Exl3Weight LoadExl3(const TensorResolver& get,
                std::to_string(svh.shape.empty() ? -1 : svh.shape[0]) + "]");
 
   Exl3Weight r;
+  r.name = proj;
   // THE CODEBOOK IS SELECTED BY TENSOR PRESENCE, and the polarity is the
   // opposite of the obvious guess. `LinearEXL3` sets
   // `self.mcg = (self.mcg_tensor is not None)` and likewise for `mul1`
@@ -765,6 +838,14 @@ inline Exl3Weight LoadExl3(const TensorResolver& get,
     const StTensor& mul1 = get(proj + ".mul1");
     VT_CHECK(mul1.dtype == "I32",
              "dense loader: expected I32 mul1 marker for " + proj + ", got " + mul1.dtype);
+    // The native codebook-2 decoder uses this fixed multiplier. Accept the
+    // producer's scalar and the historical one-element spelling, but never
+    // silently decode another codebook from a tensor wearing the same name.
+    VT_CHECK((mul1.shape.empty() || mul1.shape == std::vector<int64_t>{1}) &&
+                 mul1.nbytes == sizeof(uint32_t) && mul1.data != nullptr,
+             "dense loader: expected one I32 mul1 multiplier for " + proj);
+    VT_CHECK(vt::LoadUnaligned<uint32_t>(mul1.data) == 0x83DCD12DU,
+             "dense loader: unsupported mul1 multiplier for " + proj);
   }
   VT_CHECK(!has(proj + ".had"),
            "dense loader: " + proj +

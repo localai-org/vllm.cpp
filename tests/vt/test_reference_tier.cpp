@@ -28,7 +28,7 @@
 //      so the fused-recipe ladder is unchanged.
 //
 // This file is its own executable (tests/CMakeLists.txt: one add_executable per
-// test), so registering a backend on the otherwise-unused kXPU and kTENSTORRENT
+// test), so registering a backend on the unused TestDevice() and kTENSTORRENT
 // slots cannot leak into any other test binary. The two slots are separate
 // because a reference-tier provider cannot be uninstalled once registered, so a
 // case that must observe an EMPTY table needs a table nothing else has touched.
@@ -54,6 +54,23 @@ using vt::OpId;
 using vt::Queue;
 using vt::Tensor;
 
+// Keep synthetic host allocations away from real device-only XPU kernels.
+// TENSTORRENT remains reserved for the separate non-host-addressable case.
+DeviceType TestDevice() {
+  static const DeviceType device = [] {
+    for (auto d : {DeviceType::kXPU, DeviceType::kMETAL, DeviceType::kVULKAN,
+                   DeviceType::kROCM, DeviceType::kCUDA}) {
+      if (vt::TryGetBackend(d)) continue;
+      bool empty = true;
+      for (int op = 0; op < static_cast<int>(OpId::kCount); ++op)
+        if (vt::OpProviderCount(static_cast<OpId>(op), d)) empty = false;
+      if (empty) return d;
+    }
+    throw std::runtime_error("reference-tier test requires an unused device registry slot");
+  }();
+  return device;
+}
+
 // A minimal backend over ordinary HOST memory. `unified` is the only thing under
 // test: a unified instance stands in for Metal/GB10/integrated-Vulkan (host and
 // device pointers alias, so the CPU reference tier is sound); a discrete instance
@@ -76,7 +93,7 @@ class FakeBackend final : public Backend {
   void Copy(Queue&, void* dst, const void* src, size_t bytes) override {
     std::memcpy(dst, src, bytes);
   }
-  Queue CreateQueue() override { return Queue{Device{DeviceType::kXPU, 0}, nullptr}; }
+  Queue CreateQueue() override { return Queue{Device{TestDevice(), 0}, nullptr}; }
   bool UnifiedMemory() const override { return unified_; }
   bool DeviceMemoryIsHostAddressable() const override { return host_addressable_; }
   const char* HostAddressabilityNote() const override { return note_; }
@@ -124,17 +141,17 @@ void NativeKernel() {}
 // 1. SAFETY GATE — a DISCRETE device is never given a CPU fallback.
 // ---------------------------------------------------------------------------
 TEST_CASE("reference tier: a discrete (non-unified) device is refused and still throws") {
-  vt::RegisterBackend(DeviceType::kXPU, &Discrete());
+  vt::RegisterBackend(TestDevice(), &Discrete());
 
   // The gate itself.
-  CHECK_FALSE(vt::ReferenceTierEligible(DeviceType::kXPU));
+  CHECK_FALSE(vt::ReferenceTierEligible(TestDevice()));
   // Eager install is a strict no-op: nothing registered, count 0.
-  CHECK(vt::RegisterReferenceTier(DeviceType::kXPU) == 0);
-  CHECK(vt::OpProviderCount(OpId::kRelu, DeviceType::kXPU) == 0);
+  CHECK(vt::RegisterReferenceTier(TestDevice()) == 0);
+  CHECK(vt::OpProviderCount(OpId::kRelu, TestDevice()) == 0);
   // And a dispatch on an op it lacks THROWS — a CPU kernel must not be allowed to
   // run against what this device claims is discrete memory.
-  CHECK_FALSE(vt::OpRegistered(OpId::kRelu, DeviceType::kXPU));
-  CHECK_THROWS(vt::GetOp(OpId::kRelu, DeviceType::kXPU));
+  CHECK_FALSE(vt::OpRegistered(OpId::kRelu, TestDevice()));
+  CHECK_THROWS(vt::GetOp(OpId::kRelu, TestDevice()));
 }
 
 // A device that withdrew host addressability DELIBERATELY gets to say why, in
@@ -148,13 +165,13 @@ TEST_CASE("reference tier: a discrete (non-unified) device is refused and still 
 // The REQUIRE below turns a reordering into a diagnosable failure instead of a
 // silently vacuous pass.
 TEST_CASE("reference tier: the refusal carries the backend's own reason") {
-  REQUIRE(vt::OpProviderCount(OpId::kRelu, DeviceType::kXPU) == 0);
-  vt::RegisterBackend(DeviceType::kXPU, &DiscreteWithNote());
-  REQUIRE_FALSE(vt::ReferenceTierEligible(DeviceType::kXPU));
+  REQUIRE(vt::OpProviderCount(OpId::kRelu, TestDevice()) == 0);
+  vt::RegisterBackend(TestDevice(), &DiscreteWithNote());
+  REQUIRE_FALSE(vt::ReferenceTierEligible(TestDevice()));
 
   std::string message;
   try {
-    vt::GetOp(OpId::kRelu, DeviceType::kXPU);
+    vt::GetOp(OpId::kRelu, TestDevice());
   } catch (const std::exception& e) {
     message = e.what();
   }
@@ -168,10 +185,10 @@ TEST_CASE("reference tier: the refusal carries the backend's own reason") {
   // A backend with NOTHING to add leaves the message byte-identical, so the
   // note cannot become a sentence every refusal drags along. Same slot, same
   // op, same refusal path: the only difference is the note.
-  vt::RegisterBackend(DeviceType::kXPU, &Discrete());
+  vt::RegisterBackend(TestDevice(), &Discrete());
   std::string plain;
   try {
-    vt::GetOp(OpId::kRelu, DeviceType::kXPU);
+    vt::GetOp(OpId::kRelu, TestDevice());
   } catch (const std::exception& e) {
     plain = e.what();
   }
@@ -263,11 +280,11 @@ TEST_CASE("reference tier: unified memory the host cannot address is refused, by
 // 2. CORRECTNESS WITH ZERO NATIVE KERNELS — a unified device runs via the tier.
 // ---------------------------------------------------------------------------
 TEST_CASE("reference tier: a unified device with NO native Relu falls back to the CPU kernel") {
-  vt::RegisterBackend(DeviceType::kXPU, &Unified());
-  CHECK(vt::ReferenceTierEligible(DeviceType::kXPU));
+  vt::RegisterBackend(TestDevice(), &Unified());
+  CHECK(vt::ReferenceTierEligible(TestDevice()));
 
-  // There is no native kMETAL/kVULKAN kernel here; kXPU has none registered.
-  REQUIRE_FALSE(vt::OpRegistered(OpId::kRelu, DeviceType::kXPU));
+  // There is no native kMETAL/kVULKAN kernel here; the test device has none registered.
+  REQUIRE_FALSE(vt::OpRegistered(OpId::kRelu, TestDevice()));
 
   constexpr int64_t kRows = 5, kCols = 32;
   constexpr size_t kN = kRows * kCols;
@@ -290,9 +307,9 @@ TEST_CASE("reference tier: a unified device with NO native Relu falls back to th
   const unsigned long long hits_before = vt::GetReferenceTierHits();
 
   // Now the same op on the UNIFIED "accelerator" — with zero native kernels.
-  Backend& dev = vt::GetBackend(DeviceType::kXPU);
+  Backend& dev = vt::GetBackend(TestDevice());
   Queue q = dev.CreateQueue();
-  const Device d{DeviceType::kXPU, 0};
+  const Device d{TestDevice(), 0};
   void* pin = dev.Alloc(kN * sizeof(float));
   void* pout = dev.Alloc(kN * sizeof(float));
   dev.Copy(q, pin, in.data(), kN * sizeof(float));
@@ -312,47 +329,47 @@ TEST_CASE("reference tier: a unified device with NO native Relu falls back to th
 
   // OBSERVABILITY — the fallback is loud, not silent.
   CHECK(vt::GetReferenceTierHits() > hits_before);
-  REQUIRE(vt::OpProviderCount(OpId::kRelu, DeviceType::kXPU) >= 1);
-  CHECK(std::string(vt::OpProviderNameAt(OpId::kRelu, DeviceType::kXPU, 0)) ==
+  REQUIRE(vt::OpProviderCount(OpId::kRelu, TestDevice()) >= 1);
+  CHECK(std::string(vt::OpProviderNameAt(OpId::kRelu, TestDevice(), 0)) ==
         vt::kReferenceProviderName);
-  const auto s = vt::GetOpProviderStats(OpId::kRelu, DeviceType::kXPU);
+  const auto s = vt::GetOpProviderStats(OpId::kRelu, TestDevice());
   REQUIRE(s.last_selected != nullptr);
   CHECK(std::string(s.last_selected) == vt::kReferenceProviderName);
 
   // And it is NOT counted as a native kernel — the meaning OpRegistered must keep
   // for the fused-recipe ladder — even though GetOp now returns a working fn.
-  CHECK_FALSE(vt::OpRegistered(OpId::kRelu, DeviceType::kXPU));
+  CHECK_FALSE(vt::OpRegistered(OpId::kRelu, TestDevice()));
 }
 
 // ---------------------------------------------------------------------------
 // 3. NATIVE ALWAYS WINS + eager registration shape.
 // ---------------------------------------------------------------------------
 TEST_CASE("reference tier: a native kernel outranks the fallback and is left untouched") {
-  vt::RegisterBackend(DeviceType::kXPU, &Unified());
+  vt::RegisterBackend(TestDevice(), &Unified());
 
   // A native provider for kEmbedding on the "accelerator".
-  vt::RegisterOp(OpId::kEmbedding, DeviceType::kXPU, AsVoid(&NativeKernel));
-  REQUIRE(vt::OpRegistered(OpId::kEmbedding, DeviceType::kXPU));
+  vt::RegisterOp(OpId::kEmbedding, TestDevice(), AsVoid(&NativeKernel));
+  REQUIRE(vt::OpRegistered(OpId::kEmbedding, TestDevice()));
 
   // Eager install must SKIP kEmbedding (already native) and install for the ops
   // that only have a CPU kernel. It returns a positive count and never displaces
   // the native provider.
-  const int installed = vt::RegisterReferenceTier(DeviceType::kXPU);
+  const int installed = vt::RegisterReferenceTier(TestDevice());
   CHECK(installed > 0);
-  CHECK(vt::GetOp(OpId::kEmbedding, DeviceType::kXPU) == AsVoid(&NativeKernel));
-  CHECK(vt::OpProviderCount(OpId::kEmbedding, DeviceType::kXPU) == 1);  // no fallback added
+  CHECK(vt::GetOp(OpId::kEmbedding, TestDevice()) == AsVoid(&NativeKernel));
+  CHECK(vt::OpProviderCount(OpId::kEmbedding, TestDevice()) == 1);  // no fallback added
 
   // An op that only had a CPU kernel now resolves through the tier.
   CHECK(vt::OpRegistered(OpId::kMatmul, DeviceType::kCPU));
-  CHECK(vt::GetOp(OpId::kMatmul, DeviceType::kXPU) ==
+  CHECK(vt::GetOp(OpId::kMatmul, TestDevice()) ==
         vt::GetOp(OpId::kMatmul, DeviceType::kCPU));  // same host kernel pointer
 }
 
 // A second eager pass is idempotent — the tier providers are already present and
 // RegisterOpProvider rejects the duplicate name, so nothing new is installed.
 TEST_CASE("reference tier: eager registration is idempotent") {
-  vt::RegisterBackend(DeviceType::kXPU, &Unified());
-  (void)vt::RegisterReferenceTier(DeviceType::kXPU);
-  const int second = vt::RegisterReferenceTier(DeviceType::kXPU);
+  vt::RegisterBackend(TestDevice(), &Unified());
+  (void)vt::RegisterReferenceTier(TestDevice());
+  const int second = vt::RegisterReferenceTier(TestDevice());
   CHECK(second == 0);
 }

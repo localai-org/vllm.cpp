@@ -24,6 +24,7 @@ NewRequestData NewRequestData::from_request(
   // (output.py NewRequestData.from_request); ours dropped it, so the worker
   // never learned a request had an image. Empty vector on every text request.
   data.mm_features = request.mm_features;
+  data.prompt_block_hashes = request.block_hashes;
   return data;
 }
 

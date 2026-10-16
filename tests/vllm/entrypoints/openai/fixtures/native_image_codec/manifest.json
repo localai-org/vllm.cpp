@@ -1,0 +1,146 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "contract": "Executed pinned vLLM ImageMediaIO.load_bytes: normalize EXIF orientation, then RGB with default white alpha background. Generated deterministic fixtures, no model weights.",
+  "fixtures": [
+    {
+      "name": "rgb",
+      "mode": "RGB",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "0723219778083d697b3647966d2d8cb04b68dc00b60e0334a605900e16672777",
+      "rgb_sha256": "0c1c2dd95aab8ce4b6212f43e06b48e81b76927a2ddee27fbcf64df6e17fef25"
+    },
+    {
+      "name": "gray",
+      "mode": "L",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "a49d6493ec3815bc212f46c6a394d6ebba988dad754e143c75a790796a8f7381",
+      "rgb_sha256": "627675fde885d63bb76312516a92f20b0d16611d0de3444ed7d029404b37b02c"
+    },
+    {
+      "name": "rgba",
+      "mode": "RGBA",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "b324b4e607aa2d8500e10b82c982d919a071c62e9951e964a4d504d5f6c5cab1",
+      "rgb_sha256": "ee9f3307f50a667ffd050da51fc1acb93ad5d186754b4a67f5dc04d29ef10ba8"
+    },
+    {
+      "name": "jpeg-rgb",
+      "mode": "RGB",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "cf4f210641154e9aad72206e7760fe55cd914a883f2a5018ca5c48b41c8ab3b6",
+      "rgb_sha256": "cade3fafb8b2038817580928e2a70e01deb35695089888ade0592287e99c916d"
+    },
+    {
+      "name": "jpeg-gray",
+      "mode": "L",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "a1d0aaf0d3f3cd4f6ccad9e03e1d28161b8113efbfaceefbdf114ab0f4288ace",
+      "rgb_sha256": "51f732adde6d09538f2b7a488e96497dc41e27bf889d6bbdcc3df37952558564"
+    },
+    {
+      "name": "jpeg-orientation",
+      "mode": "RGB",
+      "original_wh": [
+        64,
+        32
+      ],
+      "decoded_wh": [
+        32,
+        64
+      ],
+      "container_sha256": "705d00bd3028a8db149c0532d169342b0da5047564dab9cec53c9d252104c067",
+      "rgb_sha256": "765d3ada3eeadd37293753f3159805adf15f57427bad1cb2fa3a66cea5dd005c"
+    },
+    {
+      "name": "png-orientation",
+      "mode": "RGB",
+      "original_wh": [
+        64,
+        32
+      ],
+      "decoded_wh": [
+        32,
+        64
+      ],
+      "container_sha256": "a905a4214441aaf6be9a5a0e6bd9fbe4cfd63f9ee6b454baba50a965944bc2cc",
+      "rgb_sha256": "52b945eb116a6ef5e233cbe58655142d5d66242338f42494561077a912d3fa25"
+    },
+    {
+      "name": "gray-alpha",
+      "mode": "LA",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "81c1422f0252cee393cbbe5a078b503324a5f3f04dcc6567a2d8b3eb0472f14c",
+      "rgb_sha256": "467942de572fa2a6920f9f453e0c6235f8c612c5b4c9f11de73a611a328509ac"
+    },
+    {
+      "name": "palette-alpha",
+      "mode": "P",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "486af87ddaf4a5c608f08e4ddabd0145e804a59bd7ae9e58c4b7bca90e9de8ec",
+      "rgb_sha256": "c52e285af95f58bdf15f79f18886f1fd35a7882231ae5f58e0d2b9db6f65aba5"
+    },
+    {
+      "name": "rgb-transparency",
+      "mode": "RGB",
+      "original_wh": [
+        64,
+        64
+      ],
+      "decoded_wh": [
+        64,
+        64
+      ],
+      "container_sha256": "b89fc0d24333ef1f37bfa07433e1fca163828ede9c2f45d9ffa611d14bf56fe7",
+      "rgb_sha256": "0c1c2dd95aab8ce4b6212f43e06b48e81b76927a2ddee27fbcf64df6e17fef25"
+    }
+  ]
+}

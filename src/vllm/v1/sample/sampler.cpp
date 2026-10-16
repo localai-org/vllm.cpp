@@ -9,6 +9,7 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <vector>
 
 #include "vllm/v1/sample/device_scratch.h"
@@ -18,17 +19,11 @@
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#include "vt/sample_common.h"
 
 namespace vllm::v1 {
 
 namespace {
-
-// Batch-default RNG seed for rows without a per-request generator override.
-// Upstream uses a shared default torch.Generator; our RandomSample hashes
-// (seed, row, vocab_index) so a constant default still gives independent per-row
-// draws (the row index enters the hash). Exact torch-Philox parity is the
-// documented M1.7 T1 carry.
-constexpr uint64_t kDefaultSeed = 0;
 
 // Owns a device-side output buffer of the given shape and downloads it to host.
 // Mirrors the DeviceScratch materialization (unified vs discrete) but for OUTPUT
@@ -254,7 +249,10 @@ struct Sampler::GreedyArgmaxScratch {
   }
 };
 
-Sampler::Sampler(LogprobsMode logprobs_mode) : logprobs_mode_(logprobs_mode) {}
+Sampler::Sampler(LogprobsMode logprobs_mode) : logprobs_mode_(logprobs_mode) {
+  std::random_device entropy;
+  default_seed_ = (uint64_t(entropy()) << 32) ^ uint64_t(entropy());
+}
 Sampler::~Sampler() = default;
 
 std::vector<int64_t> Sampler::greedy_argmax_host(vt::Queue& q,
@@ -344,11 +342,20 @@ std::vector<int64_t> Sampler::sample(vt::Queue& q, vt::Tensor& logits,
   DeviceBuffer probs(logits.device, q, vt::DType::kF32, {n, vocab});
   vt::ComputeProbs(q, probs.tensor(), logits);
 
-  std::vector<int64_t> seeds(static_cast<size_t>(n), static_cast<int64_t>(kDefaultSeed));
+  // Unseeded draws advance the sampler's stream. Explicit seeds instead use
+  // accepted output positions, so replay/resume and batch permutations agree.
+  // This remains VT's SplitMix64 stream, not torch Philox token parity.
+  VT_CHECK(sm.output_token_positions.empty() || sm.output_token_positions.size() == size_t(n),
+           "sampler: output token positions must have num_reqs rows");
+  const auto batch_seed = vt::sample::SplitMix64(default_seed_ + random_step_++);
+  std::vector<int64_t> seeds(static_cast<size_t>(n), static_cast<int64_t>(batch_seed));
   for (const auto& [i, seed] : sm.generators) {
     VT_CHECK(i >= 0 && static_cast<int64_t>(i) < n,
              "sampler: generator request index out of range");
-    seeds[static_cast<size_t>(i)] = static_cast<int64_t>(seed);
+    const auto position = sm.output_token_positions.empty() ? 0 : sm.output_token_positions[size_t(i)];
+    // Cancel RandomSample's row salt only for explicit per-request generators.
+    seeds[size_t(i)] = static_cast<int64_t>(vt::sample::SplitMix64(seed + position) -
+                                          0x9E3779B97F4A7C15ULL * uint64_t(i));
   }
   std::vector<int64_t> random_sampled(static_cast<size_t>(n));
   {

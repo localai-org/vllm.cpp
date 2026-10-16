@@ -884,6 +884,8 @@ TEST_CASE("qwen3_5 exl3: an EXL3 dense checkpoint LOADS, with the codebook and t
 
   const Qwen3_5DenseWeights w = LoadDense(ckpt, c);
   REQUIRE(w.layers.size() == 2);
+  CHECK(w.precision.activation == DType::kBF16);
+  CHECK(w.embed_tokens.dtype == DType::kBF16);
 
   // The full-attention tower.
   const vllm::FullAttnLayerWeights& a = w.layers[1].attn;
@@ -1335,10 +1337,88 @@ TEST_CASE("qwen3_5 exl3: the bf16, per-tensor FP8 and NVFP4 arms are UNCHANGED")
 // ===========================================================================
 
 // H1 + H2 + H3 ---------------------------------------------------------------
+TEST_CASE("qwen3_5 exl3: XPU MTP loads all seven norms at FP16 boundaries") {
+  const Geometry g;
+  const HfConfig c = DenseConfig(/*with_exl3_quant_config=*/true);
+  auto tensors = DenseCheckpointWithMtp(Arm::kExl3, g);
+  SUBCASE("checkpoint BF16 remainders") {}
+  SUBCASE("checkpoint F16 and F32 remainders") {
+    for (auto& tensor : tensors) {
+      if (tensor.name.rfind("mtp.", 0) != 0 || tensor.dtype != "BF16") continue;
+      const bool half = tensor.name.find("self_attn.") != std::string::npos;
+      const size_t count = tensor.bytes.size() / 2;
+      std::vector<uint8_t> converted(count * (half ? 2 : 4));
+      for (size_t i = 0; i < count; ++i) {
+        uint16_t bits;
+        std::memcpy(&bits, tensor.bytes.data() + 2 * i, 2);
+        const float value = vt::BF16ToF32(bits);
+        if (half) {
+          bits = vt::F32ToF16(value);
+          std::memcpy(converted.data() + 2 * i, &bits, 2);
+        } else {
+          std::memcpy(converted.data() + 4 * i, &value, 4);
+        }
+      }
+      tensor.dtype = half ? "F16" : "F32";
+      tensor.bytes = std::move(converted);
+    }
+  }
+  const TempCheckpoint ckpt(tensors);
+  std::vector<SafetensorsFile> shards;
+  shards.push_back(SafetensorsFile::Open(ckpt.path()));
+  const auto weights = vllm::LoadQwen3_5MTP(
+      shards, c, Qwen3_5MTPKind::kDense, vt::DeviceType::kXPU);
+  REQUIRE(weights.IsExl3());
+  REQUIRE(weights.dense_layers.size() == 1);
+  const auto& layer = weights.dense_layers[0];
+  const std::vector<std::pair<std::string, const vllm::OwnedTensor*>> norms = {
+      {"mtp.pre_fc_norm_embedding.weight", &weights.pre_fc_norm_embedding},
+      {"mtp.pre_fc_norm_hidden.weight", &weights.pre_fc_norm_hidden},
+      {"mtp.norm.weight", &weights.final_norm},
+      {"mtp.layers.0.input_layernorm.weight", &layer.input_layernorm},
+      {"mtp.layers.0.post_attention_layernorm.weight", &layer.post_attention_layernorm},
+      {"mtp.layers.0.self_attn.q_norm.weight", &layer.attn.q_norm},
+      {"mtp.layers.0.self_attn.k_norm.weight", &layer.attn.k_norm}};
+  for (const auto& [name, owned] : norms) {
+    CAPTURE(name);
+    REQUIRE(owned->dtype == DType::kF16);
+    const auto& source = shards[0].Get(name);
+    const size_t count = owned->bytes.size() / 2;
+    bool exact = true;
+    for (size_t i = 0; i < count; ++i) {
+      uint16_t got, bits;
+      std::memcpy(&got, owned->bytes.data() + 2 * i, 2);
+      uint16_t expected;
+      if (source.dtype == "F32") {
+        float value;
+        std::memcpy(&value, source.data + 4 * i, 4);
+        expected = vt::F32ToF16(value);
+      } else {
+        std::memcpy(&bits, source.data + 2 * i, 2);
+        expected = source.dtype == "F16" ? bits
+                                        : vt::F32ToF16(vt::BF16ToF32(bits));
+      }
+      exact &= got == expected;
+    }
+    CHECK(exact);
+  }
+  for (const auto* packed : {&weights.fc_exl3, &layer.attn.q_proj_exl3,
+       &layer.attn.k_proj_exl3, &layer.attn.v_proj_exl3, &layer.attn.o_proj_exl3,
+       &layer.mlp.gate_proj_exl3, &layer.mlp.up_proj_exl3, &layer.mlp.down_proj_exl3}) {
+    CHECK_FALSE(packed->Empty());
+  }
+  CHECK(weights.fc.Empty());
+  CHECK(layer.attn.q_proj.Empty());
+  CHECK(layer.mlp.gate_proj.Empty());
+}
+
 TEST_CASE("qwen3_5 exl3: the mtp.* draft head LOADS, and its PAGED forward "
           "agrees with the decoded twin") {
   const Geometry g;
-  const HfConfig c = DenseConfig(/*with_exl3_quant_config=*/true);
+  HfConfig c = DenseConfig(/*with_exl3_quant_config=*/true);
+  // The EXL3 target's explicit precision policy requires the checkpoint's
+  // declared FP32 recurrence even when this test only exercises the draft.
+  c.mamba_ssm_dtype = "float32";
   const HfConfig c_plain = DenseConfig(/*with_exl3_quant_config=*/false);
 
   const TempCheckpoint exl3_ckpt(DenseCheckpointWithMtp(Arm::kExl3, g));
@@ -1528,4 +1608,36 @@ TEST_CASE("qwen3_5 exl3: a head that matches no arm at all REFUSES, with every "
   CHECK(bf16.Empty());
   CHECK(packed.Empty());
   CHECK(trellis.Empty());
+}
+
+TEST_CASE("qwen3_5 exl3: FP16 remainders require the explicit layer policy") {
+  const Geometry g;
+  const TempCheckpoint ckpt(DenseCheckpoint(Arm::kExl3, g, GdnArm::kExl3));
+  const auto shard = SafetensorsFile::Open(ckpt.path());
+  const auto get = [&](const std::string& name) -> const vllm::StTensor& {
+    return shard.Get(name);
+  };
+  const auto has = [&](const std::string& name) {
+    const auto& names = shard.Names();
+    return std::find(names.begin(), names.end(), name) != names.end();
+  };
+  for (const bool fp16 : {false, true}) {
+    const auto dtype = fp16 ? DType::kF16 : DType::kBF16;
+    const auto gdn = vllm::LoadQwen3_5DenseLayer(
+        get, has, "linear_attention", 0, "model.",
+        vllm::Fp8BlockQuantConfig{}, fp16);
+    const auto attn = vllm::LoadQwen3_5DenseLayer(
+        get, has, "full_attention", 1, "model.",
+        vllm::Fp8BlockQuantConfig{}, fp16);
+    CHECK(gdn.input_layernorm.dtype == dtype);
+    CHECK(gdn.post_attention_layernorm.dtype == dtype);
+    CHECK(gdn.gdn.in_proj_ba.dtype == dtype);
+    CHECK(gdn.gdn.conv1d_weight.dtype == dtype);
+    CHECK(gdn.gdn.norm_weight.dtype == dtype);
+    CHECK(attn.input_layernorm.dtype == dtype);
+    CHECK(attn.attn.q_norm.dtype == dtype);
+    CHECK(attn.attn.k_norm.dtype == dtype);
+    CHECK(gdn.gdn.IsExl3());
+    CHECK(attn.attn.IsExl3());
+  }
 }

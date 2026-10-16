@@ -116,6 +116,8 @@ TEST_CASE("exl3 native loader: a mul1 marker means codebook 2") {
   FakeShard s;
   s.AddProjection("p", 128, 128, 4);
   s.Add("p.mul1", "I32", {1}, 4);
+  const uint32_t multiplier = 0x83DCD12DU;
+  std::memcpy(s.storage.back().data(), &multiplier, sizeof(multiplier));
   // THIS CASE USED TO ASSERT A REFUSAL, and the refusal was correct for as long
   // as it stood: cb 2 is upstream's dp4a byte-sum variant, and decoding it as 0
   // or 1 would be silently wrong in exactly the way this suite's header

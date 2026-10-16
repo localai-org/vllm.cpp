@@ -24,15 +24,19 @@
 // unchanged. Set VLLM_MM_TOWER_PROFILE=1 to print the prepare(marshal) vs
 // forward(compute) split on stderr.
 #include "vllm/model_executor/models/qwen3_vl_vision.h"
+#include "vllm/model_executor/models/qwen3_vl_vision_attention.h"
 
 #include <algorithm>
 #include <array>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <map>
+#include <mutex>
 #include <vector>
 
 #include "vllm/model_executor/models/merged_qkv_fold.h"
@@ -128,14 +132,10 @@ struct DevW {
 
 namespace {
 
-// Upload host bf16 bits once as a device-resident buffer.
-//
-// Since #1359 the host store IS bf16, so this is a straight `Copy` of the bytes
-// the checkpoint shipped. It used to allocate an N-element scratch and run an
-// N-element `F32ToBF16` pass per weight per upload; deleting that pass is why
-// the storage change cannot cost latency by its own mechanism.
-DevW MakeDevBf16(Backend& b, Queue& q, const std::vector<uint16_t>& bf,
-                 std::vector<int64_t> shape) {
+// Source bits already have the declared dtype. The caller retains their owner
+// until the prepare queue drains.
+DevW MakeDevRaw16(Backend& b, Queue& q, const std::vector<uint16_t>& bits,
+                  std::vector<int64_t> shape, DType dtype) {
   DevW d;
   d.b = &b;
   int64_t numel = 1;
@@ -143,7 +143,7 @@ DevW MakeDevBf16(Backend& b, Queue& q, const std::vector<uint16_t>& bf,
   const size_t bytes = static_cast<size_t>(numel) * vt::SizeOf(DType::kBF16);
   d.p = b.Alloc(bytes == 0 ? 1 : bytes);
   d.t.data = d.p;
-  d.t.dtype = DType::kBF16;
+  d.t.dtype = dtype;
   d.t.device = q.device;
   d.t.rank = static_cast<int>(shape.size());
   int64_t stride = 1;
@@ -152,10 +152,20 @@ DevW MakeDevBf16(Backend& b, Queue& q, const std::vector<uint16_t>& bf,
     d.t.stride[i] = stride;
     stride *= shape[static_cast<size_t>(i)];
   }
-  VT_CHECK(bf.size() * sizeof(uint16_t) >= bytes,
+  VT_CHECK(bits.size() * sizeof(uint16_t) >= bytes,
            "qwen3-vl vision: weight store is smaller than its declared shape");
-  if (bytes != 0) b.Copy(q, d.p, bf.data(), bytes);
+  if (bytes != 0) b.Copy(q, d.p, bits.data(), bytes);
   return d;
+}
+
+DevW MakeDevWeight(Backend& b, Queue& q, const std::vector<uint16_t>& bf,
+                   std::vector<int64_t> shape, DType dtype,
+                   std::vector<std::vector<uint16_t>>& staging) {
+  if (dtype == DType::kBF16) return MakeDevRaw16(b, q, bf, std::move(shape), dtype);
+  auto& converted = staging.emplace_back(bf.size());
+  for (size_t i = 0; i < converted.size(); ++i)
+    converted[i] = vt::F32ToF16(vt::BF16ToF32(bf[i]));
+  return MakeDevRaw16(b, q, converted, std::move(shape), dtype);
 }
 
 // (Former SubRows/SubVec qkv row-slicers removed: the qkv projection now folds
@@ -174,29 +184,31 @@ struct DevMerger {
   DevW norm_w, norm_b, fc1_w, fc1_b, fc2_w, fc2_b;
 };
 
-DevMerger MakeDevMerger(Backend& b, Queue& q, const VisionMergerWeights& mw,
-                        const Qwen3VLVisionConfig& cfg) {
+void UploadMerger(DevMerger& dm, Backend& b, Queue& q, const VisionMergerWeights& mw,
+                  const Qwen3VLVisionConfig& cfg, DType dtype,
+                  std::vector<std::vector<uint16_t>>& staging) {
   const int64_t H = cfg.hidden_size;
   const int64_t ctx4 = H * cfg.merge_unit();
   const int64_t D = cfg.out_hidden_size;
-  DevMerger dm;
   dm.use_postshuffle_norm = mw.use_postshuffle_norm;
   const int64_t nd = mw.use_postshuffle_norm ? ctx4 : H;
-  dm.norm_w = MakeDevBf16(b, q, mw.norm_w, {nd});
-  dm.norm_b = MakeDevBf16(b, q, mw.norm_b, {nd});
-  dm.fc1_w = MakeDevBf16(b, q, mw.fc1_w, {ctx4, ctx4});
-  dm.fc1_b = MakeDevBf16(b, q, mw.fc1_b, {ctx4});
-  dm.fc2_w = MakeDevBf16(b, q, mw.fc2_w, {D, ctx4});
-  dm.fc2_b = MakeDevBf16(b, q, mw.fc2_b, {D});
-  return dm;
+  dm.norm_w = MakeDevWeight(b, q, mw.norm_w, {nd}, dtype, staging);
+  dm.norm_b = MakeDevWeight(b, q, mw.norm_b, {nd}, dtype, staging);
+  dm.fc1_w = MakeDevWeight(b, q, mw.fc1_w, {ctx4, ctx4}, dtype, staging);
+  dm.fc1_b = MakeDevWeight(b, q, mw.fc1_b, {ctx4}, dtype, staging);
+  dm.fc2_w = MakeDevWeight(b, q, mw.fc2_w, {D, ctx4}, dtype, staging);
+  dm.fc2_b = MakeDevWeight(b, q, mw.fc2_b, {D}, dtype, staging);
 }
 
 }  // namespace
 
 // The device-resident tower weights (opaque to callers; built once).
 struct Qwen3VLVisionDeviceWeights {
+  Backend* backend = nullptr;
+  DType execution_dtype = DType::kBF16;
   DevW patch_proj_w, patch_proj_b;
-  std::vector<float> pos_embed_w;  // host f32 kept for the per-grid bilinear interp
+  std::vector<float> pos_embed_w;  // legacy BF16 host interpolation only
+  DevW device_pos_embed_w;        // explicit FP16 execution, device interpolation
   std::vector<DevBlock> blocks;
   DevMerger merger;
   std::vector<DevMerger> deepstack_mergers;
@@ -305,39 +317,73 @@ void VisionRopeCosSin(const std::array<int64_t, 3>& grid_thw, const Qwen3VLVisio
 
 // --- build the resident device weights (the ONE-TIME conversion + upload) -----
 std::shared_ptr<Qwen3VLVisionDeviceWeights> PrepareVisionDeviceWeights(
-    const Qwen3VLVisionWeights& w, const Qwen3VLVisionConfig& cfg, Backend& b) {
+    const Qwen3VLVisionWeights& w, const Qwen3VLVisionConfig& cfg, Backend& b,
+    DType execution_dtype) {
+  VT_CHECK(execution_dtype == DType::kBF16 || execution_dtype == DType::kF16,
+           "qwen3-vl vision: execution dtype must be BF16 or FP16");
+  // Destruction order matters: drain/destroy the queue before staging or device
+  // weights are released, including exceptions during conversion/allocation.
+  auto dw = std::make_shared<Qwen3VLVisionDeviceWeights>();
+  std::vector<std::vector<uint16_t>> staging;
   Queue q = b.CreateQueue();
+  struct PrepareQueue {
+    Backend& b;
+    Queue& q;
+    bool finished = false;
+    void Finish() { b.Synchronize(q); b.DestroyQueue(q); finished = true; }
+    ~PrepareQueue() {
+      if (!finished) {
+        try { b.Synchronize(q); } catch (...) {}
+        try { b.DestroyQueue(q); } catch (...) {}
+      }
+    }
+  } queue_owner{b, q};
+  VT_CHECK(execution_dtype != DType::kF16 || q.device.type == vt::DeviceType::kXPU,
+           "qwen3-vl vision: explicit FP16 preparation requires XPU");
+  dw->backend = &b;
+  dw->execution_dtype = execution_dtype;
   const int64_t H = cfg.hidden_size;
   const int64_t I = cfg.intermediate_size;
   const int64_t patch_dim =
       cfg.in_channels * cfg.temporal_patch_size * cfg.patch_size * cfg.patch_size;
-  auto dw = std::make_shared<Qwen3VLVisionDeviceWeights>();
-  dw->patch_proj_w = MakeDevBf16(b, q, w.patch_proj_w, {H, patch_dim});
-  dw->patch_proj_b = MakeDevBf16(b, q, w.patch_proj_b, {H});
-  dw->pos_embed_w = w.pos_embed_w;  // host f32 kept for per-grid interp
+  auto upload = [&](const std::vector<uint16_t>& source, std::vector<int64_t> shape) {
+    return MakeDevWeight(b, q, source, std::move(shape), execution_dtype, staging);
+  };
+  dw->patch_proj_w = upload(w.patch_proj_w, {H, patch_dim});
+  dw->patch_proj_b = upload(w.patch_proj_b, {H});
+  if (execution_dtype == DType::kF16) {
+    std::vector<uint16_t> bits(w.pos_embed_w.size());
+    for (size_t i = 0; i < bits.size(); ++i) bits[i] = vt::F32ToF16(w.pos_embed_w[i]);
+    // These are already FP16 bits; upload without converting them as BF16.
+    staging.push_back(std::move(bits));
+    dw->device_pos_embed_w = MakeDevRaw16(
+        b, q, staging.back(), {cfg.num_position_embeddings, H}, DType::kF16);
+  } else {
+    dw->pos_embed_w = w.pos_embed_w;
+  }
   dw->blocks.resize(w.blocks.size());
   for (size_t l = 0; l < w.blocks.size(); ++l) {
     const VisionBlockWeights& bw = w.blocks[l];
     DevBlock& db = dw->blocks[l];
-    db.norm1_w = MakeDevBf16(b, q, bw.norm1_w, {H});
-    db.norm1_b = MakeDevBf16(b, q, bw.norm1_b, {H});
-    db.norm2_w = MakeDevBf16(b, q, bw.norm2_w, {H});
-    db.norm2_b = MakeDevBf16(b, q, bw.norm2_b, {H});
-    db.qkv_w = MakeDevBf16(b, q, bw.qkv_w, {3 * H, H});  // fused, sliced at forward
-    db.qkv_b = MakeDevBf16(b, q, bw.qkv_b, {3 * H});
-    db.proj_w = MakeDevBf16(b, q, bw.proj_w, {H, H});
-    db.proj_b = MakeDevBf16(b, q, bw.proj_b, {H});
-    db.fc1_w = MakeDevBf16(b, q, bw.fc1_w, {I, H});
-    db.fc1_b = MakeDevBf16(b, q, bw.fc1_b, {I});
-    db.fc2_w = MakeDevBf16(b, q, bw.fc2_w, {H, I});
-    db.fc2_b = MakeDevBf16(b, q, bw.fc2_b, {H});
+    db.norm1_w = upload(bw.norm1_w, {H});
+    db.norm1_b = upload(bw.norm1_b, {H});
+    db.norm2_w = upload(bw.norm2_w, {H});
+    db.norm2_b = upload(bw.norm2_b, {H});
+    db.qkv_w = upload(bw.qkv_w, {3 * H, H});  // fused, sliced at forward
+    db.qkv_b = upload(bw.qkv_b, {3 * H});
+    db.proj_w = upload(bw.proj_w, {H, H});
+    db.proj_b = upload(bw.proj_b, {H});
+    db.fc1_w = upload(bw.fc1_w, {I, H});
+    db.fc1_b = upload(bw.fc1_b, {I});
+    db.fc2_w = upload(bw.fc2_w, {H, I});
+    db.fc2_b = upload(bw.fc2_b, {H});
   }
-  dw->merger = MakeDevMerger(b, q, w.merger, cfg);
-  dw->deepstack_mergers.reserve(w.deepstack_mergers.size());
-  for (const auto& dm : w.deepstack_mergers)
-    dw->deepstack_mergers.push_back(MakeDevMerger(b, q, dm, cfg));
-  b.Synchronize(q);  // resident + ready for any later queue
-  b.DestroyQueue(q);
+  UploadMerger(dw->merger, b, q, w.merger, cfg, execution_dtype, staging);
+  dw->deepstack_mergers.resize(w.deepstack_mergers.size());
+  for (size_t i = 0; i < w.deepstack_mergers.size(); ++i)
+    UploadMerger(dw->deepstack_mergers[i], b, q, w.deepstack_mergers[i], cfg,
+                 execution_dtype, staging);
+  queue_owner.Finish();  // resident + ready for any later queue; release staging
   return dw;
 }
 
@@ -377,12 +423,362 @@ void RunMerger(Backend& b, Queue& q, const DevMerger& mw, const Qwen3VLVisionCon
 
 }  // namespace
 
+// The typed XPU route reuses the same block/merger structure with reference
+// FP16 projection/bias ordering. The legacy BF16 forward below is unchanged.
+namespace {
+struct VisionEvent {
+  Backend& backend;
+  vt::Event event;
+  explicit VisionEvent(Backend& b) : backend(b), event(b.CreateEvent(true)) {}
+  ~VisionEvent() { try { backend.DestroyEvent(event); } catch (...) {} }
+};
+void CheckVisionQueue(Backend& b, Queue& q, Backend* owner, const vt::Device& device) {
+  VT_CHECK(&b==owner && q.device==device,
+           "qwen3-vl vision: workspace/output belongs to another backend/device");
+}
+void CaptureF16(Buf& buffer, Queue& q, std::vector<float>& out) {
+  std::vector<uint16_t> bits(buffer.bytes/2);
+  buffer.Download(q,bits.data());out.resize(bits.size());
+  for (size_t i=0;i<bits.size();++i) out[i]=vt::F16ToF32(bits[i]);
+}
+void LinearF16(Queue& q, Tensor& out, const Tensor& x, const DevW& w, const DevW& bias) {
+  vt::MatmulDenseF16(q,out,x,w.tensor(),&bias.tensor());
+}
+}
+
+struct Qwen3VLVisionWorkspace {
+  Backend& backend;
+  vt::Device device;
+  uint64_t queue_id;
+  Qwen3VLVisionConfig cfg;
+  std::array<int64_t,3> grid;
+  int64_t length;
+  VisionEvent last_encode;
+  std::mutex submission_mutex;
+  std::unique_ptr<Buf> hidden,pos,base32,base16,ids,rope,n1,qb,kb,vb,qkv,ao,
+                       projected,n2,fc1,fc2,merger_norm,merger_fc1;
+  Qwen3VLVisionWorkspace(Backend& b, Queue& q, const Qwen3VLVisionConfig& c,
+                         const std::array<int64_t,3>& g)
+      : backend(b),device(q.device),queue_id(q.id),cfg(c),grid(g),
+        length(g[1]*g[2]),last_encode(b) {}
+  ~Qwen3VLVisionWorkspace() {
+    // Drain before member buffers are freed, including abandoned requests.
+    try { backend.SynchronizeEvent(last_encode.event); } catch (...) {}
+  }
+};
+
+std::shared_ptr<Qwen3VLVisionWorkspace> PrepareVisionWorkspace(
+    const std::array<int64_t,3>& grid, const Qwen3VLVisionConfig& cfg,
+    Backend& b, Queue& q) {
+  VT_CHECK(q.device.type==vt::DeviceType::kXPU && cfg.hidden_size==1152 &&
+               cfg.num_heads==16 && cfg.head_dim()==72,
+           "qwen3-vl vision: FP16 workspace requires XPU tower width 1152/16x72");
+  VT_CHECK(grid[0]==1 && grid[1]>0 && grid[2]>0 && grid[1]<=32768 && grid[2]<=32768 &&
+               grid[1]*grid[2]<=16384 && cfg.spatial_merge_size>0 &&
+               cfg.spatial_merge_size<=128 && grid[1]%cfg.spatial_merge_size==0 &&
+               grid[2]%cfg.spatial_merge_size==0,
+           "qwen3-vl vision: invalid or oversized image grid");
+  VT_CHECK(cfg.depth>0 && cfg.depth<=27 && cfg.intermediate_size>0 &&
+               cfg.intermediate_size<=16384 && cfg.out_hidden_size>0 &&
+               cfg.out_hidden_size<=16384 && cfg.num_position_embeddings>0 &&
+               cfg.num_position_embeddings<=1048576 && cfg.patch_size>0 &&
+               cfg.patch_size<=64 && cfg.temporal_patch_size>0 &&
+               cfg.temporal_patch_size<=8 && cfg.in_channels>0 && cfg.in_channels<=4 &&
+               std::isfinite(cfg.norm_eps) && cfg.norm_eps>0 && cfg.deepstack_visual_indexes.empty(),
+           "qwen3-vl vision: unsupported FP16 image tower configuration");
+  auto ws=std::make_shared<Qwen3VLVisionWorkspace>(b,q,cfg,grid);
+  const int64_t L=ws->length,H=cfg.hidden_size,I=cfg.intermediate_size,
+      merge=cfg.merge_unit(),Nm=L/merge,ctx=H*merge,P=std::max(grid[1],grid[2]);
+  const auto make=[&](DType dt,std::vector<int64_t> shape) {
+    return std::make_unique<Buf>(b,q,dt,std::move(shape));
+  };
+  ws->hidden=make(DType::kF16,{L,H});ws->pos=make(DType::kF16,{L,H});
+  ws->base32=make(DType::kF32,{P,36});ws->base16=make(DType::kF16,{P,36});
+  ws->ids=make(DType::kI32,{P});ws->rope=make(DType::kF16,{L,72});
+  ws->n1=make(DType::kF16,{L,H});ws->qb=make(DType::kF16,{L,H});
+  ws->kb=make(DType::kF16,{L,H});ws->vb=make(DType::kF16,{L,H});
+  ws->qkv=make(DType::kF16,{L,3*H});ws->ao=make(DType::kF16,{L,16,72});
+  ws->projected=make(DType::kF16,{L,H});ws->n2=make(DType::kF16,{L,H});
+  ws->fc1=make(DType::kF16,{L,I});ws->fc2=make(DType::kF16,{L,H});
+  ws->merger_norm=make(DType::kF16,{L,H});ws->merger_fc1=make(DType::kF16,{Nm,ctx});
+  // Initialization only: the small static base positions never travel back to
+  // the host. All per-image spatial ordering/rotation remains on the GPU.
+  std::vector<int32_t> ids(static_cast<size_t>(P));
+  for (int64_t i=0;i<P;++i) ids[static_cast<size_t>(i)]=static_cast<int32_t>(i);
+  try {
+    b.Copy(q,ws->ids->t.data,ids.data(),ids.size()*sizeof(int32_t));
+    vt::RopeArgs args;args.rotary_dim=36;args.linear_scaling_factor=1;args.fp16_intermediates=true;
+    vt::RopeCosSinCache(q,ws->base32->t,ws->ids->t,args);
+    vt::CastF16(q,ws->base16->t,ws->base32->t);
+    vt::VisionRopeGrid(q,ws->rope->t,ws->base16->t,{1,grid[1],grid[2],cfg.spatial_merge_size});
+    b.RecordEvent(ws->last_encode.event,q);
+  } catch (...) { b.Synchronize(q);throw; }
+  return ws;
+}
+
+namespace {
+void RunTypedVisionBlock(Qwen3VLVisionWorkspace& ws, const DevBlock& db,
+                         Queue& q, int64_t block, Qwen3VLVisionCapture* cap,
+                         const std::map<std::string,Tensor>* reference_outputs = nullptr) {
+  const auto& cfg=ws.cfg;
+  const int64_t L=ws.length,H=cfg.hidden_size;
+  const bool selected=cap && std::find(cap->selected_blocks.begin(),cap->selected_blocks.end(),block)
+      !=cap->selected_blocks.end();
+  const auto capture=[&](const char* name,Buf& buffer) {
+    if (selected) CaptureF16(buffer,q,cap->block_boundaries[block][name]);
+    if (reference_outputs) {
+      const auto it=reference_outputs->find(name);
+      if (it!=reference_outputs->end()) {
+        const auto& input=it->second;
+        VT_CHECK(input.data && input.device==q.device && input.dtype==DType::kF16 &&
+                     input.IsContiguous() && input.Bytes()==buffer.bytes,
+                 "qwen3-vl vision: invalid diagnostic reference output");
+        ws.backend.Copy(q,buffer.t.data,input.data,input.Bytes());
+      }
+    }
+  };
+  capture("input",*ws.hidden);
+  vt::LayerNorm(q,ws.n1->t,ws.hidden->t,&db.norm1_w.t,&db.norm1_b.t,{cfg.norm_eps});
+  capture("norm1",*ws.n1);
+  LinearF16(q,ws.qkv->t,ws.n1->t,db.qkv_w,db.qkv_b);
+  capture("qkv",*ws.qkv);
+  vt::QkvSplit(q,ws.qb->t,ws.kb->t,ws.vb->t,ws.qkv->t);
+  capture("q",*ws.qb);capture("k",*ws.kb);capture("v",*ws.vb);
+  auto queries=ws.qb->t.View({L,16,72}),keys=ws.kb->t.View({L,16,72}),values=ws.vb->t.View({L,16,72});
+  vt::VisionRopeApply(q,queries,keys,ws.rope->t);
+  capture("rotated_q",*ws.qb);capture("rotated_k",*ws.kb);
+  vt::AttentionDenseFlash(q,ws.ao->t,queries,keys,values,TypedVisionAttentionArgs(cfg.head_dim()));
+  capture("attention",*ws.ao);
+  LinearF16(q,ws.projected->t,ws.ao->t.View({L,H}),db.proj_w,db.proj_b);
+  capture("projection",*ws.projected);
+  vt::Add(q,ws.hidden->t,ws.hidden->t,ws.projected->t);
+  capture("residual1",*ws.hidden);
+  vt::LayerNorm(q,ws.n2->t,ws.hidden->t,&db.norm2_w.t,&db.norm2_b.t,{cfg.norm_eps});
+  capture("norm2",*ws.n2);
+  LinearF16(q,ws.fc1->t,ws.n2->t,db.fc1_w,db.fc1_b);
+  capture("fc1",*ws.fc1);
+  vt::GeluTanh(q,ws.fc1->t,ws.fc1->t);
+  capture("gelu",*ws.fc1);
+  LinearF16(q,ws.fc2->t,ws.fc1->t,db.fc2_w,db.fc2_b);
+  capture("fc2",*ws.fc2);
+  vt::Add(q,ws.hidden->t,ws.hidden->t,ws.fc2->t);
+  capture("output",*ws.hidden);
+}
+
+void RunTypedVisionMerger(Qwen3VLVisionWorkspace& ws, const DevMerger& mw,
+                          Buf& output, Queue& q, Qwen3VLVisionCapture* cap,
+                          const std::map<std::string,Tensor>* reference_outputs = nullptr) {
+  const int64_t Nm=ws.length/ws.cfg.merge_unit(),ctx=ws.cfg.hidden_size*ws.cfg.merge_unit();
+  const auto capture=[&](const char* name,Buf& buffer,std::vector<float>* destination) {
+    if (destination) CaptureF16(buffer,q,*destination);
+    if (reference_outputs) {
+      const auto it=reference_outputs->find(name);
+      if (it!=reference_outputs->end()) {
+        const auto& input=it->second;
+        VT_CHECK(input.data && input.device==q.device && input.dtype==DType::kF16 &&
+                     input.IsContiguous() && input.Bytes()==buffer.bytes,
+                 "qwen3-vl vision: invalid diagnostic merger reference output");
+        ws.backend.Copy(q,buffer.t.data,input.data,input.Bytes());
+      }
+    }
+  };
+  capture("input",*ws.hidden,cap ? &cap->merger_input : nullptr);
+  vt::LayerNorm(q,ws.merger_norm->t,ws.hidden->t,&mw.norm_w.t,&mw.norm_b.t,{ws.cfg.norm_eps});
+  capture("norm",*ws.merger_norm,cap ? &cap->merger_norm_out : nullptr);
+  LinearF16(q,ws.merger_fc1->t,ws.merger_norm->t.View({Nm,ctx}),mw.fc1_w,mw.fc1_b);
+  capture("fc1",*ws.merger_fc1,cap ? &cap->merger_fc1_out : nullptr);
+  vt::GeluErf(q,ws.merger_fc1->t,ws.merger_fc1->t);
+  capture("gelu",*ws.merger_fc1,cap ? &cap->merger_gelu_out : nullptr);
+  LinearF16(q,output.t,ws.merger_fc1->t,mw.fc2_w,mw.fc2_b);
+  capture("output",output,cap ? &cap->merger_out : nullptr);
+}
+}
+
+struct Qwen3VLVisionDeviceOutput::State {
+  Backend& backend;
+  vt::Device device;
+  std::shared_ptr<const Qwen3VLVisionDeviceWeights> weights;
+  std::unique_ptr<Buf> output;
+  VisionEvent ready;
+  std::mutex mutex;
+  std::map<uint64_t,std::unique_ptr<VisionEvent>> consumers;
+  State(Backend& b,Queue& q,std::shared_ptr<const Qwen3VLVisionDeviceWeights> w,
+        int64_t rows,int64_t width)
+      : backend(b),device(q.device),weights(std::move(w)),
+        output(std::make_unique<Buf>(b,q,DType::kF16,std::vector<int64_t>{rows,width})),ready(b) {}
+  ~State() {
+    try { backend.SynchronizeEvent(ready.event); } catch (...) {}
+    for (auto& [_,event] : consumers)
+      try { backend.SynchronizeEvent(event->event); } catch (...) {}
+  }
+};
+Qwen3VLVisionDeviceOutput::Qwen3VLVisionDeviceOutput(std::shared_ptr<State> state)
+    : state_(std::move(state)) {
+  VT_CHECK(state_,"qwen3-vl vision: output owner must not be null");
+}
+const Tensor& Qwen3VLVisionDeviceOutput::tensor() const { return state_->output->t; }
+void Qwen3VLVisionDeviceOutput::WaitOn(Queue& q) const {
+  VT_CHECK(q.device==state_->device,"qwen3-vl vision: output consumer on another device");
+  state_->backend.QueueWaitEvent(q,state_->ready.event);
+}
+void Qwen3VLVisionDeviceOutput::RecordUse(Queue& q) const {
+  VT_CHECK(q.device==state_->device,"qwen3-vl vision: output consumer on another device");
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  for (auto it=state_->consumers.begin();it!=state_->consumers.end();) {
+    if (state_->backend.QueryEvent(it->second->event)) it=state_->consumers.erase(it);
+    else ++it;
+  }
+  auto& event=state_->consumers[q.id];
+  if (!event) event=std::make_unique<VisionEvent>(state_->backend);
+  state_->backend.RecordEvent(event->event,q);
+}
+
+Qwen3VLVisionDeviceOutput Qwen3VLVisionForwardDevice(const Tensor& pixels,
+    std::shared_ptr<const Qwen3VLVisionDeviceWeights> dw,
+    Qwen3VLVisionWorkspace& ws, Backend& b, Queue& q, Qwen3VLVisionCapture* cap) {
+  // Serialize host submission to shared scratch, without waiting for the GPU.
+  std::lock_guard<std::mutex> lock(ws.submission_mutex);
+  CheckVisionQueue(b,q,&ws.backend,ws.device);
+  VT_CHECK(q.id==ws.queue_id,"qwen3-vl vision: scratch is bound to its encode queue");
+  VT_CHECK(dw && dw->backend==&b && dw->execution_dtype==DType::kF16,
+           "qwen3-vl vision: device forward requires owned FP16 weights");
+  const auto& cfg=ws.cfg;
+  const int64_t L=ws.length,H=cfg.hidden_size,I=cfg.intermediate_size,
+      Nm=L/cfg.merge_unit(),ctx=H*cfg.merge_unit(),D=cfg.out_hidden_size,
+      patch_dim=cfg.in_channels*cfg.temporal_patch_size*cfg.patch_size*cfg.patch_size;
+  VT_CHECK(pixels.rank==2 && pixels.shape[0]==L && pixels.shape[1]==patch_dim &&
+               pixels.dtype==DType::kF16 && pixels.device==q.device &&
+               pixels.IsContiguous() && pixels.data!=nullptr,
+           "qwen3-vl vision: invalid typed input patches");
+  const auto shape=[&](const DevW& w,std::initializer_list<int64_t> dims) {
+    VT_CHECK(w.t.data && w.t.dtype==DType::kF16 && w.t.device==q.device &&
+                 w.t.IsContiguous() && w.t.rank==static_cast<int>(dims.size()),
+             "qwen3-vl vision: invalid prepared weight metadata");
+    int axis=0;for (auto d : dims)
+      VT_CHECK(w.t.shape[axis++]==d,"qwen3-vl vision: prepared weight geometry differs from workspace");
+  };
+  shape(dw->patch_proj_w,{H,patch_dim});shape(dw->patch_proj_b,{H});
+  shape(dw->device_pos_embed_w,{cfg.num_position_embeddings,H});
+  VT_CHECK(dw->blocks.size()>=static_cast<size_t>(cfg.depth) && dw->deepstack_mergers.empty() &&
+               !dw->merger.use_postshuffle_norm,"qwen3-vl vision: unsupported typed tower/merger");
+  for (int64_t l=0;l<cfg.depth;++l) {
+    const auto& db=dw->blocks[static_cast<size_t>(l)];
+    shape(db.norm1_w,{H});shape(db.norm1_b,{H});shape(db.norm2_w,{H});shape(db.norm2_b,{H});
+    shape(db.qkv_w,{3*H,H});shape(db.qkv_b,{3*H});shape(db.proj_w,{H,H});shape(db.proj_b,{H});
+    shape(db.fc1_w,{I,H});shape(db.fc1_b,{I});shape(db.fc2_w,{H,I});shape(db.fc2_b,{H});
+  }
+  const auto& mw=dw->merger;
+  shape(mw.norm_w,{H});shape(mw.norm_b,{H});shape(mw.fc1_w,{ctx,ctx});
+  shape(mw.fc1_b,{ctx});shape(mw.fc2_w,{D,ctx});shape(mw.fc2_b,{D});
+  if (cap) for (auto block : cap->selected_blocks)
+    VT_CHECK(block>=0 && block<cfg.depth,"qwen3-vl vision: invalid selected capture block");
+  auto result=std::make_shared<Qwen3VLVisionDeviceOutput::State>(b,q,dw,Nm,D);
+  try {
+    LinearF16(q,ws.hidden->t,pixels,dw->patch_proj_w,dw->patch_proj_b);
+    if (cap) CaptureF16(*ws.hidden,q,cap->patch_embed_out);
+    vt::VisionPosEmbedInterpolate(q,ws.pos->t,dw->device_pos_embed_w.t,
+        {1,ws.grid[1],ws.grid[2],cfg.num_grid_per_side(),cfg.spatial_merge_size});
+    vt::Add(q,ws.hidden->t,ws.hidden->t,ws.pos->t);
+    if (cap) {
+      CaptureF16(*ws.pos,q,cap->pos_embeds);
+      std::vector<float> rope;CaptureF16(*ws.rope,q,rope);
+      cap->rotary_cos.resize(static_cast<size_t>(L)*36);cap->rotary_sin.resize(static_cast<size_t>(L)*36);
+      for (int64_t i=0;i<L;++i) {
+        std::copy_n(rope.data()+i*72,36,cap->rotary_cos.data()+i*36);
+        std::copy_n(rope.data()+i*72+36,36,cap->rotary_sin.data()+i*36);
+      }
+      cap->deepstack_out.clear();
+      cap->block_outputs.clear();
+      cap->block_outputs.resize(static_cast<size_t>(cfg.depth));
+      cap->block_boundaries.clear();
+    }
+    for (int64_t l=0;l<cfg.depth;++l) {
+      RunTypedVisionBlock(ws,dw->blocks[static_cast<size_t>(l)],q,l,cap);
+      if (cap && l==0) CaptureF16(*ws.hidden,q,cap->block0_out);
+      if (cap && (cap->selected_blocks.empty() ||
+          std::find(cap->selected_blocks.begin(),cap->selected_blocks.end(),l)!=cap->selected_blocks.end()))
+        CaptureF16(*ws.hidden,q,cap->block_outputs[static_cast<size_t>(l)]);
+    }
+    RunTypedVisionMerger(ws,mw,*result->output,q,cap);
+    b.RecordEvent(result->ready.event,q);b.RecordEvent(ws.last_encode.event,q);
+  } catch (...) { b.Synchronize(q);throw; }
+  return Qwen3VLVisionDeviceOutput(std::move(result));
+}
+
+void Qwen3VLVisionReplayBlockDevice(const Tensor& input,
+    std::shared_ptr<const Qwen3VLVisionDeviceWeights> dw,
+    Qwen3VLVisionWorkspace& ws, Backend& b, Queue& q,
+    int64_t block, Qwen3VLVisionCapture& cap,
+    const std::map<std::string,Tensor>* reference_outputs) {
+  std::lock_guard<std::mutex> lock(ws.submission_mutex);
+  CheckVisionQueue(b,q,&ws.backend,ws.device);
+  VT_CHECK(q.id==ws.queue_id && dw && dw->backend==&b && dw->execution_dtype==DType::kF16,
+           "qwen3-vl vision: replay requires matching FP16 weights/encode queue");
+  VT_CHECK(block>=0 && block<ws.cfg.depth && dw->blocks.size()>=static_cast<size_t>(ws.cfg.depth),
+           "qwen3-vl vision: invalid replay block");
+  VT_CHECK(input.rank==2 && input.shape[0]==ws.length && input.shape[1]==ws.cfg.hidden_size &&
+               input.dtype==DType::kF16 && input.device==q.device && input.IsContiguous() && input.data,
+           "qwen3-vl vision: invalid replay input");
+  if (reference_outputs) {
+    const std::set<std::string> stages{"norm1","qkv","q","k","v","rotated_q","rotated_k",
+                                     "attention","projection","residual1","norm2","fc1","gelu","fc2"};
+    for (const auto& [name,_] : *reference_outputs)
+      VT_CHECK(stages.contains(name),"qwen3-vl vision: unknown diagnostic reference stage");
+  }
+  cap.selected_blocks={block};cap.block_boundaries.clear();cap.block_outputs.clear();
+  try {
+    b.Copy(q,ws.hidden->t.data,input.data,input.Bytes());
+    RunTypedVisionBlock(ws,dw->blocks[static_cast<size_t>(block)],q,block,&cap,reference_outputs);
+    b.RecordEvent(ws.last_encode.event,q);
+    b.Synchronize(q); // Diagnostic returns all host captures; never called by serving.
+  } catch (...) { b.Synchronize(q);throw; }
+}
+
+void Qwen3VLVisionReplayMergerDevice(const Tensor& input,
+    std::shared_ptr<const Qwen3VLVisionDeviceWeights> dw,
+    Qwen3VLVisionWorkspace& ws, Backend& b, Queue& q, Qwen3VLVisionCapture& cap,
+    const std::map<std::string,Tensor>* reference_outputs) {
+  std::lock_guard<std::mutex> lock(ws.submission_mutex);
+  CheckVisionQueue(b,q,&ws.backend,ws.device);
+  VT_CHECK(q.id==ws.queue_id && dw && dw->backend==&b && dw->execution_dtype==DType::kF16 &&
+               !dw->merger.use_postshuffle_norm,
+           "qwen3-vl vision: merger replay requires matching FP16 weights/encode queue");
+  VT_CHECK(input.rank==2 && input.shape[0]==ws.length && input.shape[1]==ws.cfg.hidden_size &&
+               input.dtype==DType::kF16 && input.device==q.device && input.IsContiguous() && input.data,
+           "qwen3-vl vision: invalid merger replay input");
+  const auto& mw=dw->merger;
+  const int64_t H=ws.cfg.hidden_size,ctx=H*ws.cfg.merge_unit(),D=ws.cfg.out_hidden_size;
+  const auto shape=[&](const DevW& w,std::initializer_list<int64_t> dims) {
+    VT_CHECK(w.t.data && w.t.dtype==DType::kF16 && w.t.device==q.device &&
+                 w.t.IsContiguous() && w.t.rank==static_cast<int>(dims.size()),
+             "qwen3-vl vision: invalid replay merger weight metadata");
+    int axis=0;for (auto d:dims)
+      VT_CHECK(w.t.shape[axis++]==d,"qwen3-vl vision: replay merger geometry differs");
+  };
+  shape(mw.norm_w,{H});shape(mw.norm_b,{H});shape(mw.fc1_w,{ctx,ctx});
+  shape(mw.fc1_b,{ctx});shape(mw.fc2_w,{D,ctx});shape(mw.fc2_b,{D});
+  if (reference_outputs) for (const auto& [name,_]:*reference_outputs)
+    VT_CHECK(name=="norm" || name=="fc1" || name=="gelu",
+             "qwen3-vl vision: unknown diagnostic merger reference stage");
+  Buf output(b,q,DType::kF16,{ws.length/ws.cfg.merge_unit(),D});
+  try {
+    b.Copy(q,ws.hidden->t.data,input.data,input.Bytes());
+    RunTypedVisionMerger(ws,mw,output,q,&cap,reference_outputs);
+    b.RecordEvent(ws.last_encode.event,q);
+    b.Synchronize(q); // Diagnostic host captures only; never called by serving.
+  } catch (...) { b.Synchronize(q);throw; }
+}
+
 // --- the resident-weights forward (the fast/production path) ------------------
 std::vector<float> Qwen3VLVisionForward(const std::vector<uint16_t>& pixel_values_bf16,
                                         const std::array<int64_t, 3>& grid_thw,
                                         const Qwen3VLVisionDeviceWeights& dw,
                                         const Qwen3VLVisionConfig& cfg, Backend& b,
                                         Qwen3VLVisionCapture* cap) {
+  VT_CHECK(dw.execution_dtype == DType::kBF16,
+           "qwen3-vl vision: legacy BF16 forward cannot consume FP16 weights");
+  VT_CHECK(dw.backend == &b,
+           "qwen3-vl vision: prepared weights belong to another backend");
   Queue q = b.CreateQueue();
   const int64_t H = cfg.hidden_size;
   const int64_t nh = cfg.num_heads;
