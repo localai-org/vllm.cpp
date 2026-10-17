@@ -628,8 +628,6 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   // Same doctrine as SigmoidGateBf16's f32 shadow. The residual commit above
   // stays in the tensors' native dtype (the residual is read back in bf16 by
   // the next block, as before).
-  ttnn::Tensor norm_f32 = NormalizeDevF32Tile(std::move(to_norm),
-                                              static_cast<uint32_t>(rows), d);
   // The affine rides the staged weight tensor, typecast on device (no host
   // traffic): the gemma path's baked form is already FLOAT32; the raw path's
   // EnsureAffine1D form is BF16 TILE.
@@ -651,6 +649,38 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
   // (tenstorrent_gdn.cpp l2 lambda). VT_TT_RMSNORM_TTNN=1 restores the
   // pinned ttnn::rms_norm arm for A/B.
   ttnn::Tensor dev_y;
+  // ITEM-2 DIAGNOSTIC (kolibri1 P150, not for commit beyond the instrument):
+  // capture REAL in-model norm inputs — the bf16 input row and the f32 tile
+  // the device rms_norm consumes — so the standalone micro can replay them.
+  static const char* norm_dump_dir = std::getenv("VT_TT_NORM_DUMP_DIR");
+  std::vector<float> norm_dump_x;
+  if (norm_dump_dir != nullptr)
+    norm_dump_x = to_norm.to_vector<float>();
+  ttnn::Tensor norm_f32 = NormalizeDevF32Tile(std::move(to_norm),
+                                              static_cast<uint32_t>(rows), d);
+  if (norm_dump_dir != nullptr) {
+    static std::atomic<unsigned> norm_dump_seq{0};
+    const unsigned nseq = norm_dump_seq.fetch_add(1);
+    if (nseq < 64) {  // cap: the first 64 norm sites are enough
+      std::vector<float> nf = norm_f32.to_vector<float>();
+      std::vector<float> xv = norm_dump_x;
+      std::vector<float> wf = wf32.to_vector<float>();
+      char path[512];
+      std::snprintf(path, sizeof path, "%s/normrow-%03u.bin", norm_dump_dir,
+                    nseq);
+      if (FILE* f = std::fopen(path, "wb")) {
+        const uint32_t hdr[2] = {static_cast<uint32_t>(rows),
+                                 static_cast<uint32_t>(d)};
+        std::fwrite(hdr, 4, 2, f);
+        std::fwrite(nf.data(), 4, nf.size(), f);
+        std::fwrite(xv.data(), 4, xv.size(), f);
+        std::fwrite(wf.data(), 4, wf.size(), f);
+        std::fclose(f);
+      }
+      std::fprintf(stderr, "[NORM] dumped row %u to %s\n", nseq, path);
+    }
+  }
+
   // The composed f32 arm is the micro-test-clean one but its row broadcast
   // does not survive the model's tensor geometry on this stack (binary_ng
   // refuses the subtile), so the pinned ttnn::rms_norm stays the device

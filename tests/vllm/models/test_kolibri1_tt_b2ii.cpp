@@ -817,9 +817,52 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
   vt::Queue cpu_q = cpu_be.CreateQueue();
   vt::Backend& ttbeg = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
   vt::Queue tt_q = ttbeg.CreateQueue();
-  const int64_t d = 2560;
-  std::vector<uint16_t> xb(static_cast<size_t>(d));
-  std::vector<uint16_t> gb(static_cast<size_t>(d));
+  // ITEM-2 replay arm (the rms_norm input-dependence diagnostic): set
+  // VT_TT_RMSNORM_MICRO_INPUT=<bin> to a row captured by VT_TT_NORM_DUMP_DIR
+  // in tenstorrent_ops.cpp (u32 rows, u32 d; norm_f32 rows*d f32; the bf16
+  // input read back as f32 rows*d; the staged gamma d f32) to run this micro
+  // over a REAL in-model activation row instead of the random one.
+  int64_t d = 2560;
+  std::vector<uint16_t> xb;
+  std::vector<uint16_t> gb;
+  const char* micro_in = std::getenv("VT_TT_RMSNORM_MICRO_INPUT");
+  std::vector<float> replay_x, replay_w;
+  if (micro_in != nullptr && micro_in[0] != '\0') {
+    FILE* f = std::fopen(micro_in, "rb");
+    REQUIRE(f != nullptr);
+    uint32_t hdr[2] = {0, 0};
+    REQUIRE(std::fread(hdr, 4, 2, f) == 2);
+    d = static_cast<int64_t>(hdr[1]);
+    std::vector<float> nf(static_cast<size_t>(hdr[0]) * hdr[1]);
+    replay_x.resize(nf.size());
+    replay_w.resize(static_cast<size_t>(hdr[1]));
+    REQUIRE(std::fread(nf.data(), 4, nf.size(), f) == nf.size());
+    REQUIRE(std::fread(replay_x.data(), 4, replay_x.size(), f) ==
+            replay_x.size());
+    REQUIRE(std::fread(replay_w.data(), 4, replay_w.size(), f) ==
+            replay_w.size());
+    std::fclose(f);
+    auto tobf = [](float v) {
+      uint32_t u;
+      std::memcpy(&u, &v, 4);
+      return static_cast<uint16_t>(u >> 16);
+    };
+    xb.resize(static_cast<size_t>(d));
+    gb.resize(static_cast<size_t>(d));
+    for (int64_t i = 0; i < d; ++i)
+      xb[static_cast<size_t>(i)] = tobf(replay_x[static_cast<size_t>(i)]);
+    for (int64_t i = 0; i < d; ++i)
+      gb[static_cast<size_t>(i)] = tobf(replay_w[static_cast<size_t>(i)]);
+    double m = 0;
+    for (int64_t i = 0; i < d; ++i)
+      m = std::max(m, static_cast<double>(
+                          std::fabs(replay_x[static_cast<size_t>(i)])));
+    MESSAGE("replay " << micro_in << " rows=" << hdr[0] << " d=" << d
+                      << " max|x|=" << m);
+  } else {
+    xb.resize(static_cast<size_t>(d));
+    gb.resize(static_cast<size_t>(d));
+  }
   std::mt19937 rng(7);
   std::normal_distribution<float> nd(0.0f, 0.5f);
   auto tobf = [](float f) {
@@ -827,9 +870,11 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
     std::memcpy(&u, &f, 4);
     return static_cast<uint16_t>(u >> 16);
   };
-  for (int64_t i = 0; i < d; ++i) xb[static_cast<size_t>(i)] = tobf(nd(rng));
-  for (int64_t i = 0; i < d; ++i)
-    gb[static_cast<size_t>(i)] = tobf(nd(rng) * 0.1f + 1.0f);
+  if (micro_in == nullptr || micro_in[0] == '\0') {
+    for (int64_t i = 0; i < d; ++i) xb[static_cast<size_t>(i)] = tobf(nd(rng));
+    for (int64_t i = 0; i < d; ++i)
+      gb[static_cast<size_t>(i)] = tobf(nd(rng) * 0.1f + 1.0f);
+  }
   for (int with_res : {0, 1}) {
     std::vector<uint16_t> resb(static_cast<size_t>(d),
                                static_cast<uint16_t>(0));
