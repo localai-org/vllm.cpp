@@ -817,11 +817,10 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
   vt::Queue cpu_q = cpu_be.CreateQueue();
   vt::Backend& ttbeg = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
   vt::Queue tt_q = ttbeg.CreateQueue();
-  // ITEM-2 replay arm (the rms_norm input-dependence diagnostic): set
-  // VT_TT_RMSNORM_MICRO_INPUT=<bin> to a row captured by VT_TT_NORM_DUMP_DIR
-  // in tenstorrent_ops.cpp (u32 rows, u32 d; norm_f32 rows*d f32; the bf16
-  // input read back as f32 rows*d; the staged gamma d f32) to run this micro
-  // over a REAL in-model activation row instead of the random one.
+  // ITEM-2 replay arm (not for landing): VT_TT_RMSNORM_MICRO_INPUT=<bin>
+  // loads a REAL in-model row captured by VT_TT_NORM_DUMP_DIR in
+  // tenstorrent_ops.cpp (hdr[2]={rows,d}; norm_f32 rows*d f32; x rows*d f32;
+  // gamma d f32) and runs the micro over it instead of the random row.
   int64_t d = 2560;
   std::vector<uint16_t> xb;
   std::vector<uint16_t> gb;
@@ -865,15 +864,15 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
   }
   std::mt19937 rng(7);
   std::normal_distribution<float> nd(0.0f, 0.5f);
-  auto tobf = [](float f) {
+  auto tobf2 = [](float f) {
     uint32_t u;
     std::memcpy(&u, &f, 4);
     return static_cast<uint16_t>(u >> 16);
   };
   if (micro_in == nullptr || micro_in[0] == '\0') {
-    for (int64_t i = 0; i < d; ++i) xb[static_cast<size_t>(i)] = tobf(nd(rng));
+    for (int64_t i = 0; i < d; ++i) xb[static_cast<size_t>(i)] = tobf2(nd(rng));
     for (int64_t i = 0; i < d; ++i)
-      gb[static_cast<size_t>(i)] = tobf(nd(rng) * 0.1f + 1.0f);
+      gb[static_cast<size_t>(i)] = tobf2(nd(rng) * 0.1f + 1.0f);
   }
   for (int with_res : {0, 1}) {
     std::vector<uint16_t> resb(static_cast<size_t>(d),
@@ -956,6 +955,16 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
     MESSAGE("with_res=" << with_res << " sum_cpu=" << sc << " sum_tt=" << st
                         << " ratio=" << (sc != 0 ? st / sc : 0.0)
                         << " max_abs=" << mad);
+    if (micro_in != nullptr && micro_in[0] != '\0') {
+      std::vector<float> outv(static_cast<size_t>(d));
+      for (int64_t i = 0; i < d; ++i)
+        outv[static_cast<size_t>(i)] = val(outt[static_cast<size_t>(i)]);
+      FILE* of = std::fopen("/tmp/normdump/tt-out.bin", "wb");
+      if (of != nullptr) {
+        std::fwrite(outv.data(), 4, outv.size(), of);
+        std::fclose(of);
+      }
+    }
   }
 }
 
@@ -1393,6 +1402,215 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
   // THE ADJUDICATED VERDICT (expected RED today): every divergence under the
   // common prefix must be a near-tie.
   CHECK(instr_hard_flips == 0);
+}
+
+// ---- ITEM-3 (row BACKEND-TENSTORRENT): the chunked-prefill adjudication ----
+//
+// The chunked walk (8-token prompt forwards over the persistent KV cache)
+// was measured at 2.2x the serial one-token walk (156 -> 72 s prefill) but
+// not adopted because the greedy chain moved and the band-class equivalence
+// evidence was owed. This instrument adjudicates it: for every gate golden,
+// run BOTH walks — serial (the b2ii one-token walk) and chunked — with the
+// decode phase teacher-forced on the golden chain (the b2ii methodology),
+// and score every decode position whose chunked-row argmax differs from the
+// serial-row argmax against the SAME 2.5-nat band and top-5 rule the gate
+// uses (gap = chunked-row[chunked argmax] - chunked-row[serial argmax];
+// the serial argmax is the reference choice). Every divergence in-band =>
+// adoption justified; any out-of-band position is the honest blocker, and
+// the verdict prints its count and worst gap.
+//
+// Decode position 0 is the LAST prefill forward's final row in both arms
+// (the serial walk's prompt walk and the chunked walk's last chunk forward
+// end at the same context position; ModelRegistry::Forward returns the last
+// row of a multi-token forward), so both arms compare identical positions.
+//
+// Opt-in (VT_KOLIBRI1_TT_CHUNK_ADJUDICATE=1): the device legs are expensive
+// and the default gate must stay at its committed cost.
+TEST_CASE("kolibri1 TT B2b-ii: chunked-prefill near-tie adjudication — "
+          "chunked vs serial walk, decode positions under the 2.5-nat band") {
+  if (!TenstorrentDevicePresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || *model_dir == '\0') {
+    MESSAGE("SKIPPED: VT_KOLIBRI1_TT_B2II_MODEL not set");
+    return;
+  }
+  const char* opt_in = std::getenv("VT_KOLIBRI1_TT_CHUNK_ADJUDICATE");
+  if (opt_in == nullptr || opt_in[0] != '1') {
+    MESSAGE("SKIPPED: opt-in required (VT_KOLIBRI1_TT_CHUNK_ADJUDICATE=1)");
+    return;
+  }
+  int64_t chunk_tokens = 8;
+  if (const char* cs = std::getenv("VT_KOLIBRI1_TT_CHUNK_TOKENS"))
+    chunk_tokens = std::max<int64_t>(1, std::atoi(cs));
+
+  const std::string dir = model_dir;
+  const HfConfig config = vllm::LoadHfConfig(dir + "/config.json");
+  const ModelRegistration& reg = ModelRegistry::Resolve(config);
+  REQUIRE(reg.architecture == "Kolibri1ForCausalLM");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(dir + "/model.safetensors.index.json"));
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items()) {
+    (void)name;
+    shard_names.insert(shard.get<std::string>());
+  }
+  std::vector<SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(SafetensorsFile::Open(dir + "/" + shard));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+  std::unique_ptr<LoadedModel> model = ModelRegistry::Load(config, source);
+  REQUIRE(model != nullptr);
+  vt::Backend& be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue q = be.CreateQueue();
+  ModelRegistry::Prepare(*model, config, q);
+  Kolibri1TTStreamingDeviceContext* st =
+      Kolibri1LoadedModelTTStreamContext(*model, q);
+  REQUIRE(st != nullptr);
+  const Kolibri1Weights& w = Kolibri1LoadedModelWeights(*model);
+  const Kolibri1Params& p = w.params;
+
+  const int64_t hkv = p.num_key_value_heads;
+  const int64_t hd = p.head_dim;
+  const int64_t block_size = 16;
+  const int64_t num_blocks = 32;
+  const int64_t kv_bytes = num_blocks * 2 * block_size * hkv * hd *
+                           static_cast<int64_t>(vt::SizeOf(vt::DType::kBF16));
+  std::vector<std::shared_ptr<void>> kv_keep;
+  std::vector<PagedKvCache> kv;
+  kv.reserve(static_cast<size_t>(p.num_hidden_layers));
+  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+    void* buf = be.Alloc(kv_bytes);
+    kv_keep.emplace_back(buf, [&be](void* ptr) { be.Free(ptr); });
+    std::memset(buf, 0, static_cast<size_t>(kv_bytes));
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = block_size;
+    c.num_kv_heads = hkv;
+    c.head_size = hd;
+    kv.push_back(c);
+  }
+
+  auto reset_kv = [&] {
+    for (auto& keep : kv_keep)
+      std::memset(keep.get(), 0, static_cast<size_t>(kv_bytes));
+  };
+  auto steady = [] { return std::chrono::steady_clock::now(); };
+  constexpr double kNatBand = 2.5;
+
+  // One teacher-forced walk over a golden. prefill_serial selects the
+  // prompt arm; rows hold one row per decode position (0 = the last prefill
+  // forward's final row). Returns the prefill wall seconds.
+  auto walk = [&](const GateGolden& gp, bool prefill_serial,
+                  std::vector<std::vector<float>>* rows) {
+    const size_t plen = gp.input_ids.size();
+    const auto t0 = steady();
+    int64_t ctx = 0;
+    if (prefill_serial) {
+      for (size_t i = 0; i < plen; ++i) {
+        std::vector<float> row = ForwardLastLogits(
+            *model, config, q, be, kv, {gp.input_ids[i]},
+            static_cast<int64_t>(i), num_blocks);
+        if (i + 1 == plen) rows->push_back(std::move(row));
+      }
+      ctx = static_cast<int64_t>(plen);
+    } else {
+      size_t consumed = 0;
+      while (consumed < plen) {
+        const size_t take =
+            std::min(static_cast<size_t>(chunk_tokens), plen - consumed);
+        std::vector<int32_t> chunk(
+            gp.input_ids.begin() + static_cast<int64_t>(consumed),
+            gp.input_ids.begin() + static_cast<int64_t>(consumed + take));
+        std::vector<float> row = ForwardLastLogits(
+            *model, config, q, be, kv, chunk, ctx, num_blocks);
+        consumed += take;
+        ctx += static_cast<int64_t>(take);
+        if (consumed == plen) rows->push_back(std::move(row));
+      }
+    }
+    const double prefill_s =
+        std::chrono::duration<double>(steady() - t0).count();
+    // Teacher-forced decode under the golden chain: decode position d
+    // (d >= 1) is produced by feeding generated_ids[d - 1] — the b2ii
+    // instrument's feeding contract.
+    for (size_t d = 1; d < gp.generated_ids.size() + 1; ++d) {
+      const int32_t fed = gp.generated_ids[d - 1];
+      rows->push_back(ForwardLastLogits(*model, config, q, be, kv, {fed},
+                                        ctx + static_cast<int64_t>(d) - 1,
+                                        num_blocks));
+    }
+    return prefill_s;
+  };
+
+  int64_t serial_vs_chunk_flips = 0, near_ties = 0, hard_flips = 0;
+  double worst_gap = 0.0;
+  std::vector<std::string> hard_records;
+  double serial_prefill_total = 0.0, chunked_prefill_total = 0.0;
+
+  for (const GateGolden& gp : LoadGateGoldens()) {
+    reset_kv();
+    std::vector<std::vector<float>> serial_rows;
+    const double serial_s = walk(gp, /*prefill_serial=*/true, &serial_rows);
+    reset_kv();
+    std::vector<std::vector<float>> chunked_rows;
+    const double chunked_s = walk(gp, /*prefill_serial=*/false, &chunked_rows);
+    REQUIRE(serial_rows.size() == chunked_rows.size());
+    serial_prefill_total += serial_s;
+    chunked_prefill_total += chunked_s;
+
+    int64_t prompt_flips = 0, prompt_near = 0, prompt_hard = 0;
+    double prompt_worst = 0.0;
+    for (size_t d = 0; d < serial_rows.size(); ++d) {
+      const std::vector<float>& sr = serial_rows[d];
+      const std::vector<float>& cr = chunked_rows[d];
+      const int32_t s_am = static_cast<int32_t>(
+          std::max_element(sr.begin(), sr.end()) - sr.begin());
+      const int32_t c_am = static_cast<int32_t>(
+          std::max_element(cr.begin(), cr.end()) - cr.begin());
+      if (s_am == c_am) continue;
+      ++prompt_flips;
+      const double gap = static_cast<double>(cr[static_cast<size_t>(c_am)]) -
+                         static_cast<double>(cr[static_cast<size_t>(s_am)]);
+      int above = 0;
+      for (float v : cr)
+        if (static_cast<double>(v) >
+            static_cast<double>(cr[static_cast<size_t>(s_am)]))
+          ++above;
+      const bool in_top5 = above < 5;
+      prompt_worst = std::max(prompt_worst, gap);
+      worst_gap = std::max(worst_gap, gap);
+      if (gap > kNatBand || !in_top5) {
+        ++prompt_hard;
+        ++hard_flips;
+        hard_records.push_back("'" + gp.prompt + "' d=" + std::to_string(d) +
+                               ": serial argmax " + std::to_string(s_am) +
+                               ", chunked argmax " + std::to_string(c_am) +
+                               ", gap " + std::to_string(gap) +
+                               " nats, in-top5=" + (in_top5 ? "yes" : "no"));
+      } else {
+        ++prompt_near;
+        ++near_ties;
+      }
+    }
+    serial_vs_chunk_flips += prompt_flips;
+    MESSAGE("'" << gp.prompt << "' prefill serial " << serial_s
+                << " s, chunked " << chunked_s << " s; flips "
+                << prompt_flips << " (near " << prompt_near << ", hard "
+                << prompt_hard << ", worst " << prompt_worst << " nats)");
+  }
+  MESSAGE("ADJUDICATION: chunked-vs-serial flips " << serial_vs_chunk_flips
+           << " (near-ties " << near_ties << ", hard " << hard_flips
+           << ", worst gap " << worst_gap << " nats, band " << kNatBand
+           << "); prefill total serial " << serial_prefill_total
+           << " s, chunked " << chunked_prefill_total << " s (x"
+           << serial_prefill_total / chunked_prefill_total << ")");
+  for (const std::string& r : hard_records) MESSAGE("HARD: " << r);
+  CHECK(chunked_prefill_total > 0.0);
 }
 
 // ---- SCRATCH DEBUG: the router diagnostic's reference separation -----------

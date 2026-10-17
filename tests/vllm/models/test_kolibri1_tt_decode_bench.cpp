@@ -246,11 +246,23 @@ TEST_CASE("kolibri1 TT decode bench: 128-token prefill, 64 greedy steps, "
   // ---- 3. PREFILL: walk the 128 prompt tokens one forward per step over
   // the persistent KV cache (see the prefill-shape note above), timed; the
   // last walk step yields the first greedy token.
+  // ITEM-3 opt-in (VT_KOLIBRI1_TT_DECODE_BENCH_PREFILL_CHUNK=N, default 1 =
+  // the committed serial walk): drive the 128-token prefill in N-token
+  // forwards over the same persistent KV cache. The last forward's row is
+  // the first-token row either way.
+  int64_t prefill_chunk = 1;
+  if (const char* cs =
+          std::getenv("VT_KOLIBRI1_TT_DECODE_BENCH_PREFILL_CHUNK"))
+    prefill_chunk = std::max<int64_t>(1, std::atoi(cs));
   const double t_pre0 = NowSec();
   ForwardLogits fl;
-  for (int i = 0; i < kPromptLen; ++i) {
-    fl = Forward({seq[i]}, /*ctx_before=*/i, /*pure_decode=*/false);
+  for (int i = 0; i < kPromptLen;) {
+    const int take = static_cast<int>(std::min<int64_t>(
+        prefill_chunk, kPromptLen - static_cast<int64_t>(i)));
+    std::vector<int32_t> chunk(seq.begin() + i, seq.begin() + i + take);
+    fl = Forward(chunk, /*ctx_before=*/i, /*pure_decode=*/false);
     REQUIRE(fl.rows == 1);
+    i += take;
   }
   int32_t next = GreedyNext(fl);
   seq.push_back(next);
