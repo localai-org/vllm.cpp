@@ -33,6 +33,7 @@
 // a non-Tenstorrent queue by name at its boundary.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -156,6 +157,15 @@ struct Kolibri1TTStreamingDeviceContext {
     int64_t slot = -1;
     std::shared_ptr<void> owner;
     vt::Tensor gate, up, down;  // bf16 [n, k] device views
+    // The memo entry OWNS its staged device tensors (opaque
+    // vt::tenstorrent::StageOwnedWeight handles): staged once at dequant
+    // time, served to the expert GEMMs directly, and dropped exactly once at
+    // eviction. The pointer-keyed weight-view shadow maps never cache views
+    // of this transient buffer, so evictions neither re-stage the 7.86 MB
+    // dequant at the next touch nor keep the residency sweeps on the decode
+    // hot path (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH). Declared last so
+    // the stagings die BEFORE the host owner that backed from_span.
+    std::array<std::shared_ptr<void>, 3> staged;
   };
   std::map<std::pair<int64_t, int64_t>, SlotDequant> memo;
 };

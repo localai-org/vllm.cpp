@@ -422,6 +422,30 @@ std::map<uintptr_t, WeightViewShadow>& WeightViewShadows();
 bool IsTrackedBase2D(const Tensor& t);
 ttnn::Tensor EnsureWeightViewDevice(const Tensor& t, MeshDevice& device);
 ttnn::Tensor EnsureMatmulWeightDevice(const Tensor& b, MeshDevice& device);
+
+// ---- The OWNED staged-weight seam (the memo-owner repair) -----------------
+// The kolibri1 TT routed-expert memo dequants a 7.86 MB bf16 slot buffer per
+// expert and frees it on eviction. Its views keyed into WeightViewShadows
+// made every eviction a full re-staging at the next touch and kept the
+// UnregisterHostBuffer scan and the MarkScratchAcquired drain on the decode
+// hot path (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH). Here the CALLER owns
+// the staging: StageOwnedWeightDevice stages the contiguous rank-2 bf16 view
+// once and returns a shared_ptr whose deleter erases the lookup entry, so
+// the map holds exactly the live stagings, the transient-buffer hazard the
+// range sweeps exist for cannot arise for these buffers, and a memo entry
+// carries its staged device tensors through its lifetime. Because the entry
+// dies with its owner, a freed address never serves a new tenant (the
+// stale-serve property the sweeps enforce).
+std::mutex& OwnedWeightMutex();
+std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>& OwnedWeightShadows();
+std::shared_ptr<ttnn::Tensor> StageOwnedWeightDevice(const Tensor& t,
+                                                     MeshDevice& device);
+// Serves the live owned staging for `host` whose shape is exactly
+// [rows, cols], or nullptr. EnsureMatmulWeightDevice consults this BEFORE
+// any other residency, so a memo-owned view never (re)enters the
+// pointer-keyed transient maps.
+ttnn::Tensor* OwnedWeightLookup(const void* host, uint32_t rows,
+                                uint32_t cols);
 ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device);
 bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols);
 // ---- BFP8 weight residency (spec .agents/specs/tenstorrent-bfp-weight-

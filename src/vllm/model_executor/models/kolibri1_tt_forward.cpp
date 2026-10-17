@@ -41,6 +41,7 @@
 #include "vllm/model_executor/models/kv_cache_route.h"   // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"    // the ONE pool (#1664)
 #include "vt/ops.h"
+#include "vt/tenstorrent/tenstorrent_device.h"  // StageOwnedWeight (the memo-owned staging seam)
 
 // SCRATCH DEBUG (layer-1 moe localization): the CPU arm's stashed router
 // logits (defined in kolibri1_forward.cpp, same process), read by RouteDump.
@@ -812,6 +813,13 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       const int64_t n_dims[3] = {inter, inter, h};
       const int64_t k_dims[3] = {h, h, inter};
       const size_t nb_total = static_cast<size_t>(3 * inter * h) * 2;
+      // EVICT FIRST (the address-reuse discipline): a victim entry can hold
+      // a dequant buffer whose address be.Alloc below reuses. Evicting
+      // before the allocation drops the victim's OWNED stagings with the
+      // entry, so the fresh staging at the reused address can never collide
+      // with (or serve) the dying tenant's entry in the owned-weight seam.
+      constexpr size_t kMemoMaxEntries = 512;
+      Kolibri1TTMemoEvictForEmplace(st.memo, kMemoMaxEntries);
       void* bp = be.Alloc(nb_total);
       Kolibri1TTStreamingDeviceContext::SlotDequant dq;
       dq.slot = slot;
@@ -849,6 +857,18 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
         *dsts[pi] = MakeTensor(dst, DType::kBF16, d.q.device,
                                std::vector<int64_t>{n, k});
       }
+      // The memo entry OWNS its staged device tensors: stage the three
+      // views once, here, into the entry. The expert GEMMs below are served
+      // from these stagings (EnsureMatmulWeightDevice consults the owned
+      // seam first), so the pointer-keyed WeightViewShadows map never
+      // caches views of this transient buffer — an eviction drops each
+      // staging exactly once with the entry, instead of forcing a full
+      // 7.86 MB re-stage at the next touch and keeping the
+      // UnregisterHostBuffer scan and the MarkScratchAcquired drain on the
+      // decode hot path (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH).
+      dq.staged = {vt::tenstorrent::StageOwnedWeight(dq.gate),
+                   vt::tenstorrent::StageOwnedWeight(dq.up),
+                   vt::tenstorrent::StageOwnedWeight(dq.down)};
       // THE BOUND: the memo is a cache, and an unbounded one exhausts the
       // device (each entry owns a 3*inter*h*2 = 7.86 MB bf16 buffer at the
       // Kolibri-1 dims; a free-running decode routes to ever-new experts
@@ -866,7 +886,9 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       // weights, uninitialized-DRAM-scale outputs, and run-to-run
       // nondeterministic decode. Evicting first keeps the current entry out
       // of the victim set, so `it` stays valid for the GEMM below.
-      constexpr size_t kMemoMaxEntries = 512;
+      // The cap was already enforced before the dequant allocation above
+      // (the address-reuse discipline); this second call is the emplace
+      // contract's belt — a no-op at <= cap - 1 entries.
       Kolibri1TTMemoEvictForEmplace(st.memo, kMemoMaxEntries);
       it = st.memo.emplace(key, std::move(dq)).first;
     }

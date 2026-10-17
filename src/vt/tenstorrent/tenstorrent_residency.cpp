@@ -7,7 +7,17 @@
 
 #include "vllm/config/tt_weight_residency.h"
 
+
 namespace vt::tenstorrent {
+namespace {
+// Attribution probe gate (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH): the env
+// must read exactly "1" so an empty shell default stays silent.
+bool ShadowDropTraceOn() {
+  const char* e = std::getenv("VT_TT_SHADOW_DROP_TRACE");
+  return e != nullptr && e[0] == '1';
+}
+}  // namespace
+
 namespace {
 void DropEmbedTableShadow(void* host) {
   if (host == nullptr) return;
@@ -567,6 +577,24 @@ ttnn::Tensor EnsureWeightViewDevice(const Tensor& t, MeshDevice& device) {
 // interior views get the persistent shadow instead of the per-call anonymous
 // staging.
 ttnn::Tensor EnsureMatmulWeightDevice(const Tensor& b, MeshDevice& device) {
+  // A caller-owned staging (the kolibri1 TT memo's expert dequant views)
+  // serves FIRST: the entry's lifetime is the owner's shared_ptr, so it can
+  // never outlive its host buffer (no stale-serve) and it must never enter
+  // the pointer-keyed transient maps below — an eviction of the owning memo
+  // entry drops the staging exactly once instead of forcing a full re-stage
+  // at the next touch and keeping the UnregisterHostBuffer scan and the
+  // MarkScratchAcquired drain on the decode hot path
+  // (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH). Owned stagings are bf16 by
+  // contract; the VT_TT_WEIGHT_RESIDENCY arms below do not apply to them.
+  if (b.rank == 2 && b.dtype == DType::kBF16) {
+    if (ttnn::Tensor* owned = OwnedWeightLookup(
+            b.data, static_cast<uint32_t>(b.shape[0]),
+            static_cast<uint32_t>(b.shape[1]))) {
+      if (ShadowDropTraceOn())
+        std::fprintf(stderr, "[TT-OWNED] serve ptr=%p\n", b.data);
+      return *owned;
+    }
+  }
   // One lever selects the residency; a future variant is a new VALUE of
   // VT_TT_WEIGHT_RESIDENCY, not a new flag.
   switch (vllm::ParseTtWeightResidency(
@@ -680,6 +708,13 @@ void DropWeightViewShadowsInRange(void* host, size_t bytes, bool drain) {
       bfp8_dead.push_back(it->first);
   }
   if (wv_dead.empty() && bfp8_dead.empty()) return;
+  // Attribution probe (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH): every sweep
+  // that finds live entries, with the drop and drain counts, one line each.
+  if (ShadowDropTraceOn())
+    std::fprintf(stderr,
+                 "[TT-DROP] range=%p..%zu wv=%zu bfp8=%zu drain=%d\n", host,
+                 bytes, wv_dead.size(), bfp8_dead.size(),
+                 static_cast<int>(drain));
   if (drain && !tt_capture_active())
     SharedMeshDevice().mesh_command_queue().finish();
   {
@@ -933,6 +968,80 @@ void StageWeightViewForTest(const Tensor& t) {
 size_t WeightViewShadowCountForTest() {
   std::lock_guard<std::mutex> g(WeightViewMutex());
   return WeightViewShadows().size();
+}
+
+// ---- The OWNED staged-weight seam -----------------------------------------
+// See tenstorrent_internal.h. The map holds one shared_ptr per live owner
+// staging; the returned handle's aliasing deleter erases the entry, so the
+// resident tensor dies exactly when the caller's handle does — never before
+// its host buffer can be reused by a new tenant, and never carried into the
+// range the transient sweeps must police.
+std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>& OwnedWeightShadows() {
+  static std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>* m =
+      new std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>();  // #1486
+  return *m;
+}
+
+std::mutex& OwnedWeightMutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::shared_ptr<ttnn::Tensor> StageOwnedWeightDevice(const Tensor& t,
+                                                     MeshDevice& device) {
+  VT_CHECK(t.rank == 2 && t.IsContiguous() && t.dtype == DType::kBF16,
+           "tenstorrent StageOwnedWeightDevice: contiguous rank-2 bf16");
+  const uint32_t rows = static_cast<uint32_t>(t.shape[0]);
+  const uint32_t cols = static_cast<uint32_t>(t.shape[1]);
+  const uintptr_t key = reinterpret_cast<uintptr_t>(t.data);
+  {
+    std::lock_guard<std::mutex> g(OwnedWeightMutex());
+    auto it = OwnedWeightShadows().find(key);
+    if (it != OwnedWeightShadows().end()) return it->second;
+  }
+  EnsureHost(t);
+  const size_t n = static_cast<size_t>(rows) * static_cast<size_t>(cols);
+  if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
+    std::fprintf(stderr,
+                 "[TT-UP] StageOwnedWeightDevice from_span WRITE during "
+                 "capture ptr=%p rows=%u cols=%u\n",
+                 t.data, rows, cols);
+  auto staged = std::make_shared<ttnn::Tensor>(ttnn::Tensor::from_span(
+      ttsl::Span<const bfloat16>(static_cast<const bfloat16*>(t.data), n),
+      TileSpecOf(rows, cols), &device));
+  if (ShadowDropTraceOn())
+    std::fprintf(stderr, "[TT-OWNED] stage ptr=%p rows=%u cols=%u\n", t.data,
+                 rows, cols);
+  // Same counters EnsureWeightViewDevice bumps: an owned stage IS a bulk
+  // bf16 staging under the W4 contract, and later calls serve the resident
+  // entry and count nothing.
+  StagingBulkUploads().fetch_add(1, std::memory_order_relaxed);
+  StagingBulkBytes().fetch_add(static_cast<uint64_t>(n) * 2,
+                               std::memory_order_relaxed);
+  std::lock_guard<std::mutex> g(OwnedWeightMutex());
+  auto handle = std::shared_ptr<ttnn::Tensor>(staged.get(), [key](ttnn::Tensor*) {
+    std::lock_guard<std::mutex> g(OwnedWeightMutex());
+    OwnedWeightShadows().erase(key);
+  });
+  OwnedWeightShadows()[key] = std::move(staged);
+  return handle;
+}
+
+ttnn::Tensor* OwnedWeightLookup(const void* host, uint32_t rows,
+                                uint32_t cols) {
+  std::lock_guard<std::mutex> g(OwnedWeightMutex());
+  auto it = OwnedWeightShadows().find(reinterpret_cast<uintptr_t>(host));
+  if (it == OwnedWeightShadows().end()) return nullptr;
+  const auto shape = it->second->logical_shape();
+  if (shape.rank() != 2 ||
+      static_cast<uint32_t>(shape[0]) != rows ||
+      static_cast<uint32_t>(shape[1]) != cols)
+    return nullptr;
+  return it->second.get();
+}
+
+std::shared_ptr<void> StageOwnedWeight(const Tensor& t) {
+  return StageOwnedWeightDevice(t, SharedMeshDevice());
 }
 
 // DEBUG (BACKEND-TENSTORRENT-QWEN35 W2c): ensure the tensor is staged on

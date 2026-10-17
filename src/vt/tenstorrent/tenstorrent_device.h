@@ -231,6 +231,15 @@ void StageWeightBf16ForTest(const Tensor& t, MeshDevice& device);
 // can verify that freeing the owning buffer drops the entries inside it.
 void StageWeightViewForTest(const Tensor& t);
 size_t WeightViewShadowCountForTest();
+// Stage `t` (contiguous rank-2 bf16) into a device tensor OWNED BY THE
+// CALLER: the returned handle keeps the resident staging alive and its
+// deleter removes the lookup entry. Matmuls over views of the same host
+// buffer are served from this staging (EnsureMatmulWeightDevice consults it
+// first) and never key it into the transient weight-view shadow maps, so
+// freeing the buffer drops the staging exactly once and no range sweep ever
+// sees it — the kolibri1 TT routed-expert memo's eviction hot path
+// (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH).
+std::shared_ptr<void> StageOwnedWeight(const Tensor& t);
 // W4d W6: stage the keep-quant word shadow for a block-quant weight at
 // LOAD time (the residency pre-pass; no-op for non-block dtypes).
 void StageKeepQuantWordsFor(const Tensor& packed);
@@ -288,6 +297,7 @@ inline int64_t DeviceDramTotalBytes() { return 0; }
 inline void StageWeightBf16ForTest(const Tensor&, MeshDevice&) {}
 inline void StageWeightViewForTest(const Tensor&) {}
 inline size_t WeightViewShadowCountForTest() { return 0; }
+inline std::shared_ptr<void> StageOwnedWeight(const Tensor&) { return {}; }
 inline void StageKeepQuantWordsFor(const Tensor&) {}
 inline void DumpSlotCensus(const char*) {}
 inline void ReleaseWarmShapeSlots(uint32_t) {}
