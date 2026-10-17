@@ -17,7 +17,7 @@ scope = the kolibri1 (Kolibri1ForCausalLM) architecture only: 50-layer hybrid sl
 pin = 049a6a7bd240
 pin_label = PyPI v1.0.0 (049a6a7bd240)
 pinned_on = 2026-10-03
-gateable = yes (CPU, aarch64 — 2026-10-15)
+gateable = yes
 evidence = #3396 + ISSUE-LOCAL-01M4R8DVBMQA4WWCF9X6VG00E1-era records; see Gateability
 ```
 
