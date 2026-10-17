@@ -176,6 +176,12 @@ target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Kolibri-1 three-way numerics capture (row/kolibri-three-way): inert without
+# VT_THREEWAY_DUMP_DIR; dumps teacher-forced per-position f32 logit rows.
+vllm_cpp_add_test(test_kolibri1_threeway_capture vllm/models/test_kolibri1_threeway_capture.cpp)
+target_include_directories(test_kolibri1_threeway_capture PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_threeway_capture PRIVATE
+  KOLIBRI1_PRIMARY_TOPK_ROWS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_primary_topk_rows.json")
 # Kolibri-1 n-gram SPEC-DECODE engine gate (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6,
 # branch row/kolibri-spec-engine): pins the FIXED KV seam at unit level (an
 # ngram spec config keeps kolibri's own KV groups — no MambaSpec, no fa_draft —
