@@ -45,6 +45,7 @@
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
+#include "vllm/model_executor/models/kolibri1_bfdot_gemv.h"
 #include "vllm/model_executor/models/kolibri1_shared.h"  // the routing + step inputs, shared with the TT row
 #include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
@@ -241,6 +242,18 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
   Tensor wt = ResidentWeight(d, wt_raw);
   DBuf out(d, out_dtype, {t, wt.shape[0]});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * wt.shape[0] * wt.shape[1]);
+  // BFDOT f32-out arm (same knob, same t==1 decode-only gate as the fp8-block
+  // arm below): covers the ROUTER GATE, the one bf16-native LinearBTRaw
+  // projection the t==1 LinearBT hook cannot reach. Rounding-policy change,
+  // identical to the arm's documented envelope; measured, not hidden.
+  if (t == 1 && out_dtype == DType::kF32 &&
+   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::KnobActive()) {
+ kolibri1_bfdot_gemv::GemvF32Out(
+     static_cast<const uint16_t*>(wt.data),
+     static_cast<const uint16_t*>(x.data),
+     static_cast<float*>(out.ptr()), wt.shape[0], wt.shape[1]);
+ return out;
+  }
   vt::MatmulBT(d.q, out.t(), x, wt);
   return out;
 }
@@ -292,6 +305,30 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // unchanged unless the env var is set.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
+  // BFDOT bf16 GEMV DRAFT arm, strictly opt-in (VT_CPU_KOLIBRI_BFDOT_GEMV=1,
+  // default OFF) and t==1 decode-only: the warm-cache tensor is ALREADY bf16
+  // [n, k] row-major (the dequant cache decode rounds to bf16 on store), so
+  // the arm feeds those bytes straight into vbfdotq_f32 (bf16 in, f32
+  // accumulate). This is a rounding-policy change versus the f32
+  // widen+fma MatmulBT below — the chain WILL move under the knob; measured,
+  // not hidden. Requires DetectArmBf16 (KnobActive refuses by name
+  // otherwise); deliberately dotprod-free. The residency precondition is the
+  // dequant cache itself: the arm exists to re-use the warm bf16 bytes, so
+  // with the cache disabled the knob refuses and the f32-widen path below
+  // runs. Covers every fp8-block projection that resolves here at decode:
+  // attention q/k/v/o and the routed-expert gate/up/down. The router gate
+  // (IsBf16) keeps its production path — it never was an fp8 warm-cache
+  // tensor.
+  if (t == 1 && kolibri1_bfdot_gemv::KnobActive() &&
+      kolibri1_dequant_cache::ProcessCache().enabled()) {
+    prof::Scope prof("linear_gemm");
+    DBuf out(d, out_dtype, {1, w.fp8_block.n});
+    kolibri1_bfdot_gemv::Gemv(static_cast<const uint16_t*>(r.wt.data),
+                              static_cast<const uint16_t*>(x.data),
+                              static_cast<uint16_t*>(out.ptr()),
+                              w.fp8_block.n, w.fp8_block.k);
+    return out;
+  }
   DBuf out(d, out_dtype, {t, w.fp8_block.n});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * w.fp8_block.n *
                                w.fp8_block.k);
@@ -322,12 +359,14 @@ DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
                                       wg[0].wt.shape[1] * 2);
     vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
     DBuf a(d, DType::kBF16, {t, inter});
+    prof::Scope prof_silu("moe_silu_mul");
     vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
     return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());
   }
   DBuf g = LinearBT(d, x, e.gate_proj, t, DType::kBF16, sg.c_str());  // [t, I]
   DBuf u = LinearBT(d, x, e.up_proj, t, DType::kBF16, su.c_str());    // [t, I]
   DBuf a(d, DType::kBF16, {t, inter});
+  prof::Scope prof_silu("moe_silu_mul");
   vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
   return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());  // [t, H]
 }
@@ -615,6 +654,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       {
         const size_t rb = static_cast<size_t>(h) * vt::SizeOf(DType::kBF16);
         auto* dp = static_cast<char*>(gathered.ptr());
+        prof::Scope prof_gather("moe_gather");  // the row-wise gather Copy below
         const auto* sp = static_cast<const char*>(dhn.data);
         for (size_t s = 0; s < token_rows.size(); ++s)
           d.b.Copy(d.q, dp + s * rb,
@@ -622,6 +662,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       }
       DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(),
                          ne, inter, "routed");
+      prof::Scope prof_scatter("moe_scatter");
       for (int64_t i = 0; i < ne; ++i) {
         d.b.Copy(d.q,
                  static_cast<char*>(expert_out.ptr()) +
@@ -743,6 +784,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       Tensor ag = rows_view(gout.t(), run.row0, ne);
       Tensor au = rows_view(uout.t(), run.row0, ne);
       Tensor aa = rows_view(act.t(), run.row0, ne);
+      prof::Scope prof_silu("moe_silu_mul");
       vt::MoeSiluMul(d.q, aa, ag, au);
     }
 
@@ -768,6 +810,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
 
     // Scatter each run's rows to their (token, top-k) slots — unchanged.
     for (const RoutedRun& run : runs) {
+      prof::Scope prof_scatter("moe_scatter");
       for (int64_t i = 0; i < static_cast<int64_t>(run.slot_rows.size()); ++i) {
         d.b.Copy(d.q,
                  static_cast<char*>(expert_out.ptr()) +
@@ -786,6 +829,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // router weights ARE the mixture weights (no renormalisation, no scaling).
   DBuf out(d, DType::kBF16, {t, h});
   Tensor shared_t = shared.t();
+  prof::Scope prof_combine("moe_combine");
   vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared_t,
                  /*routed_scale=*/1.0f);
   return out;
@@ -1047,6 +1091,20 @@ ForwardLogits ForwardKolibri1Forward(
     prof::Scope prof("lm_head");
     gemvprof::Call gc("lm_head", static_cast<uint64_t>(n_out) * vocab * h);
     vt::MatmulBT(d.q, logits.t(), src, lm);
+ // BFDOT f32-out arm, same knob and t==1 decode-only gate as the
+ // LinearBT/LinearBTRaw arms: the lm_head weight is bf16 [vocab, H]
+ // row-major (the untied head, never an fp8 warm-cache tensor), the one
+ // remaining decode linear outside the LinearBT hook's coverage. Same
+ // rounding-policy envelope; measured, not hidden.
+ if (n_out == 1 && lm.dtype == DType::kBF16 &&
+     kolibri1_bfdot_gemv::KnobActive()) {
+   kolibri1_bfdot_gemv::GemvF32Out(
+       static_cast<const uint16_t*>(lm.data),
+       static_cast<const uint16_t*>(src.data),
+       static_cast<float*>(logits.ptr()), vocab, h);
+ } else {
+   vt::MatmulBT(d.q, logits.t(), src, lm);
+ }
   }
 
   ForwardLogits fl;

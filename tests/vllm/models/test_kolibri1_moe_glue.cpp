@@ -372,3 +372,112 @@ TEST_CASE("kolibri1 moe_glue combine: 1-thread and 8-thread pools are "
   ScalarCombineBf16(want, expert_out, weights, &shared, t, k, h, 1.0f);
   CHECK_EQ(std::memcmp(serial.data(), want.data(), serial.size() * 2), 0);
 }
+
+// ── moe_glue silu-mul (the ExpertMlp activation, vt::MoeSiluMul) ────────────
+//
+// The routed-expert silu-mul is the second moe_glue sub-stage (the first is
+// the nested expert GEMM/dequant work). The scalar body computes, per flat
+// element: silu = RoundThrough(gate.dtype, g / (1 + exp(-g)));
+// out = F32ToBF16(silu * BF16ToF32(up)). The aarch64 fast path keys a 64K
+// table on the GATE BIT PATTERN (a bf16 gate has at most 2^16 distinct
+// values, and the silu value is rounded through bf16 before the multiply),
+// so the fast path is bit-identical to the scalar body BY CONSTRUCTION.
+// These tests pin that contract over the FULL 2^16 gate domain.
+//
+// MUTATION CHECK (run in this worktree, scratch only, restored
+// byte-for-byte after): perturbing one LUT entry (e[b] ^= 1) or replacing
+// the table lookup with F32ToBF16(RoundThrough(kF32, SiluGate(g))) (dropping
+// the bf16 narrowing) each go RED on the full-domain case below.
+
+// The EXACT scalar silu-mul body (src/vt/cpu/cpu_ops.cpp MoeSiluMulKernel),
+// transcribed — deliberately NOT reading the fast path's table.
+void ScalarSiluMulBf16(std::vector<uint16_t>& out,
+                       const std::vector<uint16_t>& gate,
+                       const std::vector<uint16_t>& up) {
+  for (size_t i = 0; i < out.size(); ++i) {
+    const float g = vt::BF16ToF32(gate[i]);
+    const float silu = vt::BF16ToF32(vt::F32ToBF16(g / (1.0f + std::exp(-g))));
+    out[i] = vt::F32ToBF16(silu * vt::BF16ToF32(up[i]));
+  }
+}
+
+TEST_CASE("kolibri1 moe_glue silu-mul: the FULL bf16 gate domain (all 2^16 "
+          "patterns) x spread up values is raw-uint16 identical to the scalar "
+          "body") {
+  const int64_t n = 65536 * 4;
+  // Gate row i covers every bf16 bit pattern exactly; the four rows differ
+  // only in the up operand (0, 1, a large finite, a tiny subnormal — exact
+  // in bf16), so the multiply-side edge cases are covered per pattern too.
+  std::vector<uint16_t> gate(static_cast<size_t>(n));
+  for (int64_t r = 0; r < 4; ++r)
+    for (uint32_t b = 0; b < 65536; ++b)
+      gate[static_cast<size_t>(r * 65536 + b)] = static_cast<uint16_t>(b);
+  std::vector<uint16_t> up(static_cast<size_t>(n));
+  const uint16_t ups[4] = {0x0000 /* +0 */, 0x3F80 /* 1.0 */,
+                           0x7F80 /* +inf */, 0x0001 /* min subnormal */};
+  for (int64_t r = 0; r < 4; ++r)
+    for (uint32_t b = 0; b < 65536; ++b)
+      up[static_cast<size_t>(r * 65536 + b)] = ups[r];
+
+  std::vector<uint16_t> got(static_cast<size_t>(n), 0xBEEF);
+  Tensor gt = Bf16_2(gate, n, 1);
+  Tensor ut = Bf16_2(up, n, 1);
+  Tensor ot = Bf16_2(got, n, 1);
+  Queue q = Q();
+  vt::MoeSiluMul(q, ot, gt, ut);
+
+  std::vector<uint16_t> want(static_cast<size_t>(n), 0xDEAD);
+  ScalarSiluMulBf16(want, gate, up);
+  CHECK_EQ(std::memcmp(got.data(), want.data(), want.size() * 2), 0);
+  if (std::memcmp(got.data(), want.data(), want.size() * 2) != 0) {
+    for (size_t i = 0; i < want.size(); ++i) {
+      if (got[i] != want[i]) {
+        MESSAGE("divergence at i=", i, " gate=0x", std::hex,
+                static_cast<unsigned>(gate[i]), " up=0x", std::hex,
+                static_cast<unsigned>(up[i]), ": got 0x", std::hex,
+                static_cast<unsigned>(got[i]), " want 0x", std::hex,
+                static_cast<unsigned>(want[i]));
+        break;
+      }
+    }
+  }
+}
+
+// Random finite gate/up spreads across the REAL decode shapes (inter-wide
+// rows, ragged lengths crossing the partition boundaries) — the
+// thread-count-stable identity, same protocol as the combine cases.
+TEST_CASE("kolibri1 moe_glue silu-mul: random finite spread at the decode "
+          "shapes, 1-thread vs 8-thread pool, raw-uint16 identical") {
+  Lcg rng(20512099ULL);
+  for (int64_t n : {1, 3, 17, 2560, 2561, 8192, 100003}) {
+    std::vector<uint16_t> gate(static_cast<size_t>(n));
+    std::vector<uint16_t> up(static_cast<size_t>(n));
+    for (auto& v : gate) v = rng.NextBf16();
+    for (auto& v : up) v = rng.NextBf16();
+
+    auto run = [&](std::vector<uint16_t>& got) {
+      Tensor gt = Bf16_2(gate, n, 1);
+      Tensor ut = Bf16_2(up, n, 1);
+      Tensor ot = Bf16_2(got, n, 1);
+      Queue q = Q();
+      vt::MoeSiluMul(q, ot, gt, ut);
+    };
+    std::vector<uint16_t> serial(static_cast<size_t>(n), 0xBEEF);
+    vt::cpu::Threadpool serial_pool(1);
+    vt::cpu::Threadpool* prev =
+        vt::cpu::Threadpool::SwapForTesting(&serial_pool);
+    run(serial);
+    vt::cpu::Threadpool::SwapForTesting(prev);
+
+    std::vector<uint16_t> threaded(static_cast<size_t>(n), 0xDEAD);
+    vt::cpu::Threadpool threaded_pool(8);
+    prev = vt::cpu::Threadpool::SwapForTesting(&threaded_pool);
+    run(threaded);
+    vt::cpu::Threadpool::SwapForTesting(prev);
+
+    CHECK_EQ(std::memcmp(serial.data(), threaded.data(), n * 2), 0);
+    std::vector<uint16_t> want(static_cast<size_t>(n), 0x0000);
+    ScalarSiluMulBf16(want, gate, up);
+    CHECK_EQ(std::memcmp(serial.data(), want.data(), n * 2), 0);
+  }
+}

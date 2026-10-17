@@ -23,6 +23,7 @@ struct ArmIsaTierRequirement {
   std::string_view darwin_probe;
 };
 
+bool DetectArmBf16();
 const std::array<ArmIsaTierRequirement, 4>& ArmIsaTierInventory();
 const char* ArmIsaTierName(ArmIsaTier tier);
 ArmIsaCaps DetectArmIsaCaps();

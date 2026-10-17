@@ -140,6 +140,21 @@ target_compile_definitions(test_kolibri1 PRIVATE
 # partitions.
 vllm_cpp_add_test(test_kolibri1_dequant vllm/models/test_kolibri1_dequant.cpp)
 target_include_directories(test_kolibri1_dequant PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# ENVELOPE pin (~2% vs the dequant-f32 reference) on the production kolibri
+
+# shapes. Perf is bench-only; the W3 chain movement under the knob is the
+
+# Kolibri1 BFDOT bf16 GEMV draft arm: bf16-ULP envelope pin (<=2 bf16 ULP vs
+
+# the f32-widen production reference) on the production shapes + tail cases;
+
+# skips by name without FEAT_BF16. Perf is bench-only; the chain movement
+
+# under the knob is the accepted draft rounding change, not a defect.
+
+vllm_cpp_add_test(test_kolibri1_bfdot_gemv vllm/models/test_kolibri1_bfdot_gemv.cpp)
+
+target_include_directories(test_kolibri1_bfdot_gemv PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1 re-land of the dequant cache
 # (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2): byte identity cold/hot, budget
 # invariance in one binary, and entry OWNERSHIP under pool traffic (the v1
@@ -3913,6 +3928,7 @@ vllm_cpp_add_test(test_ops_paged_attn vt/test_ops_paged_attn.cpp)
 # adjudicated by the stated tolerance envelope, not a memcmp. Non-aarch64
 # builds skip loudly.
 vllm_cpp_add_test(test_ops_paged_attn_neon vt/test_ops_paged_attn_neon.cpp)
+target_include_directories(test_ops_paged_attn_neon PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # SPEC-DFLASH2 W10 (#1857): the host lane-classification seam of the CUDA
 # paged-attention dispatch (include/vt/paged_attn_route.h).
 vllm_cpp_add_test(test_paged_attn_route vt/test_paged_attn_route.cpp)

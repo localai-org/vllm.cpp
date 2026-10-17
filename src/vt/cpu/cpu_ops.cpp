@@ -866,6 +866,59 @@ void MoeSiluMulKernel(Queue&, Tensor& out, const Tensor& gate, const Tensor& up)
   // (notably the grouped bf16 GEMM composite, whose partials are f32) are
   // bit-identical to before.
   const DType in_dt = gate.dtype;
+#if defined(__aarch64__)
+  // BF16 fast path (the kolibri1 routed-expert polarity: bf16 gate/up, bf16
+  // out). The gate is bf16, so `g` has at most 2^16 distinct f32 values and
+  // `RoundThrough(kBF16, silu(g))` — the value the scalar body multiplies by —
+  // is a FUNCTION OF THE GATE BIT PATTERN alone. A 64K-entry table (128 KB,
+  // L2-resident) keyed on that pattern, built once with the IDENTICAL scalar
+  // expression below (SiluGate + F32ToBF16 + BF16ToF32), therefore reproduces
+  // the scalar body bit for bit BY CONSTRUCTION — including the subnormal,
+  // +-inf and NaN patterns, which flow through the same exp/div/round chain.
+  // This replaces the per-element glibc expf + fdiv (the profiled hot spot of
+  // the moe_glue silu-mul sub-stage on the kolibri1 decode path) with one
+  // table load. A NEON expf cannot hold this contract: no vector polynomial
+  // is bit-identical to the scalar libm expf, and silu-mul is elementwise, so
+  // any vector arm must match it exactly to be shippable under the
+  // bit-exactness gate (the combine's NEON arm gets away with vmulq/vaddq
+  // because those ARE the scalar ops; expf is not). The remaining multiply +
+  // store keep the scalar f32 multiply and the same F32ToBF16 round.
+  if (in_dt == DType::kBF16 && up.dtype == DType::kBF16 &&
+      out.dtype == DType::kBF16) {
+    struct SiluLut {
+      uint16_t e[65536];
+      SiluLut() {
+        for (uint32_t b = 0; b < 65536; ++b) {
+          const float g = BF16ToF32(static_cast<uint16_t>(b));
+          e[b] = F32ToBF16(RoundThrough(
+              DType::kBF16, g / (1.0f + std::exp(-g))));  // == SiluGate(g)
+        }
+      }
+    };
+    static const SiluLut lut;  // magic static: thread-safe one-shot build
+    const auto* gp = static_cast<const uint16_t*>(gate.data);
+    const auto* upv = static_cast<const uint16_t*>(up.data);
+    auto* op = out.Ptr<uint16_t>();
+    // Small-call inline: the kolibri1 decode reaches this kernel once per
+    // expert with ne x 512 elements (moe_intermediate_size 512, one-to-few
+    // rows per routed expert), where a full pool kick + 32-thread barrier
+    // costs more than the work. Below the threshold the body runs inline on
+    // the caller. BIT-IDENTITY: the op is elementwise and ForRows partitions
+    // elements only, so any partition and the serial run produce the same
+    // bits — pinned cross-pool (1-thread vs 8-thread) by the silu-mul tests
+    // in test_kolibri1_moe_glue.cpp.
+    auto body = [&](int64_t r0, int64_t r1) {
+      for (int64_t i = r0; i < r1; ++i)
+        op[i] = F32ToBF16(BF16ToF32(lut.e[gp[i]]) * BF16ToF32(upv[i]));
+    };
+    if (n <= 8192) {
+      body(0, n);
+    } else {
+      ForRows(n, body);
+    }
+    return;
+  }
+#endif
   // Elementwise: partition the flat output range.
   ForRows(n, [&](int64_t r0, int64_t r1) {
   for (int64_t i = r0; i < r1; ++i) {
