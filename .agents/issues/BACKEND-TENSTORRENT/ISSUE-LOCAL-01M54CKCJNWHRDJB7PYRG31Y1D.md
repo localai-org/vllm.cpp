@@ -16,4 +16,11 @@ The chunked-prefill near-tie adjudication instrument (VT_KOLIBRI1_TT_CHUNK_ADJUD
 
 ## Resolution
 
--
+- 2026-10-17 (row/tt-kolibri-p150-resume, post-#3452 deterministic chain, pinned
+  device recipe): the adjudication REPRODUCES the blocker. Chunked-vs-serial
+  flips 78 (near-ties 47, HARD 31, worst gap 9.957 nats vs the 2.5-nat band),
+  hard flips on all 8 gate prompts including decode position 0 on 4 of them;
+  prefill total serial 146.3 s vs chunked 71.0 s (x2.06). The speed is real;
+  the band-class equivalence precondition fails at many positions, so
+  adoption stays blocked exactly as recorded above.
+
