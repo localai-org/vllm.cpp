@@ -18,7 +18,7 @@ pin = 049a6a7bd240
 pin_label = PyPI v1.0.0 (049a6a7bd240)
 pinned_on = 2026-10-03
 gateable = yes
-evidence = #3396 + ISSUE-LOCAL-01M4R8DVBMQA4WWCF9X6VG00E1-era records; see Gateability
+evidence = docs/bench-evidence/kolibri1-readj/shadow-recon-bisect-20261015.md
 ```
 
 ## Gateability
