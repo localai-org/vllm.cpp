@@ -27,7 +27,13 @@
 
 #include "vt/cpu/cpu_isa_arm.h"
 
+#include <cstdint>
+
+#if defined(__aarch64__) && defined(__ARM_FEATURE_BF16)
+// `arm_neon.h` exposes `vbfdotq_f32`; <arm_neon.h> does not exist off-Arm, so
+// the include lives inside the guard (the cpu_ops.cpp:24 shape on main).
 #include <arm_neon.h>
+#endif
 
 namespace vt::cpu {
 
