@@ -39,7 +39,7 @@ lesson): both BUILD+RUN a coherent greedy golden**, unlike OLMo-3. Two SACRED ga
 - **Tokenizer (both, additive vehicle prep):** Yi and internlm3 ship a SentencePiece
   `tokenizer.model` whose HF form is either absent (`tokenizer.model` only) or a null
   pre_tokenizer + `Replace " "→"▁"` normalizer that our parser rejects
-  (`tokenizer.cpp:283,345`). Gated ID-based via the `TokensPrompt` path (feeds the oracle's
+  (`tokenizer.cpp:293,355`). Gated ID-based via the `TokensPrompt` path (feeds the oracle's
   exact prompt ids). `scripts/stage-tokenizer-metaspace.py` (reproducible, gate-neutral)
   generates a BPE `tokenizer.json` (fast-backend for Yi; direct SentencePiece→BPE extraction
   for internlm3's custom slow `InternLM3Tokenizer`) and re-expresses whitespace as the

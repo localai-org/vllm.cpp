@@ -752,6 +752,15 @@ them.
 - `ISSUE-LOCAL-01M41PGNENY6EDHWVE75EEECJA` — the `pr-size` evidence lanes
   and the PowerShell AST stage of `check-windows-portability.py`.
 
+- `ISSUE-LOCAL-01M433BAC470XAV8VYFF8KJ1WD` — the vulkan platform-gate log
+  capture and the `EVIDENCE_REQUIRED_TOOLS` pwsh declaration that the pr-size
+  install alone could not reach.
+
+- `ISSUE-LOCAL-01M43M9EEXZTM1S9KX25VSWSN5` — the definitive CI pass on PR
+  #3393: the vulkan platform-gate grep bracket bug, the MSVC C4244 sites in
+  `vulkan_ops.cpp`, and the 17 unclassified pr-size paths. Repairs in flow on
+  `row/ci-wiring-residuals`.
+
 
 ## Outcome
 

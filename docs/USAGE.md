@@ -157,21 +157,68 @@ build/examples/vllm-cli \
 
 Two more example binaries ship alongside it:
 
-- `vllm-bench` ([`examples/bench/main.cpp`](../examples/bench/main.cpp)), a
-  throughput/latency harness taking `--model`, `--dataset-path`,
-  `--num-prompts`, `--input-len`, `--output-len`, `--concurrency`,
-  `--max-num-batched-tokens`, and `--num-blocks`. It pretokenizes before timing
-  and atomically publishes each concurrency wave. Set
-  `VT_BENCH_PRETOKENIZE=0` for the timed-string rollback; the report names the
-  resolved mode. Its `--output-wait` mode
-  defaults to `poll`; the explicit `blocking-c1` diagnostic is valid only with
-  `--concurrency 1` and is not a general multi-request policy.
+- `vllm-bench`, the [throughput and latency harness](#benchmark-workload-controls).
 - `tokenize` ([`examples/tokenize/main.cpp`](../examples/tokenize/main.cpp)), a
   tokenizer smoke tool taking `<tokenizer.json | model.gguf> <corpus.txt>`.
   GGUF `tokenizer.ggml.pre` names accepted: `qwen35`, `qwen2`, `llama-bpe`,
   `gpt-4o` / `llama4` / `kanana2` / `talkie` (the GPT-4o / o200k family),
   `joyai-llm`, `deepseek-llm`, `deepseek-v3`, `laguna`. Any other name is
   refused by name rather than aliased onto a near-miss regex.
+
+### Benchmark workload controls
+
+`vllm-bench` measures throughput and latency through the engine's async frontend.
+Without `--model`, it runs a tiny synthetic CPU engine. Use this command to check
+the harness. Its timings do not measure real-model performance:
+
+```sh
+build/examples/vllm-bench --num-prompts 1 --input-len 8 --output-len 2 --concurrency 1
+```
+
+For a local checkpoint that includes a chat template, this example enables
+chat formatting and natural end-of-sequence (EOS) stopping:
+
+```sh
+build/examples/vllm-bench --model /path/to/model \
+  --num-prompts 8 --input-len 128 --output-len 64 --concurrency 4 \
+  --seed 0 --temperature 0 --no-ignore-eos --no-skip-chat-template \
+  --no-enable-thinking --kv-cache-dtype auto
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `--ignore-eos`, `--no-ignore-eos` | Ignore EOS | Generate to `--output-len`, or allow earlier EOS stopping |
+| `--skip-chat-template`, `--no-skip-chat-template` | Raw prompts | Skip or apply chat formatting |
+| `--chat-template <file or template>` | Model's template when formatting is enabled | Override with an existing file or a single-line literal |
+| `--enable-thinking`, `--no-enable-thinking` | Unset | Set the template's `enable_thinking` variable to true or false |
+| `--kv-cache-dtype <dtype>` | `auto` | Select cache storage, with `auto`, `bfloat16`, `fp8`, or `fp8_e4m3` as documented choices |
+
+With `--no-skip-chat-template`, the harness renders each prompt as one user
+message and requests an assistant generation prefix. A `--chat-template` override
+requires `--no-skip-chat-template`. The harness refuses missing templates instead
+of silently changing the prompt format. The synthetic engine has no template,
+so it needs an explicit override for this mode. Unset thinking leaves the
+template variable undefined. It does not mean false.
+
+The `auto` KV dtype lets the loader resolve storage from the checkpoint.
+An explicit dtype overrides the checkpoint setting. Keep the text report with
+your results. Its `KV cache dtype (requested)` and `KV cache dtype (resolved storage)`
+fields distinguish the option from allocated storage. `Ignore EOS (resolved sampling)`,
+`Chat template`, and `Chat template kwargs` record the other workload controls.
+Check `Total input tokens` after formatting and `Total generated tokens` after EOS
+stopping. Matching these options alone does not establish a fair comparison.
+Use identical model artifacts, prompts, sampling, concurrency, and cache settings
+for each engine.
+
+Use `--dataset-path <sharegpt.json>` to load prompts from a ShareGPT dataset.
+The harness also accepts `--max-num-batched-tokens` and `--num-blocks` for engine
+sizing. It pretokenizes prompts before timing and atomically submits each
+concurrency wave. Set `VT_BENCH_PRETOKENIZE=0` to include tokenization in timing.
+The report names the resolved mode. `--output-wait` defaults to `poll`.
+The `blocking-c1` diagnostic requires `--concurrency 1`.
+
+See the [option parser](../examples/bench/main.cpp) and
+[benchmark implementation](../examples/bench/bench_core.h) for the complete behavior.
 
 ### Which HF tokenizers load
 
@@ -241,6 +288,12 @@ a silent fallback cannot post a plausible number:
   and reports GB/s against that roof. Set `VT_VULKAN_DISPATCH_STATS=1` so it
   reports GPU-timestamp time rather than wall clock; see
   [ENVIRONMENT.md](ENVIRONMENT.md) for what each knob does and what it measured.
+
+### Kolibri-1 on CPU
+
+Use the released FP8 safetensors checkpoint with `--device cpu`.
+The [Kolibri-1 recipe](models/kolibri-1.md) lists the recorded revision, shard set,
+command, correctness evidence, and unavailable arms.
 
 ### Quantized checkpoints: which weight forms load
 
@@ -844,6 +897,68 @@ directory. The [CLM page](models/clm.md) has the commands.
 GGUF k-quant arms are not implemented; `ClmModel` refuses a GGUF source by
 name.
 
+## Kolibri-1
+
+`Kolibri1ForCausalLM` loads the mixed FP8/BF16 safetensors checkpoint from
+`Aleph-Alpha/Kolibri-1`. The recorded checkpoint contains 32 shards.
+Its `model.safetensors.index.json` records 78,827,029,120 bytes of tensor data.
+The existing record identifies revision `e52eb462` but lacks the full revision
+and shard SHA-256 hashes. This is incomplete artifact provenance, not a
+reproducible download pin. See the [checkpoint record](../.agents/specs/kolibri-1-cpu.md#the-checkpoint).
+
+Use an existing local checkpoint directory containing the index, its shards,
+`config.json`, `tokenizer.json`, and `tokenizer_config.json`. Allow host memory
+for the weights, temporary dequantized projections, activations, and the KV cache.
+The checkpoint size is not a peak-memory estimate.
+
+After [building the CLI and server](BUILD.md), run a raw completion on CPU:
+
+```sh
+build/examples/vllm-cli \
+  --model /path/to/Kolibri-1 --device cpu \
+  --prompt "The capital of Germany is" --max-tokens 16 --temperature 0
+```
+
+For chat, select both Kolibri parsers explicitly:
+
+```sh
+build/examples/vllm-server \
+  --model /path/to/Kolibri-1 --device cpu --served-model-name kolibri1 \
+  --host 127.0.0.1 --port 8000 \
+  --max-model-len 2048 --kv-cache-dtype bfloat16 \
+  --reasoning-parser kolibri1 --tool-call-parser kolibri1
+```
+
+The server uses the checkpoint's chat template. In another terminal, send a
+chat request with thinking disabled:
+
+```sh
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kolibri1","messages":[{"role":"user","content":"Name the capital of Germany."}],"max_tokens":16,"temperature":0,"chat_template_kwargs":{"enable_thinking":false}}'
+```
+
+This request omits `reasoning_effort`. When that template argument is non-null,
+it takes precedence over `enable_thinking`. Only the value `"none"` disables thinking.
+The explicit context limit keeps this example separate from the author's
+unverified million-token serving recipe. It does not limit weight memory.
+
+The loader retains FP8 blocks and BF16 tensors. The CPU forward dequantizes FP8
+projections when needed. Its optional dequantization cache defaults to disabled
+(`VT_KOLIBRI1_DEQUANT_CACHE_MB=0`), so enabling it adds a memory budget.
+The registry also dispatches to a Tenstorrent forward with streamed experts.
+See the [Tenstorrent measurements and remaining gaps](gap-kolibri1-tt-captured-decode.md).
+GGUF loading and other device forwards, including CUDA, are refused.
+
+The recorded CPU gate matched 141 of 145 argmax positions against a
+PyTorch transcription of the author's plugin. Four differences were accepted
+near-ties. Four of eight prompts matched token-for-token through the full
+continuation. This was not a native Transformers generation run.
+See the [CPU comparison](../.agents/specs/kolibri-1-cpu.md#now) and
+[serving validation](bench-evidence/kolibri1-serve-20261008.md).
+Full correctness and speed parity against the
+[author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) remain unverified.
+
 ## Muse Glimmer 30B from a GGUF k-quant
 
 The text tower loads from a `muse-glimmer`-architecture GGUF, so the 30B model
@@ -1158,8 +1273,9 @@ that invokes `ffmpeg`, path configurable with `--video-ffmpeg`).
 ## Consuming it as a library (C ABI)
 
 Link `libvllm` (static or shared) and include [`include/vllm.h`](../include/vllm.h).
-It exposes a flat, exception-free, llama.cpp-style C ABI (`VLLM_ABI_VERSION 17`,
-35 exported functions) suitable for `dlopen` / FFI / LocalAI integration.
+It exposes a flat, exception-free, llama.cpp-style C ABI for `dlopen`, FFI, and LocalAI integration.
+See the [C API reference](reference/c-api.md) for the current version, ownership rules,
+and [speaker diarization](reference/c-api.md#speaker-diarization).
 
 ```c
 #include "vllm.h"
@@ -1185,7 +1301,8 @@ vllm_engine_free(engine);
 ```
 
 The ABI covers lifecycle, blocking and streaming completion, non-blocking
-concurrent requests, memory helpers, and diagnostics. Later ABI versions add:
+concurrent requests, memory helpers, and diagnostics. The table lists the early ABI additions.
+See [recent additions](reference/c-api.md#recent-abi-additions) for newer controls.
 
 | ABI | Adds |
 |---:|---|

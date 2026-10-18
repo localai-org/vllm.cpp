@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-23
-Updated: 2026-09-23
+Updated: 2026-10-04
 Closed: -
 
 ## Problem
@@ -17,3 +17,39 @@ The W4b lever stayed default-off (#3031) because its e2e lane failed the 500-mna
 ## Resolution
 
 -
+
+- 2026-10-04 (`row/int8dot-default-flip`): gates re-run on the LIVE 27B arm
+  after wave 3 (evidence `docs/bench-evidence/tt-int8dot-flip-live-gates-20261003.md`,
+  spec section "Live-arm re-run"). c1 arms token-IDENTICAL (64/64 ids) and
+  the c1 A/B reads 4.50x (31,277 vs 6,957 ms TPOT); the c2 arm-pair
+  divergence is within-arm run-to-run nondeterminism (a c2 `=0` re-run
+  reproduced the `=1` stream byte-for-byte), not a lever effect. The flip
+  stays blocked: the pinned llama.cpp b10451 REFUSES the unsloth Q4_K_M
+  artifact (`missing tensor 'blk.64.ssm_conv1d.weight'`; nextn KV override
+  inert), so the 500-mnat teacher-forced band of spec gate 1 has no
+  denominator for this checkpoint; sibling gate and `=0` opt-out identity
+  are re-owed on the live arm. VERDICT: DONT-FLIP, lever stays opt-in,
+  issue stays OPEN pending a working oracle denominator for this artifact.
+- 2026-10-04, later (`row/int8dot-default-flip`): the blocker RESOLVED. The
+  llama.cpp pin advanced to `11fe0215` (loads the artifact; commit
+  `6fbe576dc`), and gate 1 ran on the live arm: 16 prompts at c1, BOTH arms
+  16/16 in-band (`=1` max 97.2, `=0` max 144.1 mnats), every arm-pair
+  divergence a single-position near-tie; TPOT 4.69x. Evidence
+  `docs/bench-evidence/tt-int8dot-band-16p-20261004.md`; spec `## Now`
+  updated. 64-prompt width fell to the 16-prompt minimum because both c2
+  legs died on the GDN state-slot churn engine-fatal
+  (`ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`). VERDICT: gate 1 PASSES, the
+  flip is RECOMMENDED as its own authorized change; this issue stays OPEN
+  for the remaining gates (siblings, `=0` opt-out identity, flip lands).
+- 2026-10-04, later still (`row/int8dot-default-flip`): the operator
+  AUTHORIZED the flip on the gate-1 band evidence (gate 1 PASSED at the
+  advanced pin `11fe0215`; the spec's stop conditions addressed gates that
+  could not execute, and gate 1 now executes). The dispatch default in
+  `src/vt/tenstorrent/tenstorrent_keepquant.cpp` is FLIPPED: unset/empty =
+  INT8DOT on, `=0` = the W4a grouped dequant opt-out. Docs updated
+  (`docs/ENVIRONMENT.md`, `docs/BUILD.md`); spec `## Now` marks FLIPPED.
+  Still OWED and tracked: the 64-prompt band width (BLOCKED on
+  `ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`, the multi-wave GDN state-slot
+  churn engine-fatal), spec gate 2 (sibling keep-quant models on the live
+  arm), and spec gate 4's `=0` opt-out identity on the live arm. Issue stays
+  OPEN for those gates.

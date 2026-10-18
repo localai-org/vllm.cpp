@@ -900,7 +900,7 @@ class BudgetEnforcement(unittest.TestCase):
             ambient.mkdir()
             empty_system_path = root / "empty-system-path"
             empty_system_path.mkdir()
-            for name in ("cmake", "ninja", "ambient-secret"):
+            for name in ("cmake", "ninja", "pwsh", "ambient-secret"):
                 executable = ambient / name
                 executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
                 executable.chmod(0o755)
@@ -915,7 +915,7 @@ class BudgetEnforcement(unittest.TestCase):
                 env = checker._sanitized_env(root, tools)
                 entries = env["PATH"].split(os.pathsep)
                 self.assertNotIn(str(ambient), entries)
-                for name in ("cmake", "ninja"):
+                for name in ("cmake", "ninja", "pwsh"):
                     with self.subTest(name=name):
                         self.assertEqual(
                             shutil.which(name, path=env["PATH"]),
@@ -995,13 +995,13 @@ class BudgetEnforcement(unittest.TestCase):
         module = "tests.scripts.test_check_windows_portability"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for missing in ("cmake", "ninja"):
+            for missing in ("cmake", "ninja", "pwsh"):
                 with self.subTest(missing=missing):
                     container = root / f"container-{missing}"
                     container.mkdir()
                     available = root / f"available-{missing}"
                     available.mkdir()
-                    for name in ({"cmake", "ninja"} - {missing}):
+                    for name in ({"cmake", "ninja", "pwsh"} - {missing}):
                         executable = available / name
                         executable.write_text(
                             "#!/bin/sh\nexit 0\n", encoding="utf-8"
@@ -1041,6 +1041,9 @@ class BudgetEnforcement(unittest.TestCase):
             ninja = binaries / "ninja"
             ninja.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             ninja.chmod(0o755)
+            pwsh = binaries / "pwsh"
+            pwsh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            pwsh.chmod(0o755)
             empty_system_path = root / "empty-system-path"
             empty_system_path.mkdir()
             with mock.patch.dict(

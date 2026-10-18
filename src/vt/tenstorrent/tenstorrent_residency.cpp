@@ -7,7 +7,17 @@
 
 #include "vllm/config/tt_weight_residency.h"
 
+
 namespace vt::tenstorrent {
+namespace {
+// Attribution probe gate (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH): the env
+// must read exactly "1" so an empty shell default stays silent.
+bool ShadowDropTraceOn() {
+  const char* e = std::getenv("VT_TT_SHADOW_DROP_TRACE");
+  return e != nullptr && e[0] == '1';
+}
+}  // namespace
+
 namespace {
 void DropEmbedTableShadow(void* host) {
   if (host == nullptr) return;
@@ -567,6 +577,24 @@ ttnn::Tensor EnsureWeightViewDevice(const Tensor& t, MeshDevice& device) {
 // interior views get the persistent shadow instead of the per-call anonymous
 // staging.
 ttnn::Tensor EnsureMatmulWeightDevice(const Tensor& b, MeshDevice& device) {
+  // A caller-owned staging (the kolibri1 TT memo's expert dequant views)
+  // serves FIRST: the entry's lifetime is the owner's shared_ptr, so it can
+  // never outlive its host buffer (no stale-serve) and it must never enter
+  // the pointer-keyed transient maps below — an eviction of the owning memo
+  // entry drops the staging exactly once instead of forcing a full re-stage
+  // at the next touch and keeping the UnregisterHostBuffer scan and the
+  // MarkScratchAcquired drain on the decode hot path
+  // (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH). Owned stagings are bf16 by
+  // contract; the VT_TT_WEIGHT_RESIDENCY arms below do not apply to them.
+  if (b.rank == 2 && b.dtype == DType::kBF16) {
+    if (ttnn::Tensor* owned = OwnedWeightLookup(
+            b.data, static_cast<uint32_t>(b.shape[0]),
+            static_cast<uint32_t>(b.shape[1]))) {
+      if (ShadowDropTraceOn())
+        std::fprintf(stderr, "[TT-OWNED] serve ptr=%p\n", b.data);
+      return *owned;
+    }
+  }
   // One lever selects the residency; a future variant is a new VALUE of
   // VT_TT_WEIGHT_RESIDENCY, not a new flag.
   switch (vllm::ParseTtWeightResidency(
@@ -644,6 +672,59 @@ std::map<uintptr_t, Bfp8WeightShadow>& Bfp8WeightShadows() {
   static std::map<uintptr_t, Bfp8WeightShadow>* m =
       new std::map<uintptr_t, Bfp8WeightShadow>();  // never destroyed (#1486)
   return *m;
+}
+
+// Invalidate every pointer-keyed weight-view shadow whose key lies within
+// the retiring allocation [host, host+bytes). These maps are keyed by the
+// VIEW's host pointer — interior offsets included — so an entry outlives
+// the buffer it was staged from unless it is dropped here. The address is
+// about to be reused (a pool re-hand, or a free whose malloc successor lands
+// on the same address), and a surviving entry would serve the PREVIOUS
+// tenant's device bytes to the new tenant's views. That is the run-to-run
+// decode nondeterminism this closes: the kolibri1 memo eviction frees 7.86 MB
+// dequant buffers whose up/down expert-weight views are interior pointers
+// cached in WeightViewShadows; malloc reuses the address for the next
+// dequant, and the new expert's GEMM stale-served the OLD expert's weights
+// (onset exactly when the memo cap is first crossed and evictions begin).
+// The dropped tensors' consumers may still be queued when `drain` is set
+// (a pool re-hand is not a drain point); the be.Free path passes false —
+// its mid-run caller is the kolibri1 memo eviction, whose queue was already
+// drained by the preceding expert's scatter readback.
+void DropWeightViewShadowsInRange(void* host, size_t bytes, bool drain) {
+  if (host == nullptr || bytes == 0) return;
+  const uintptr_t lo = reinterpret_cast<uintptr_t>(host);
+  const uintptr_t hi = lo + bytes;
+  std::vector<uintptr_t> wv_dead, bfp8_dead;
+  {
+    std::lock_guard<std::mutex> g(WeightViewMutex());
+    for (auto it = WeightViewShadows().lower_bound(lo);
+         it != WeightViewShadows().end() && it->first < hi; ++it)
+      wv_dead.push_back(it->first);
+  }
+  {
+    std::lock_guard<std::mutex> g(Bfp8WeightMutex());
+    for (auto it = Bfp8WeightShadows().lower_bound(lo);
+         it != Bfp8WeightShadows().end() && it->first < hi; ++it)
+      bfp8_dead.push_back(it->first);
+  }
+  if (wv_dead.empty() && bfp8_dead.empty()) return;
+  // Attribution probe (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH): every sweep
+  // that finds live entries, with the drop and drain counts, one line each.
+  if (ShadowDropTraceOn())
+    std::fprintf(stderr,
+                 "[TT-DROP] range=%p..%zu wv=%zu bfp8=%zu drain=%d\n", host,
+                 bytes, wv_dead.size(), bfp8_dead.size(),
+                 static_cast<int>(drain));
+  if (drain && !tt_capture_active())
+    SharedMeshDevice().mesh_command_queue().finish();
+  {
+    std::lock_guard<std::mutex> g(WeightViewMutex());
+    for (const uintptr_t k : wv_dead) WeightViewShadows().erase(k);
+  }
+  {
+    std::lock_guard<std::mutex> g(Bfp8WeightMutex());
+    for (const uintptr_t k : bfp8_dead) Bfp8WeightShadows().erase(k);
+  }
 }
 
 ttnn::Tensor EnsureBfp8WeightDevice(const Tensor& b, MeshDevice& device) {
@@ -875,6 +956,94 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
 // needs external linkage for the focused test and calls EnsureDevice2D,
 // which stays TU-internal here.)
 
+// Test surface for the stale-serve fix (external linkage, same pattern):
+// StageWeightViewForTest stages an INTERIOR bf16 weight view exactly as
+// EnsureMatmulWeightDevice routes it (a WeightViewShadows entry keyed by
+// the view's pointer), and WeightViewShadowCountForTest reports the map
+// size, so a focused case can verify that freeing the owning buffer drops
+// the entries keyed inside it.
+void StageWeightViewForTest(const Tensor& t) {
+  (void)EnsureWeightViewDevice(t, SharedMeshDevice());
+}
+size_t WeightViewShadowCountForTest() {
+  std::lock_guard<std::mutex> g(WeightViewMutex());
+  return WeightViewShadows().size();
+}
+
+// ---- The OWNED staged-weight seam -----------------------------------------
+// See tenstorrent_internal.h. The map holds one shared_ptr per live owner
+// staging; the returned handle's aliasing deleter erases the entry, so the
+// resident tensor dies exactly when the caller's handle does — never before
+// its host buffer can be reused by a new tenant, and never carried into the
+// range the transient sweeps must police.
+std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>& OwnedWeightShadows() {
+  static std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>* m =
+      new std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>();  // #1486
+  return *m;
+}
+
+std::mutex& OwnedWeightMutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::shared_ptr<ttnn::Tensor> StageOwnedWeightDevice(const Tensor& t,
+                                                     MeshDevice& device) {
+  VT_CHECK(t.rank == 2 && t.IsContiguous() && t.dtype == DType::kBF16,
+           "tenstorrent StageOwnedWeightDevice: contiguous rank-2 bf16");
+  const uint32_t rows = static_cast<uint32_t>(t.shape[0]);
+  const uint32_t cols = static_cast<uint32_t>(t.shape[1]);
+  const uintptr_t key = reinterpret_cast<uintptr_t>(t.data);
+  {
+    std::lock_guard<std::mutex> g(OwnedWeightMutex());
+    auto it = OwnedWeightShadows().find(key);
+    if (it != OwnedWeightShadows().end()) return it->second;
+  }
+  EnsureHost(t);
+  const size_t n = static_cast<size_t>(rows) * static_cast<size_t>(cols);
+  if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr && tt_capture_active())
+    std::fprintf(stderr,
+                 "[TT-UP] StageOwnedWeightDevice from_span WRITE during "
+                 "capture ptr=%p rows=%u cols=%u\n",
+                 t.data, rows, cols);
+  auto staged = std::make_shared<ttnn::Tensor>(ttnn::Tensor::from_span(
+      ttsl::Span<const bfloat16>(static_cast<const bfloat16*>(t.data), n),
+      TileSpecOf(rows, cols), &device));
+  if (ShadowDropTraceOn())
+    std::fprintf(stderr, "[TT-OWNED] stage ptr=%p rows=%u cols=%u\n", t.data,
+                 rows, cols);
+  // Same counters EnsureWeightViewDevice bumps: an owned stage IS a bulk
+  // bf16 staging under the W4 contract, and later calls serve the resident
+  // entry and count nothing.
+  StagingBulkUploads().fetch_add(1, std::memory_order_relaxed);
+  StagingBulkBytes().fetch_add(static_cast<uint64_t>(n) * 2,
+                               std::memory_order_relaxed);
+  std::lock_guard<std::mutex> g(OwnedWeightMutex());
+  auto handle = std::shared_ptr<ttnn::Tensor>(staged.get(), [key](ttnn::Tensor*) {
+    std::lock_guard<std::mutex> g(OwnedWeightMutex());
+    OwnedWeightShadows().erase(key);
+  });
+  OwnedWeightShadows()[key] = std::move(staged);
+  return handle;
+}
+
+ttnn::Tensor* OwnedWeightLookup(const void* host, uint32_t rows,
+                                uint32_t cols) {
+  std::lock_guard<std::mutex> g(OwnedWeightMutex());
+  auto it = OwnedWeightShadows().find(reinterpret_cast<uintptr_t>(host));
+  if (it == OwnedWeightShadows().end()) return nullptr;
+  const auto shape = it->second->logical_shape();
+  if (shape.rank() != 2 ||
+      static_cast<uint32_t>(shape[0]) != rows ||
+      static_cast<uint32_t>(shape[1]) != cols)
+    return nullptr;
+  return it->second.get();
+}
+
+std::shared_ptr<void> StageOwnedWeight(const Tensor& t) {
+  return StageOwnedWeightDevice(t, SharedMeshDevice());
+}
+
 // DEBUG (BACKEND-TENSTORRENT-QWEN35 W2c): ensure the tensor is staged on
 // device exactly as a consuming kernel would, then read the DEVICE copy back.
 // Comparing this against the host master exposes staging corruption that a
@@ -1047,12 +1216,23 @@ void RegisterHostBuffer(void* host, size_t bytes) {
 
 void UnregisterHostBuffer(void* host) {
   if (host == nullptr) return;
+  size_t bytes = 0;
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     if (std::getenv("VT_TT_SLOT_TRACE") != nullptr)
       std::fprintf(stderr, "[TT-SLOT] unregister %p\n", host);
+    // Immediate destroy (no drain): be.Free's mid-run caller is the kolibri1
+    // memo eviction, whose 7.86 MB shadow frees the very next GEMM
+    // allocations reuse, and whose slot's consumers are already complete (the
+    // preceding expert's scatter readback drained the queue).
+    auto it = Slots().find(reinterpret_cast<uintptr_t>(host));
+    if (it != Slots().end()) bytes = it->second.bytes;
     Slots().erase(reinterpret_cast<uintptr_t>(host));
   }
+  // The freed address is about to be reused: drop the pointer-keyed
+  // weight-view shadows keyed inside it (stale-serve fix). No drain: the
+  // queue was already drained past these shadows' consumers.
+  DropWeightViewShadowsInRange(host, bytes, /*drain=*/false);
   DropPagedKvShadow(host);
   DropEmbedTableShadow(host);
   DropDecodedWeightShadow(host);
@@ -1082,9 +1262,11 @@ void MarkHostWritten(void* host) {
 
 void MarkScratchAcquired(void* host) {
   if (host == nullptr) return;
+  size_t bytes = 0;
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     BufferSlot* s = FindSlot(host);
+    if (s != nullptr) bytes = s->bytes;
     if (s != nullptr) {
       // The state MarkHostWritten registers, plus the W7 reservation: the
       // bytes on BOTH sides belong to the previous tenant. host_current stays
@@ -1100,6 +1282,10 @@ void MarkScratchAcquired(void* host) {
   // Same drop MarkHostWritten performed for every caller — a pool block must
   // never serve a stale embed-table staging either.
   DropEmbedTableShadow(host);
+  // The re-handed address keeps its bytes: drop the pointer-keyed
+  // weight-view shadows keyed inside it (stale-serve fix). A pool re-hand
+  // is not a drain point, so the queue is drained first.
+  DropWeightViewShadowsInRange(host, bytes, /*drain=*/true);
 }
 
 // TRUSTED dump (BACKEND-TENSTORRENT-QWEN35 W2c measurement reset): whole
@@ -1279,6 +1465,16 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
     BufferSlot* d = FindSlot(dst);
     if (s == nullptr || !s->device_current || !s->device.has_value()) return false;
     if (d == nullptr) return false;
+    // ISSUE-LOCAL-01M4JK8PT8NF9TQ7M06VS51JJH: the destination must be the
+    // slot's BASE. FindSlot resolves an interior pointer to the base slot, so
+    // a row-granular staging copy (the kolibri1 expert gather/scatter loops
+    // copy single [1,h] rows into `base + row*rb`) used to install a
+    // whole-slot device shadow for one row at a foreign offset, leave the
+    // slot's host bytes stale, and clobber the recorded geometry — the next
+    // EnsureDevice2D then refreshed the whole buffer from the last row's
+    // shadow. The eager resident lane below already guards `d->host == dst`;
+    // the capture lane is the same contract.
+    if (d->host != dst) return false;
     // The Copy contract is `bytes`, NOT slot capacity. The registered
     // s->bytes / d->bytes are the HOST blocks' pool capacities, and the
     // best-fit lend (#1922) hands a DBuf a block from a LARGER size class:

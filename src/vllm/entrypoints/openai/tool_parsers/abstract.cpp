@@ -96,6 +96,14 @@ std::unique_ptr<ToolParser> get_tool_parser(const std::string& name) {
   if (name == "hermes") {
     return std::make_unique<HermesToolParser>();
   }
+  // kolibri1 IS the Hermes class upstream: the plugin registers the kolibri1
+  // name over vllm.tool_parsers.hermes_tool_parser.Hermes2ProToolParser
+  // verbatim (aleph-alpha-inference @ 049a6a7bd240 __init__.py:50-54, "shares
+  // the Hermes <tool_call>...</tool_call> format"), so this is an alias to
+  // the same implementation, not a parallel dialect.
+  if (name == "kolibri1") {
+    return std::make_unique<HermesToolParser>();
+  }
   if (name == "qwen3") {
     return std::make_unique<Qwen3ToolParser>();
   }
@@ -301,6 +309,7 @@ const std::vector<std::string>& tool_parser_names() {
       "glm47",          "minimax_m2",
       "gemma4",         "seed_oss",
       "muse_glimmer",   "inkling",
+      "kolibri1",
   };
   return names;
 }

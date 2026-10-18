@@ -1,6 +1,7 @@
 """Real process ownership at the qualification Adapter boundary (#3108)."""
 import json
 import ctypes
+import platform
 import os
 from pathlib import Path
 import subprocess
@@ -169,6 +170,25 @@ print(report.decode())
 '''
 
 
+# CI-context exemption, recorded: the qualification runtime is bound to the
+# measured Strix host. tools/bench/strix_four_engine/child_lifecycle.py
+# (Native.__init__) refuses anything but Linux x86-64 glibc 2.39, and real
+# qualification additionally requires the Strix lease. Off that host these
+# tests cannot exercise the runtime they own, so the class SKIPS with this
+# reason instead of failing a hundred cases deep; it still runs for real on
+# the Strix x86-64 lane.
+import platform
+
+STRIX_RUNTIME = (sys.platform == "linux" and platform.machine() == "x86_64"
+                 and platform.libc_ver()[1] == "2.39")
+
+
+@unittest.skipUnless(
+    STRIX_RUNTIME,
+    "the adopted-children runtime refuses non-Linux-x86_64/glibc-2.39 hosts "
+    "(tools/bench/strix_four_engine/child_lifecycle.py); no aarch64 port "
+    "exists to exercise",
+)
 class AdoptedChildrenTests(unittest.TestCase):
     def driver(self, body):
         with tempfile.TemporaryDirectory() as directory:

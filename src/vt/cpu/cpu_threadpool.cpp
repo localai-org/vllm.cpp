@@ -33,9 +33,20 @@
 #define VT_CPU_THREAD_SANITIZER 0
 #endif
 
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+
 namespace vt::cpu {
 namespace {
 
+// SCRATCH (VT_GEMV_PROF): state defined in cpu_threadpool.h.
+inline uint64_t NowNs() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
 // ggml_thread_cpu_relax, ggml-cpu.c:510-529 (arm yield / x86 _mm_pause /
 // riscv pause / no-op fallback).
 inline void CpuRelax() {
@@ -133,6 +144,19 @@ struct ParallelRegionScope {
 };
 
 }  // namespace
+
+// SCRATCH (VT_GEMV_PROF).
+GemvProfState& GemvProf() {
+  static GemvProfState s{.on = std::getenv("VT_GEMV_PROF") != nullptr};
+  return s;
+}
+GemvProfState& GemvProfStateForOps() { return GemvProf(); }
+uint64_t ProfNowNs() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
 
 // ggml_threadpool_new_impl, ggml-cpu.c:3237-3308. Workers are allocated and
 // initialized (:3261-3271), then threads 1..n-1 are spawned on the secondary
@@ -354,6 +378,18 @@ void Threadpool::Kickoff(int n_threads) {
 void Threadpool::Run(const std::function<void(int, int)>& fn) {
   VT_CHECK(!t_in_parallel_region,
            "cpu_threadpool: nested parallel dispatch from inside a parallel region");
+  // SCRATCH (VT_GEMV_PROF): wall+kick accounting for every pool kick.
+  GemvProfState& gp = GemvProf();
+  struct KickGuard {
+    GemvProfState& gp;
+    uint64_t t0;
+    ~KickGuard() {
+      if (gp.on) {
+        gp.pool_ns.fetch_add(NowNs() - t0, std::memory_order_relaxed);
+      }
+    }
+  } guard{gp, gp.on ? NowNs() : 0};
+  if (gp.on) gp.kicks.fetch_add(1, std::memory_order_relaxed);
   // Deviation: serialize concurrent submitters (ggml assumes one dispatcher).
   std::lock_guard<std::mutex> run_lock(run_mutex_);
 
@@ -455,6 +491,21 @@ void ParallelForRows(Threadpool& tp, int64_t nr,
       current_chunk = tp.ChunkAdd(1);
     }
   });
+}
+
+GemvProfSnap GemvProfTake() {
+  GemvProfState& gp = GemvProf();
+  GemvProfSnap s;
+  s.kicks = gp.kicks.load(std::memory_order_relaxed);
+  s.pool_ns = gp.pool_ns.load(std::memory_order_relaxed);
+  s.busy_ns = gp.busy_ns.load(std::memory_order_relaxed);
+  return s;
+}
+void GemvProfReset() {
+  GemvProfState& gp = GemvProf();
+  gp.kicks.store(0, std::memory_order_relaxed);
+  gp.pool_ns.store(0, std::memory_order_relaxed);
+  gp.busy_ns.store(0, std::memory_order_relaxed);
 }
 
 }  // namespace vt::cpu

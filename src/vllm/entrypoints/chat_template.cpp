@@ -13,7 +13,9 @@
 #include "vllm/model_executor/model_loader/gguf_reader.h"
 #include "vllm/v1/engine/validation_error.h"  // refused kwarg -> HTTP 400
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -122,9 +124,15 @@ nlohmann::ordered_json BuildMessages(
 }
 
 // Rebuild the OpenAI tool JSON objects the request carried, exposed to the
-// template as `tools` exactly as transformers' apply_chat_template(tools=...)
-// sees them:
-//   {"type": <t>, "function": {"name": .., "description"?: .., "parameters"?: ..}}
+// template as `tools` exactly as the pinned renderer sees them:
+//   vLLM hands apply_chat_template `[tool.model_dump() for tool in
+//    request.tools]` (online_renderer.py:178) — pydantic field order
+//    type/function, name/description/parameters — with `description` and
+//    `parameters` present as null when the request omitted them (only
+//    strict/defer_loading are popped by the model serializer). `parameters`
+//    keeps the request document's key order (ordered_json; the pinned
+//    renderer dumps it with sort_keys=False, transformers 5.14.1
+//    chat_template_utils.py:481).
 nlohmann::ordered_json BuildTools(
     const std::vector<openai::ChatCompletionToolsParam>& tools) {
   nlohmann::ordered_json arr = nlohmann::ordered_json::array();
@@ -133,13 +141,13 @@ nlohmann::ordered_json BuildTools(
     fn["name"] = t.function.name;
     if (t.function.description.has_value()) {
       fn["description"] = *t.function.description;
+    } else {
+      fn["description"] = nullptr;  // model_dump keeps absent fields as null
     }
     if (t.function.parameters.has_value()) {
-      // parameters is a plain nlohmann::json (unordered). Round-trip through a
-      // string to land it in ordered_json without an implicit cross-container
-      // conversion.
-      fn["parameters"] =
-          nlohmann::ordered_json::parse(t.function.parameters->dump());
+      fn["parameters"] = *t.function.parameters;
+    } else {
+      fn["parameters"] = nullptr;
     }
     nlohmann::ordered_json tool = nlohmann::ordered_json::object();
     tool["type"] = t.type;
@@ -147,6 +155,107 @@ nlohmann::ordered_json BuildTools(
     arr.push_back(std::move(tool));
   }
   return arr;
+}
+
+// ─── `tojson`: CPython json.dumps semantics over a minja value ─────────────
+// The byte-level rules below were MEASURED against the pinned transformers
+// 5.14.1 renderer (its tojson override IS json.dumps with the four options;
+// see the filter's comment at its installation site). nlohmann's dump already
+// matches CPython's string escaping exactly (quote/backslash, \b \t \n \f \r,
+// other control characters as lowercase \u00xx, non-ASCII raw or \uXXXX with
+// surrogate pairs), so string leaves delegate to it.
+std::string JsonDumpsQuote(const std::string& s, bool ensure_ascii) {
+  return nlohmann::ordered_json(s).dump(/*indent=*/-1, /*indent_char=*/' ',
+                                        ensure_ascii);
+}
+
+// json.dumps key coercion: string keys as-is; other primitives to their JSON
+// literal as text (json.dumps({1: ..}) -> {"1": ..}, {True: ..} ->
+// {"true": ..}, {None: ..} -> {"null": ..}). By value: minja's keys() is
+// non-const and a Value copy is a cheap shared_ptr copy.
+std::string JsonDumpsKeyText(minja::Value key) {
+  return key.is_string() ? key.get<std::string>() : key.dump();
+}
+
+std::string RepeatStr(const std::string& s, int n) {
+  std::string out;
+  for (int i = 0; i < n; ++i) out += s;
+  return out;
+}
+
+void JsonDumps(minja::Value v, bool ensure_ascii, bool pretty,
+               const std::string& indent_str, const std::string& item_sep,
+               const std::string& key_sep, bool sort_keys, int level,
+               std::string& out) {
+  if (v.is_null()) {
+    out += "null";
+    return;
+  }
+  if (v.is_boolean()) {
+    out += v.get<bool>() ? "true" : "false";
+    return;
+  }
+  if (v.is_number()) {
+    // nlohmann's dump matches CPython's float repr for every value a
+    // JSON-parsed request can carry (measured: 0.5, 100.0, 1e+16, 1e-05,
+    // -2.75, 0.0001, pi, 1e+100, 5e-324, max-double all agree). Known edge:
+    // [1e15, 1e16) formats exponential where CPython keeps the full decimal.
+    out += v.dump();
+    return;
+  }
+  if (v.is_string()) {
+    out += JsonDumpsQuote(v.get<std::string>(), ensure_ascii);
+    return;
+  }
+  // Empty containers stay {} / [] even when pretty (CPython does the same).
+  if (v.is_array() && v.size() == 0) {
+    out += "[]";
+    return;
+  }
+  if (v.is_object() && v.size() == 0) {
+    out += "{}";
+    return;
+  }
+  const std::string nl =
+      pretty ? "\n" + RepeatStr(indent_str, level + 1) : std::string();
+  const std::string nl_end =
+      pretty ? "\n" + RepeatStr(indent_str, level) : std::string();
+  if (v.is_array()) {
+    out += "[";
+    for (std::size_t i = 0; i < v.size(); ++i) {
+      if (i) out += item_sep;
+      out += nl;
+      JsonDumps(v.at(minja::Value(static_cast<int64_t>(i))), ensure_ascii,
+                pretty, indent_str, item_sep, key_sep, sort_keys, level + 1,
+                out);
+    }
+    out += nl_end;
+    out += "]";
+    return;
+  }
+  if (v.is_object()) {
+    std::vector<minja::Value> keys = v.keys();
+    if (sort_keys) {
+      // Byte order == UTF-8 code-point order == Python's string sort.
+      std::sort(keys.begin(), keys.end(),
+                [](const minja::Value& a, const minja::Value& b) {
+                  return JsonDumpsKeyText(a) < JsonDumpsKeyText(b);
+                });
+    }
+    out += "{";
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+      if (i) out += item_sep;
+      out += nl;
+      out += JsonDumpsQuote(JsonDumpsKeyText(keys[i]), ensure_ascii);
+      out += key_sep;
+      JsonDumps(v.at(keys[i]), ensure_ascii, pretty, indent_str, item_sep,
+                key_sep, sort_keys, level + 1, out);
+    }
+    out += nl_end;
+    out += "}";
+    return;
+  }
+  throw std::runtime_error("tojson: cannot serialize a callable");
 }
 
 // A template parsed ONCE, or the reason it would not parse. The failure is
@@ -209,6 +318,95 @@ std::string RenderChatTemplate(
     std::shared_ptr<minja::Context> builtins = minja::Context::builtins();
     std::shared_ptr<minja::Context> context =
         minja::Context::make(minja::Value(top), builtins);
+    // `tojson` is the PINNED TRANSFORMERS renderer's filter, not Jinja's
+    // builtin. transformers 5.14.1 (the pin .agents/oracles/transformers.md
+    // records inside the pinned vLLM environment) installs its own tojson
+    // over Jinja's default in _compile_jinja_template
+    // (utils/chat_template_utils.py:481-492):
+    //
+    //   def tojson(x, ensure_ascii=False, indent=None, separators=None,
+    //              sort_keys=False):
+    //       # We override the built-in tojson filter because Jinja's default
+    //       # filter escapes HTML characters
+    //       return json.dumps(x, ensure_ascii=ensure_ascii, indent=indent,
+    //                         separators=separators, sort_keys=sort_keys)
+    //
+    // Measured against the pin (2026-10-09; probe over an insertion-ordered
+    // {"z": 1, "a": 2}, nested unsorted tool schemas, Unicode/HTML leaves,
+    // through render_jinja_template): the DEFAULT keeps INSERTION key order
+    // (sort_keys=False), keeps Unicode raw (ensure_ascii=False) and never
+    // HTML-escapes — Jinja's builtin sorts keys and escapes HTML, which is
+    // exactly what the transformers override exists to avoid, so the old
+    // sorted-dump override here rendered prompt bytes no serving reference
+    // produces. minja's builtin tojson matches the default byte-for-byte
+    // (ordered_map objects, nlohmann dump: raw UTF-8, no HTML escape,
+    // Python's separators and indent shape) but accepts only `indent`; this
+    // child-scope global ports the pinned filter's full signature so every
+    // option the serving reference accepts renders the same bytes here
+    // (set() on the child cannot touch the shared builtins).
+    context->set(
+        "tojson",
+        minja::Value::callable(
+            [](const std::shared_ptr<minja::Context>&,
+               minja::ArgumentsValue& args) -> minja::Value {
+              // Positional order after the value is (ensure_ascii, indent,
+              // separators, sort_keys), as in the pinned signature; keyword
+              // arguments address the same options by name.
+              args.expectArgs("tojson", {1, 5}, {0, 4});
+              for (const auto& [name, v] : args.kwargs) {
+                if (name != "ensure_ascii" && name != "indent" &&
+                    name != "separators" && name != "sort_keys") {
+                  throw std::runtime_error(
+                      "tojson() got an unexpected keyword argument '" + name +
+                      "'");
+                }
+              }
+              const minja::Value value = args.args.at(0);
+              // Option i: keyword wins, else positional slot i + 1, else the
+              // default (a null Value reads as Python's None/absent).
+              auto option = [&args](std::size_t i, const char* name) {
+                if (args.has_named(name)) return args.get_named(name);
+                if (args.args.size() > i + 1) return args.args.at(i + 1);
+                return minja::Value();
+              };
+              const bool ensure_ascii = option(0, "ensure_ascii").to_bool();
+              // indent: None (compact), an int N (newline + N spaces per
+              // level; N <= 0 is newline + no spaces, measured), or a string
+              // used verbatim as the per-level prefix.
+              bool pretty = false;
+              std::string indent_str;
+              const minja::Value indent_v = option(1, "indent");
+              if (!indent_v.is_null()) {
+                pretty = true;
+                if (indent_v.is_string()) {
+                  indent_str = indent_v.get<std::string>();
+                } else {
+                  const int64_t n = indent_v.get<int64_t>();
+                  if (n > 0) indent_str.assign(static_cast<std::size_t>(n), ' ');
+                }
+              }
+              // separators: None -> (", ", ": ") compact, (",", ": ") when
+              // pretty (CPython's rule); an explicit (item, key) pair wins
+              // over both.
+              std::string item_sep = pretty ? "," : ", ";
+              std::string key_sep = ": ";
+              const minja::Value seps = option(2, "separators");
+              if (!seps.is_null()) {
+                if (!seps.is_array() || seps.size() != 2 ||
+                    !seps.at(minja::Value(int64_t{0})).is_string() ||
+                    !seps.at(minja::Value(int64_t{1})).is_string()) {
+                  throw std::runtime_error(
+                      "tojson() separators must be a pair of strings");
+                }
+                item_sep = seps.at(minja::Value(int64_t{0})).get<std::string>();
+                key_sep = seps.at(minja::Value(int64_t{1})).get<std::string>();
+              }
+              const bool sort_keys = option(3, "sort_keys").to_bool();
+              std::string out;
+              JsonDumps(value, ensure_ascii, pretty, indent_str, item_sep,
+                        key_sep, sort_keys, /*level=*/0, out);
+              return minja::Value(out);
+            }));
     context->set("bos_token", minja::Value(bos_token));
     context->set("eos_token", minja::Value(eos_token));
     context->set("tools", minja::Value(BuildTools(tools)));

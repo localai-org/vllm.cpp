@@ -642,7 +642,7 @@ vllm-bench --model muse-glimmer-30B-kquant-17gb.gguf ...
 
 The file declares `tokenizer.ggml.model = gpt2` (which we accept) and
 `tokenizer.ggml.pre = llama4`, which `Tokenizer::FromGguf`
-(`src/vllm/tokenizer/tokenizer.cpp:749`) refuses by name.
+(`src/vllm/tokenizer/tokenizer.cpp:766`) refuses by name.
 
 **This is not an alias away.** llama.cpp maps `llama4` to
 `LLAMA_VOCAB_PRE_TYPE_GPT4O` with `clean_spaces = false`

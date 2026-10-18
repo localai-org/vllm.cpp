@@ -125,7 +125,13 @@ struct ResponseFormat {
 struct FunctionDefinition {
   std::string name;
   std::optional<std::string> description;
-  std::optional<nlohmann::json> parameters;
+  // Order-preserving ON PURPOSE: the pinned renderer serializes tool schemas
+  // into the prompt with sort_keys=False (transformers 5.14.1
+  // utils/chat_template_utils.py:481), so the request document's key order is
+  // the prompt's key order (pinned vLLM types this field dict[str, Any],
+  // protocol.py:326, and its json parse preserves document order).
+  // nlohmann::json would sort the keys away at parse (std::map).
+  std::optional<nlohmann::ordered_json> parameters;
 };
 
 // Ported from: vllm/entrypoints/openai/chat_completion/protocol.py:165
@@ -583,6 +589,21 @@ void from_json(const nlohmann::json& j, CompletionRequest& r);
 void from_json(const nlohmann::json& j, ChatMessage& m);
 void from_json(const nlohmann::json& j, ChatCompletionToolsParam& t);
 void from_json(const nlohmann::json& j, ChatCompletionRequest& r);
+// Order-preserving twin of the ChatCompletionToolsParam overload: a body
+// parsed as nlohmann::ordered_json keeps `parameters` in document order,
+// which is the order the pinned renderer dumps into the prompt.
+void from_json(const nlohmann::ordered_json& j, ChatCompletionToolsParam& t);
+
+// Re-read a parsed request's `tools` from an order-preserving parse of the
+// same body. A body parsed as nlohmann::json sorts object keys (std::map),
+// which loses the tool schemas' document order; the pinned renderer
+// preserves that order into the prompt bytes (sort_keys=False tojson), so
+// every entry point that renders chat prompts calls this after its regular
+// parse. No-op when the request carries no tools. Throws whatever the
+// ordered parse throws (the regular parse of the same body already
+// succeeded by the time callers reach this).
+void RestoreToolSchemaOrder(const std::string& request_body,
+                            ChatCompletionRequest& r);
 
 void to_json(nlohmann::json& j, const UsageInfo& u);
 void to_json(nlohmann::json& j, const ErrorInfo& e);

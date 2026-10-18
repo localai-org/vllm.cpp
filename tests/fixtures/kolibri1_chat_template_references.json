@@ -1,0 +1,456 @@
+{
+ "provenance": "chat_template from tests/fixtures/kolibri1-chat-template-tokenizer_config.json (sha256 9ba35d4bd6baa26b66aa75d03a922dfee98b16bb1fa37481b195d247267b0f97 of the template string; originally the chat_template key of /mnt/models/Aleph-Alpha/Kolibri-1/tokenizer_config.json, checkpoint pin of oracle aleph-alpha-inference 049a6a7bd240); rendered through the PINNED transformers 5.14.1 renderer (transformers.utils.chat_template_utils.render_jinja_template, the function apply_chat_template delegates to; its _compile_jinja_template installs the tojson override at chat_template_utils.py:481 with sort_keys=False and ensure_ascii=False — insertion key order, raw UTF-8, no HTML escaping), with jinja2 3.1.6; captured by tests/fixtures/gen-kolibri1-chat-template-references.py, which asserts the transformers pin; the C++ gate compares minja's rendering (src/vllm/entrypoints/chat_template.cpp) byte-for-byte against these references",
+ "cases": [
+  {
+   "name": "default_user_only",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "enable_thinking_false",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning is disabled. Proceed straight to answering according to the user's instructions.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+  },
+  {
+   "name": "reasoning_effort_none",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "reasoning_effort": "none"
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning is disabled. Proceed straight to answering according to the user's instructions.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+  },
+  {
+   "name": "reasoning_effort_low",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "reasoning_effort": "low"
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to low. Think briefly through only the essential steps in the user's language, then proceed directly to the answer.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "reasoning_effort_medium",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "reasoning_effort": "medium"
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to medium. Think through the task methodically in the user's language, check key assumptions, and provide a well-supported answer.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "reasoning_effort_high",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "reasoning_effort": "high"
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "effort_low_overrides_enable_thinking_false",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "reasoning_effort": "low",
+    "enable_thinking": false
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to low. Think briefly through only the essential steps in the user's language, then proceed directly to the answer.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "effort_none_overrides_enable_thinking_default",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "reasoning_effort": "none",
+    "enable_thinking": true
+   },
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning is disabled. Proceed straight to answering according to the user's instructions.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+  },
+  {
+   "name": "with_tools",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "Get the weather for a city",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "city": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "city"
+       ]
+      }
+     }
+    }
+   ],
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Get the weather for a city\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": [\"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "with_tools_thinking_off",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "Get the weather for a city",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "city": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "city"
+       ]
+      }
+     }
+    }
+   ],
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning is disabled. Proceed straight to answering according to the user's instructions.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Get the weather for a city\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": [\"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+  },
+  {
+   "name": "system_and_user",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are helpful."
+    },
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\nYou are helpful.\n\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "assistant_turn_preserved",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    },
+    {
+     "role": "assistant",
+     "content": "It is sunny.",
+     "reasoning": "The user asks about Berlin weather."
+    },
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": false,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\nIt is sunny.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n"
+  },
+  {
+   "name": "assistant_think_in_content",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    },
+    {
+     "role": "assistant",
+     "content": "<think>\nBerlin is in Germany.\n</think>\nIt is sunny."
+    },
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": false,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\nIt is sunny.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n"
+  },
+  {
+   "name": "tool_response_turn",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    },
+    {
+     "role": "assistant",
+     "content": "It is sunny.",
+     "reasoning": "The user asks about Berlin weather."
+    },
+    {
+     "role": "tool",
+     "content": "22C, clear"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n<think>\nThe user asks about Berlin weather.\n</think>\n\nIt is sunny.<|im_end|>\n<|im_start|>user\n<tool_response>\n22C, clear\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "no_generation_prompt",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": false,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n"
+  },
+  {
+   "name": "with_tools_unsorted_unicode",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Wetter in München? <b>Berlin</b> & 'quotes' \"dquotes\" ☕ äöü"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "Wetter für <b>München</b> & <i>Berlin</i> ☕ \"quoted\" 'apos'",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "zeta_city": {
+         "type": "string",
+         "description": "Zeta first <hr>"
+        },
+        "alpha_unit": {
+         "type": "string",
+         "enum": [
+          "celsius",
+          "fahrenheit ☀"
+         ]
+        },
+        "city": {
+         "type": "string",
+         "description": "line1\nline2 <tag>"
+        }
+       },
+       "required": [
+        "zeta_city",
+        "city"
+       ]
+      }
+     }
+    }
+   ],
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Wetter für <b>München</b> & <i>Berlin</i> ☕ \\\"quoted\\\" 'apos'\", \"parameters\": {\"type\": \"object\", \"properties\": {\"zeta_city\": {\"type\": \"string\", \"description\": \"Zeta first <hr>\"}, \"alpha_unit\": {\"type\": \"string\", \"enum\": [\"celsius\", \"fahrenheit ☀\"]}, \"city\": {\"type\": \"string\", \"description\": \"line1\\nline2 <tag>\"}}, \"required\": [\"zeta_city\", \"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWetter in München? <b>Berlin</b> & 'quotes' \"dquotes\" ☕ äöü<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "with_tools_unsorted_unicode_thinking_off",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Wetter in München? <b>Berlin</b> & 'quotes' \"dquotes\" ☕ äöü"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "get_weather",
+      "description": "Wetter für <b>München</b> & <i>Berlin</i> ☕ \"quoted\" 'apos'",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "zeta_city": {
+         "type": "string",
+         "description": "Zeta first <hr>"
+        },
+        "alpha_unit": {
+         "type": "string",
+         "enum": [
+          "celsius",
+          "fahrenheit ☀"
+         ]
+        },
+        "city": {
+         "type": "string",
+         "description": "line1\nline2 <tag>"
+        }
+       },
+       "required": [
+        "zeta_city",
+        "city"
+       ]
+      }
+     }
+    }
+   ],
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning is disabled. Proceed straight to answering according to the user's instructions.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Wetter für <b>München</b> & <i>Berlin</i> ☕ \\\"quoted\\\" 'apos'\", \"parameters\": {\"type\": \"object\", \"properties\": {\"zeta_city\": {\"type\": \"string\", \"description\": \"Zeta first <hr>\"}, \"alpha_unit\": {\"type\": \"string\", \"enum\": [\"celsius\", \"fahrenheit ☀\"]}, \"city\": {\"type\": \"string\", \"description\": \"line1\\nline2 <tag>\"}}, \"required\": [\"zeta_city\", \"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWetter in München? <b>Berlin</b> & 'quotes' \"dquotes\" ☕ äöü<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+  },
+  {
+   "name": "with_tools_minimal_no_description",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "ping",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "zeta": {
+         "type": "string"
+        },
+        "alpha": {
+         "type": "integer"
+        }
+       },
+       "required": [
+        "alpha"
+       ]
+      }
+     }
+    }
+   ],
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"ping\", \"description\": null, \"parameters\": {\"type\": \"object\", \"properties\": {\"zeta\": {\"type\": \"string\"}, \"alpha\": {\"type\": \"integer\"}}, \"required\": [\"alpha\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "assistant_tool_call_unsorted_arguments",
+   "messages": [
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    },
+    {
+     "role": "assistant",
+     "content": "Let me check the weather.",
+     "tool_calls": [
+      {
+       "id": "call_1",
+       "type": "function",
+       "function": {
+        "name": "get_weather",
+        "arguments": "{\"zeta_city\": \"München <b>rocks</b> & more\", \"alpha_unit\": \"celsius ☀\", \"city\": \"Berlin\"}"
+       }
+      }
+     ]
+    },
+    {
+     "role": "user",
+     "content": "What is the weather in Berlin?"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\nLet me check the weather.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"zeta_city\": \"München <b>rocks</b> & more\", \"alpha_unit\": \"celsius ☀\", \"city\": \"Berlin\"}}\n</tool_call><|im_end|>\n<|im_start|>user\nWhat is the weather in Berlin?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "unicode_html_user_message",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Wetter in München? <b>Berlin</b> & 'quotes' \"dquotes\" ☕ äöü"
+    }
+   ],
+   "add_generation_prompt": true,
+   "chat_template_kwargs": {},
+   "tools": null,
+   "expected": "<|im_start|>system\n# Reasoning effort\n\nReasoning effort is set to high. Think carefully through the task in the user's language, validate key assumptions, consider plausible alternatives, and prioritize correctness and clarity.<|im_end|>\n<|im_start|>user\nWetter in München? <b>Berlin</b> & 'quotes' \"dquotes\" ☕ äöü<|im_end|>\n<|im_start|>assistant\n"
+  }
+ ]
+}

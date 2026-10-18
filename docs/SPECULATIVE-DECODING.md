@@ -357,17 +357,45 @@ under an unchanged name. The revisions above are what these results describe.
 
 ## n-gram
 
-The draft-free proposer: candidates come from matching the sequence's own
-suffix, so there is no draft checkpoint to load. `num_speculative_tokens` is
-required and the prompt-lookup window defaults to 5/5.
+The proposer matches the sequence's own suffix to draft tokens. It needs no
+draft checkpoint. `num_speculative_tokens` is required. Both lookup bounds
+default to 5.
 
 ```bash
-server --model /models/Qwen3.6-27B \
+build/examples/vllm-server --model /models/Qwen3.6-27B \
   --speculative-config '{"method":"ngram","num_speculative_tokens":4}'
 ```
 
-It is wired end to end and reuses the same verify machinery as MTP. No
-throughput number is published for it.
+The engine verifies these drafts through the shared speculative decoding path.
+
+### Kolibri-1 on CPU
+
+Kolibri-1 accepts n-gram speculation through the CLI and server. Use the
+[Kolibri-1 checkpoint](../.agents/specs/kolibri-1-cpu.md#the-checkpoint)
+at your local model path. This example uses the configuration from the recorded
+CPU comparison: up to 5 draft tokens and lookup lengths from 1 to 4.
+
+```bash
+build/examples/vllm-cli --model /models/Aleph-Alpha/Kolibri-1 --device cpu \
+  --prompt "The capital of France is" --max-tokens 32 --temperature 0 \
+  --speculative-config '{"method":"ngram","num_speculative_tokens":5,"prompt_lookup_min":1,"prompt_lookup_max":4}'
+```
+
+Omit `--speculative-config` to disable speculation. The server accepts the same
+JSON through `--speculative-config`. Set `temperature` to `0` in each request
+for greedy decoding. N-gram speculation uses the synchronous scheduler.
+
+The [recorded engine comparison](../.agents/specs/kolibri-1-cpu.md#now)
+found identical tokens with speculation enabled and disabled on nine prompts,
+run one at a time. This preserves the existing comparison with oracle outputs,
+including its adjudicated near-tie differences. It does not establish strict
+oracle token parity on every prompt.
+
+The [cache and engine tests](../tests/vllm/models/test_kolibri1_ngram_spec.cpp)
+cover the cache layout without weights and compare generated tokens when the
+checkpoint is available. Acceptance at batch sizes above one and on real
+traffic remains unverified. Low draft acceptance can increase verification
+work, so these settings are not a speed guarantee for other prompts.
 
 ## DSpark (semi-autoregressive block drafting), in progress
 

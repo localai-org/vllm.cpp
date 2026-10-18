@@ -99,8 +99,13 @@ class RunBatch {
   BatchRequestOutput RunLine(const std::string& request_json);
 
  private:
+  // `body_json` is the chat body's serialization from an ORDER-PRESERVING
+  // parse of the original line text: the nlohmann::json `body` sorts object
+  // keys, and RestoreToolSchemaOrder re-reads `tools` from this text so the
+  // request document's schema key order survives into the prompt.
   BatchRequestOutput DispatchChat(const std::string& custom_id,
-                                  const nlohmann::json& body);
+                                  const nlohmann::json& body,
+                                  const std::string& body_json);
 
   OpenAIServingChat* chat_;
   OpenAIServingModels* models_;

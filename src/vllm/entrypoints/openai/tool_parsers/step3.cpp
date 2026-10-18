@@ -66,7 +66,7 @@ ojson CastArguments(
     const std::vector<std::pair<std::string, std::string>>& params,
     const ChatCompletionRequest& request) {
   // Locate the schema properties for func_name (if any).
-  const nlohmann::json* properties = nullptr;
+  const nlohmann::ordered_json* properties = nullptr;
   if (request.tools.has_value()) {
     for (const ChatCompletionToolsParam& tool : *request.tools) {
       if (tool.function.name == func_name) {

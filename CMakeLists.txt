@@ -851,6 +851,23 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/mimo_v2_registry.cpp
   src/vllm/model_executor/models/mimo_v2_weights.cpp
   src/vllm/model_executor/models/mimo_v2.cpp
+  # Kolibri-1 (MODEL-TEXT-kolibri-1) is a NEW architecture TU pair following
+  # the mimo_v2 seam: registry + weights + CPU forward. W2 adds the CPU
+  # hybrid forward (RNoPE, qk-norm, sandwich norms, sigmoid-logit-add MoE).
+  # kolibri1_tt.cpp is the MODEL-TEXT-kolibri-1-tenstorrent wave-A staging
+  # plan (device-free; spec .agents/specs/kolibri-tt.md).
+  # kolibri1_shared.h is the CPU row's routing/step-input helpers, shared
+  # VERBATIM with the TT row (a pure relocation; the CPU gates pin it).
+  # kolibri1_tt_forward.cpp is the B2b-i dense-resident device forward
+  # (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum, slice i);
+  # it is backend-agnostic (vt ops + the shared residency seam) and refuses
+  # non-Tenstorrent queues by name.
+  src/vllm/model_executor/models/kolibri1_tt.cpp
+  src/vllm/model_executor/models/kolibri1_tt_forward.cpp
+  src/vllm/model_executor/models/kolibri1_tt_stream.cpp
+  src/vllm/model_executor/models/kolibri1_registry.cpp
+  src/vllm/model_executor/models/kolibri1_weights.cpp
+  src/vllm/model_executor/models/kolibri1_forward.cpp
   src/vllm/model_executor/models/qwen4_exp_ple.cpp
   src/vllm/model_executor/models/qwen4_exp.cpp
   src/vllm/model_executor/models/qwen4_exp_weights.cpp
@@ -1406,6 +1423,7 @@ add_library(vllm STATIC
   src/vllm/entrypoints/openai/tool_parsers/muse_glimmer.cpp
   src/vllm/entrypoints/openai/tool_parsers/parser_engine_adapter.cpp
   src/vllm/entrypoints/openai/reasoning_parsers/muse_glimmer.cpp
+  src/vllm/entrypoints/openai/reasoning_parsers/kolibri1.cpp
   src/vllm/parser/engine/incremental_lexer.cpp
   src/vllm/parser/engine/token_id_scanner.cpp
   src/vllm/parser/engine/streaming_parser_engine.cpp
@@ -1842,7 +1860,8 @@ if(VLLM_CPP_TENSTORRENT)
     src/vt/tenstorrent/tenstorrent_keepquant.cpp
     src/vt/tenstorrent/tenstorrent_paged.cpp
     src/vt/tenstorrent/tenstorrent_gdn.cpp
-    src/vt/tenstorrent/tenstorrent_capture.cpp)
+    src/vt/tenstorrent/tenstorrent_capture.cpp
+    src/vt/tenstorrent/tenstorrent_staging.cpp)
   target_include_directories(vllm_tenstorrent_ops PRIVATE
     ${CMAKE_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/include ${CMAKE_SOURCE_DIR}/src)
   target_link_libraries(vllm_tenstorrent_ops PRIVATE TTNN::TTNN)

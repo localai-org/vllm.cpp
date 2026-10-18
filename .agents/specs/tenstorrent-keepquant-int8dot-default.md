@@ -100,3 +100,113 @@ trace-capture row that follows it. This spec gates the flip.
 
 - The 27B trace-capture row (separate spec) consumes this flip's -33.8% trace
   demand; nothing in this change gates capture.
+
+## Live-arm re-run (2026-10-03/04, `row/int8dot-default-flip`, DONT-FLIP recorded)
+
+The 2026-09-23/24 gate run fired on the dead engine; wave 3 landed the live
+27B capture arm, so the gates re-ran there. Full evidence:
+[docs/bench-evidence/tt-int8dot-flip-live-gates-20261003.md](../../docs/bench-evidence/tt-int8dot-flip-live-gates-20261003.md).
+
+- Gate (a) anchor/token: **PASS at c1** — the arms produce the identical
+  2x32 token stream (64/64 ids byte-equal). At c2 the request-0 streams
+  diverge at generated index 3, but a c2 `=0` re-run reproduced the `=1`
+  stream byte-for-byte, so the divergence is WITHIN-ARM run-to-run
+  nondeterminism of batched decode, not a lever difference. The comparison
+  cannot decide the gate at c2.
+- Gate (a) band: **STRUCTURALLY UNEXECUTABLE for this checkpoint.** The
+  pinned llama.cpp `b10451` refuses
+  `Qwen3.8-27B-Q4_K_M.gguf` (`missing tensor 'blk.64.ssm_conv1d.weight'`;
+  the artifact's `blk.64` MTP block carries no SSM tensors, the KV is
+  absent from the GGUF metadata, and `mp.kv_overrides` is inert at the pin
+  for this key — verified through a `llama_log_set` callback). No
+  500-mnat denominator exists for the unsloth Q4_K_M at this pin. This is
+  the named external blocker: a pin advance, a re-saved artifact, or a
+  ratified alternative denominator is owed before this gate can fire on
+  this model.
+- Gates (b) siblings and (c) `=0` opt-out identity: not re-run this window
+  (the 2026-09-23 verdicts predate wave 3 and are invalidated with the dead
+  engine; re-owed on the live arm).
+- A/B TPOT for the record: c1 31,277.25 vs 6,956.66 ms (4.50x), c2
+  31,546.01 vs 25,389.87 ms (1.24x, the queue-serialization shape) — all
+  four legs `BENCH_EXIT=0`.
+
+Per this spec's own stop conditions ("any gate-1 prompt exceeds the band →
+stop … keep the lever opt-in"; here the band cannot even be measured), the
+default stays OFF. The 4.5x default-path lever remains real and opt-in;
+what is owed is a working oracle denominator for this artifact, the
+sibling gate and the opt-out identity on the live arm.
+
+## Flip landed (2026-10-04, `row/int8dot-default-flip`)
+
+The operator authorized the flip on the gate-1 band evidence above. The
+dispatch default in `src/vt/tenstorrent/tenstorrent_keepquant.cpp` is
+**FLIPPED to ON**: unset or empty keeps the int8-dot arm; `=0` opts out to
+the W4a grouped f32-exact arm (same parsing discipline as before — only the
+exact string `0` opts out, everything else is on). Doc surfaces updated in
+the same change: `docs/ENVIRONMENT.md` (new `VT_TT_KEEPQUANT_INT8DOT` row,
+default `1`), `docs/BUILD.md` (the opt-in smoke-run text and the example
+command line now read as default-on / `=0` opt-out).
+
+Owed, tracked on the owning issue
+(`ISSUE-LOCAL-01M37W0HP6JTNJP55S74159T02`):
+
+- The 64-prompt band width — BLOCKED on
+  `ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W` (the multi-wave GDN state-slot
+  churn engine-fatal kills c2 legs); 16 prompts is the documented minimum
+  the band gate accepts.
+- Gate 2: sibling keep-quant models on the live arm.
+- Gate 4: the `=0` opt-out identity on the live arm.
+- No device leg is owed for the flip itself: the band evidence is this
+  branch's own commits (`docs/bench-evidence/tt-int8dot-band-16p-20261004.md`).
+
+## Post-flip suite repair (2026-10-04, `row/int8dot-default-flip`)
+
+The first post-flip clean-device suite run recorded 34 failing cases (103
+cases, 69 passed, 8249/8252 assertions). Case-by-case disposition:
+
+- **33 of 34 were environmental or cascade, not flip regressions.**
+  - The recorded run launched with CWD = `build/`; the keep-quant kernel
+    loader resolves `./src/vt/tenstorrent/kernels` relative to CWD, so 33
+    cases threw `TT_THROW: Compiler include directory ... not found` at their
+    first device compile. Re-run from the worktree root: all of those pass.
+  - From the worktree root, 17 further cases failed only IN-SUITE and passed
+    isolated (`-tc`): the root cause below throws mid-capture without an
+    `EndCapture`, leaking `tt_capture_active()`, and every later capture-based
+    case's eager warm then refuses (word-shadow miss during trace capture,
+    UploadRowsBf16 refused inside a trace, nested TraceBeginCapture).
+- **2 real breaks (filed as `ISSUE-LOCAL-01M44802A39JWBFBAYM49ES235`):** the
+  int8-dot 50 MiB trace-capture legs (F32-out and BF16-out dispatch) fatalled
+  on "activation staging during trace capture". Pre-existing at the pre-flip
+  HEAD — the F32-out leg skipped under the old default-off lever, so the flip
+  exposed it on the default configuration. Root cause: the kernel's eager host
+  staging (`from_span`) discarded its tensor, so the capture pass re-staged
+  and refused. Fix: the eager staging persists as the slot's device shadow
+  (the words-shadow discipline applied to the activation);
+  `src/vt/tenstorrent/tenstorrent_keepquant.cpp` `MatmulBTQuantInt8DotKernel`.
+  Both legs green isolated after the fix.
+- **1 owed flake:** `batched decode RAC is capture-safe (num_slots=2)`
+  (test_tenstorrent_backend.cpp:2261 class) — the pre-recorded owed RAC flake,
+  not touched here.
+
+No golden was re-pinned and no assertion weakened: no case contract moved
+arms, and no token-stream golden was invalidated by the flip in this suite
+(the flip's accuracy evidence stays the band gate).
+
+## Now
+
+State: FLIPPED (2026-10-04). Default ON; gates 2 and 4 and the 64-prompt
+width are owed (the width blocked on the slot-churn fatal). The post-flip
+TT suite repair landed in the same row (see above).
+
+Band evidence backing the flip: the pin advance `b10451` → `11fe0215`
+([`.agents/oracles/llama-cpp.md`](../../.agents/oracles/llama-cpp.md), evidence
+[oracle-llamacpp-11fe0215-gateable-20261003.md](../../docs/bench-evidence/oracle-llamacpp-11fe0215-gateable-20261003.md)):
+the new pin loads the unsloth 27B Q4_K_M artifact `b10451` refuses, so gate
+1's denominator exists. The band ran on the live arm, 16 prompts at c1
+(the 64-prompt c2 plan died on the GDN state-slot churn engine-fatal,
+`ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W`; 16 is the documented minimum):
+**both arms 16/16 in-band** — `=1` max 97.2, `=0` max 144.1 mnats; every
+arm-pair divergence is a single-position near-tie the band prices. Full
+evidence:
+[tt-int8dot-band-16p-20261004.md](../../docs/bench-evidence/tt-int8dot-band-16p-20261004.md).
+TPOT 4.69x at c1 reproduces the lever.

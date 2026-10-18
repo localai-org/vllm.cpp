@@ -45,10 +45,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <string>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -228,6 +230,35 @@ class DevicePool {
     }
     return fresh;
   }
+  // ── THE LEASE (cross-step carriers) ──────────────────────────────────────
+  // `DBuf::ReleaseShared()` registers the block it hands to a shared_ptr here,
+  // and the carrier's deleter returns it through `PutLeased`, which erases the
+  // lease and then performs the ordinary uncapped return. A lease is one
+  // pointer per outstanding carrier — bounded by live cross-step hand-offs —
+  // and it exists so the pool can tell a legal return from a SECOND owner's
+  // return of a live block, which is the aliasing the kolibri-1 dequant-cache
+  // experiment observed (`POOL DOUBLE-HAND-OUT`) and which this set makes
+  // refuse-able instead of silent.
+  //
+  // The registration happens on ReleaseShared, not on Get: a plain scratch
+  // DBuf has exactly the one owner its destructor models, and only a block
+  // whose ownership leaves the DBuf lifetime needs the extra record.
+  void NoteLease(void* p) {
+    if (p == nullptr) return;
+    std::lock_guard<std::mutex> lk(mu_);
+    leased_.insert(p);
+  }
+
+  // The carrier deleter's return: discharge the lease, then the ordinary
+  // uncapped Put. A carrier whose block was never leased here — or whose lease
+  // was already discharged — is the same double-owner defect seen from the
+  // carrier's side, and is refused by name.
+  void PutLeased(vt::Backend& b, size_t bytes, void* p) {
+    RequireOwnDevice(b, "PutLeased");
+    if (!DischargeLease(p)) throw std::logic_error(LeaseMessage(p, "PutLeased"));
+    Put(b, bytes, p);
+  }
+
   // Uncapped retention (deliberately-retained cross-step buffers: the device
   // logits / MTP hidden handed off via a shared_ptr deleter). Bytes are always
   // returned to the free list — the cross-step buffers are not cap-evicted.
@@ -246,6 +277,20 @@ class DevicePool {
   // (#516).
   void Put(vt::Backend& b, size_t bytes, void* p) {
     RequireOwnDevice(b, "Put");
+    // THE LEASE GUARD (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2). A block whose
+    // `DBuf::ReleaseShared()` carrier is still alive is OWNED by that carrier;
+    // the only return the pool accepts for it is the carrier's own, which goes
+    // through `PutLeased` below and erases the lease first. Any other Put of a
+    // leased block is a second owner returning a live block — the kolibri-1
+    // dequant-cache defect: the block entered the free list, the next `Get`
+    // handed it to a new owner, and the carrier's bytes became another
+    // tensor's data (`POOL DOUBLE-HAND-OUT`). Before this guard the second
+    // return was indistinguishable from a legal one and was accepted in
+    // silence; now it is a hard runtime throw in BOTH lanes — under bypass the
+    // same Put would free a live block to the driver, the louder spelling of
+    // the same defect. The check runs before the bypass branch so the refusal
+    // does not depend on the lane.
+    if (TakeLeaseRefusal(p)) throw std::logic_error(LeaseMessage(p, "Put"));
     // Bypass: free for real so a later use-after-free traps.
     if (Bypass()) {
       b.Free(p);
@@ -269,6 +314,9 @@ class DevicePool {
   // rather than pooled, so the reuse pool self-limits without a model edit.
   void Put(vt::Backend& b, size_t bytes, void* p, size_t cap) {
     RequireOwnDevice(b, "Put");
+    // The lease guard, on the capped overload identically — see the uncapped
+    // Put above.
+    if (TakeLeaseRefusal(p)) throw std::logic_error(LeaseMessage(p, "Put"));
     if (Bypass()) {
       b.Free(p);
       return;
@@ -613,6 +661,34 @@ class DevicePool {
     if (cs.live > 0) --cs.live;
   }
 
+  // Caller holds no lock. True when the block is currently leased; the caller
+  // turns the hit into the throw WITHOUT discharging, so the carrier's own
+  // later return is still the accepted one.
+  bool TakeLeaseRefusal(void* p) {
+    if (p == nullptr) return false;
+    std::lock_guard<std::mutex> lk(mu_);
+    return leased_.count(p) != 0;
+  }
+  // Caller holds no lock. True when the lease existed and is now discharged.
+  bool DischargeLease(void* p) {
+    if (p == nullptr) return false;
+    std::lock_guard<std::mutex> lk(mu_);
+    return leased_.erase(p) != 0;
+  }
+  std::string LeaseMessage(void* p, const char* op) {
+    // A per-call string, not a member buffer: two defect-path Puts on
+    // different threads format concurrently, and a shared buffer would race.
+    // The string is copied into the exception before the statement ends, so
+    // a local outlives the throw.
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "DevicePool::%s: block %p is still leased (its DBuf::ReleaseShared carrier "
+                  "is alive) — a second return of a live block is the POOL DOUBLE-HAND-OUT "
+                  "defect, not a legal return",
+                  op, static_cast<const void*>(p));
+    return std::string(buf);
+  }
+
   // The class the DRIVER allocated `p` at, and forget it. `fallback` covers a
   // block this pool never handed out through `Get` — which is not reachable
   // today, and is answered with the requesting class rather than with a throw
@@ -649,7 +725,10 @@ class DevicePool {
   // it is bounded by concurrent liveness and empties itself as blocks return.
   // It exists because `Put` is told the caller's byte count and a borrowed
   // block's own size is not derivable from that.
+  // Blocks whose ReleaseShared carrier is still alive. One entry per live
+  // cross-step hand-off; the carrier's deleter erases it.
   std::unordered_map<void*, size_t> block_class_;
+  std::unordered_set<void*> leased_;
   size_t retained_ = 0;  // bytes (class-rounded) held free, for the soft cap
   std::atomic<uint64_t> hits_{0};
   std::atomic<uint64_t> misses_{0};

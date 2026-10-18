@@ -1806,17 +1806,33 @@ DBuf MatmulBf16D(Dev d, const Tensor& x, const OwnedTensor& w) {
 // flag alone is insufficient: gdn_expand_nk also sets nk=true for the bf16
 // expanded weight, but that weight has ReorderVCols applied and needs NO
 // input permutation. Only the T25 tiled Q5_K path (out_proj_tiled=true) does.
+//
+// `gated_in` is the deferred V-head-PERMUTED activation (MODEL-MM-QWEN4-EXP)
+// and the default bf16 arm MUST consume it: a tiled-order weight paired with
+// the raw grouped-order `gated_bf16` scrambles the V-head pairing. Handing
+// this arm the unpermuted buffer was the 66f2f8c22 regression —
+// test_gdn_v_head_permute read bad=94/96 (worst 0.115234) and
+// test_qwen4_exp_layer_loop's tiled arm 2.09756 against a 0.03 bound, in
+// every build, while the grouped arm stayed green. The T25 branch permutes
+// the RAW activation instead: LoadGdnGguf — the only loader that sets
+// out_proj_tiled — never sets v_head_perm_key_heads, so the two mechanisms
+// cannot co-occur, and the VT_CHECK refuses the combination rather than
+// letting a future loader run the permutation twice.
 static DBuf GdnOutProjMatmul(Dev d, const GdnLayerWeights& w,
-                              const DBuf& gated_bf16,
+                              const Tensor& gated_in, const DBuf& gated_bf16,
                               int64_t T, int64_t Hk, int64_t Hv, int64_t Dv) {
   if (w.out_proj_tiled) {
+    VT_CHECK(w.v_head_perm_key_heads == 0,
+             "gdn: out_proj_tiled (T25 keep-quant) cannot combine with a "
+             "deferred V-head permutation: the runtime input permutation "
+             "would run twice");
     const int64_t value_dim = Hv * Dv;
     const int64_t rpk = Hk > 0 ? Hv / Hk : 1;
     DBuf permuted(d, DType::kBF16, {T, value_dim});
     vt::PermuteVHeads(d.q, permuted.t(), gated_bf16.t(), T, Hk, rpk, Dv);
     return MatmulBf16D(d, permuted.t(), w.out_proj);
   }
-  return MatmulBf16D(d, gated_bf16.t(), w.out_proj);
+  return MatmulBf16D(d, gated_in, w.out_proj);
 }
 
 // A tied BF16 lm_head follows torch Linear's model-dtype output, then the
@@ -4791,8 +4807,8 @@ DBuf GdnBlock(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   return !w.out_proj_fp8.Empty()
              ? MatmulFp8CutlassD(d, gated_in, w.out_proj_fp8, DType::kBF16)
          : !w.out_proj_fp4.Empty()
-             ? MatmulNvfp4Bf16D(d, gated_bf16.t(), w.out_proj_fp4)
-             : GdnOutProjMatmul(d, w, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
+             ? MatmulNvfp4Bf16D(d, gated_in, w.out_proj_fp4)
+             : GdnOutProjMatmul(d, w, gated_in, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
 }
 
 // PERSISTENT per-step input device buffers (decode host-tax #2): the flattened
@@ -5299,8 +5315,8 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
   return !w.out_proj_fp8.Empty()
              ? MatmulFp8CutlassD(d, gated_in, w.out_proj_fp8, DType::kBF16)
          : !w.out_proj_fp4.Empty()
-             ? MatmulNvfp4Bf16D(d, gated_bf16.t(), w.out_proj_fp4)
-             : GdnOutProjMatmul(d, w, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
+             ? MatmulNvfp4Bf16D(d, gated_in, w.out_proj_fp4)
+             : GdnOutProjMatmul(d, w, gated_in, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
 }
 
 // VT_DUMP_ACT stage probe (GDN): dump named intermediates so a layer-level
@@ -5825,8 +5841,8 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
   return !w.out_proj_fp8.Empty()
              ? MatmulFp8CutlassD(d, gated_in, w.out_proj_fp8, DType::kBF16)
          : !w.out_proj_fp4.Empty()
-             ? MatmulNvfp4Bf16D(d, gated_bf16.t(), w.out_proj_fp4)
-             : GdnOutProjMatmul(d, w, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
+             ? MatmulNvfp4Bf16D(d, gated_in, w.out_proj_fp4)
+             : GdnOutProjMatmul(d, w, gated_in, gated_bf16, T, Hk, Hv, Dv);  // [T,H]
 }
 
 // --- Dense full_attention block. qwen36-forward-notes.md §5; pinned
@@ -11560,6 +11576,25 @@ struct Qwen3_5DecodeGraph::Impl {
     // Option A pinned host staging (the true-async H2D source). Sized once at capture.
     PinnedStepInputs pin;
 
+    // TT-GDN-SLOT-CHURN (ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W): the GDN
+    // non-spec state-slot indices this slot's warm state / captured graph was
+    // built FOR. On Tenstorrent the captured decode graph does not read the
+    // indices at replay: GdnDecodeKernel / causal_conv1d_update resolve them
+    // on the HOST and serve content-keyed device tensors (the one-hot gather
+    // matrix, the split-block scatter ids, the conv roll masks) that the
+    // trace BAKED at capture time. A wave re-admission that hands the batch a
+    // DIFFERENT slot set therefore has two failure modes the earlier
+    // single-wave legs never reached: the replay gathers/scatters the stale
+    // capture-time slots (the c2 run-to-run churn), and the next capture
+    // aborts at the GdnSsmIdxEntry / GdnConvIdxEntry content CHECK
+    // (tenstorrent_gdn.cpp:558/:1629, engine-fatal). Recording the bound
+    // content per slot lets the driver detect the change and route through
+    // the reset lane below: destroy the graph, run the boundary step eagerly
+    // (which re-warms the idx caches with the NEW content, capture inactive),
+    // and re-capture on the next step. Replay stays byte-exact because it
+    // only ever runs while the content is unchanged.
+    std::optional<std::vector<int32_t>> gdn_idx;
+
     // In-place refresh of the persistent host inputs (fixed addresses once the
     // slot's vectors reach size S) so a replay re-reads this step's tokens.
     void Refresh(const std::vector<int32_t>& tok, const std::vector<int32_t>& pos,
@@ -11614,6 +11649,7 @@ struct Qwen3_5DecodeGraph::Impl {
       CopyInPlace(gdn_meta.num_accepted_tokens, gm.num_accepted_tokens);
       gdn_meta.spec_state_indices_num_cols = gm.spec_state_indices_num_cols;
       gdn_meta.num_actual_tokens = gm.num_actual_tokens;
+      CopyInPlace(gdn_idx, gm.non_spec_state_indices_tensor);
     }
   };
 
@@ -11822,9 +11858,20 @@ ForwardLogits Qwen3_5DecodeGraph::Step(
   // staged/baked H2D dest shape moves) → invalidate this slot's graph and persistent
   // device inputs, and re-warm/re-capture.
   const bool cols_changed = (s.fa_cols != -1 && s.fa_cols != cols);
+  // TT-GDN-SLOT-CHURN: a wave re-admission handed this size a different GDN
+  // state-slot set. Both the captured trace and a WARM (not yet captured)
+  // slot are bound to the previous set — replaying or capturing over the new
+  // one is the stale-binding churn / the tenstorrent_gdn.cpp:558 capture
+  // fatal. Route through the reset lane (the cols_changed shape). The
+  // optional-to-optional compare covers a batch with no GDN consumers on
+  // either side (both nullopt → unchanged).
+  const bool gdn_idx_changed =
+      d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
+      s.gdn_idx != pgm.non_spec_state_indices_tensor;
   s.Refresh(ptok, ppos, pam, pgm);
   s.fa_cols = cols;
-  if (cols_changed && s.graph.captured()) {
+  if ((cols_changed || gdn_idx_changed) &&
+      (s.graph.captured() || s.warm)) {
     s.graph.Reset();
     Pool(b).UnpinForGraph(b, s.pinned);  // #2274: no graph, nothing baked
     s.pinned.clear();
@@ -12237,6 +12284,25 @@ struct Qwen3_5DenseDecodeGraph::Impl {
     // Option A pinned host staging (the true-async H2D source). Sized once at capture.
     PinnedStepInputs pin;
 
+    // TT-GDN-SLOT-CHURN (ISSUE-LOCAL-01M433M0TNT8FWC6SMT4R3700W): the GDN
+    // non-spec state-slot indices this slot's warm state / captured graph was
+    // built FOR. On Tenstorrent the captured decode graph does not read the
+    // indices at replay: GdnDecodeKernel / causal_conv1d_update resolve them
+    // on the HOST and serve content-keyed device tensors (the one-hot gather
+    // matrix, the split-block scatter ids, the conv roll masks) that the
+    // trace BAKED at capture time. A wave re-admission that hands the batch a
+    // DIFFERENT slot set therefore has two failure modes the earlier
+    // single-wave legs never reached: the replay gathers/scatters the stale
+    // capture-time slots (the c2 run-to-run churn), and the next capture
+    // aborts at the GdnSsmIdxEntry / GdnConvIdxEntry content CHECK
+    // (tenstorrent_gdn.cpp:558/:1629, engine-fatal). Recording the bound
+    // content per slot lets the driver detect the change and route through
+    // the reset lane below: destroy the graph, run the boundary step eagerly
+    // (which re-warms the idx caches with the NEW content, capture inactive),
+    // and re-capture on the next step. Replay stays byte-exact because it
+    // only ever runs while the content is unchanged.
+    std::optional<std::vector<int32_t>> gdn_idx;
+
     // In-place refresh of the persistent host inputs (fixed addresses once the
     // slot's vectors reach size S) so a replay re-reads this step's tokens.
     void Refresh(const std::vector<int32_t>& tok, const std::vector<int32_t>& pos,
@@ -12291,6 +12357,7 @@ struct Qwen3_5DenseDecodeGraph::Impl {
       CopyInPlace(gdn_meta.num_accepted_tokens, gm.num_accepted_tokens);
       gdn_meta.spec_state_indices_num_cols = gm.spec_state_indices_num_cols;
       gdn_meta.num_actual_tokens = gm.num_actual_tokens;
+      CopyInPlace(gdn_idx, gm.non_spec_state_indices_tensor);
     }
   };
 
@@ -12584,6 +12651,13 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // A block-table column-count change reallocates the persistent block_table (the
   // staged/baked H2D dest shape moves) → invalidate this slot's graph + device inputs.
   const bool cols_changed = (s.fa_cols != -1 && s.fa_cols != cols);
+  // TT-GDN-SLOT-CHURN: same detection as the MoE driver above — a wave
+  // re-admission that changed the GDN state-slot set must not replay (stale
+  // bindings) nor capture (the tenstorrent_gdn.cpp:558 content fatal). It
+  // joins the tt_boundary / conv_shadow_stale reset lane below.
+  const bool gdn_idx_changed =
+      d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
+      s.gdn_idx != pgm.non_spec_state_indices_tensor;
   s.Refresh(ptok, ppos, pam, pgm);
   s.fa_cols = cols;
   bool seq_continuation = true;  // no seq_lens -> no boundary to detect
@@ -12687,8 +12761,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   }
   const bool tt_boundary =
       d.q.device.type == vt::DeviceType::kTENSTORRENT && !seq_continuation;
-  if (((cols_changed || tt_boundary) && s.graph.captured()) ||
-      (conv_shadow_stale && (s.graph.captured() || s.warm))) {
+  if (((cols_changed || tt_boundary || gdn_idx_changed) && s.graph.captured()) ||
+      (conv_shadow_stale && (s.graph.captured() || s.warm)) ||
+      (gdn_idx_changed && s.warm)) {
     s.graph.Reset();
     Pool(b).UnpinForGraph(b, s.pinned);  // #2274: no graph, nothing baked
     s.pinned.clear();

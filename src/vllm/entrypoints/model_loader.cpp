@@ -1614,10 +1614,14 @@ std::optional<vllm::SpeculativeConfig> LoadedEngine::ResolveSpecConfig(
   // SPEC-NGRAM (ROAD-V1-D3): the draft-FREE n-gram proposer. num_speculative_tokens
   // (k) is REQUIRED (speculative.py:1224-1234); the prompt_lookup window defaults to
   // 5/5. There is NO draft checkpoint to load and NO n_predict-module constraint —
-  // the drafts come from matching the sequence's own suffix. The GDN spec verify
-  // machinery (widened conv + k+1 state slots) is still needed and is reused via
-  // MakeQwen3_5KVCacheSpec(num_spec>0) exactly like MTP; the fa_draft draft-KV group
-  // it allocates is simply unused (ngram has no draft-model forward).
+  // the drafts come from matching the sequence's own suffix. On a model WITH a
+  // recurrent (GDN) group the spec verify machinery (widened conv + k+1 state
+  // slots) is still needed and MakeKVCacheMaybeSpec reuses it via
+  // MakeQwen3_5KVCacheSpec(num_spec>0) exactly like MTP; the fa_draft draft-KV
+  // group it allocates is simply unused (ngram has no draft-model forward). On a
+  // model WITHOUT one (kolibri) the model's own KV spec is already spec-correct:
+  // the drafts are ordinary scheduled tokens and the cache need is the target's
+  // groups alone.
   if (cli.method == "ngram") {
     if (!cli.num_speculative_tokens.has_value()) {
       throw std::invalid_argument(
@@ -1753,15 +1757,31 @@ vllm::v1::KVCacheConfig LoadedEngine::MakeKVCacheMaybeSpec(
                  block_size, resolved_bs);
     block_size = resolved_bs;
   }
-  vllm::v1::KVCacheConfig kv;
-  if (spec.has_value()) {
+  // SPEC-NGRAM / kolibri (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6): build the
+  // MODEL's own KV spec first, always. The widened qwen3.5 spec below exists
+  // for exactly two needs: (a) an eagle method (mtp/dflash/dspark), whose
+  // draft-model forward writes its own K/V into the extra `fa_draft`
+  // full-attn group, and (b) a model with a recurrent (GDN/mamba) group,
+  // whose conv row widens to (K-1)+k taps and whose SSM state needs the k+1
+  // snapshot slots a k+1 verify step rewinds. A draft-FREE method (ngram) on
+  // a model with NO recurrent group — kolibri: sliding/full attention only —
+  // needs neither: the drafts are ordinary scheduled tokens verified by the
+  // target's own forward, so the target's own groups are the whole cache need
+  // and there is no draft-proposal group to add. Building
+  // MakeQwen3_5KVCacheSpec for such a model instead injected a MambaSpec
+  // group with empty shapes (the checkpoint carries no linear_* keys) plus an
+  // unused fa_draft group, and the runner refused at construction
+  // (runner.cpp:1074 "MambaSpec state shapes must be positive"). The default
+  // (no spec config) path is untouched: exactly ModelRegistry::MakeKVCache,
+  // byte-identical.
+  vllm::v1::KVCacheConfig kv =
+      ModelRegistry::MakeKVCache(model, config, block_size, num_blocks);
+  if (spec.has_value() && (spec->use_eagle() || kv.has_mamba_layers())) {
     // Speculation is Qwen3.5/3.6-only at this pin (both gate checkpoints); build
     // the widened spec KV directly (extra GDN k+1 state slots + widened conv row
     // + the `fa_draft` full-attn group). MakeQwen3_5KVCacheSpec(num_spec>0).
     kv = vllm::MakeQwen3_5KVCacheSpec(config, block_size, num_blocks,
                                       spec->ResolvedNumSpeculativeTokens());
-  } else {
-    kv = ModelRegistry::MakeKVCache(model, config, block_size, num_blocks);
   }
   // FIX-KV-GROUP-LAYER-COUNT (#1963, #1966). THE single funnel: both branches
   // above return through here, so one call reaches every architecture and both

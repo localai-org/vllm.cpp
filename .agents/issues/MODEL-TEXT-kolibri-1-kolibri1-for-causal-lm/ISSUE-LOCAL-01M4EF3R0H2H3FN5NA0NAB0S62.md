@@ -1,0 +1,23 @@
+ID: ISSUE-LOCAL-01M4EF3R0H2H3FN5NA0NAB0S62
+Title: kolibri1 serving completion: chat template rendering plus kolibri1 reasoning and tool-call parsers
+Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
+State: CLOSED
+Kind: enhancement
+GitHub: -
+Mirror: PENDING
+Availability: FULL
+Created: 2026-10-08
+Updated: 2026-10-09
+Closed: 2026-10-08
+
+## Problem
+
+The kolibri1 CPU arm reaches the model forward but not serving: the OpenAI chat path has no kolibri1 reasoning parser, no kolibri1 tool-parser alias, and no template-detection rows, so the model-author plugin's serving recipe (aleph-alpha-inference pin 049a6a7bd240: reasoning parser kolibri1 = Qwen3 grammar with the template's thinking switch derived from chat_template_kwargs reasoning_effort/enable_thinking; tool parser kolibri1 = the Hermes <tool_call> format; chat template shipped in tokenizer_config.json) cannot be served end to end. Scope: port the thinking_enabled switch and the engine-backed kolibri1 reasoning adapter, alias the kolibri1 tool parser to hermes, add template-marker detection rows, gate template rendering against jinja2 reference outputs on kolibri1 goldens. No tokenizer change, no behavior change to other models' parsers.
+
+## Resolution
+
+Landed on row/kolibri-serve 2026-10-08 (commits 3c0fcc164, 4aade352b); see docs/bench-evidence/kolibri1-serve-20261008.md.
+
+REOPENED IN EFFECT BY REVIEW 2026-10-09: the PR #3422 review (localai-org-maint-bot) blocked the landing with two findings against the serving-completion change. P1: the adapter's global tojson override sorted object keys for every model, but the pinned transformers 5.14.1 renderer overrides Jinja's tojson with sort_keys=False / ensure_ascii=False / no HTML escaping (utils/chat_template_utils.py:481), so the override rendered prompt bytes no serving reference produces; the reference fixtures had been captured with plain jinja2, which certifies the same incorrect reference (sorted keys, HTML escaped). P2: tests/vllm/entrypoints/test_kolibri1_chat_template.cpp loaded /mnt/models/Aleph-Alpha/Kolibri-1/tokenizer_config.json in both the rendering and detection cases, so a clean checkout could not run the gate, and the fixture generator hard-coded its output under /tmp/vllm-kolibri-serve.
+
+REPAIR LANDED on row/kolibri-serve 2026-10-09 (review-repair commits): the pinned renderer was MEASURED first (probe through transformers 5.14.1 render_jinja_template over an insertion-ordered {"z":1,"a":2}, nested unsorted tool schemas, Unicode/HTML leaves): the default keeps insertion key order, raw UTF-8, no HTML escaping. chat_template.cpp's tojson is now a port of the pinned filter's full signature (ensure_ascii/indent/separators/sort_keys, CPython json.dumps semantics) instead of the sorted-dump override; FunctionDefinition::parameters is order-preserving (ordered_json) with RestoreToolSchemaOrder re-reading tools from an order-preserving body parse at every chat entry point (api_server, C ABI, run_batch), and BuildTools mirrors pinned vLLM's model_dump tool shape (description/parameters present as null when absent). The kolibri1 references were REGENERATED through the pinned renderer (20 scenarios, including unsorted nested tool schemas, Unicode/HTML content, a description-less tool and unsorted historical tool-call arguments) by a generator that asserts transformers==5.14.1 and writes in-tree; the template input is committed at tests/fixtures/kolibri1-chat-template-tokenizer_config.json (sha256 9ba35d4bd6baa26b66aa75d03a922dfee98b16bb1fa37481b195d247267b0f97) and the test loads it from the fixture directory with no /mnt path. Red-first: 6 of 20 scenarios failed under the corrected reference before the fix (with_tools, with_tools_thinking_off, with_tools_unsorted_unicode, with_tools_unsorted_unicode_thinking_off, with_tools_minimal_no_description, assistant_tool_call_unsorted_arguments). Gates after the repair: test_reasoning_kolibri1 43, test_tool_parser_kolibri1 19, test_kolibri1_chat_template 61, test_chat_template 204 (196 pre-existing plus 8 new non-kolibri tojson guard assertions), test_reasoning_parser_detect 75, test_tool_parser_detect 361, test_reasoning_qwen3 164, test_openai_tool_parsers 64, test_kolibri1 27/234, test_kolibri1_decode_bench anchor 109726, all green; serving/protocol suites (test_openai_serving 1365, test_openai_api_server 1517, test_openai_conformance 252, test_parser_engine_assembly 5038, test_openai_run_batch 16) and the parameters-reading tool-parser suites green; test_capi v27 (gliner fixture load) remains the pre-existing host failure recorded in the evidence doc. W3 not rerun: no forward change. Evidence: docs/bench-evidence/kolibri1-serve-20261008.md "Review repair".

@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 namespace vllm {
 namespace kev {
@@ -32,6 +34,55 @@ std::vector<float> PointerHeadForward(
   const int64_t d = params.hidden_size;
   const int64_t dp = params.head_dim;
   const double scale = params.scale();
+
+  // SHAPE VALIDATION FIRST. The loader reads head_dim from the config
+  // (kev_registry.cpp) and the weights from head.safetensors independently,
+  // so a config/checkpoint mismatch must be a loud refusal, never an
+  // out-of-bounds read: the loops below index q_weight[j * d] / q_bias[j] for
+  // j up to dp-1, and dp comes from the params. (The wrong-scale perturbation
+  // test reached exactly that OOB read before this guard existed — ASan
+  // heap-buffer-overflow at the `w[i]` read, ISSUE-LOCAL-01M4FK4ATBNXVV9VGEN5Q25HZ1.)
+  if (d <= 0 || dp <= 0 || n_options < 0) {
+    throw std::invalid_argument(
+        "kev PointerHead: hidden_size, head_dim must be positive and "
+        "n_options must not be negative, got hidden_size=" +
+        std::to_string(d) + " head_dim=" + std::to_string(dp) +
+        " n_options=" + std::to_string(n_options));
+  }
+  const size_t weight_elems = static_cast<size_t>(dp) * static_cast<size_t>(d);
+  if (weights.q_weight.size() != weight_elems ||
+      weights.k_weight.size() != weight_elems) {
+    throw std::invalid_argument(
+        "kev PointerHead: q/k weights must be [head_dim, hidden_size] = [" +
+        std::to_string(dp) + ", " + std::to_string(d) + "] = " +
+        std::to_string(weight_elems) + " elements, got q_weight " +
+        std::to_string(weights.q_weight.size()) + " and k_weight " +
+        std::to_string(weights.k_weight.size()));
+  }
+  const size_t bias_elems = static_cast<size_t>(dp);
+  if (weights.q_bias.size() != bias_elems ||
+      weights.k_bias.size() != bias_elems) {
+    throw std::invalid_argument(
+        "kev PointerHead: q/k biases must be [head_dim] = [" +
+        std::to_string(dp) + "] = " + std::to_string(bias_elems) +
+        " elements, got q_bias " +
+        std::to_string(weights.q_bias.size()) + " and k_bias " +
+        std::to_string(weights.k_bias.size()));
+  }
+  if (h_decide.size() < static_cast<size_t>(d)) {
+    throw std::invalid_argument(
+        "kev PointerHead: h_decide must carry at least hidden_size=" +
+        std::to_string(d) + " elements, got " +
+        std::to_string(h_decide.size()));
+  }
+  const size_t opts_elems =
+      static_cast<size_t>(n_options) * static_cast<size_t>(d);
+  if (h_opts.size() < opts_elems) {
+    throw std::invalid_argument(
+        "kev PointerHead: h_opts must carry n_options * hidden_size = " +
+        std::to_string(opts_elems) + " elements for n_options=" +
+        std::to_string(n_options) + ", got " + std::to_string(h_opts.size()));
+  }
 
   // q_vec[j] = sum_i(h_decide[i] * q_weight[j * d + i]) + q_bias[j]
   std::vector<float> q_vec(static_cast<size_t>(dp), 0.0F);

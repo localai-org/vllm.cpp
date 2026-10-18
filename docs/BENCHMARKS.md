@@ -1,5 +1,30 @@
 # Benchmarks
 
+## Index
+
+Every benchmark detail page, with what it is. `check-benchmark-index.py` requires
+this table to name every file under `docs/benchmarks/` exactly once, with the ID equal
+to the file stem.
+
+| Benchmark ID | Subject | Disposition | Detail |
+|---|---|---|---|
+| `at-a-glance` | Headline scoreboard: weight load, record/checker repair, per-reference result and token class | Results | [Detail](benchmarks/at-a-glance.md) |
+| `vllm-online-serving` | The binding comparison. vLLM's production graphed config, never `--enforce-eager` | Results | [Detail](benchmarks/vllm-online-serving.md) |
+| `memory` | Peak memory across the serving window. Each row names its own model, host and window | Results | [Detail](benchmarks/memory.md) |
+| `llama-cpp-cpu` | llama.cpp on CPU, including the RPi5/A76 gating arm that does not transfer | Results | [Detail](benchmarks/llama-cpp-cpu.md) |
+| `mlx-lm-apple-m4` | MLX-LM on Apple M4, warm, batch 1, 6 interleaved runs | Results | [Detail](benchmarks/mlx-lm-apple-m4.md) |
+| `dwarfstar-gguf` | DwarfStar vs ds4 on DeepSeek-V4-Flash GGUF, GB10, byte-exact | Results | [Detail](benchmarks/dwarfstar-gguf.md) |
+| `speculative-decoding` | MTP / DFlash / n-gram / DSpark rows against vLLM | Results | [Detail](benchmarks/speculative-decoding.md) |
+| `tt-capture-default-decode` | Qwen3-0.6B decode on the P150 with captured decode as the shipped default | Results | [Detail](benchmarks/tt-capture-default-decode.md) |
+| `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150 | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
+| `qwen38-27b-exl3-gb10` | Qwen3.8-27B EXL3 3.5bpw on GB10, with and without its DFlash2 draft | Results | [Detail](benchmarks/qwen38-27b-exl3-gb10.md) |
+| `qwen38-27b-exl3-variadic-gb10` | The same pair under a mixed-length serving load, percentiles over concurrency | Results | [Detail](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
+| `qwen38-27b-q4km-gfx1151` | Qwen3.8-27B Q4_K_M on Strix Halo, llama.cpp against pinned vLLM and vllm.cpp | Results | [Detail](benchmarks/qwen38-27b-q4km-gfx1151.md) |
+| `how-we-measure` | The measurement protocol, the oracle pin, and the disposition rules every number obeys | Method, no headline number | [Detail](benchmarks/how-we-measure.md) |
+| `variadic-load-methodology` | How the mixed-load serving benchmark works, and what the harness cannot see | Method, no result | [Detail](benchmarks/variadic-load-methodology.md) |
+| `reproduce` | The entry point for each benchmark and where its evidence lives | Index of entry points | [Detail](benchmarks/reproduce.md) |
+| `open-gaps` | What is NOT measured, per track, with the next gate that would move it | Gap register | [Detail](benchmarks/open-gaps.md) |
+
 ## At a glance: W5/W6 green; validated release artifacts pending
 
 | Reference | Workload | Headline | Tokens |

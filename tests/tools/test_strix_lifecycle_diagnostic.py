@@ -155,6 +155,22 @@ class Adapter(TransportAdapter):
 '''
 
 
+# CI-context exemption, recorded: the diagnostic drives the qualification
+# runtime, which is bound to the measured Strix host (Linux x86-64 glibc 2.39
+# only, per tools/bench/strix_four_engine/child_lifecycle.py) and needs the
+# Strix lease. Off that host the class SKIPS with this reason instead of
+# failing; it still runs for real on the Strix x86-64 lane.
+import platform
+
+STRIX_RUNTIME = (sys.platform == "linux" and platform.machine() == "x86_64"
+                 and platform.libc_ver()[1] == "2.39")
+
+
+@unittest.skipUnless(
+    STRIX_RUNTIME,
+    "the qualification runtime refuses non-Linux-x86_64/glibc-2.39 hosts; no "
+    "aarch64 port exists to exercise",
+)
 class LifecycleDiagnosticTests(unittest.TestCase):
     def test_duplicate_selection_refuses_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:

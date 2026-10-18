@@ -26,6 +26,18 @@ thread_local size_t bytes = 0;
 
 }  // namespace allocation_probe
 
+// THE COMPLETE SET OF REPLACEABLE GLOBAL ALLOCATION FUNCTIONS. The probe
+// replaces `operator new` with a `std::malloc`-based one so it can count every
+// allocation, and pairs it with a `std::free`-based `operator delete`. That
+// pairing is only sound if EVERY replaceable allocation form routes through
+// the same malloc/free pair: the nothrow and aligned forms included. The
+// pre-fix file replaced only the throwing forms, so libstdc++'s
+// `std::get_temporary_buffer` (used by `std::stable_sort` inside
+// `vllm::OrderedRegistry` at static-init time) allocated through the DEFAULT
+// nothrow `operator new` and was freed by the replaced `operator delete` with
+// `std::free` — an operator-new/operator-delete mismatch ASan refuses
+// (alloc-dealloc-mismatch, ISSUE-LOCAL-01M4FK4BJFZMCSG04WD0CAY5D2).
+//
 // NOT INLINED, for two reasons that point the same way. A probe the optimizer
 // inlines is a probe it can elide, and an uncounted allocation reads as a
 // PASS on the very assertion these operators exist to make. And GCC pairs the
@@ -33,12 +45,27 @@ thread_local size_t bytes = 0;
 // unrelated caller and reports `-Wmismatched-new-delete`, which is a false
 // positive on a deliberate replacement rather than a defect to silence.
 __attribute__((noinline))
+static void* ProbeAlloc(std::size_t size, std::size_t alignment) {
+  if (size == 0) size = 1;
+  // Over-aligned requests need a genuinely aligned block; plain malloc only
+  // guarantees __STDCPP_DEFAULT_NEW_ALIGNMENT__. std::aligned_alloc requires
+  // the size to be a multiple of the alignment, so round up. Every path here
+  // is released by std::free in the matching operator delete below.
+  void* pointer =
+      alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__
+          ? std::aligned_alloc(alignment, (size + alignment - 1) & ~(alignment - 1))
+          : std::malloc(size);
+  if (pointer == nullptr) return nullptr;
+  if (allocation_probe::enabled) {
+    ++allocation_probe::allocations;
+    allocation_probe::bytes += size;
+  }
+  return pointer;
+}
+
+__attribute__((noinline))
 void* operator new(std::size_t size) {
-  if (void* pointer = std::malloc(size == 0 ? 1 : size)) {
-    if (allocation_probe::enabled) {
-      ++allocation_probe::allocations;
-      allocation_probe::bytes += size;
-    }
+  if (void* pointer = ProbeAlloc(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__)) {
     return pointer;
   }
   throw std::bad_alloc();
@@ -46,6 +73,35 @@ void* operator new(std::size_t size) {
 
 void* operator new[](std::size_t size) {
   return ::operator new(size);
+}
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+  return ProbeAlloc(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+  return ::operator new(size, std::nothrow);
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment) {
+  if (void* pointer = ProbeAlloc(size, static_cast<std::size_t>(alignment))) {
+    return pointer;
+  }
+  throw std::bad_alloc();
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+  return ::operator new(size, alignment);
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment,
+                   const std::nothrow_t&) noexcept {
+  return ProbeAlloc(size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment,
+                     const std::nothrow_t&) noexcept {
+  return ::operator new(size, alignment, std::nothrow);
 }
 
 __attribute__((noinline))
@@ -63,6 +119,40 @@ void operator delete(void* pointer, std::size_t) noexcept {
 
 void operator delete[](void* pointer, std::size_t) noexcept {
   ::operator delete[](pointer);
+}
+
+void operator delete(void* pointer, const std::nothrow_t&) noexcept {
+  std::free(pointer);
+}
+
+void operator delete[](void* pointer, const std::nothrow_t&) noexcept {
+  ::operator delete(pointer, std::nothrow);
+}
+
+void operator delete(void* pointer, std::align_val_t) noexcept {
+  std::free(pointer);
+}
+
+void operator delete[](void* pointer, std::align_val_t) noexcept {
+  ::operator delete[](pointer, std::nothrow);
+}
+
+void operator delete(void* pointer, std::align_val_t, std::size_t) noexcept {
+  std::free(pointer);
+}
+
+void operator delete[](void* pointer, std::align_val_t, std::size_t) noexcept {
+  ::operator delete[](pointer, std::nothrow);
+}
+
+void operator delete(void* pointer, std::align_val_t,
+                     const std::nothrow_t&) noexcept {
+  std::free(pointer);
+}
+
+void operator delete[](void* pointer, std::align_val_t,
+                       const std::nothrow_t&) noexcept {
+  ::operator delete[](pointer, std::nothrow);
 }
 
 namespace {

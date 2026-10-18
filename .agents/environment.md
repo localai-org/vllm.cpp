@@ -2343,3 +2343,15 @@ inner 4096, state 128; context 262144.
 - **No Intel GPU exists on any box here**, so `BACKEND-XPU` end-to-end work is
   HW-BLOCKED; only policy-port, compile coverage and oneAPI CPU-device unit
   numerics are available.
+
+## 2026-10-07: run test_kolibri1_w3 with a thread cap on shared hosts
+
+A fresh mutation-review run of `test_kolibri1_w3` executed UNCONSTRAINED
+(128 threads) OOM-killed a 256 GB host: RSS exceeded 76 GB, `dmesg` recorded
+the oom-kill, and the test died with exit 137. A capped run
+(`VLLM_CPP_CPU_THREADS=8`) reached the same ~76 GB anon RSS
+(`total-vm:153529600kB, anon-rss:75975936kB`), so the resident floor is the
+model, not the thread count: W3 needs a host with ~80 GB free above whatever
+else is resident. Run it with a thread cap, and only when `free -g` reports
+that much available. The constrained run is also the one whose expected
+fingerprints the gates quote.

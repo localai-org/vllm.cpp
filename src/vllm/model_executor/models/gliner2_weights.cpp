@@ -75,10 +75,17 @@ deberta_v2::Params InferEncoderParams(
   const auto& rel_shape = tensors.Shape("encoder.encoder.rel_embeddings.weight");
   p.position_buckets = rel_shape[0] / 2;
 
-  // Fields the checkpoint does not carry. DeBERTa-v3 always uses head_dim 64,
-  // so num_attention_heads = hidden_size / 64. This covers mdeberta-v3-base
-  // (768/12) and deberta-v3-large (1024/16).
-  p.num_attention_heads = p.hidden_size / 64;
+  // num_attention_heads: the config's own value is authoritative when the
+  // checkpoint carries one (the e2e fixture declares 4 heads at hidden_size
+  // 24, which the /64 rule below would round to 0 and deberta_v2::Load would
+  // refuse). The published GLiNER2.5 configs carry no encoder fields, so the
+  // fallback keeps the DeBERTa-v3 head_dim-64 derivation (4b252aff4): DeBERTa-v3
+  // always uses head_dim 64, so hidden_size / 64 covers mdeberta-v3-base
+  // (768/12) and deberta-v3-large (1024/16) — and equals the config's own
+  // value there, so real checkpoints are unchanged either way.
+  p.num_attention_heads = config.num_attention_heads > 0
+                              ? config.num_attention_heads
+                              : p.hidden_size / 64;
   p.max_position_embeddings = 512;
   p.layer_norm_eps = 1e-7;
   p.position_biased_input = false;
@@ -88,7 +95,6 @@ deberta_v2::Params InferEncoderParams(
   p.use_c2p = true;
   p.use_p2c = true;
 
-  (void)config;  // config.raw has no DeBERTa fields (model_name is a string ref)
   return p;
 }
 

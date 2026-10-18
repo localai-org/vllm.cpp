@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-03
-Updated: 2026-10-03
+Updated: 2026-10-04
 Closed: -
 
 ## Problem
@@ -16,4 +16,4 @@ scripts/check-windows-portability.py skips its PowerShell AST stage when pwsh is
 
 ## Resolution
 
--
+RESOLVED 2026-10-04, row/ci-wiring-residuals. The pwsh install at /usr/local/bin (3b812f596) was invisible to both evidence lanes: _sanitized_env PATH is os.defpath (/bin:/usr/bin) plus the private tools directory (scripts/check-pr-size.py:881-892), and pwsh was absent from EVIDENCE_REQUIRED_TOOLS (scripts/check-pr-size.py:852). Declaring pwsh for tests.scripts.test_check_windows_portability puts the same pwsh on both lanes' PATH, so the PowerShell AST stage runs at HEAD and at BASE and red-before reproduces. Superseded-in-part by ISSUE-LOCAL-01M433BAC470XAV8VYFF8KJ1WD for the record of the vulkan half.
