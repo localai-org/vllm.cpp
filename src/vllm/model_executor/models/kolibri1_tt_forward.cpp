@@ -689,8 +689,8 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // step's 323 fetch, and the compute loop refused "no slot holds it" — a
   // self-inflicted miss-handle on a fully warm table). Touch on a resident
   // only refreshes the stamp; the table is unchanged.
-  for (const int64_t e : ld.resident_experts)
-    st.pool.policy.Touch(layer, e);
+  for (const int64_t resident : ld.resident_experts)
+    st.pool.policy.Touch(layer, resident);
   for (const Kolibri1TTSlotFetchJob& job : list.jobs) {
     // Touch FIRST: the policy's slot is authoritative (the dispatch
     // plan's fetch_slots are advisory — SuggestSlotFor is read-only over

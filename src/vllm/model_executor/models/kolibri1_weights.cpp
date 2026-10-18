@@ -222,7 +222,7 @@ Kolibri1Weights LoadKolibri1Weights(
   // equivalent of the measured `numactl --interleave=all` wrapper
   // (ISSUE-LOCAL-01M4GQ82X99D6JNBWDPX7ATJPY). Allocation policy only; the
   // bytes are identical. test_kolibri1_numa pins the policy engagement.
-  const kolibri1_numa::PolicyGuard numa_guard;
+  [[maybe_unused]] const kolibri1_numa::PolicyGuard numa_guard;
   const Kolibri1Params p = ParseKolibri1Params(config);
   CheckQuantConfig(config.raw);
 

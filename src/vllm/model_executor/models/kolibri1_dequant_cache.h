@@ -240,7 +240,7 @@ class Cache {
     // The decoded block is WEIGHT-ARENA traffic the decode streams: park its
     // pages interleaved over the NUMA nodes (kolibri1_numa.h) so a multi-node
     // decode reads them local. Allocation policy only — bytes identical.
-    const kolibri1_numa::PolicyGuard numa_guard;
+    [[maybe_unused]] const kolibri1_numa::PolicyGuard numa_guard;
     auto bytes = std::make_shared<std::vector<uint16_t>>();
     DecodeInto(w, *bytes);
     if (budget_ == 0 || byte_count > budget_) {
