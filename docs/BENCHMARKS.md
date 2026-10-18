@@ -19,6 +19,7 @@ to the file stem.
 | `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150 | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
 | `qwen38-27b-exl3-gb10` | Qwen3.8-27B EXL3 3.5bpw on GB10, with and without its DFlash2 draft | Results | [Detail](benchmarks/qwen38-27b-exl3-gb10.md) |
 | `qwen38-27b-exl3-variadic-gb10` | The same pair under a mixed-length serving load, percentiles over concurrency | Results | [Detail](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
+| `qwen38-tensorfold-gap` | Qwen3.8 TensorFold gap: blocked, missing artifacts, no number | Blocked, no number | [Detail](benchmarks/qwen38-tensorfold-gap.md) |
 | `qwen38-27b-q4km-gfx1151` | Qwen3.8-27B Q4_K_M on Strix Halo, llama.cpp against pinned vLLM and vllm.cpp | Results | [Detail](benchmarks/qwen38-27b-q4km-gfx1151.md) |
 | `how-we-measure` | The measurement protocol, the oracle pin, and the disposition rules every number obeys | Method, no headline number | [Detail](benchmarks/how-we-measure.md) |
 | `variadic-load-methodology` | How the mixed-load serving benchmark works, and what the harness cannot see | Method, no result | [Detail](benchmarks/variadic-load-methodology.md) |
@@ -57,28 +58,7 @@ Reading the ratios: throughput is ours/reference, latency is reference/ours, so
 is measured on, and the per-architecture correctness gate behind it, is the
 registry-bound list in [FEATURES.md](FEATURES.md).
 
-## Benchmark detail index
-
-| Benchmark ID | Disposition | Detail |
-|---|---|---|
-| `qwen38-tensorfold-gap` | `BLOCKED_MISSING_ARTIFACTS`; no number | [Qwen3.8 TensorFold gap](benchmarks/qwen38-tensorfold-gap.md) |
-| `at-a-glance` | portfolio snapshot, current W5/W6 state | [At a glance](benchmarks/at-a-glance.md) |
-| `dwarfstar-gguf` | `DONE`: byte-exact decode, 1.144x vs DwarfStar `ds4` with `VT_V4_RESIDENT_W` | [DwarfStar, GGUF](benchmarks/dwarfstar-gguf.md) |
-| `how-we-measure` | methodology reference for every binding number | [How we measure](benchmarks/how-we-measure.md) |
-| `llama-cpp-cpu` | `DONE`: prefill 1.18x ahead, decode tie, memory parity (aarch64) | [llama.cpp, CPU](benchmarks/llama-cpp-cpu.md) |
-| `memory` | `PASS`: peak PSS/RSS/GPU-memory ratios vs vLLM, 27B NVFP4 GB10 | [Memory](benchmarks/memory.md) |
-| `mlx-lm-apple-m4` | INDICATIVE: 97.6% warm total vs MLX-LM, Qwen3-0.6B | [MLX-LM, Apple M4](benchmarks/mlx-lm-apple-m4.md) |
-| `open-gaps` | ledger of open performance gaps and their next gates | [Open gaps](benchmarks/open-gaps.md) |
-| `qwen38-27b-exl3-gb10` | EXL3 3.5bpw decode, with and without the DFlash2 draft | [Qwen3.8-27B EXL3 GB10](benchmarks/qwen38-27b-exl3-gb10.md) |
-| `qwen38-27b-exl3-variadic-gb10` | EXL3 under a mixed-length serving load | [Qwen3.8-27B EXL3 variadic GB10](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
-| `qwen38-27b-q4km-gfx1151` | Q4_K_M three-engine comparison on Strix Halo | [Qwen3.8-27B Q4_K_M gfx1151](benchmarks/qwen38-27b-q4km-gfx1151.md) |
-| `reproduce` | entry points and recipes to reproduce each benchmark | [Reproduce](benchmarks/reproduce.md) |
-| `speculative-decoding` | MTP/DFlash/n-gram/DSpark spec-decode rows vs vLLM | [Speculative decoding](benchmarks/speculative-decoding.md) |
-| `tt-capture-default-decode` | Tenstorrent capture-default decode rate | [Tenstorrent capture-default decode](benchmarks/tt-capture-default-decode.md) |
-| `tt-keepquant-27b-decode` | Tenstorrent keep-quant 27B decode, capture-default | [Tenstorrent keep-quant 27B decode](benchmarks/tt-keepquant-27b-decode.md) |
-| `variadic-load-methodology` | methodology of the mixed-load serving benchmark | [Variadic-load methodology](benchmarks/variadic-load-methodology.md) |
-| `vllm-online-serving` | the binding vLLM online-serving comparison grids | [vLLM, online serving](benchmarks/vllm-online-serving.md) |
-
+## vLLM, online serving
 ## vLLM, online serving
 
 The binding comparison. vLLM runs its **production graphed config**, never
