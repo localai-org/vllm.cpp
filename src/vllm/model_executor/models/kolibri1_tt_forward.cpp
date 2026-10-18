@@ -26,6 +26,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <iterator>
 #include <map>
 #include <set>
 #include <mutex>
@@ -695,7 +697,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     // Touch FIRST: the policy's slot is authoritative (the dispatch
     // plan's fetch_slots are advisory — SuggestSlotFor is read-only over
     // the tables, so a multi-miss dispatch repeats the first free slot).
-    const int64_t slot = st.pool.policy.Touch(layer, job.expert);
+    const int64_t slot = st.pool.policy.Touch(layer, expert);
     VT_CHECK(slot >= 0 && slot < st.pool.capacity_per_layer,
              "kolibri1-tt B2b-ii: the policy handed out slot " +
                  std::to_string(slot) + " outside the per-layer capacity");
@@ -791,6 +793,8 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     auto it = st.memo.find(key);
     if (it != st.memo.end() && it->second.slot == slot) {
       ++st.memo_hits;
+      // LRU touch: refresh the entry's recency stamp.
+      it->second.stamp = ++st.memo_clock;
     } else {
       // The slot bytes are authoritative ON DEVICE: read the slot back
       // (the readback pivot) and verify byte-exact against the shadow
@@ -823,6 +827,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       void* bp = be.Alloc(nb_total);
       Kolibri1TTStreamingDeviceContext::SlotDequant dq;
       dq.slot = slot;
+      dq.stamp = ++st.memo_clock;
       dq.owner = std::shared_ptr<void>(bp, [&be](void* ptr) {
         be.Free(ptr);
       });
@@ -889,6 +894,15 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       // The cap was already enforced before the dequant allocation above
       // (the address-reuse discipline); this second call is the emplace
       // contract's belt — a no-op at <= cap - 1 entries.
+      //
+      // THE VICTIM IS THE LRU ENTRY, NOT THE SMALLEST KEY. The pre-LRU
+      // victim (erase begin()) was always the lowest (layer, expert): with
+      // the layers walked in ascending order every step, every layer's
+      // miss sacrificed a layer-0 entry, so layer 0 re-dequanted and
+      // re-staged 7.86 MB EVERY step while its entries never survived a
+      // full pass. The LRU stamp spreads the evictions over the entries
+      // the route actually touched longest ago (the #3452 dangling-
+      // iterator discipline — evict BEFORE emplace — is unchanged).
       Kolibri1TTMemoEvictForEmplace(st.memo, kMemoMaxEntries);
       it = st.memo.emplace(key, std::move(dq)).first;
     }
@@ -926,6 +940,23 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     }
   }
   DBuf out(d, DType::kBF16, {t, h});
+  if (std::getenv("VT_KOLIBRI1_TT_MEMO_STATS") != nullptr) {
+    std::fprintf(stderr,
+                 "[MEMO][TT] L%lld hits=%lld misses=%lld fills=%lld "
+                 "slots=%lld memo=%zu delta=%lld/%lld/%lld\n",
+                 static_cast<long long>(layer),
+                 static_cast<long long>(st.memo_hits),
+                 static_cast<long long>(st.memo_misses),
+                 static_cast<long long>(st.slot_fills),
+                 static_cast<long long>(st.pool.capacity_per_layer),
+                 st.memo.size(),
+                 static_cast<long long>(st.memo_hits - st.memo_prev_hits),
+                 static_cast<long long>(st.memo_misses - st.memo_prev_misses),
+                 static_cast<long long>(st.slot_fills - st.memo_prev_fills));
+    st.memo_prev_hits = st.memo_hits;
+    st.memo_prev_misses = st.memo_misses;
+    st.memo_prev_fills = st.slot_fills;
+  }
   if (StageDumpOn()) {
     std::vector<float> wsum(route.weights.begin(), route.weights.end());
     double s = 0;
@@ -976,7 +1007,18 @@ Kolibri1DebugRouteDiff Kolibri1DebugRouteCompare(
 // See the header: evict BEFORE the caller's emplace so the just-emplaced
 // entry is never the victim.
 void Kolibri1TTMemoEvictForEmplace(Kolibri1TTMemo& memo, size_t cap) {
-  while (memo.size() >= cap) memo.erase(memo.begin());
+  while (memo.size() >= cap) {
+    // The victim is the LEAST RECENTLY USED entry (smallest stamp; ties
+    // break to the smallest key so the choice is deterministic). The old
+    // erase(begin()) always took the smallest key — with the layers walked
+    // in ascending order every step, that concentrated every eviction on
+    // the lowest layer and destroyed its hit pattern.
+    auto victim = memo.begin();
+    for (auto it = std::next(victim); it != memo.end(); ++it) {
+      if (it->second.stamp < victim->second.stamp) victim = it;
+    }
+    memo.erase(victim);
+  }
 }
 
 // ---- The routed-expert refusal (public contract) -----------------------------

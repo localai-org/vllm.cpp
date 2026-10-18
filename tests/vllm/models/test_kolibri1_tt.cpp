@@ -790,54 +790,61 @@ TEST_CASE("kolibri1 TT reset lane: the slot-table fingerprint flips on a "
   CHECK_FALSE(policy.ContentChangedSince(after1));
 }
 
-TEST_CASE("kolibri1 TT memo eviction: the just-emplaced entry is never the "
-          "victim (dangling-iterator use-after-free regression)") {
-  // The memo cap is 512 on the production shape and the eviction erases the
-  // smallest key. The OLD order (emplace, then erase begin()) erased the
-  // JUST-EMPLACED entry once the memo's smallest key caught up to the
-  // current (layer, expert): the iterator the expert loop holds dangled,
-  // and the ExpertMlp read gate/up/down views plus a dequant buffer that
-  // had already been freed (be.Free inside the erase) — garbage weights,
-  // uninitialized-DRAM-scale outputs, and run-to-run nondeterministic
-  // decode. Kolibri1TTMemoEvictForEmplace evicts BEFORE the caller's
-  // emplace so the current entry is never the victim.
+TEST_CASE("kolibri1 TT memo eviction: LRU victim, just-emplaced and hot "
+          "entries survive (dangling-iterator + min-key-order regressions)") {
+  // Two contracts pinned here. (1) The #3452 discipline: the helper evicts
+  // BEFORE the caller's emplace, so the just-emplaced entry is never the
+  // victim and the expert loop's iterator stays valid. (2) The victim is
+  // the LEAST RECENTLY USED entry (smallest stamp), NOT the smallest key:
+  // the old erase(begin()) always sacrificed the lowest (layer, expert),
+  // so with the layers walked ascending every step, every layer's miss
+  // destroyed a layer-0 entry and layer 0 re-dequanted and re-staged its
+  // hot experts every single step.
   constexpr size_t kCap = 512;
   using SlotDequant = Kolibri1TTStreamingDeviceContext::SlotDequant;
   Kolibri1TTMemo memo;
 
-  // Fill to the cap with keys (0,1)..(0,cap): the smallest key is (0,1),
-  // the catch-up shape the bug needed (a fresh dequant whose key sorts
-  // below every resident entry).
+  // Fill to the cap, stamps 1..cap in key order; then TOUCH the smallest
+  // key (0,1) — the hottest entry under the LRU discipline.
+  uint64_t clock = 0;
   for (int64_t e = 1; e <= static_cast<int64_t>(kCap); ++e)
-    memo.emplace(std::make_pair(int64_t{0}, e), SlotDequant{});
+    memo[std::make_pair(int64_t{0}, e)].stamp = ++clock;
   REQUIRE(memo.size() == kCap);
+  memo[std::make_pair(int64_t{0}, int64_t{1})].stamp = ++clock;
 
-  // The caller's next dequant is for the smallest key (0,0). The old
-  // emplace-then-evict order erased (0,0) itself here; the helper evicts
-  // the pre-existing smallest (0,1) instead, and the emplace that follows
-  // lands at the cap with a valid iterator.
+  // The caller's next dequant is for a fresh key. Evict-then-emplace: the
+  // emplace lands at the cap with a valid iterator.
   Kolibri1TTMemoEvictForEmplace(memo, kCap);
   const auto key = std::make_pair(int64_t{0}, int64_t{0});
-  auto it = memo.emplace(key, SlotDequant{}).first;
+  SlotDequant fresh;
+  fresh.stamp = ++clock;
+  auto it = memo.emplace(key, std::move(fresh)).first;
 
   CHECK(memo.size() == kCap);
-  // The just-emplaced entry SURVIVES (the old order erased it — this is the
-  // deterministic red on the old code).
+  // The just-emplaced entry SURVIVES (the #3452 red on the old order).
   CHECK(memo.find(key) != memo.end());
-  // The iterator the expert loop holds stays valid and names the entry.
   CHECK(it != memo.end());
   CHECK(it->first == key);
-  // The victim was a PRE-EXISTING entry: (0,1) is gone, (0,0) is resident.
-  CHECK(memo.find(std::make_pair(int64_t{0}, int64_t{1})) == memo.end());
-  CHECK(memo.begin()->first == key);
+  // THE LRU RED (on the min-key code the victim was (0,1), the entry the
+  // test just touched): the victim is the SMALLEST-STAMP pre-existing
+  // entry, (0,2), and the touched hot entry (0,1) is still resident.
+  CHECK(memo.find(std::make_pair(int64_t{0}, int64_t{2})) == memo.end());
+  CHECK(memo.find(std::make_pair(int64_t{0}, int64_t{1})) != memo.end());
 
-  // A second round on the full memo keeps the invariant: emplacing the
-  // current smallest key never destroys it either.
+  // The belt invariant: emplacing an entry whose key sorts smallest never
+  // destroys it either, and the next victim is again the LRU entry.
   Kolibri1TTMemoEvictForEmplace(memo, kCap);
   const auto key2 = std::make_pair(int64_t{0}, int64_t{1});
-  auto it2 = memo.emplace(key2, SlotDequant{}).first;
+  // (0,1) is resident with the LOWEST stamp now — touch it, so the next
+  // emplace's victim must be (0,3), not the just-touched (0,1).
+  memo[key2].stamp = ++clock;
+  SlotDequant fresh2;
+  fresh2.stamp = ++clock;
+  auto it2 = memo.emplace(std::make_pair(int64_t{0}, int64_t{-1}),
+                          std::move(fresh2))
+                 .first;
+  (void)it2;
   CHECK(memo.size() == kCap);
   CHECK(memo.find(key2) != memo.end());
-  CHECK(it2 != memo.end());
-  CHECK(it2->first == key2);
+  CHECK(memo.find(std::make_pair(int64_t{0}, int64_t{3})) == memo.end());
 }
