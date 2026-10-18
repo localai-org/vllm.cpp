@@ -303,3 +303,13 @@ owns that row.
 **Not checked:** runtime behavior. This audit read source and records; nothing
 was built or executed, so "implemented" here means "present and reachable in
 source", grounded on the matrices' own gate evidence for correctness claims.
+## Owed
+
+- **`ISSUE-GH-242` — `docs/FEATURES.md` drifted from the registry.** The
+  architecture counts read 30 against 35 in the registry, and
+  multimodal-over-HTTP stays marked unshipped though W1-W3 landed. That is this
+  audit's class B against a surface it covers.
+- **`ISSUE-GH-652` — `.agents/model-matrix.md`'s five prose counters drifted
+  when LTX-2.5 landed.** The model reached the rows and the CI-enforced rollup
+  and none of the sentences that count models moved with it; record-coverage
+  drift is the same class B shape as the FEATURES row above.

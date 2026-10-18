@@ -104,3 +104,10 @@ README/BENCHMARKS, coordination — same commit.
 - Risk: cuBLASLt may tile the larger-N GEMM differently -> not byte-exact ->
   token-gate fallback (a near-tie greedy flip is the only blocker).
 - Product calls: none (vLLM-defined behavior).
+## Owed
+
+- **`ISSUE-GH-469` — `test_ops_glue.cpp:190`'s `CHECK_THROWS` is satisfied by
+  the CPU kernel's second guard, not the dispatch guard it names**, so mutation
+  M8 survives. This spec introduced `vt::MulColVecF32` together with its
+  validate+dispatch arm, which is the guard the case intends to pin. Behavior is
+  correct; test strength only.
