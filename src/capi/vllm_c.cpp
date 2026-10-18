@@ -510,7 +510,13 @@ vllm::entrypoints::openai::ChatCompletionRequest ParseChatRequest(
                                 e.what());
   }
   try {
-    return j.get<vllm::entrypoints::openai::ChatCompletionRequest>();
+    auto request = j.get<vllm::entrypoints::openai::ChatCompletionRequest>();
+    // Tool schemas keep the request document's key order (the pinned
+    // renderer dumps them into the prompt with sort_keys=False); the
+    // nlohmann::json parse above sorts object keys, so re-read `tools`
+    // order-preserving.
+    vllm::entrypoints::openai::RestoreToolSchemaOrder(request_json, request);
+    return request;
   } catch (const std::exception& e) {
     throw std::invalid_argument(std::string("invalid chat request: ") +
                                 e.what());

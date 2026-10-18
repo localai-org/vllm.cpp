@@ -665,7 +665,163 @@ ChatMessage AssistantToolCall(std::string arguments,
       std::vector<vllm::entrypoints::openai::ToolCall>{std::move(call)};
   return assistant;
 }
+
+// ─── tojson guards: the SHARED seam stays on the pinned renderer ────────────
+// The serving reference for `{{ tool | tojson }}` is the PINNED transformers
+// 5.14.1 renderer's tojson override (utils/chat_template_utils.py:481:
+// sort_keys=False, ensure_ascii=False, no HTML escaping) — NOT plain jinja2's
+// builtin (which sorts keys and escapes HTML). The expected bytes below were
+// rendered by the pin itself (transformers 5.14.1 + jinja2 3.1.6 through
+// render_jinja_template, 2026-10-09; see docs/bench-evidence/
+// kolibri1-serve-20261008.md "Review repair"), so any drift of this adapter's
+// tojson away from the pinned renderer fails here — on NON-kolibri templates
+// no kolibri1 row owns.
+// An insertion-ordered (NOT alphabetical) tool at every level, with Unicode
+// and HTML in the leaves: the case that separates the pinned renderer from
+// plain jinja2's built-in tojson.
+std::vector<ChatCompletionToolsParam> UnsortedUnicodeTool() {
+  ChatCompletionToolsParam t;
+  t.type = "function";
+  t.function.name = "get_weather";
+  t.function.description = "Wetter für <b>München</b> & ☕";
+  t.function.parameters = nlohmann::ordered_json::parse(
+      R"({"type":"object","properties":{"zeta":{"type":"string","description":"<hr> München"},"alpha":{"type":"string"}},"required":["zeta","alpha"],"x_f":0.5})");
+  return {t};
+}
+
+// The schema is alphabetical at EVERY level (properties < required < type;
+// the single-property schema needs no order), so the sorted-dump override the
+// adapter carried BEFORE the review repair and the pinned renderer's
+// insertion-order tojson produce the SAME bytes for it. The tool WRAPPER's
+// field order (type/function, name/description/parameters) is the pinned
+// renderer's fixed model_dump order — NOT alphabetical — so the byte-identity
+// claim can only be demonstrated on the schema itself, which is what the
+// case below renders.
+std::vector<ChatCompletionToolsParam> AlphabeticalTool() {
+  ChatCompletionToolsParam t;
+  t.type = "function";
+  t.function.name = "get_weather";
+  t.function.description = "Get the weather for a city.";
+  t.function.parameters = nlohmann::ordered_json::parse(
+      R"({"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"})");
+  return {t};
+}
+
+// The pinned renderer's insertion-ordered tojson of UnsortedUnicodeTool(),
+// shared by the tests below.
+const char* kUnsortedToolJson =
+    "{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", "
+    "\"description\": \"Wetter für <b>München</b> & ☕\", \"parameters\": "
+    "{\"type\": \"object\", \"properties\": {\"zeta\": {\"type\": \"string\", "
+    "\"description\": \"<hr> München\"}, \"alpha\": {\"type\": \"string\"}}, "
+    "\"required\": [\"zeta\", \"alpha\"], \"x_f\": 0.5}}}";
 }  // namespace
+
+TEST_CASE("chat_template: tojson keeps the pinned renderer's insertion order") {
+  const std::vector<ChatMessage> msgs = {
+      ChatMessage{"user", std::string("weather?")}};
+  const std::string out = apply_chat_template(
+      kToolTemplate, msgs, /*add_generation_prompt=*/false, /*bos=*/"",
+      /*eos=*/"", UnsortedUnicodeTool());
+  // Byte-identical to the pinned transformers 5.14.1 renderer's
+  // `{{ tool | tojson }}`: insertion key order at every level, Unicode raw,
+  // HTML unescaped.
+  CHECK(out ==
+        std::string("<|im_start|>system\n# Tools\n<tools>") +
+            kUnsortedToolJson + "</tools><|im_end|>" +
+            "<|im_start|>user\nweather?<|im_end|>");
+}
+
+TEST_CASE("chat_template: tojson is byte-stable for already-ordered schemas") {
+  // The repair must not alter a rendering where the pinned renderer and the
+  // old sorted override already agreed: for this alphabetically-ordered
+  // schema the sorted and insertion-order dumps are the same bytes, so this
+  // case stays green even under a sorted tojson — the byte-identity-before/
+  // after claim is real. The schema is rendered alone because the tool
+  // wrapper's field order (type/function, name/description/parameters) is the
+  // pinned model_dump order, which is NOT alphabetical.
+  const std::string out = apply_chat_template(
+      "{{ tools[0].function.parameters | tojson }}", {},
+      /*add_generation_prompt=*/false, /*bos=*/"", /*eos=*/"",
+      AlphabeticalTool());
+  CHECK(out ==
+        "{\"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": "
+        "[\"city\"], \"type\": \"object\"}");
+}
+
+TEST_CASE("chat_template: tojson options match the pinned renderer") {
+  // The four options the pinned tojson accepts (chat_template_utils.py:481),
+  // each pinned byte-for-byte against the pin.
+  const auto render = [](const std::string& call) {
+    return apply_chat_template("{{ tools[0] | " + call + " }}", {}, false, "",
+                               "", UnsortedUnicodeTool());
+  };
+  // indent=2: newline + 2 spaces per level, (",", ": ") separators.
+  CHECK(render("tojson(indent=2)") ==
+        "{\n"
+        "  \"type\": \"function\",\n"
+        "  \"function\": {\n"
+        "    \"name\": \"get_weather\",\n"
+        "    \"description\": \"Wetter für <b>München</b> & ☕\",\n"
+        "    \"parameters\": {\n"
+        "      \"type\": \"object\",\n"
+        "      \"properties\": {\n"
+        "        \"zeta\": {\n"
+        "          \"type\": \"string\",\n"
+        "          \"description\": \"<hr> München\"\n"
+        "        },\n"
+        "        \"alpha\": {\n"
+        "          \"type\": \"string\"\n"
+        "        }\n"
+        "      },\n"
+        "      \"required\": [\n"
+        "        \"zeta\",\n"
+        "        \"alpha\"\n"
+        "      ],\n"
+        "      \"x_f\": 0.5\n"
+        "    }\n"
+        "  }\n"
+        "}");
+  // sort_keys=True: recursive key sort (byte order == code-point order).
+  CHECK(render("tojson(sort_keys=True)") ==
+        "{\"function\": {\"description\": \"Wetter für <b>München</b> & ☕\", "
+        "\"name\": \"get_weather\", \"parameters\": {\"properties\": {\"alpha\": "
+        "{\"type\": \"string\"}, \"zeta\": {\"description\": \"<hr> "
+        "München\", \"type\": \"string\"}}, \"required\": [\"zeta\", "
+        "\"alpha\"], \"type\": \"object\", \"x_f\": 0.5}}, \"type\": "
+        "\"function\"}");
+  // ensure_ascii=True: non-ASCII escapes as \uXXXX (literal backslash-u in
+  // the rendered bytes, hence the doubled backslashes here).
+  CHECK(render("tojson(ensure_ascii=True)") ==
+        "{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", "
+        "\"description\": \"Wetter f\\u00fcr <b>M\\u00fcnchen</b> & "
+        "\\u2615\", \"parameters\": {\"type\": \"object\", \"properties\": "
+        "{\"zeta\": {\"type\": \"string\", \"description\": \"<hr> "
+        "M\\u00fcnchen\"}, \"alpha\": {\"type\": \"string\"}}, \"required\": "
+        "[\"zeta\", \"alpha\"], \"x_f\": 0.5}}}");
+  // separators: compact (item ",", key ":").
+  CHECK(render("tojson(separators=(',', ':'))") ==
+        "{\"type\":\"function\",\"function\":{\"name\":\"get_weather\","
+        "\"description\":\"Wetter für <b>München</b> & ☕\",\"parameters\":"
+        "{\"type\":\"object\",\"properties\":{\"zeta\":{\"type\":\"string\""
+        ",\"description\":\"<hr> München\"},\"alpha\":{\"type\":\"string\"}},"
+        "\"required\":[\"zeta\",\"alpha\"],\"x_f\":0.5}}}");
+}
+
+TEST_CASE("chat_template: the real Qwen3.5 template's tojson matches the pin") {
+  // A second, non-kolibri template (the real Qwen3.5 fixture) rendering the
+  // unsorted tool: the pinned renderer's insertion-ordered, raw-Unicode,
+  // unescaped-HTML tojson bytes must appear in the prompt.
+  const std::string tmpl = ReadFixture("qwen35_chat_template.jinja");
+  const std::vector<ChatMessage> msgs = {
+      ChatMessage{"user", std::string("weather?")}};
+  std::string out;
+  REQUIRE_NOTHROW(out = apply_chat_template(tmpl, msgs,
+                                            /*add_generation_prompt=*/true,
+                                            /*bos=*/"", /*eos=*/"<|im_end|>",
+                                            UnsortedUnicodeTool()));
+  CHECK(out.find(kUnsortedToolJson) != std::string::npos);
+}
 
 TEST_CASE("chat_template: real Qwen3.5 template renders a plain conversation") {
   const std::string tmpl = ReadFixture("qwen35_chat_template.jinja");

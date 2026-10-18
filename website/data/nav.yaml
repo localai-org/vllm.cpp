@@ -28,3 +28,5 @@ docs:
     label: SGLang compatibility
   - file: ROCM.md
     label: ROCm backend
+  - file: gap-kolibri1-tt-captured-decode.md
+    label: Kolibri1 TT captured decode gap analysis

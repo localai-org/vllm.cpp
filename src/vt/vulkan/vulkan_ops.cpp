@@ -1160,8 +1160,9 @@ void MatmulGeneric(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
         [&](uint32_t m_chunk, uint32_t a_chunk, uint32_t out_chunk) {
           MatmulParams p{m_chunk, static_cast<uint32_t>(n),
                          static_cast<uint32_t>(k), a_chunk, b_off, out_chunk};
-          const uint32_t groups = (static_cast<uint64_t>(m_chunk) * n + rows - 1) / rows;
-          Go("vt_matmul_vec", wide, p, groups, spec, 6);
+          const uint64_t groups = (static_cast<uint64_t>(m_chunk) * n + rows - 1) / rows;
+          // MSVC C4244: the ceil-div is 64-bit on purpose; Go takes uint32_t.
+          Go("vt_matmul_vec", wide, p, static_cast<uint32_t>(groups), spec, 6);
         });
     return;
   }
@@ -1624,7 +1625,7 @@ void MoeRouterTopKKernelVulkan(Queue& queue, Tensor& weights, Tensor& indices,
                         l_off,
                         w_off,
                         i_off};
-  Go("vt_moe_router_topk", bind, p, t, spec, 4);
+  Go("vt_moe_router_topk", bind, p, static_cast<uint32_t>(t), spec, 4);
 }
 
 // cpu_ops.cpp:2162-2176 QkvSplitKernel. Mirrors vLLM's QKVParallelLinear output

@@ -219,6 +219,40 @@ void MatmulBT(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   reinterpret_cast<MatmulFn>(ResolveWeightOp(OpId::kMatmulBT, q, b))(q, out, a, b);
 }
 
+// vt::MatmulBTBatch — see ops.h. Validation mirrors MatmulBT per job; the
+// weight must be elementwise (the fp8 block arm dequantizes to bf16 before
+// batching), and all jobs must sit on the queue device.
+void MatmulBTBatch(Queue& q, const MatmulBTJob* jobs, int64_t n) {
+  VT_CHECK(n >= 0 && jobs != nullptr, "matmul_bt_batch: null job list");
+  const std::string jn = std::to_string(n);
+  for (int64_t i = 0; i < n; ++i) {
+    const Tensor& out = *jobs[i].out;
+    const Tensor& a = *jobs[i].a;
+    const Tensor& b = *jobs[i].b;
+    const std::string ji = " (job " + std::to_string(i) + " of " + jn + ")";
+    VT_CHECK(!IsBlockQuant(b.dtype),
+             "matmul_bt_batch: block-quant weight" + ji +
+                 " — resolve (dequant) to bf16 before batching");
+    VT_CHECK(a.rank == 2 && b.rank == 2 && out.rank == 2,
+             "matmul_bt_batch: rank-2 tensors required" + ji);
+    VT_CHECK(a.shape[1] == b.shape[1],
+             "matmul_bt_batch: inner dims mismatch (b is [N,K])" + ji);
+    VT_CHECK(out.shape[0] == a.shape[0] && out.shape[1] == b.shape[0],
+             "matmul_bt_batch: output shape mismatch" + ji);
+    VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
+             "matmul_bt_batch: float inputs and f32/bf16 output required" + ji);
+    VT_CHECK(a.stride[1] == 1 && a.stride[0] >= a.shape[1],
+             "matmul_bt_batch: activation rows must be packed" + ji);
+    VT_CHECK(b.IsContiguous() && out.IsContiguous(),
+             "matmul_bt_batch: contiguous weight and output required" + ji);
+    VT_CHECK(a.device == b.device && a.device == out.device &&
+                 a.device == q.device,
+             "matmul_bt_batch: device mismatch" + ji);
+  }
+  reinterpret_cast<MatmulBTBatchFn>(
+      GetOp(OpId::kMatmulBTBatch, q.device.type))(q, jobs, n);
+}
+
 // vt::MatmulBTQuant — see ops.h. Validation mirrors MatmulBT except for the
 // weight, whose block layout replaces the elementwise stride contract.
 void MatmulBTQuant(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
@@ -3449,6 +3483,32 @@ void MoeRouterTopK(Queue& q, Tensor& weights, Tensor& indices, const Tensor& log
            "moe_router_topk: device mismatch (logits/weights/indices/queue)");
   reinterpret_cast<MoeRouterTopKFn>(GetOp(OpId::kMoeRouterTopK, q.device.type))(
       q, weights, indices, logits, args, e_score_correction_bias);
+}
+
+void SigmoidBiasTopK(Queue& q, Tensor& weights, Tensor& indices,
+                     const Tensor& logits, const Tensor& bias, int top_k) {
+  VT_CHECK(logits.rank == 2 && weights.rank == 2 && indices.rank == 2,
+           "sigmoid_bias_topk: logits/weights/indices rank-2");
+  const int64_t t = logits.shape[0], e = logits.shape[1];
+  VT_CHECK(bias.rank == 1 && bias.shape[0] == e,
+           "sigmoid_bias_topk: bias must be [num_experts]");
+  VT_CHECK(IsFloat(logits.dtype) && bias.dtype == DType::kF32,
+           "sigmoid_bias_topk: float logits, f32 bias");
+  VT_CHECK(weights.dtype == DType::kF32 && indices.dtype == DType::kI32,
+           "sigmoid_bias_topk: f32 weights, i32 indices");
+  VT_CHECK(top_k >= 1 && top_k <= e,
+           "sigmoid_bias_topk: top_k must be in [1, num_experts]");
+  VT_CHECK(weights.shape[0] == t && weights.shape[1] == top_k &&
+               indices.shape[0] == t && indices.shape[1] == top_k,
+           "sigmoid_bias_topk: weights/indices must be [T, top_k]");
+  VT_CHECK(logits.IsContiguous() && bias.IsContiguous() &&
+               weights.IsContiguous() && indices.IsContiguous(),
+           "sigmoid_bias_topk: contiguous required");
+  VT_CHECK(logits.device == q.device && bias.device == q.device &&
+               weights.device == q.device && indices.device == q.device,
+           "sigmoid_bias_topk: device mismatch");
+  reinterpret_cast<SigmoidBiasTopKFn>(GetOp(OpId::kSigmoidBiasTopK, q.device.type))(
+      q, weights, indices, logits, bias, top_k);
 }
 
 void MoeCombine(Queue& q, Tensor& out, const Tensor& expert_out, const Tensor& weights,

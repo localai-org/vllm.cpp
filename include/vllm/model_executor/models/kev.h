@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,8 +30,18 @@ struct HeadParams {
   int64_t hidden_size = 1024;  // d: backbone hidden dimension
   int64_t head_dim = 256;      // dp: pointer dimension
 
+  // Optional explicit scale. Unset (the default, and the only value the loader
+  // ever produces) keeps the reference formula 1/sqrt(dp). It exists so a
+  // caller can express "this implementation scales by the wrong dimension"
+  // WITHOUT also resizing the projections: head_dim still sizes the [dp, d]
+  // weights, only the scale factor changes. The wrong-scale perturbation test
+  // in tests/vllm/models/test_kev.cpp uses it for exactly that simulation.
+  std::optional<double> scale_override;
+
   double scale() const {
-    return 1.0 / std::sqrt(static_cast<double>(head_dim));
+    return scale_override.has_value()
+               ? *scale_override
+               : 1.0 / std::sqrt(static_cast<double>(head_dim));
   }
 };
 

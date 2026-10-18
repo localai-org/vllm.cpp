@@ -9,6 +9,7 @@
 
 #include "vllm/entrypoints/openai/reasoning_parsers/deepseek_r1.h"
 #include "vllm/entrypoints/openai/reasoning_parsers/deepseek_v3.h"
+#include "vllm/entrypoints/openai/reasoning_parsers/kolibri1.h"
 #include "vllm/entrypoints/openai/reasoning_parsers/think_auto.h"
 #include "vllm/entrypoints/openai/reasoning_parsers/minimax_m2.h"
 #include "vllm/entrypoints/openai/reasoning_parsers/mistral.h"
@@ -64,6 +65,14 @@ std::unique_ptr<ReasoningParser> get_reasoning_parser(const std::string& name) {
   if (name == "qwen3" || name == "mimo") {
     return std::make_unique<Qwen3ParserReasoningAdapter>();
   }
+  // aleph-alpha-inference @ 049a6a7bd240 __init__.py:44-48 registers
+  // "kolibri1" -> Kolibri1ParserReasoningAdapter (reasoning.py:61): the qwen3
+  // engine face with the starting state derived from the request's
+  // chat_template_kwargs the way the Kolibri template switches thinking
+  // (reasoning_effort "none" / literal enable_thinking false; see kolibri1.h).
+  if (name == "kolibri1") {
+    return std::make_unique<Kolibri1ParserReasoningAdapter>();
+  }
   return nullptr;
 }
 
@@ -73,7 +82,7 @@ const std::vector<std::string>& reasoning_parser_names() {
   static const std::vector<std::string> names = {
       "think_auto", "deepseek_r1", "deepseek_v3", "holo2",
       "mistral", "minimax_m2", "minimax_m2_append_think", "step3", "olmo3",
-      "muse_glimmer", "qwen3", "mimo",
+      "muse_glimmer", "qwen3", "mimo", "kolibri1",
   };
   return names;
 }

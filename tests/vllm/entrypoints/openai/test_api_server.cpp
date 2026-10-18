@@ -1087,6 +1087,56 @@ TEST_CASE("api_server: a request's chat_template_kwargs reach the renderer "
         std::string::npos);
 }
 
+// The ordered-parameters seam (ISSUE-LOCAL-01M4FR1D7RH7CN5X2R2CAR6N61, F1):
+// handle_chat_completions parses the body with nlohmann::json, which SORTS
+// object keys, and RestoreToolSchemaOrder (api_server.cpp:400) re-reads
+// `tools` from an order-preserving parse of the raw body — the pinned
+// renderer dumps schemas into the prompt with sort_keys=False. No committed
+// test crossed that boundary (the kolibri1 gate drives apply_chat_template
+// over C++-constructed tools), so a no-op RestoreToolSchemaOrder passed every
+// gate. This case posts an unsorted-schema tools request through the
+// PRODUCTION /v1/chat/completions dispatch and asserts the rendered prompt
+// carries the schema in the REQUEST DOCUMENT's key order. RED evidence: with
+// RestoreToolSchemaOrder mutated to a no-op, the first CHECK fails — the
+// prompt carries the key-sorted form instead.
+TEST_CASE("api_server: an unsorted tool schema keeps its document key order "
+          "in the rendered prompt") {
+  const HfConfig c = MakeConfig();
+  const Qwen3_5MoeWeights w = MakeWeights(c);
+  CapturingTemplatePrompt prompt(ReadTestFixture("qwen38_chat_template.jinja"));
+  ServerHarness h(c, w, Fixture(), /*enable_force_include_usage=*/false,
+                  ApiServer::kDefaultMaxConcurrentStreams, prompt.fn);
+
+  // The schema keys are deliberately NON-alphabetical at every level of the
+  // `parameters` object: document order type/properties/required, and
+  // zeta/alpha inside properties.
+  const std::string body =
+      R"({"messages":[{"role":"user","content":"hi"}],)"
+      R"("max_completion_tokens":4,"temperature":0.0,)"
+      R"("tools":[{"type":"function","function":{"name":"get_weather",)"
+      R"("description":"Get the weather for a city.",)"
+      R"("parameters":{"type":"object","properties":{)"
+      R"("zeta":{"type":"string"},"alpha":{"type":"string"}},)"
+      R"("required":["zeta","alpha"]}}}]})";
+  ApiServer::DispatchResult r = h.server.handle_chat_completions(body);
+
+  INFO("dispatch body: " << r.body);
+  REQUIRE(r.status == 200);
+  // The schema reaches the prompt in the request document's key order
+  // (CPython json.dumps separators: ", " and ": ").
+  CHECK(prompt.rendered->find(
+            "\"parameters\": {\"type\": \"object\", \"properties\": {\"zeta\": "
+            "{\"type\": \"string\"}, \"alpha\": {\"type\": \"string\"}}, "
+            "\"required\": [\"zeta\", \"alpha\"]}") != std::string::npos);
+  // ...and not in the key-sorted form the nlohmann::json parse leaves behind
+  // without the order-preserving re-read.
+  CHECK(prompt.rendered->find(
+            "\"parameters\": {\"properties\": {\"alpha\": {\"type\": "
+            "\"string\"}, \"zeta\": {\"type\": \"string\"}}, \"required\": "
+            "[\"zeta\", \"alpha\"], \"type\": \"object\"}") ==
+        std::string::npos);
+}
+
 // #1681 review F1. `chat_template_kwargs` is the first request-controlled key
 // that can reach the render context at all, and the seam it opens is the
 // conversation itself: bound unfiltered, a request key REPLACED `messages`, so

@@ -481,8 +481,10 @@ typedef struct vllm_model_params {
    * the emitted tokens under greedy sampling, so it is a throughput knob.
    * NULL or "" => speculation DISABLED, the byte-identical default engine.
    * A malformed document or unsupported method fails vllm_engine_load with
-   * VLLM_ERR_INVALID_ARGUMENT. Only MTP is supported today, on the Qwen3.5/3.6
-   * checkpoints that ship an mtp.* head (safetensors only). Borrowed for the
+   * VLLM_ERR_INVALID_ARGUMENT. "mtp" needs a Qwen3.5/3.6 checkpoint that
+   * ships an mtp.* head (safetensors only); "ngram" is draft-free and runs on
+   * any target (measured on the kolibri1 CPU checkpoint: the speculative
+   * chain is byte-identical to speculative-off). Borrowed for the
    * vllm_engine_load call only. */
   const char* speculative_config;
   /* ── Automatic prefix caching (ABI v7) ─────────────────────────────────────

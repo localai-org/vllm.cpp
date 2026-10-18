@@ -235,8 +235,15 @@ DBuf AttentionBlock(Dev d, const MiMoV2AttnWeights& w,
   vt::RopeNeox(d.q, q3, k3, positions, ra);
 
   // --- Scale V by attention_value_scale ---
+  // `vs` OWNS the storage v3 is re-pointed at, and the KV-cache write below
+  // reads it, so it must live in THIS scope, not the `if`: a DBuf destroyed at
+  // the closing brace returns its block to the DevicePool — freed outright
+  // under VT_POOL_BYPASS=1 — while WriteKvCache is still memcpy-ing out of it
+  // (ASan heap-use-after-free in ReshapeAndCacheKernel,
+  // ISSUE-LOCAL-01M4FK2H2Y3D2TXADS8JPRN492).
+  DBuf vs;
   if (p.attention_value_scale != 0.0 && p.attention_value_scale != 1.0) {
-    DBuf vs(d, DType::kBF16, {T, Hkv, Dv});
+    vs = DBuf(d, DType::kBF16, {T, Hkv, Dv});
     vt::MulScalar(d.q, vs.t(), v3, p.attention_value_scale);
     v3 = vs.t();
   }
@@ -256,6 +263,14 @@ DBuf AttentionBlock(Dev d, const MiMoV2AttnWeights& w,
   pa.query_start_loc_host = nullptr;  // TODO: thread from meta if available
   pa.max_seq_len = 0;                  // let the kernel read from device
 
+  // `sink` must outlive the vt::PagedAttention call below: pa.attn_sink POINTS
+  // at it and the kernel dereferences it (args.attn_sink->Ptr<float>(),
+  // src/vt/cpu/cpu_paged_attn.cpp:138). Declaring it inside the
+  // `if (w.has_sink_bias)` block leaves a dangling stack pointer (the same
+  // escape class as `vs` above, ISSUE-LOCAL-01M4FK2H2Y3D2TXADS8JPRN492). The
+  // house pattern is deepseek_v4_dsa.cpp:265-271: t_sink lives in the
+  // enclosing scope for exactly this reason.
+  Tensor sink;
   if (is_full) {
     pa.window_size = std::nullopt;
     pa.attn_sink = nullptr;
@@ -264,7 +279,7 @@ DBuf AttentionBlock(Dev d, const MiMoV2AttnWeights& w,
     // AttentionWindow{left, right} where (W-1, 0) = causal decoder window of W tokens.
     pa.window_size = vt::AttentionWindow{static_cast<int32_t>(p.sliding_window - 1), 0};
     if (w.has_sink_bias) {
-      Tensor sink = ResidentWeight(d, w.sink_bias, {Hq});
+      sink = ResidentWeight(d, w.sink_bias, {Hq});
       pa.attn_sink = &sink;
     } else {
       pa.attn_sink = nullptr;

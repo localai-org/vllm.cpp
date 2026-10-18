@@ -189,4 +189,26 @@ Threadpool& CurrentThreadpool();
 void ParallelForRows(Threadpool& tp, int64_t nr,
                      const std::function<void(int64_t r0, int64_t r1)>& body);
 
+// SCRATCH INSTRUMENTATION (row/kolibri-gemv-overhead, not for landing):
+// env-gated (VT_GEMV_PROF) cumulative pool-kick counters so a caller can split
+// wall time inside a kick into (a) the kick+handoff dispatch cost and (b) the
+// busy compute summed across all workers.
+struct GemvProfSnap {
+  uint64_t kicks = 0;
+  uint64_t pool_ns = 0;  // caller wall time inside kicks
+  uint64_t busy_ns = 0;  // summed body execution across all workers
+};
+GemvProfSnap GemvProfTake();
+void GemvProfReset();
+
+// SCRATCH: accessors for cpu_ops.cpp MatmulChunked busy accounting.
+struct GemvProfState {
+  std::atomic<uint64_t> kicks{0};
+  std::atomic<uint64_t> pool_ns{0};
+  std::atomic<uint64_t> busy_ns{0};
+  bool on = false;
+};
+GemvProfState& GemvProfStateForOps();
+uint64_t ProfNowNs();
+
 }  // namespace vt::cpu

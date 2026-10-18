@@ -107,10 +107,17 @@ TEST_CASE("P1 eligibility pins SharedK d=256 qg=2 T>=64 one request") {
 }
 
 TEST_CASE("P1 GPU binary is not registered as ordinary CTest") {
+  // ABSOLUTE at configure time (tests/CMakeLists.txt): __FILE__ is
+  // source-root-RELATIVE under -ffile-prefix-map, so a __FILE__-relative
+  // probe path would resolve against the process CWD and miss under ctest.
+#ifdef VLLM_CPP_TESTS_CMAKELISTS
+  const std::string cmake = VLLM_CPP_TESTS_CMAKELISTS;
+#else
   std::string path = __FILE__;
   const auto slash = path.find_last_of('/');
   REQUIRE(slash != std::string::npos);
   const std::string cmake = path.substr(0, slash) + "/../CMakeLists.txt";
+#endif
   std::ifstream in(cmake);
   REQUIRE(in);
   std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

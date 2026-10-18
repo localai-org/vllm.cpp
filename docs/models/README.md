@@ -12,6 +12,7 @@ which checkpoint was used, the exact command, and what has not been measured.
 
 | Model | What it is | Read the page for |
 |---|---|---|
+| [Kolibri-1](kolibri-1.md) | A mixture of experts with sliding and full attention | CPU inference from FP8 safetensors and the remaining accelerator gaps |
 | [Qwen3.8 2.4T](qwen3-8-2-4t.md) | A 2.4-trillion-parameter mixture of experts, 370 GiB at `UD-Q1_0` | Serving a checkpoint three times larger than the machine's memory, at 11.05 s/token |
 | [Qwen3.8 27B](qwen3-8-27b.md) | A 27B dense model | Which quantized arms run, and why block-wise FP8 is CPU-only today |
 | [Qwen3.6](qwen3-6.md) | The Qwen3.6 dense and MoE family | Which `lm_head` forms load, and the merged FP8 `in_proj_qkvz` GEMM |

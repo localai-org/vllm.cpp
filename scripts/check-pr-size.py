@@ -213,13 +213,30 @@ COMPLETED_STATE_EVENT = re.compile(
     r"\.agents/completed/state-events/\d{4}-\d{2}/STATE-[A-Za-z0-9-]+\.md\Z"
 )
 SYNC_RECORD = re.compile(r"\.agents/sync/[A-Za-z0-9_.-]+\.md\Z")
+# One file per secondary-oracle comparator (AGENTS.md oracle table companions),
+# same per-key shape as ORACLE: globbed for reading, not a shared table every
+# change must write. Classified 2026-10-04 after comparators/README.md and
+# tensorfold.md landed on main unclassified and `classify_path` FAILS CLOSED,
+# going red in this checker's own whole-tree sweep (PR #3393, run 37202846607).
+COMPARATOR = re.compile(r"\.agents/comparators/[A-Za-z0-9_.-]+\.md\Z")
+# A PER-RUN evidence directory under .agents/evidence/: <name>/<run-id>/<file>,
+# with `latest` as a stable symlink to the current run. Same shape and class as
+# BENCH_EVIDENCE_RUN -- the recipe, the receipts and the summary of one
+# measured run. Classified 2026-10-04 after bench-qwen38-tensorfold-gap landed
+# nine unclassified files (PR #3393, run 37202846607).
+AGENT_EVIDENCE_RUN = re.compile(
+    r"\.agents/evidence/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?\Z"
+)
 HOOK = re.compile(r"\.githooks/(?:README\.md|[A-Za-z0-9_.-]+)\Z")
 # `csv` joined the list 2026-08-29 (#2316): `ncu --csv` writes one, and
 # `docs/bench-evidence/laguna-grouped-gemv-ncu-20260829.csv` (#2289) landed
 # on `main` with no class at all. `classify_path` FAILS CLOSED, so the
 # whole-tree sweep in this checker's suite went red on `main` itself. A
 # profiler export is evidence exactly as a `.log` is.
-BENCH_EVIDENCE = re.compile(r"(?:benchmarks/(?:demo|media)|docs/bench-evidence)/[A-Za-z0-9_.-]+\.(?:json|png|gif|mp4|log|csv)\Z")
+BENCH_EVIDENCE = re.compile(r"(?:benchmarks/(?:demo|media)|docs/bench-evidence)/[A-Za-z0-9_.-]+\.(?:json|png|gif|mp4|log|csv|txt)\Z")
+# `txt` joined 2026-10-04: docs/bench-evidence/qwen4exp-layerfp-2999-20260923-full-log.txt
+# landed on main as a flat per-run full log. A `.txt` log is evidence exactly as
+# a `.log` is; the run-id in the file name already carries the per-run shape.
 # A PER-RUN evidence directory: docs/bench-evidence/<run-id>/<file> (#1448).
 # AGENTS.md requires the exact build and run recipe beside a measurement, so one
 # run arrives as a dated directory of logs, dumps and the scripts that produced
@@ -301,8 +318,15 @@ BENCH_EVIDENCE = re.compile(r"(?:benchmarks/(?:demo|media)|docs/bench-evidence)/
 # suffix licence.
 BENCH_EVIDENCE_RUN = re.compile(
     r"docs/bench-evidence/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
-    r"\.(?:txt|log|gz|sh|cu|py|jsonl|rc)\Z"
+    r"\.(?:txt|log|gz|sh|cu|cpp|py|jsonl|rc)\Z"
 )
+# `cpp` joined 2026-10-04: the tt-matmul/tt-trace/tt-ttm retention per-run
+# directories carry repro_*.cpp instruments. A repro source is the recipe that
+# produced the number -- the same claim the `.sh`/`.py` arms make -- and
+# nothing outside docs/ builds, installs or executes them. `.patch` stays OUT:
+# the near-miss test pins a patch to the exact RECORDED_BENCH_EVIDENCE set, so
+# ttledger-instrument.patch joins that set instead (uninspected harness patches
+# must not inherit the evidence class).
 # #3060: exact client stdout and the harness patch archived with two EXL3 runs.
 # The patch records an external server-wrapper adaptation, and the live
 # variadic recipe applies its staged copy. Keep this admission exact so an
@@ -310,6 +334,9 @@ BENCH_EVIDENCE_RUN = re.compile(
 # Source/history: .agents/specs/gate-pr-size-bench-evidence.md.
 RECORDED_BENCH_EVIDENCE = frozenset(
     {
+        # #3393: the TT ledger instrument patch archived with the tt-ttm
+        # retention run. Same shape as the #3060 admission below.
+        "docs/bench-evidence/tt-ttm-retention-repro-20260925/ttledger-instrument.patch",
         "docs/bench-evidence/qwen38-27b-exl3-headtohead-20260903/OURS-A.clientlog",
         "docs/bench-evidence/qwen38-27b-exl3-headtohead-20260903/OURS-B.clientlog",
         "docs/bench-evidence/qwen38-27b-exl3-headtohead-20260903/THEIRS-A.clientlog",
@@ -592,6 +619,7 @@ def classify_path(path: str) -> str:
         or SPEC.fullmatch(path)
         or CLAIM.fullmatch(path)
         or ORACLE.fullmatch(path)
+        or COMPARATOR.fullmatch(path)
         or COMPLETED.fullmatch(path)
         or COMPLETED_STATE_EVENT.fullmatch(path)
     ):
@@ -603,6 +631,7 @@ def classify_path(path: str) -> str:
         or SYNC_RECORD.fullmatch(path)
         or BENCH_EVIDENCE.fullmatch(path)
         or BENCH_EVIDENCE_RUN.fullmatch(path)
+        or AGENT_EVIDENCE_RUN.fullmatch(path)
         or path in RECORDED_BENCH_EVIDENCE
         or AGENT_RUN_SCRIPT.fullmatch(path)
     ):
@@ -850,7 +879,18 @@ def deleted_paths(base: str, head: str, *, repo: Path = ROOT) -> set[str]:
 
 
 EVIDENCE_REQUIRED_TOOLS = {
-    "tests.scripts.test_check_windows_portability": ("cmake", "ninja"),
+    # pwsh: `check-windows-portability.py` executes `pwsh` for its PowerShell
+    # AST stage (scripts/check-windows-portability.py:2028) and skips the stage
+    # when `shutil.which("pwsh")` misses. The evidence lane's sanitized PATH is
+    # `os.defpath` (`/bin:/usr/bin`) plus the private tools directory
+    # (`_sanitized_env` below), so the pr-size job's tarball install at
+    # `/usr/local/bin/pwsh` (.github/workflows/ci.yml) is INVISIBLE to both
+    # lanes until it is declared here: a changed test whose red runs through
+    # the AST stage then stays green at BASE and the gate rejects the evidence
+    # with "BASE checker stayed green". Declaring it puts the same pwsh in
+    # HEAD's and BASE's PATH, which is the toolchain symmetry ci.yml installs
+    # pwsh for.
+    "tests.scripts.test_check_windows_portability": ("cmake", "ninja", "pwsh"),
     # #1892: this module CONFIGURES CMake in nearly every case and uses the
     # `Ninja Multi-Config` generator in one of them. Without the declaration it
     # ran with an empty private tools directory and died with

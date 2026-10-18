@@ -24,3 +24,5 @@ glm4       # plain-w add+RMSNorm at input/post/final sites → kFusedAddRmsNormS
            # half for this model and does NOT cover this check — see scripts/merged-gemm-consistency-allowlist.txt.
 phi3       # plain-w add+RMSNorm at input/post/final sites → kFusedAddRmsNormStd; pending #314 (the GLUE half). FUSION-DENSE-MIGRATE/#299 closed the MERGED-GEMM
            # half for this model and does NOT cover this check — see scripts/merged-gemm-consistency-allowlist.txt.
+kolibri1_forward    # hand add+RMSNorm residual sites (input/post-attn/final) exactly as landed by the
+           # kolibri-1 port (W2); pending vt::FusedChain migration — NOT an adoption claim.

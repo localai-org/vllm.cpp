@@ -45,9 +45,9 @@ int main(void) {
 ```
 
 The ABI covers engine lifecycle, completion, chat, embeddings, entity extraction,
-transcription, media generation, speech generation, decisions, option scoring, memory helpers,
+transcription, speaker diarization, media generation, speech generation, decisions, option scoring, memory helpers,
 and diagnostics. It also exposes blocking, streaming, and concurrent request
-interfaces. The current version is `VLLM_ABI_VERSION 29`.
+interfaces. The current version is `VLLM_ABI_VERSION 30`.
 
 Read [`include/vllm.h`](../../include/vllm.h) for the fields and functions in
 the current ABI. Call `vllm_abi_version()` at runtime to detect a header and
@@ -82,6 +82,59 @@ individual fields.
   A non-GLiNER2 engine returns `VLLM_ERR_INVALID_ARGUMENT`.
   On failure, the function zeroes a non-null output and sets `vllm_last_error()`.
   See the [GLiNER C API example](../USAGE.md#through-the-c-abi-v27) for loading, calling, and cleanup.
+
+## Speaker diarization
+
+ABI 30 adds standalone speaker diarization through
+[the diarization declarations](../../include/vllm.h).
+Build with `VLLM_CPP_WITH_DIARIZATION=ON`, the default.
+See the [dependency options](../BUILD.md#speaker-diarization-dependency).
+
+Load a Nemotron-3-Diarization GGUF with `vllm_diarization_load(path)`.
+The returned `vllm_engine*` is a standalone diarization handle.
+A failed load returns `NULL`. Read `vllm_last_error()` for details.
+
+| Call | Input | Result |
+|---|---|---|
+| `vllm_diarize_path` | Diarization handle and WAV path | `vllm_diarization` |
+| `vllm_diarize_pcm` | Diarization handle and mono float32 PCM at 16 kHz | `vllm_diarization` |
+
+Pass `n_samples` and `sample_rate = 16000` to the PCM call.
+Speaker segments contain a zero-based `speaker` ID and `start` and `end` times in seconds.
+The caller owns the result struct. The library allocates its segment array.
+Call `vllm_diarization_free(&result)` before reusing the struct.
+This function clears the struct and accepts `NULL`.
+Release the engine with `vllm_engine_free()`.
+
+The status-returning calls return `VLLM_OK` on success. On failure, read `vllm_last_error()`.
+With diarization disabled, loading returns `NULL`, and processing calls return `VLLM_ERR_INVALID_ARGUMENT` with a “not compiled in” message.
+
+### Combined transcription limitation
+
+**The exported combined calls are unavailable through the normal public ASR loading path.**
+`vllm_engine_load()` creates the Parakeet transcriber from a Hugging Face directory.
+It passes that same directory to the dependency's GGUF-only ASR loader without checking for failure.
+The resulting null ASR context makes the combined calls return `VLLM_OK` with zero utterances.
+An empty successful result therefore does not establish that the audio contains no speech.
+This limitation does not affect the standalone diarization calls above.
+
+The following declarations describe the exported interface, not a working combined-transcription recipe:
+
+| Call | Declared input | Result |
+|---|---|---|
+| `vllm_transcribe_and_diarize` | Parakeet ASR handle, diarization handle, and WAV path | `vllm_sas_result` |
+| `vllm_transcribe_and_diarize_pcm` | Both handles and mono float32 PCM at 16 kHz | `vllm_sas_result` |
+
+Combined results contain utterances with `speaker`, `text`, `start`, `end`, and `conf` fields.
+The library allocates their arrays and strings.
+`vllm_sas_result_free(&result)` releases those allocations, clears the struct, and accepts `NULL`.
+
+The combined path call also assumes a 44-byte WAV header followed by mono PCM16 samples at 16 kHz.
+It does not parse arbitrary WAV chunks or resample the input.
+The PCM variant accepts decoded samples but does not bypass the ASR loading limitation.
+See the [implementation](../../src/capi/vllm_c.cpp) and the
+[tracked loading gap](../../.agents/issues/_owed/ISSUE-LOCAL-01M4FA8QB4RE33B14KGHK699S4.md)
+for source evidence. This documentation audit runs no end-to-end audio validation.
 
 ## Decisions and option scoring
 

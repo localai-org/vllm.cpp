@@ -116,7 +116,13 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // `registry.py:86` @ `a7c23ac96d`. Its EAGLE drafter is not registered.
   // Combined: 54 + 2 (Nemotron Nano VL/Omni) + 1 (Nimble) + 1 (Cohere2 North) = 58.
   // `NimbleModel` (MODEL-NIMBLE) is a POOLING decision model like ClmModel.
-  REQUIRE(registrations.size() == 58);
+  // 58 -> 59 on MODEL-TEXT-kolibri-1 (W1,
+  // ISSUE-LOCAL-01M41VCM4Z0JEFQHBFS5VT0GYA): `Kolibri1ForCausalLM`, its own
+  // additive TU. A beyond-pin hybrid text-only LLM (50 layers, 4 SWA : 1
+  // full RNoPE, MoE 384x6 + shared) with no vLLM registration. W1 gate is:
+  // config parses, KV-cache spec builds, model resolves, FP8-block loader
+  // reads; the forward refuses until its wave.
+  REQUIRE(registrations.size() == 59);
 
   for (const ModelRegistration& registration : registrations) {
     CAPTURE(registration.architecture);
@@ -231,7 +237,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // with the kExampleConfigArchitectures ledger; adding a model appends its two
   // entries here.
   const std::vector<std::string_view> supported = ModelRegistry::SupportedArchs();
-  REQUIRE(supported.size() == 58);
+  REQUIRE(supported.size() == 59);
   CHECK(std::is_sorted(supported.begin(), supported.end()));
   // The full byte-order sequence. Note "MiniCPM3" < "MiniCPMF" and "Phi3" <
   // "PhiF" ('3' 0x33 < 'F' 0x46); "OPT" < "Olmo" ('P' 0x50 < 'l' 0x6C); and among
@@ -273,6 +279,8 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "KevModel",
       "KimiK3ForConditionalGeneration",
       "KimiLinearForCausalLM",
+      // "Kolibri1" sorts before "Laguna": 'K' (0x4B) < 'L' (0x4C).
+      "Kolibri1ForCausalLM",
       "LagunaForCausalLM",
       "LayaModel",
       "LlamaForCausalLM",
@@ -484,7 +492,8 @@ TEST_CASE("registry_model_property: Qwen registrations match pinned _ModelInfo")
       // follow the GDN-hybrid twin kQwen3_5Info convention.
       CHECK(registration.info.is_hybrid);
       CHECK_FALSE(registration.info.supports_multimodal);
-    } else if (registration.architecture == "MiMoV2ForCausalLM") {
+    } else if (registration.architecture == "MiMoV2ForCausalLM" ||
+               registration.architecture == "Kolibri1ForCausalLM") {
       // MODEL-TEXT-mimo-v2 W1 (ISSUE-LOCAL-01M3F82S8ZYCTTDSKPFF5PGAH7):
       // text-only HYBRID — 8 full-attention layers (every 6th) + 40 SWA
       // layers, each with a DIFFERENT KV geometry (4 vs 8 KV heads,
@@ -854,7 +863,7 @@ TEST_CASE("Qwen3.5 SSM cache dtype accepts upstream torch aliases exactly") {
 TEST_CASE("hf_registry_coverage: every registration has an example config fixture") {
   // C++ fixture registry for the currently implemented subset. Keep this list
   // alias-for-alias with the central ordered table, mirroring HF_EXAMPLE_MODELS.
-  constexpr std::array<std::string_view, 58> kExampleConfigArchitectures{
+  constexpr std::array<std::string_view, 59> kExampleConfigArchitectures{
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
@@ -885,6 +894,8 @@ TEST_CASE("hf_registry_coverage: every registration has an example config fixtur
       "KevModel",
       "KimiK3ForConditionalGeneration",
       "KimiLinearForCausalLM",
+      // "Kolibri1" sorts before "Laguna": 'K' (0x4B) < 'L' (0x4C).
+      "Kolibri1ForCausalLM",
       "LagunaForCausalLM",
       "LayaModel",
       "LlamaForCausalLM",
@@ -1003,6 +1014,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       "'Glm5NextForConditionalGeneration', 'GlmMoeDsaForCausalLM', 'GraniteForCausalLM', "
       "'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', "
       "'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', "
+      "'Kolibri1ForCausalLM', "
       "'LagunaForCausalLM', 'LayaModel', "
       "'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', "
       "'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "

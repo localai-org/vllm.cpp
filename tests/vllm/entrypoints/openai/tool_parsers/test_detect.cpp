@@ -219,7 +219,10 @@ TEST_CASE("Registry: every enumerated tool-parser name resolves") {
   // llama3_json/llama4_json, qwen3_coder/qwen3_xml/mimo, glm45/glm47).
   // 2026-08-10 (MODEL-MUSE-GLIMMER-W7): 40 -> 41, adding "muse_glimmer".
   // 2026-08-13 (TOOLS-PARSER-BREADTH W1, #608): 41 -> 42, adding "inkling".
-  CHECK(names.size() == 42);
+  // 2026-10-08 (MODEL-TEXT-kolibri-1 serving completion): 42 -> 43, adding
+  // "kolibri1" — an ALIAS to the hermes family, per the model-author plugin's
+  // registration (aleph-alpha-inference __init__.py:50-54).
+  CHECK(names.size() == 43);
   // Every name the marker table can emit must itself be a registered name.
   std::size_t marker_count = 0;
   const ToolParserMarker* markers = ToolParserMarkerTable(&marker_count);

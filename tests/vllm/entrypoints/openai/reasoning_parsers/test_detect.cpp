@@ -104,7 +104,9 @@ TEST_CASE("Registry: every enumerated reasoning-parser name resolves") {
   // 2026-08-10 (MODEL-MUSE-GLIMMER-W7): 9 -> 10, adding "muse_glimmer".
   // 2026-08-13 (SAMPLE-REASONING W3, #605): 10 -> 12, adding the engine-backed
   // "qwen3" + its "mimo" alias (ONE class, two upstream registry names).
-  CHECK(names.size() == 12);
+  // 2026-10-08 (MODEL-TEXT-kolibri-1 serving completion): 12 -> 13, adding
+  // "kolibri1" (the model-author plugin's reasoning parser name).
+  CHECK(names.size() == 13);
   std::size_t marker_count = 0;
   const ReasoningParserMarker* markers = ReasoningParserMarkerTable(&marker_count);
   for (std::size_t i = 0; i < marker_count; ++i) {

@@ -28,8 +28,16 @@ namespace {
 // tool-definition preamble: a full literal, shared with nothing else here,
 // and the same tell the tool-parser table uses (the two parsers are always
 // selected together).
+// kolibri1: the Kolibri template's no-reasoning system sentence
+// ("Reasoning is disabled. Proceed straight to answering…") is a full literal
+// shared with no other row and contained by no other row's marker. It must
+// precede the generic "<think>" row, which the same template also contains
+// (the plugin serves kolibri1's OWN reasoning parser, not think_auto:
+// aleph-alpha-inference __init__.py:44-48).
 constexpr ReasoningParserMarker kReasoningParserMarkers[] = {
     {"muse_glimmer", "<atem:function_calls>"},
+    {"kolibri1",
+     "Reasoning is disabled. Proceed straight to answering"},
     {"mistral", "[THINK]"},
     {"think_auto", "<think>"},
 };

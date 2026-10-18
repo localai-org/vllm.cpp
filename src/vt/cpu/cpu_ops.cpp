@@ -21,6 +21,10 @@
 #include "vt/quant.h"   // cpu::BlockToFloat — the quantized gather's row decode
 #include "vt/unaligned.h"
 
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 namespace vt::cpu {
 namespace {
 
@@ -362,6 +366,10 @@ void MatmulChunked(Tensor& out, const Tensor& a, const Tensor& b) {
 
   Threadpool& tp = CurrentThreadpool();
   tp.Run([&](int ith, int nth) {
+    // SCRATCH (VT_GEMV_PROF): per-worker compute time in the chunk loop.
+    vt::cpu::GemvProfState& gp = vt::cpu::GemvProfStateForOps();
+    const bool prof = gp.on;
+    uint64_t busy = 0;
     if (ith == 0) {
       // Every thread starts at ith, so the first unprocessed chunk is nth.
       tp.ChunkSet(nth);
@@ -419,7 +427,9 @@ void MatmulChunked(Tensor& out, const Tensor& a, const Tensor& b) {
       const int64_t ir1_start = dr1 * ith1;
       const int64_t ir1_end = std::min(ir1_start + dr1, nr1);
 
+      const uint64_t tb0 = prof ? vt::cpu::ProfNowNs() : 0;
       MatmulOneChunk<kBT>(out, a, b, k, n, ir0_start, ir0_end, ir1_start, ir1_end);
+      if (prof) busy += vt::cpu::ProfNowNs() - tb0;
 
       // Same switch: the early break is what makes the collapsed grid a pure
       // static partition. With stealing enabled we keep pulling chunks.
@@ -429,6 +439,7 @@ void MatmulChunked(Tensor& out, const Tensor& a, const Tensor& b) {
 
       current_chunk = tp.ChunkAdd(1);
     }
+    if (prof) gp.busy_ns.fetch_add(busy, std::memory_order_relaxed);
   });
 }
 
@@ -456,6 +467,116 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
     return;
   }
   MatmulChunked<true>(out, a, b);
+}
+
+// vt::MatmulBTBatch CPU kernel (OpId::kMatmulBTBatch): N independent
+// MatmulChunked<true> jobs flattened into ONE Threadpool::Run. The chunk grid
+// of each job is built EXACTLY as MatmulChunked builds it for that job alone
+// (same chunk_size rule, same collapse rule), so a job's outputs see the same
+// kernel over the same rows — and because every output element's K reduction
+// is local and strictly sequential (MatmulOneChunk), which worker carries
+// which output cannot move a bit. Bit-identical to the per-job kMatmulBT
+// loop by construction.
+void MatmulBTBatchKernel(Queue&, const MatmulBTJob* jobs, int64_t nj) {
+  struct BatchJob {
+    Tensor out, a, b;
+    int64_t m, k, n;
+    bool bt;  // true: b is [N,K] elementwise; false: b is a repacked [K,N] view
+  };
+  std::vector<BatchJob> js;
+  js.reserve(static_cast<size_t>(nj));
+  for (int64_t j = 0; j < nj; ++j) {
+    BatchJob bj{*jobs[j].out, *jobs[j].a, *jobs[j].b,
+                jobs[j].a->shape[0], jobs[j].a->shape[1], jobs[j].b->shape[0],
+                /*bt=*/true};
+    // Same loader-repacked [K,N] byte layout handling as MatmulBTKernel: the
+    // repacked weight is presented as the [K,N] tensor it literally is and
+    // takes the transpose-free orientation.
+    if (bj.b.elem_kn_repacked) {
+      Tensor bkn = bj.b;
+      bkn.shape[0] = bj.b.shape[1];
+      bkn.shape[1] = bj.b.shape[0];
+      bkn.stride[0] = bj.b.shape[0];
+      bkn.stride[1] = 1;
+      bj.b = bkn;
+      bj.bt = false;
+    }
+    js.push_back(std::move(bj));
+  }
+  if (js.empty()) {
+    return;
+  }
+
+  Threadpool& tp = CurrentThreadpool();
+  tp.Run([&](int ith, int nth) {
+    vt::cpu::GemvProfState& gp = vt::cpu::GemvProfStateForOps();
+    const bool prof = gp.on;
+    uint64_t busy = 0;
+
+    // Per-job chunk grids, exactly MatmulChunked's.
+    struct Grid {
+      int64_t nchunk0, nchunk1, dr0, dr1, total;
+    };
+    std::vector<Grid> grids(js.size());
+    int64_t total_chunks = 0;
+    const bool steal = MatmulStealEnabled();
+    for (size_t j = 0; j < js.size(); ++j) {
+      const int64_t nr0 = js[j].n, nr1 = js[j].m;
+      int chunk_size = 16;
+      if (nr0 == 1 || nr1 == 1) chunk_size = 64;
+      int64_t nchunk0 = (nr0 + chunk_size - 1) / chunk_size;
+      int64_t nchunk1 = (nr1 + chunk_size - 1) / chunk_size;
+      if ((nchunk0 * nchunk1 < nth * 4 && !steal) || IsNuma()) {
+        nchunk0 = nr0 > nr1 ? nth : 1;
+        nchunk1 = nr0 > nr1 ? 1 : nth;
+      }
+      Grid g{nchunk0, nchunk1,
+             (nr0 + nchunk0 - 1) / nchunk0, (nr1 + nchunk1 - 1) / nchunk1,
+             nchunk0 * nchunk1};
+      // The per-job early break (`nth >= total && !steal`) executes only the
+      // first `nth` chunks of the job; replicate the same executed-chunk set.
+      if (nth >= g.total && !steal) g.total = std::min(g.total, static_cast<int64_t>(nth));
+      grids[j] = g;
+      total_chunks += g.total;
+    }
+
+    if (ith == 0) {
+      tp.ChunkSet(nth);
+    }
+    tp.Barrier();
+
+    auto serve = [&](int64_t c) {
+      // Map a global chunk to its job and in-job (ith0, ith1).
+      int64_t off = 0;
+      size_t j = 0;
+      for (; j + 1 < js.size(); ++j) {
+        if (c < off + grids[j].total) break;
+        off += grids[j].total;
+      }
+      const Grid& g = grids[j];
+      const int64_t lc = c - off;
+      const int64_t ir0_start = g.dr0 * (lc % g.nchunk0);
+      const int64_t ir0_end = std::min(ir0_start + g.dr0, js[j].n);
+      const int64_t ir1_start = g.dr1 * (lc / g.nchunk0);
+      const int64_t ir1_end = std::min(ir1_start + g.dr1, js[j].m);
+      const uint64_t tb0 = prof ? vt::cpu::ProfNowNs() : 0;
+      if (js[j].bt) {
+        MatmulOneChunk<true>(js[j].out, js[j].a, js[j].b, js[j].k, js[j].n,
+                             ir0_start, ir0_end, ir1_start, ir1_end);
+      } else {
+        MatmulOneChunk<false>(js[j].out, js[j].a, js[j].b, js[j].k, js[j].n,
+                              ir0_start, ir0_end, ir1_start, ir1_end);
+      }
+      if (prof) busy += vt::cpu::ProfNowNs() - tb0;
+    };
+
+    int64_t current_chunk = ith;
+    while (current_chunk < total_chunks) {
+      serve(current_chunk);
+      current_chunk = tp.ChunkAdd(1);
+    }
+    if (prof) gp.busy_ns.fetch_add(busy, std::memory_order_relaxed);
+  });
 }
 
 // vt::BatchedMatmul (`torch.bmm`) CPU reference — out[G,M,N] = a[G,M,K] @
@@ -3299,9 +3420,42 @@ void MoeRouterGroupedTopKKernel(Tensor& weights, Tensor& indices, const Tensor& 
 
 // §3 router: softmax (f32, over all E) -> greedy top-k (lowest-index tie-break)
 // -> optional renormalize. weights [T,K] f32, indices [T,K] i32.
+// The Kolibri-1 router as a kernel: EXACTLY SigmoidLogitAddRouting
+// (kolibri1_shared.h, kolibri1.py:126-142) — selection score = RAW logit +
+// e_score_correction_bias, weight = sigmoid of the UNBIASED logit, NO
+// renormalization, ties break to the LOWER expert index (strict `>` scan over
+// ascending index). The CPU reference and the executable spec; the TT kernel
+// mirrors it (the op is the seam that removes the kolibri1 TT arm's
+// per-layer full-tail router-logits download).
+void SigmoidBiasTopKKernel(Queue&, Tensor& weights, Tensor& indices,
+                           const Tensor& logits, const Tensor& bias, int top_k) {
+  const int64_t t = logits.shape[0], e = logits.shape[1];
+  const float* l = logits.Ptr<float>();
+  const float* b = bias.Ptr<float>();
+  for (int64_t i = 0; i < t; ++i) {
+    const float* row = l + i * e;
+    std::vector<char> taken(static_cast<size_t>(e), 0);
+    for (int kk = 0; kk < top_k; ++kk) {
+      int64_t best = -1;
+      float best_score = 0.0f;
+      for (int64_t j = 0; j < e; ++j) {
+        if (taken[static_cast<size_t>(j)]) continue;
+        const float score = row[j] + b[j];
+        if (best < 0 || score > best_score) {
+          best = j;
+          best_score = score;
+        }
+      }
+      taken[static_cast<size_t>(best)] = 1;
+      weights.Ptr<float>()[i * top_k + kk] =
+          1.0f / (1.0f + std::exp(-row[best]));
+      indices.Ptr<int32_t>()[i * top_k + kk] = static_cast<int32_t>(best);
+    }
+  }
+}
+
 void MoeRouterTopKKernel(Queue&, Tensor& weights, Tensor& indices, const Tensor& logits,
-                         const MoeRouterTopKArgs& args, const Tensor* bias) {
-  if (args.num_expert_group > 0) {  // W3 grouped-topk (`noaux_tc`) path
+                         const MoeRouterTopKArgs& args, const Tensor* bias) {  if (args.num_expert_group > 0) {  // W3 grouped-topk (`noaux_tc`) path
     MoeRouterGroupedTopKKernel(weights, indices, logits, args, bias);
     return;
   }
@@ -3368,11 +3522,85 @@ void MoeRouterTopKKernel(Queue&, Tensor& weights, Tensor& indices, const Tensor&
 // on `fused_output.dtype == torch.float16`; the analogue here is `out`, whose
 // dtype `MoeCombine` gates through `IsOutFloat` (ops.cpp:22 — f32/bf16 only, no
 // kF16), so no caller can reach it. Pinned by the f16-out refusal test.
+#if defined(__aarch64__)
+
+// bf16 store for 4 f32 lanes, BIT-IDENTICAL to vt::F32ToBF16 per lane:
+// round-to-nearest-even via 0x7FFF + lsb (may carry into the exponent), and
+// the NaN branch truncate-and-quiet ((u >> 16) | 0x40). This is the same
+// vectorized store kolibri1_fp8_dequant.h's F32x4ToBf16x4 uses, asserted
+// bit-identical to F32ToBF16 over the domain by test_kolibri1_dequant.cpp.
+inline uint16x4_t F32x4ToBf16x4(float32x4_t v) {
+  const uint32x4_t u = vreinterpretq_u32_f32(v);
+  const uint32x4_t exp_all_ones =
+      vceqq_u32(vandq_u32(u, vdupq_n_u32(0x7F800000U)), vdupq_n_u32(0x7F800000U));
+  const uint32x4_t mant_nonzero = vceqq_u32(vandq_u32(u, vdupq_n_u32(0x7FFFFFU)), vdupq_n_u32(0U));
+  const uint32x4_t nan_mask = vandq_u32(exp_all_ones, vmvnq_u32(mant_nonzero));
+  const uint32x4_t lsb = vandq_u32(vshrq_n_u32(u, 16), vdupq_n_u32(1U));
+  // 0x7FFF + lsb: round to nearest even, may carry into the exponent.
+  const uint32x4_t rnd = vaddq_u32(vaddq_u32(u, vdupq_n_u32(0x7FFFU)), lsb);
+  const uint32x4_t norm = vshrq_n_u32(rnd, 16);
+  const uint32x4_t nan_bf = vorrq_u32(vshrq_n_u32(u, 16), vdupq_n_u32(0x40U));
+  return vqmovn_u32(vbslq_u32(nan_mask, nan_bf, norm));
+}
+
+// bf16 widening of 4 lanes, bit-identical to vt::BF16ToF32 (the shift-left-16
+// is an exact integer rewrite; the same widening the GEMM's LoadV4<kBF16>
+// uses, asserted there).
+inline float32x4_t Bf16x4ToF32x4(uint16x4_t b) {
+  return vreinterpretq_f32_u32(vshll_n_u16(b, 16));
+}
+
+#endif  // defined(__aarch64__)
+
 void MoeCombineKernel(Queue&, Tensor& out, const Tensor& expert_out, const Tensor& weights,
                       const Tensor* shared, float routed_scale) {
   const int64_t t = out.shape[0], h = out.shape[1], k = weights.shape[1];
   ForRows(t, [&](int64_t r0, int64_t r1) {
   for (int64_t row = r0; row < r1; ++row) {
+#if defined(__aarch64__)
+    // ORDER-PRESERVING NEON across the independent output COLUMNS — the same
+    // construction as the landed Bt16Neon GEMM tier (cpu_matmul_elem.cpp): the
+    // reduction axis (j) is NEVER vectorized or reordered; each lane runs the
+    // scalar loop's exact sequence acc = 0; for j: acc += w_j * eo_j, with
+    // products vmulq + vaddq (NEVER vfmaq), so every rounding point matches the
+    // scalar body at the project-pinned -ffp-contract=off. The scale multiply
+    // and the shared add keep their scalar placement (one rounding each, in
+    // the same order), and the store is the RNE of F32ToBF16. Bit-identity
+    // over the real expert geometries (2560-wide hidden, 6-of-384 slots, the
+    // shared-expert path, ragged/tail shapes, ties/overflow/NaN,
+    // cross-thread) is pinned by tests/vllm/models/test_kolibri1_moe_glue.cpp.
+    // The fast path covers the all-bf16 polarity (kolibri1's); every other
+    // dtype combination keeps the scalar loop below, unchanged.
+    if (out.dtype == DType::kBF16 && expert_out.dtype == DType::kBF16 &&
+        (shared == nullptr || shared->dtype == DType::kBF16)) {
+      const float* wrow = weights.Ptr<float>() + row * k;
+      const auto* eo = static_cast<const uint16_t*>(expert_out.data) + row * k * h;
+      const auto* shp =
+          shared != nullptr ? static_cast<const uint16_t*>(shared->data) + row * h : nullptr;
+      auto* op = out.Ptr<uint16_t>() + row * h;
+      int64_t col = 0;
+      for (; col + 4 <= h; col += 4) {
+        float32x4_t acc = vdupq_n_f32(0.0f);
+        for (int64_t j = 0; j < k; ++j) {
+          const float32x4_t w = vdupq_n_f32(wrow[j]);
+          acc = vaddq_f32(acc, vmulq_f32(w, Bf16x4ToF32x4(vld1_u16(eo + j * h + col))));
+        }
+        if (routed_scale != 1.0f) acc = vmulq_f32(acc, vdupq_n_f32(routed_scale));
+        if (shp != nullptr)
+          acc = vaddq_f32(acc, Bf16x4ToF32x4(vld1_u16(shp + col)));
+        vst1_u16(op + col, F32x4ToBf16x4(acc));
+      }
+      for (; col < h; ++col) {  // scalar tail, the identical per-element order
+        float acc = 0.0f;
+        for (int64_t j = 0; j < k; ++j)
+          acc += wrow[j] * BF16ToF32(eo[j * h + col]);
+        if (routed_scale != 1.0f) acc *= routed_scale;
+        if (shp != nullptr) acc += BF16ToF32(shp[col]);
+        op[col] = F32ToBF16(acc);
+      }
+      continue;
+    }
+#endif
     for (int64_t col = 0; col < h; ++col) {
       float acc = 0.0f;
       for (int64_t j = 0; j < k; ++j)
@@ -4320,6 +4548,9 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<MatmulFn>(&MatmulKernel)));
     RegisterOp(OpId::kMatmulBT, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<MatmulFn>(&MatmulBTKernel)));
+    RegisterOp(OpId::kMatmulBTBatch, DeviceType::kCPU,
+               reinterpret_cast<void*>(
+                   static_cast<MatmulBTBatchFn>(&MatmulBTBatchKernel)));
     RegisterOp(OpId::kBatchedMatmul, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<BatchedMatmulFn>(&BatchedMatmulKernel)));
     RegisterOp(
@@ -4447,6 +4678,8 @@ struct Registrar {
                    static_cast<VHeadPermuteFn>(&VHeadPermuteKernel)));
     RegisterOp(OpId::kMoeRouterTopK, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<MoeRouterTopKFn>(&MoeRouterTopKKernel)));
+    RegisterOp(OpId::kSigmoidBiasTopK, DeviceType::kCPU,
+               reinterpret_cast<void*>(static_cast<SigmoidBiasTopKFn>(&SigmoidBiasTopKKernel)));
     RegisterOp(OpId::kMoeCombine, DeviceType::kCPU,
                reinterpret_cast<void*>(static_cast<MoeCombineFn>(&MoeCombineKernel)));
     RegisterOp(OpId::kAttention, DeviceType::kCPU,

@@ -109,7 +109,11 @@ ttnn::Tensor chunked_scaled_dot_product_attention(
         paged_cache_geometry = std::nullopt);
 // The GDN chunked scan (BACKEND-TENSTORRENT-GDN W1): the pinned source tree
 // carries ttnn/cpp/ttnn/operations/transformer/chunk_gated_delta_rule/
-// chunk_gated_delta_rule.hpp; the signature below mirrors it 1:1.
+// chunk_gated_delta_rule.hpp; the signature below mirrors it 1:1. The
+// advanced pin (98134127a7b) carried a `bool use_mcast` after
+// output_head_major; the updated tt-metal stack (tt_umd 0.9.12 era,
+// ISSUE-LOCAL-01M4GPEZ987KVAXCYBFB2EVNT7) removed that flag — the exported
+// _ttnncpp.so symbol takes 17 params without it. No call site passed it.
 std::tuple<ttnn::Tensor, std::optional<ttnn::Tensor>> chunk_gated_delta_rule(
     const ttnn::Tensor& q, const ttnn::Tensor& k, const ttnn::Tensor& v,
     const ttnn::Tensor& g, const ttnn::Tensor& beta,
@@ -117,9 +121,6 @@ std::tuple<ttnn::Tensor, std::optional<ttnn::Tensor>> chunk_gated_delta_rule(
     const std::optional<ttnn::Tensor>& initial_state = std::nullopt,
     bool output_final_state = false, uint32_t chunk_size = 64,
     bool use_qk_l2norm = false, bool output_head_major = false,
-    // The advanced pin (98134127a7b, chunk_gated_delta_rule.hpp:41) adds the
-    // multicast flag at this position; mirror 1:1.
-    bool use_mcast = true,
     const std::optional<ttnn::MemoryConfig>& memory_config = std::nullopt,
     const std::optional<DeviceComputeKernelConfig>& compute_kernel_config = std::nullopt,
     const std::optional<ttnn::Tensor>& eye = std::nullopt,
@@ -146,8 +147,8 @@ std::tuple<ttnn::Tensor, std::optional<ttnn::Tensor>> chunk_gated_delta_rule(
 #include <tt-metalium/circular_buffer.hpp>
 #include <tt-metalium/circular_buffer_config.hpp>
 #include <tt-metalium/tensor_accessor_args.hpp>
+#include "tt_tensor_spec_compat.hpp"
 #include <filesystem>
-#include <tt-metalium/tensor/spec/memory_config/memory_config.hpp>
 // Exact row gather/scatter for the GDN caches (BACKEND-TENSTORRENT-GDN W2):
 // ttnn::gather (data_movement/gather/gather.hpp) and ttnn::indexed_fill
 // (indexed_fill/indexed_fill.hpp) are not in the installed include set at our
@@ -175,9 +176,6 @@ Tensor transpose(const Tensor& input_tensor, int64_t dim1, int64_t dim2,
 #undef VT_RESTORE_TRACY_ENABLE
 #endif
 
-#include <tt-metalium/tensor/spec/tensor_spec.hpp>
-#include <tt-metalium/tensor/spec/layout/tensor_layout.hpp>
-#include <tt-metalium/tensor/spec/layout/page_config.hpp>
 
 namespace vt::tenstorrent {
 
@@ -424,6 +422,30 @@ std::map<uintptr_t, WeightViewShadow>& WeightViewShadows();
 bool IsTrackedBase2D(const Tensor& t);
 ttnn::Tensor EnsureWeightViewDevice(const Tensor& t, MeshDevice& device);
 ttnn::Tensor EnsureMatmulWeightDevice(const Tensor& b, MeshDevice& device);
+
+// ---- The OWNED staged-weight seam (the memo-owner repair) -----------------
+// The kolibri1 TT routed-expert memo dequants a 7.86 MB bf16 slot buffer per
+// expert and frees it on eviction. Its views keyed into WeightViewShadows
+// made every eviction a full re-staging at the next touch and kept the
+// UnregisterHostBuffer scan and the MarkScratchAcquired drain on the decode
+// hot path (ISSUE-LOCAL-01M54CJVSXAW32PB9AVKGJG2RH). Here the CALLER owns
+// the staging: StageOwnedWeightDevice stages the contiguous rank-2 bf16 view
+// once and returns a shared_ptr whose deleter erases the lookup entry, so
+// the map holds exactly the live stagings, the transient-buffer hazard the
+// range sweeps exist for cannot arise for these buffers, and a memo entry
+// carries its staged device tensors through its lifetime. Because the entry
+// dies with its owner, a freed address never serves a new tenant (the
+// stale-serve property the sweeps enforce).
+std::mutex& OwnedWeightMutex();
+std::map<uintptr_t, std::shared_ptr<ttnn::Tensor>>& OwnedWeightShadows();
+std::shared_ptr<ttnn::Tensor> StageOwnedWeightDevice(const Tensor& t,
+                                                     MeshDevice& device);
+// Serves the live owned staging for `host` whose shape is exactly
+// [rows, cols], or nullptr. EnsureMatmulWeightDevice consults this BEFORE
+// any other residency, so a memo-owned view never (re)enters the
+// pointer-keyed transient maps.
+ttnn::Tensor* OwnedWeightLookup(const void* host, uint32_t rows,
+                                uint32_t cols);
 ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device);
 bool DeviceShadowExact(const Tensor& t, uint32_t rows, uint32_t cols);
 // ---- BFP8 weight residency (spec .agents/specs/tenstorrent-bfp-weight-

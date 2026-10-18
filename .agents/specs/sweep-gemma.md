@@ -116,7 +116,7 @@ Verified in `src/`/`include/` on base `d85fd04`:
   (STANDALONE), `pre_feedforward_layernorm`, `post_feedforward_layernorm`
   (`gemma3.py:254-289`) are the SAME pattern. **REUSE — a cross-family additivity
   proof, GLM -> Gemma.**
-- **SentencePiece tokenizer** — `src/vllm/tokenizer/tokenizer.cpp:175-189,449-475`
+- **SentencePiece tokenizer** — `src/vllm/tokenizer/tokenizer.cpp:185-199,459-485`
   detects the `Metaspace` pre-tokenizer and selects `Family::kSentencePiece`, and its
   own comments name **"Mistral/Gemma"** as the family. BOS is extracted via
   `ExtractBosEos` (`:311-360`) and `PrependScheme` (`:463-467`). **REUSE** — with a W0
@@ -324,7 +324,7 @@ REUSED as-is (each with the anchor and why):
 - **Sandwich norms** — `src/vllm/model_executor/models/glm4.cpp:155-188` (standalone
   `vt::RmsNorm` on sublayer output before the residual add), landed `b568d20`. Gemma-2/3
   pre/post-ff norms are the same pattern -> cross-family reuse.
-- **SentencePiece tokenizer + BOS** — `src/vllm/tokenizer/tokenizer.cpp:175-189,311-360,449-475`
+- **SentencePiece tokenizer + BOS** — `src/vllm/tokenizer/tokenizer.cpp:185-199,321-370,459-485`
   (Metaspace -> `kSentencePiece`, names "Mistral/Gemma"; `ExtractBosEos`;
   `PrependScheme`).
 - **Sliding-window / local attention** — FA-2 window
