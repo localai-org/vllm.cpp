@@ -693,8 +693,14 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // only refreshes the stamp; the table is unchanged.
   for (const int64_t resident : ld.resident_experts)
     st.pool.policy.Touch(layer, resident);
-  for (const Kolibri1TTSlotFetchJob& job : list.jobs) {
-    // Touch FIRST: the policy's slot is authoritative (the dispatch
+  // Stage one expert into its slot. The SAME body serves the dispatch
+  // fetch loop and the compute loop's on-demand fallback: a multi-token
+  // forward can select more DISTINCT experts on one layer than the pool
+  // holds slots (t x top_k up to 48 distinct against a 12-slot layer
+  // pool), and the fetch loop then evicts a same-step expert it fetched
+  // earlier — the compute loop repairs that miss in place instead of
+  // refusing "no slot holds it".
+  auto stage_expert = [&](int64_t expert) -> int64_t {
     // plan's fetch_slots are advisory — SuggestSlotFor is read-only over
     // the tables, so a multi-miss dispatch repeats the first free slot).
     const int64_t slot = st.pool.policy.Touch(layer, expert);
@@ -706,7 +712,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     // concatenated (gate, up, down) — the layout the pool stages.
     const Kolibri1ExpertWeights& ew =
         weights.layers[static_cast<size_t>(layer)]
-            .moe.experts[static_cast<size_t>(job.expert)];
+            .moe.experts[static_cast<size_t>(expert)];
     const Kolibri1Projection* projs[3] = {&ew.gate_proj, &ew.up_proj,
                                           &ew.down_proj};
     int64_t off = 0;
@@ -738,7 +744,9 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     ++st.slot_fills;
     st.staged_bytes += st.pool.packed_bytes_per_slot;
     if (was_swap) ++st.swap_fills;
-  }
+    return slot;
+  };
+  for (const Kolibri1TTSlotFetchJob& job : list.jobs) stage_expert(job.expert);
   // Re-record the epoch AFTER the fills so the next layer's check fires
   // only on a NEW content change (swaps it did not cause itself).
   st.epoch.Record(st.pool.policy);
@@ -781,7 +789,16 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     if (token_rows.empty()) continue;
     // The slot must hold this expert — a miss here is a miss-handle
     // refusal (the fetch above pinned every requested expert).
-    const int64_t slot = st.pool.policy.SlotFor(layer, ex);
+    int64_t slot = st.pool.policy.SlotFor(layer, ex);
+    if (slot < 0) {
+      // ON-DEMAND FALLBACK (the multi-token distinct-set overflow): the
+      // fetch loop's own Touches evicted a same-step selected expert
+      // because this layer's DISTINCT selected experts exceed the pool's
+      // slots. Stage it now — same body, same readback pivot — and charge
+      // the extra stream bytes so the B1 bound still sees the truth.
+      st.guard->Charge(layer, st.pool.packed_bytes_per_slot);
+      slot = stage_expert(ex);
+    }
     VT_CHECK(slot >= 0,
              "kolibri1-tt B2b-ii: expert " + std::to_string(ex) +
                  " selected on layer " + std::to_string(layer) +
@@ -940,6 +957,10 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     }
   }
   DBuf out(d, DType::kBF16, {t, h});
+  // The on-demand fallback stages changed the pool content INSIDE the
+  // compute loop; re-record so the next layer's reset-lane check fires
+  // only on content IT did not cause.
+  st.epoch.Record(st.pool.policy);
   if (std::getenv("VT_KOLIBRI1_TT_MEMO_STATS") != nullptr) {
     std::fprintf(stderr,
                  "[MEMO][TT] L%lld hits=%lld misses=%lld fills=%lld "

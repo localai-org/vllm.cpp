@@ -848,3 +848,65 @@ TEST_CASE("kolibri1 TT memo eviction: LRU victim, just-emplaced and hot "
   CHECK(memo.find(key2) != memo.end());
   CHECK(memo.find(std::make_pair(int64_t{0}, int64_t{3})) == memo.end());
 }
+
+// The same-step slot-miss condition the routed compute loop's on-demand
+// fallback repairs (kolibri1_tt_forward.cpp: the SlotFor-miss branch under
+// "ON-DEMAND FALLBACK"). The fallback itself runs only inside the device
+// forward, but its CONDITION is device-free and deterministic: one
+// MULTI-TOKEN step's route selects more DISTINCT experts on one layer than
+// the pool holds slots, and the fetch loop's own Touch calls evict a
+// same-step selected expert it staged earlier — the LRU pre-touch of the
+// residents does NOT prevent this, because on a cold pool every selected
+// expert is a miss and no resident exists to protect. This test pins that
+// condition against the real dispatch + policy sequence, in the exact
+// order the compute path runs it, so the miss stays constructible and the
+// fallback stays justified (ISSUE-LOCAL-01M574KY547WNSRFKGVKKGJDJF).
+TEST_CASE("kolibri1 TT slot policy: a same-step distinct-set overflow leaves "
+          "a same-step staged expert evicted — the compute loop's on-demand "
+          "fallback condition") {
+  Kolibri1TTSlotPolicyOptions o;
+  o.layers = 1;
+  o.experts = 384;
+  o.expert_bytes = 100;
+  o.device_residual_bytes = 300;  // capacity 2 slots on the one layer
+  o.requested_hot_experts = 2;
+  Kolibri1TTExpertSlotPolicy policy = PlanKolibri1TTExpertSlotPolicy(o);
+  REQUIRE(policy.capacity == 2);
+
+  // t x top_k = 3 distinct ids against a two-slot pool.
+  const std::vector<std::pair<int64_t, std::vector<int64_t>>> layer_req = {
+      {0, {7, 13, 29}}};
+  const Kolibri1TTDispatchPlan disp =
+      PlanKolibri1TTMoEDispatch(policy, layer_req);
+  REQUIRE(disp.layers.size() == 1);
+  CHECK(disp.layers[0].resident_experts.empty());
+  CHECK(disp.layers[0].missed_experts.size() == 3);
+  // The plan's fetch_slots are advisory and WRONG for a multi-miss
+  // dispatch: SuggestSlotFor is read-only, so every miss repeats the first
+  // free slot. The policy's Touch is authoritative — this is why the
+  // on-demand fallback stages through Touch, never through the plan.
+  CHECK(disp.layers[0].fetch_slots.size() == 3);
+  CHECK(disp.layers[0].fetch_slots[0] == disp.layers[0].fetch_slots[1]);
+  CHECK(disp.layers[0].fetch_slots[1] == disp.layers[0].fetch_slots[2]);
+
+  // The compute path's sequence: the pre-touch loop (no residents), then
+  // the fetch loop stages every miss via Touch.
+  for (const int64_t e : disp.layers[0].resident_experts)
+    (void)policy.Touch(0, e);
+  for (const int64_t e : disp.layers[0].missed_experts)
+    (void)policy.Touch(0, e);
+
+  // The compute loop walks the selected experts ascending. Expert 7 was
+  // staged FIRST and expert 29's Touch evicted it — a SAME-STEP staged
+  // expert, not an old resident: SlotFor reports the miss the on-demand
+  // fallback repairs instead of refusing "no slot holds it".
+  CHECK(policy.SlotFor(0, 7) < 0);
+  CHECK(policy.SlotFor(0, 13) >= 0);
+  CHECK(policy.SlotFor(0, 29) >= 0);
+  // And the repair is representable: re-Touching 7 lands it in a slot
+  // again (in the device forward this is stage_expert(7) re-staging the
+  // packed bytes into the slot the policy hands out).
+  const int64_t repaired = policy.Touch(0, 7);
+  CHECK(repaired >= 0);
+  CHECK(policy.SlotFor(0, 7) == repaired);
+}
