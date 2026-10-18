@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-17
-Updated: 2026-10-17
+Updated: 2026-10-18
 Closed: -
 
 ## Problem
@@ -23,4 +23,22 @@ The chunked-prefill near-tie adjudication instrument (VT_KOLIBRI1_TT_CHUNK_ADJUD
   prefill total serial 146.3 s vs chunked 71.0 s (x2.06). The speed is real;
   the band-class equivalence precondition fails at many positions, so
   adoption stays blocked exactly as recorded above.
+- 2026-10-18 (row/tt-kolibri-p150-next): the precision-vs-logic discriminator
+  the blocker owed. Instrument: `SCRATCH dbg chunk sweep`
+  (VT_KOLIBRI1_TT_CHUNK_SWEEP=1, test_kolibri1_tt_b2ii.cpp) — one gate
+  golden, chunk sizes 2/4/8/16, last-prefill-row plus 5 teacher-forced decode
+  rows against the serial reference. VERDICT: inherent multi-token prefill
+  kernel precision, NOT chunk logic. With a SINGLE chunk (plen 6, one
+  6-token forward, zero chunk boundaries — no ordering, slot mapping, or
+  cross-chunk mask in play) the last-prefill row already deviates
+  rms(d)=1.44 nats, max|d|=6.8 logits; growing the chunk count does not
+  scale the deviation (chunk 2/4/8/16 d=0 rms: 1.44/2.12/1.85/1.67). The
+  teacher-forced decode rows over the chunked KV stay argmax-identical to
+  serial at nearly every position with sub-band gaps (worst seen 1.94 nats,
+  inside the 2.5-nat band). So the KV content is approximately right and the
+  divergence is born in the multi-token prefill-path kernels' numerics vs
+  the decode-path kernels — the same bf16-precision class as the rms_norm
+  deviation (ISSUE-LOCAL-01M578VP02HPVBYSMRP32GWZGF), amplified through 50
+  layers and the router. Chunked prefill stays opt-in; any future fix is a
+  tt-metal prefill-kernel precision change, not a walk change.
 
