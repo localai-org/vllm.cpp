@@ -17,3 +17,8 @@ The tt-metal rms_norm arm (ttnn::rms_norm over f32 tiles, patched fp32_acc=true/
 ## Resolution
 
 -
+
+
+## Update 2026-10-19: probed tt-metal upstream head (2500c1d8f63)
+
+The bias is NOT improved upstream and regressed on the largest-magnitude captured row: tt/host replay 1.0072 -> 0.9809 (normrow-000, 1x2560, max|x|=3.55, max_abs 0.4375), 1.0077 -> 1.0033 (normrow-004), 0.9984 -> 0.9970 (normrow-001). Upstream switched rsqrt_tile<LEGACY_RSQRT> to ckl::Rsqrt<Approx::Exact> in a new eltwise_chain — did not fix the input-dependence. Full details: ISSUE-LOCAL-01M5B60NEFSEHYZXMR6FSS1RAF (includes the SFPI 7.88 rvtt_live ICE blocker and the still-needed local patch audit). Re-check trigger: SFPI >= 7.89 or an upstream rms reduce/round rework.
