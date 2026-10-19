@@ -635,19 +635,32 @@ DecodeStepResult GdnDecodeStepComposed(const ttnn::Tensor& S, const ttnn::Tensor
   // 4e-5). The truncated dot error lands in the small-magnitude elements of
   // the delta-rule correction (v - S@k) and compounds across the GDN layers —
   // pinned by the wide-range arm in tests/vt/test_tenstorrent_backend.cpp.
-  // The eltwise multiply is exact f32 SFPU and ttnn::sum accumulates f32, so
-  // the three GEMMs route through broadcast multiply + sum (the outer product
-  // has no reduction at all — one exact product per element):
-  ttnn::Tensor dot = ttnn::sum(ttnn::multiply(Sd, krow), ttsl::SmallVector<int>{2},
-                               /*keep_dim=*/true);
+  // The eltwise multiply is exact f32 SFPU, so the three GEMMs route through
+  // broadcast multiply + reduce (the outer product has no reduction at all —
+  // one exact product per element). The reduction is ttnn::mean · Dk, NOT
+  // ttnn::sum: on the tt-metal pin this backend builds against
+  // (tt_umd 0.9.12 era, /tmp/umdtrial-install), f32 ttnn::sum lands on the
+  // tf32 FPU tile-reduce (the header documents the split: mean's default
+  // fast_and_approximate_mode=false is "the accurate SFPU path (full fp32)",
+  // true "the faster tf32 FPU path", and sum has no SFPU arm), which
+  // truncates the products exactly like the matmul MACs the wide-range arm
+  // exists to exclude. mean over the K dim divides by an exact f32 scalar and
+  // the rescale multiplies it back — two ulp of rounding against tf32's
+  // 2^-11 truncation.
+  const float dkf = static_cast<float>(dk);
+  ttnn::Tensor dot = ttnn::multiply(
+      ttnn::mean(ttnn::multiply(Sd, krow), ttsl::SmallVector<int>{2},
+                 /*keep_dim=*/true),
+      dkf);
   ttnn::Tensor vcol = ttnn::reshape(dev_v, ttnn::Shape({bh, dv, 1}));
   ttnn::Tensor beta = ttnn::reshape(dev_b, ttnn::Shape({bh, 1, 1}));
   ttnn::Tensor vp = ttnn::multiply(ttnn::subtract(vcol, dot), beta);
   ttnn::Tensor S2 = ttnn::add(Sd, ttnn::multiply(vp, krow));
   ttnn::Tensor qs = ttnn::multiply(dev_q, scale);
-  ttnn::Tensor o = ttnn::sum(
-      ttnn::multiply(S2, ttnn::reshape(qs, ttnn::Shape({bh, 1, dk}))),
-      ttsl::SmallVector<int>{2}, /*keep_dim=*/true);
+  ttnn::Tensor o = ttnn::multiply(
+      ttnn::mean(ttnn::multiply(S2, ttnn::reshape(qs, ttnn::Shape({bh, 1, dk}))),
+                 ttsl::SmallVector<int>{2}, /*keep_dim=*/true),
+      dkf);
   return {std::move(o), std::move(S2)};
 }
 
