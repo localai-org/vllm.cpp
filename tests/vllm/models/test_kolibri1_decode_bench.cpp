@@ -42,6 +42,7 @@
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/kolibri1_forward.h"
 #include "vllm/v1/kv_cache_interface.h"
+#include "vt/cpu/cpu_isa_arm.h"
 
 namespace {
 
@@ -58,14 +59,17 @@ constexpr int64_t kNumBlocks = 16;  // 128-in + 64-out = 192 tokens -> 12 blocks
 constexpr int64_t kPromptLen = 128;
 // 63 incremental steps after the prefill token: 64 greedy tokens out.
 constexpr int kSteps = 63;
-// The token-identity anchor: the greedy last token captured on main
-// 323f81ca6 (2026-10-07, this bench, 8 and 4 threads).
-// Re-anchored under the FMA-contract paged-attention numerics (draft:
-// GitHub #3438 option C). Under the fused numerics this prompt's greedy
-// chain is the alternate near-tie chain — 33382 from the prefill token on —
-// and both paged-attention arms are bit-identical, so one anchor serves
-// them both. The pre-fuse anchor was 109726 (chain 101807/109726).
-constexpr int32_t kAnchorLastToken = 33382;
+// The token-identity anchor, PER TIER (SPEC kolibri1-bf16-dot-cpu):
+//   f32 tier (escape hatch VT_CPU_KOLIBRI_BF16_DOT=0): 33382, the greedy
+//     last token captured on main 323f81ca6 (2026-10-07) and re-anchored
+//     under the FMA-contract paged-attention numerics (GitHub #3438 option
+//     C) — the pre-fuse anchor was 109726 (chain 101807/109726).
+//   bf16-dot DEFAULT tier: 11622, the greedy last token measured with this
+//     change (2026-10-19, this host, VT_KOLIBRI1_DEQUANT_CACHE_MB=16384,
+//     3/3 identical chains) — the tier's own chain is constant 11622 from
+//     the prefill token on, the same alternate-near-tie shape.
+constexpr int32_t kAnchorLastTokenF32 = 33382;
+constexpr int32_t kAnchorLastTokenBf16Dot = 11622;
 
 struct Topology {
   vt::DType dtype = vt::DType::kBF16;
@@ -298,6 +302,20 @@ TEST_CASE("kolibri1 incremental production shape: 128 in, 64 greedy out, anchore
   std::vector<int32_t> ids;
   for (int64_t i = 0; i < kPromptLen; ++i)
     ids.push_back(static_cast<int32_t>((i * 7919 + 13) % 128000));
+
+  // The tier resolves the anchor: the escape hatch pins the f32-tier
+  // stream (and its recorded anchor); the DEFAULT bf16-dot tier carries the
+  // anchor re-recorded under this change.
+  bool f32_tier = true;
+#if defined(__aarch64__)
+  {
+    const char* hatch = std::getenv("VT_CPU_KOLIBRI_BF16_DOT");
+    f32_tier = (hatch != nullptr && hatch[0] == '0') ||
+               (vt::cpu::DetectArmBf16() == false);
+  }
+#endif
+  const int32_t kAnchorLastToken =
+      f32_tier ? kAnchorLastTokenF32 : kAnchorLastTokenBf16Dot;
 
   if (!NeonLaneRequested()) {
     // LANE OFF (the shipped default): the byte-exact anchor gate exactly as

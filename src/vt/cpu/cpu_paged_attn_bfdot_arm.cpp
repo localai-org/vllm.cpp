@@ -41,8 +41,14 @@ namespace vt::cpu {
 
 bool PagedAttnBfDotUsable() {
   if (DetectArmBf16() == false) return false;
-  const char* e = std::getenv("VT_CPU_PAGED_ATTN_BFDOT");
-  return e != nullptr && e[0] == '1';  // opt-in, same parse as the NEON knob
+  // Legacy per-arm opt-in keeps working as an explicit `=1` (deprecated).
+  const char* legacy = std::getenv("VT_CPU_PAGED_ATTN_BFDOT");
+  if (legacy != nullptr && legacy[0] == '1') return true;
+  // DEFAULT dispatch (SPEC kolibri1-bf16-dot-cpu): feature-gated, no env
+  // gate on the default path. `VT_CPU_KOLIBRI_BF16_DOT=0` is the single
+  // escape hatch back to the f32 tier for every kolibri1 bf16-dot arm.
+  const char* e = std::getenv("VT_CPU_KOLIBRI_BF16_DOT");
+  return !(e != nullptr && e[0] == '0');
 }
 
 float PagedAttnKDotBfDot(const uint16_t* q, const uint16_t* k, int64_t d) {

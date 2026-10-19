@@ -43,7 +43,17 @@ bool KnobRequested();
 
 // Requested AND FEAT_BF16-probed. `=1` without the hardware feature refuses
 // BY NAME (VT_CHECK), so the knob can never silently stay off.
+// DEPRECATED as a default-shaping knob: kept one release as an explicit `=1`
+// opt-in; the default dispatch is `Bf16DotActive` below.
 bool KnobActive();
+
+// The DEFAULT dispatch (SPEC kolibri1-bf16-dot-cpu): feature-gated at
+// runtime — true when `DetectArmBf16()` proves FEAT_BF16, independent of any
+// environment variable. Escape hatch: `VT_CPU_KOLIBRI_BF16_DOT=0` forces the
+// f32 tier (returns false) on every kolibri1 bf16-dot arm. The legacy
+// `VT_CPU_KOLIBRI_BFDOT_GEMV=1` opt-in still selects the arm explicitly and
+// keeps its refuse-by-name contract.
+bool Bf16DotActive();
 
 // out[1, n] (bf16) = x[1, k] (bf16) @ w[1, n*k] (bf16 [n, k] row-major)^T —
 // the t==1 decode GEMV. `w` is the warm-cache bf16 tensor reused DIRECTLY

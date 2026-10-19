@@ -247,7 +247,7 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
   // projection the t==1 LinearBT hook cannot reach. Rounding-policy change,
   // identical to the arm's documented envelope; measured, not hidden.
   if (t == 1 && out_dtype == DType::kF32 &&
-   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::KnobActive()) {
+   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::Bf16DotActive()) {
  kolibri1_bfdot_gemv::GemvF32Out(
      static_cast<const uint16_t*>(wt.data),
      static_cast<const uint16_t*>(x.data),
@@ -305,8 +305,10 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // unchanged unless the env var is set.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
-  // BFDOT bf16 GEMV DRAFT arm, strictly opt-in (VT_CPU_KOLIBRI_BFDOT_GEMV=1,
-  // default OFF) and t==1 decode-only: the warm-cache tensor is ALREADY bf16
+  // BFDOT bf16 GEMV arm, DEFAULT on a FEAT_BF16 host (Bf16DotActive:
+  // feature-gated; VT_CPU_KOLIBRI_BF16_DOT=0 forces the f32 tier; the
+  // legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps refusing by name) and
+  // t==1 decode-only: the warm-cache tensor is ALREADY bf16
   // [n, k] row-major (the dequant cache decode rounds to bf16 on store), so
   // the arm feeds those bytes straight into vbfdotq_f32 (bf16 in, f32
   // accumulate). This is a rounding-policy change versus the f32
@@ -319,7 +321,7 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // attention q/k/v/o and the routed-expert gate/up/down. The router gate
   // (IsBf16) keeps its production path — it never was an fp8 warm-cache
   // tensor.
-  if (t == 1 && kolibri1_bfdot_gemv::KnobActive() &&
+  if (t == 1 && kolibri1_bfdot_gemv::Bf16DotActive() &&
       kolibri1_dequant_cache::ProcessCache().enabled()) {
     prof::Scope prof("linear_gemm");
     DBuf out(d, out_dtype, {1, w.fp8_block.n});
@@ -1097,7 +1099,7 @@ ForwardLogits ForwardKolibri1Forward(
  // remaining decode linear outside the LinearBT hook's coverage. Same
  // rounding-policy envelope; measured, not hidden.
  if (n_out == 1 && lm.dtype == DType::kBF16 &&
-     kolibri1_bfdot_gemv::KnobActive()) {
+     kolibri1_bfdot_gemv::Bf16DotActive()) {
    kolibri1_bfdot_gemv::GemvF32Out(
        static_cast<const uint16_t*>(lm.data),
        static_cast<const uint16_t*>(src.data),

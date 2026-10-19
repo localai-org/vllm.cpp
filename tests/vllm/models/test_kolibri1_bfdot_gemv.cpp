@@ -144,6 +144,36 @@ void CheckEnvelopeF32Out(int64_t n, int64_t k, uint32_t seed) {
 
 }  // namespace
 
+// SPEC kolibri1-bf16-dot-cpu: the DEFAULT dispatch selects the bf16-dot arm
+// on a FEAT_BF16 host with no environment variable set, and the single
+// escape hatch VT_CPU_KOLIBRI_BF16_DOT=0 returns the f32 tier (the dispatch
+// goes false, so the f32 widen MatmulBT serves the call — its stream is the
+// bit-identity anchor, adjudicated by the golden suite under the hatch).
+// The legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps working: it selects
+// the arm explicitly and refuses BY NAME when the host lacks FEAT_BF16.
+TEST_CASE("kolibri1 bfdot gemv: default dispatch and escape hatch") {
+  using vllm::kolibri1_bfdot_gemv::Bf16DotActive;
+  using vllm::kolibri1_bfdot_gemv::KnobActive;
+  const bool hw = vt::cpu::DetectArmBf16();
+  unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+  unsetenv("VT_CPU_KOLIBRI_BFDOT_GEMV");
+  CHECK(Bf16DotActive() == hw);
+
+  setenv("VT_CPU_KOLIBRI_BF16_DOT", "0", 1);
+  CHECK_FALSE(Bf16DotActive());
+  unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+
+  setenv("VT_CPU_KOLIBRI_BFDOT_GEMV", "1", 1);
+  if (hw) {
+    CHECK(Bf16DotActive());
+    CHECK(KnobActive());
+  } else {
+    // Refuse BY NAME is a VT_CHECK abort; assert only the hatch's false.
+    CHECK_FALSE(Bf16DotActive());
+  }
+  unsetenv("VT_CPU_KOLIBRI_BFDOT_GEMV");
+}
+
 TEST_CASE("kolibri1 bfdot gemv f32-out: lm_head / router-gate envelope") {
   if (vt::cpu::DetectArmBf16() == false) {
     MESSAGE("SKIPPED BY NAME: this host does not report FEAT_BF16");

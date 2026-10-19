@@ -25,6 +25,11 @@ bool EnvOne(const char* name) {
   return e != nullptr && e[0] == '1';
 }
 
+bool EnvZero(const char* name) {
+  const char* e = std::getenv(name);
+  return e != nullptr && e[0] == '0';
+}
+
 }  // namespace
 
 bool KnobRequested() { return EnvOne("VT_CPU_KOLIBRI_BFDOT_GEMV"); }
@@ -42,6 +47,18 @@ bool KnobActive() {
              "refusing the BFDOT kolibri1 GEMV arm");
   }
   return true;
+}
+
+bool Bf16DotActive() {
+  // Legacy per-arm opt-in keeps working as an explicit `=1` (deprecated,
+  // one-release bridge): it keeps the refuse-by-name contract above.
+  if (KnobRequested()) return KnobActive();
+  // The DEFAULT dispatch is feature-gated, not env-gated: vLLM dispatches
+  // CPU numerics kernels on feature probes (SPEC kolibri1-bf16-dot-cpu
+  // Design). The single escape hatch VT_CPU_KOLIBRI_BF16_DOT=0 forces the
+  // f32 tier for every kolibri1 bf16-dot arm.
+  if (EnvZero("VT_CPU_KOLIBRI_BF16_DOT")) return false;
+  return vt::cpu::DetectArmBf16();
 }
 
 template <bool kF32Out>

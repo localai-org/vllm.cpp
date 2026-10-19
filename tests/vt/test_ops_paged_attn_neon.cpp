@@ -40,6 +40,12 @@
 
 #include "vt/backend.h"
 #include "vt/cpu/cpu_isa_arm.h"
+
+// Same out-of-line declaration cpu_paged_attn.cpp uses; the arm TU carries
+// no header of its own.
+namespace vt::cpu {
+bool PagedAttnBfDotUsable();
+}  // namespace vt::cpu
 #include "vt/dtype.h"
 #include "vt/fp8_kv.h"
 #include "vt/ops.h"
@@ -352,6 +358,12 @@ void RunDumpedRealCall() {
 
 TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the sweep") {
   if (std::getenv("VT_DEBUG_DUMP_ATTN") != nullptr) RunDumpedRealCall();
+  // SPEC kolibri1-bf16-dot-cpu: the BFDOT K-dot is now the DEFAULT on a
+  // FEAT_BF16 host, which would silently move every bf16 case of this sweep
+  // onto the lane. This case is about the NEON lane's own bit-identity, so
+  // the escape hatch pins the f32 tier for its duration; the BFDOT case
+  // below owns the default arm.
+  setenv("VT_CPU_KOLIBRI_BF16_DOT", "0", 1);
   const std::vector<DType> kv_dts = {DType::kF32, DType::kF16, DType::kBF16, DType::kI8};
   const std::vector<DType> q_dts = {DType::kF32, DType::kBF16};
   const std::vector<DType> out_dts = {DType::kF32, DType::kBF16};
@@ -477,6 +489,7 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
             << g_fallback_cases);
   MESSAGE("NEON arm bit-equal to the FMA-contracted scalar body in "
           << g_neon_cases << " of " << g_neon_cases << " swept configurations");
+  unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +502,28 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
 // NEON arm, the accuracy class the micro evidence (/tmp/kolibri-micro/
 // bfdot_micro.cpp) claims for vbfdotq on this shape. The kernel consumes
 // bf16 PAIRS, so the case also pins the query contract: bf16 query rows only.
+// SPEC kolibri1-bf16-dot-cpu: the DEFAULT dispatch selects the bf16-dot arm
+// on a FEAT_BF16 host with no environment variable set; the single escape
+// hatch VT_CPU_KOLIBRI_BF16_DOT=0 returns the f32 tier; the legacy
+// VT_CPU_PAGED_ATTN_BFDOT=1 opt-in keeps working and the deprecated GEMV
+// knob keeps its own contract. On a host WITHOUT FEAT_BF16 the default must
+// stay false (the f32 tier never moves) — the same assertion, both hosts.
+TEST_CASE("PERF-CPU-ATTN-BFDOT: default dispatch selects the arm; the escape hatch returns the f32 tier") {
+  const bool hw = vt::cpu::DetectArmBf16();
+  unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+  unsetenv("VT_CPU_PAGED_ATTN_BFDOT");
+  unsetenv("VT_CPU_KOLIBRI_BFDOT_GEMV");
+  CHECK(vt::cpu::PagedAttnBfDotUsable() == hw);
+
+  setenv("VT_CPU_KOLIBRI_BF16_DOT", "0", 1);
+  CHECK_FALSE(vt::cpu::PagedAttnBfDotUsable());
+  unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+
+  setenv("VT_CPU_PAGED_ATTN_BFDOT", "1", 1);
+  CHECK(vt::cpu::PagedAttnBfDotUsable() == hw);
+  unsetenv("VT_CPU_PAGED_ATTN_BFDOT");
+}
+
 TEST_CASE("PERF-CPU-ATTN-BFDOT: bf16-KV native BFDOT K-dot arm") {
   if (!vt::cpu::DetectArmBf16()) {
     MESSAGE("SKIP: no HWCAP2 FEAT_BF16 on this host; the BFDOT arm cannot "
@@ -564,11 +599,12 @@ TEST_CASE("PERF-CPU-ATTN-BFDOT: bf16-KV native BFDOT K-dot arm") {
     // FMA-contracted scalar body (asserted by the sweep above; re-asserted
     // here so this case cannot pass with the knob leaking ON).
     setenv("VT_CPU_PAGED_ATTN_NEON", "1", 1);
-    unsetenv("VT_CPU_PAGED_ATTN_BFDOT");
+    // Baseline: the widen+vfma arm. The escape hatch — not the absence of a
+    // legacy knob — is what turns the BFDOT arm OFF since the default flip.
+    setenv("VT_CPU_KOLIBRI_BF16_DOT", "0", 1);
     vt::PagedAttention(qq, tneon, tq, tk, tv, tbt, tsl, tqsl, args);
-    setenv("VT_CPU_PAGED_ATTN_BFDOT", "1", 1);
+    unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
     vt::PagedAttention(qq, tbfdot, tq, tk, tv, tbt, tsl, tqsl, args);
-    unsetenv("VT_CPU_PAGED_ATTN_BFDOT");
     unsetenv("VT_CPU_PAGED_ATTN_NEON");
 
     // (c) every element within one bf16 ULP of the NEON arm.
