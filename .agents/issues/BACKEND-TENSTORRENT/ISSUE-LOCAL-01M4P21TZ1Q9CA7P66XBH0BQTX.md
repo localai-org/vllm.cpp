@@ -170,3 +170,36 @@ On the P150 (host thalia, /tmp/umdtrial-install, /tmp/tt-metal-umdtrial), the ko
   ~214 s vs ~181 s. A generation-counter scheme could cut the destruction
   count ~30x — follow-up if the decode regression matters.
 
+
+- BAND-GATE RATIFICATION + RESCORE (row/TT-B2II-BAND-GATE, 2026-10-19):
+  the developer RATIFIED the band gate as the P150 correctness standard
+  for this device: a sequence is ON iff it has ZERO hard flips —
+  divergences inside the established 2.5-nat near-tie band are not gate
+  failures; the exact-token ON/OFF counting is no longer the bar; the
+  primary oracle rows (the W3 141/145 CPU baseline) remain the
+  denominator. The scorer now prints the band-gate verdict line
+  (`BAND GATE (ratified 2026-10-19): X/Y sequences ON`, with the worst
+  in-band divergence against the band edge) beside the unchanged
+  exact-token reporting — a reporting change, not a tolerance change;
+  the classifier (the per-position nat gap vs the golden chain,
+  `test_kolibri1_tt_b2ii.cpp:1222` `-gap <= kNatBand`, band 2.5) is
+  unchanged.
+  THREE-RUN VERDICT on origin/main (61d333e52, P150 non-fleet, the
+  device recipe; byte-identical flip sets across all three runs per
+  arm, no classifier defect found — no flip beyond the band is recorded
+  as a near-tie on either arm):
+  - HOST-FREE ON (VT_TT_HOST_FREE_DECODE default): BAND GATE 3/8
+    sequences ON, worst in-band divergence -1.747 nats (margin 0.753
+    nats to the 2.5-nat edge); exact-token unchanged at 3/11 (3
+    near-ties, 5 hard: Australia, Wissen, x1=, Ein gutes, counting).
+  - HOST-FREE OFF (VT_TT_HOST_FREE_DECODE=0): BAND GATE 6/8 sequences
+    ON, worst in-band divergence -2.157 nats (margin 0.343 nats);
+    exact-token unchanged at 12/20 (6 near-ties, 2 hard: der Mond step
+    0, counting step 0).
+  Under the ratified standard the gate verdict is STABLE and REPORTABLE
+  (3/8 ON, 6/8 ON): it still fails its "all sequences ON" ideal, so the
+  gate remains open on the hard-flip sequences, but the ON/OFF state is
+  now a measured, dated, stable quantity instead of an exact-token
+  coincidence count. The three pre-existing assertion failures remain,
+  documented: `:1263` (argmax_matches >= 141), `:1264`
+  (hard_flips == 0), `:1419` (instr_hard_flips == 0).

@@ -1153,6 +1153,12 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
 
   int64_t argmax_matches = 0, argmax_total = 0, near_ties = 0, hard_flips = 0;
   std::vector<std::string> flip_records;
+  // The RATIFIED BAND GATE (developer ratification, 2026-10-19): a sequence
+  // is ON iff it has ZERO hard flips — divergences INSIDE the kNatBand band
+  // are not gate failures. Reported alongside the exact-token count; the
+  // exact-token CHECKs below stay as the documented pre-existing red.
+  int64_t band_on = 0, band_total = 0;
+  double worst_inband_gap = 0.0;
 
   for (const GateGolden& gp : LoadGateGoldens()) {
     // Fresh KV per prompt (zeroed: no stale context can leak across
@@ -1176,6 +1182,7 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
     std::vector<float> logits;
     int32_t prev_got = -1;
     bool diverged = false;
+    bool seq_hard_flip = false;
     for (int32_t step = 0; step < kGateSteps && !diverged; ++step) {
       // The prompt walk first: one token per step, no comparison.
       if (static_cast<size_t>(step) < gp.input_ids.size()) {
@@ -1221,8 +1228,10 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
                                std::to_string(gap));
         if (-gap <= kNatBand) {
           ++near_ties;
+          worst_inband_gap = std::min(worst_inband_gap, gap);
         } else {
           ++hard_flips;
+          seq_hard_flip = true;
           MESSAGE("HARD flip at '" << gp.prompt << "' step " << d
                                    << ": got " << got << " want " << want
                                    << " (gap " << gap << " beyond band "
@@ -1232,8 +1241,14 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
         break;
       }
     }
+    ++band_total;
+    if (!seq_hard_flip) ++band_on;
   }
 
+  MESSAGE("BAND GATE (ratified 2026-10-19): " << band_on << "/" << band_total
+           << " sequences ON (zero hard flips); worst in-band divergence "
+           << worst_inband_gap << " nats against the " << kNatBand
+           << "-nat band edge");
   MESSAGE("ARGMAX CHAIN: " << argmax_matches << "/" << argmax_total
                            << " compared positions match the golden greedy "
                               "decode; flips "

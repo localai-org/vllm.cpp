@@ -506,6 +506,21 @@ ReshapeAndCache / device residual norm), the `kGdnDecode` wide-range
 drift and the `kMatmulBTQuantGrouped` Q4_K decode envelope miss, the
 141/145 pass, and the bench anchor 109726.
 
+BAND-GATE STANDARD RATIFIED + B2b-ii TOKEN GATE RESCORED (2026-10-19,
+`row/TT-B2II-BAND-GATE`): the developer ratified the band gate as the
+P150 correctness standard for the B2b-ii device token gate — a sequence
+is ON iff it has ZERO hard flips (divergences beyond the 2.5-nat
+near-tie band); exact-token ON/OFF counting is no longer the bar, and
+the primary oracle rows stay the denominator. The scorer prints the
+band-gate verdict beside the exact-token counts (reporting only; the
+classifier is unchanged). Three runs on 61d333e52, byte-identical flip
+sets per arm: host-free ON — BAND GATE 3/8 sequences ON (worst in-band
+-1.747 nats, margin 0.753), exact-token 3/11; host-free OFF — 6/8 ON
+(worst in-band -2.157 nats, margin 0.343), exact-token 12/20. Evidence:
+issue ISSUE-LOCAL-01M4P21TZ1Q9CA7P66XBH0BQTX (2026-10-19 entry). The
+141/145 pass and the hard-flip sequences stay owed; the pre-existing
+`:1263`/`:1264`/`:1419` assertion failures remain, documented.
+
 
 ## Git integration
 
