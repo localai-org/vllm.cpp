@@ -547,7 +547,8 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
     const char* verify_setting = std::getenv("VT_XPU_XE2_VERIFY");
     const bool packed_requested = mode == "verify" ||
         (automatic && verify_setting && std::string_view(verify_setting) == "1");
-    if ((mode == "verify" || automatic) && tokens == 1 &&
+    if ((mode == "verify" || automatic) && (tokens == 1 ||
+        (requests >= 2 && requests <= 4 && tokens == requests)) &&
         CanUsePagedAttentionXe2Decode(q, target, query, key_cache, value_cache,
                                      block_table, seq_lens, query_start_loc, args)) {
       packed_verify_rows = 1;
@@ -570,10 +571,10 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
 #endif
     bool verify = false;
 #ifdef VLLM_CPP_XPU_XE2_VERIFY
-    // Original short C1 decode uses FP16 probabilities and XMX P*V, with
-    // one split below16 KV tiles. The same native donor is already used for
-    // optional packed verification; its own admission guards both routes.
-    if ((mode == "verify" || automatic) && tokens == 1)
+    // Original short C1 and opt-in pure B2..4 Q1 use the same donor. Exact
+    // host widths are independently checked against fresh device metadata.
+    if ((mode == "verify" || automatic) && (tokens == 1 ||
+        (requests >= 2 && requests <= 4 && tokens == requests)))
       verify = PagedAttentionXe2DecodeKernel(
           q, target, query, key_cache, value_cache,
           block_table, seq_lens, query_start_loc, args);
@@ -610,11 +611,13 @@ void PagedAttentionKernel(Queue& q, Tensor& out, const Tensor& query, const Tens
                    "{\"event\":\"xpu_fast_path\",\"operator\":\"paged_attention\","
                    "\"selected\":\"%s\",\"reason\":\"%s\","
                    "\"mode\":\"%.*s\",\"auto_eligible\":%s,"
-                   "\"tokens\":%lld}\n",
-                   onednn ? "exl3_onednn" : verify ? "xe2_verify" : split ? "split" : xe2 ? "xe2_prefill" :
+                   "\"tokens\":%lld,\"requests\":%lld}\n",
+                   onednn ? "exl3_onednn" : verify ?
+                   (requests > 1 && tokens == requests ? "xe2_decode_batch" : "xe2_verify") : split ? "split" : xe2 ? "xe2_prefill" :
                    prefill ? "prefill" : "reference", reason,
                    static_cast<int>(mode.size()), mode.data(),
-                   automatic ? "true" : "false", static_cast<long long>(tokens));
+                   automatic ? "true" : "false", static_cast<long long>(tokens),
+                   static_cast<long long>(requests));
     }
     if (onednn || verify || split || xe2 || prefill) return;
     const View qs(query), kc(key_cache), vc(value_cache), dst(target);

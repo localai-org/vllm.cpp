@@ -7,6 +7,7 @@
 #include "vt/paged_attn_route.h"
 #include "vt/xpu_paged_decode_policy.h"
 #include <filesystem>
+#include <functional>
 #include <array>
 #include <memory>
 #include <chrono>
@@ -18,10 +19,28 @@
 #include <utility>
 #include <nlohmann/json.hpp>
 
+#ifdef VLLM_CPP_XPU_ONEDNN
+// Test-only declaration of the existing host workspace seam. Fill the real
+// reservation through its normal queue/lifetime owner; add no production API.
+namespace vt::xpu {
+bool WithAttentionWorkspace(vt::Queue&, size_t, const std::function<void(void*)>&);
+}
+#endif
 namespace {
 using vt::DType;
 using xpu_test::Buffer;
 using xpu_test::Queue;
+#ifdef VLLM_CPP_XPU_ONEDNN
+void PoisonAttentionScratch(vt::Queue& q) {
+  constexpr size_t bytes = 16 * 1024 * 1024;
+  auto& backend = vt::GetBackend(q.device);
+  REQUIRE(vt::xpu::WithAttentionWorkspace(q, bytes, [&](void* storage) {
+    // 0xff is NaN as both F16 and F32; stale partials or statistics must not
+    // survive. Complete this fill before the existing asynchronous stress.
+    backend.Memset(q, storage, 0xff, bytes);
+  }));
+}
+#endif
 std::vector<float> Random(size_t size, uint32_t seed, float scale = 1) {
   std::vector<float> values(size);
   for (auto& v : values) {
@@ -98,6 +117,61 @@ struct Fixture {
 };
 }
 #ifdef VLLM_CPP_XPU_ONEDNN
+TEST_CASE("XPU batched Q1: exact widths select the bounded decode donor") {
+  struct Environment {
+    const std::array<const char*, 4> keys{{"VT_XPU_ATTENTION", "VT_XPU_XE2_LONG_DECODE",
+        "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_XE2_BATCHED_Q1"}};
+    std::array<std::string, 4> values;
+    std::array<bool, 4> present{};
+    Environment() {
+      for (size_t i = 0; i < keys.size(); ++i) {
+        const char* value = std::getenv(keys[i]); present[i] = value != nullptr;
+        if (value) values[i] = value;
+      }
+      REQUIRE(setenv(keys[1], "2", 1) == 0);
+      REQUIRE(setenv(keys[2], "32", 1) == 0);
+    }
+    ~Environment() {
+      for (size_t i = 0; i < keys.size(); ++i)
+        if (present[i]) setenv(keys[i], values[i].c_str(), 1); else unsetenv(keys[i]);
+    }
+  } environment;
+  Queue gpu(vt::DeviceType::kXPU);
+  for (int requests : {2, 3, 4}) for (int context : {1, 960, 961, 4096}) {
+    CAPTURE(requests);
+    CAPTURE(context);
+    Fixture f(gpu.q, requests, 1, context, true, false, 1600,
+              DType::kF16, DType::kF16, DType::kF16, true);
+    Buffer pages(gpu.q, DType::kI32, {requests, f.columns});
+    std::vector<int32_t> ids(requests * f.columns), lengths(requests), offsets(requests + 1);
+    for (int r = 0; r < requests; ++r) {
+      lengths[r] = std::max(1, context - r * std::min(613, std::max(1, context / 8)));
+      offsets[r] = r;
+      for (int p = 0; p < f.columns; ++p)
+        ids[r * f.columns + p] = f.blocks - 1 - r * f.columns - p;
+    }
+    offsets[requests] = requests;
+    pages.upload(ids.data()); f.lens.upload(lengths.data()); f.offsets.upload(offsets.data());
+    f.args.query_start_loc_host = offsets.data();
+    const auto run = [&](const char* mode) {
+      REQUIRE(setenv("VT_XPU_ATTENTION", mode, 1) == 0);
+      vt::PagedAttention(gpu.q, f.out.tensor, f.query.tensor, f.kc, f.vc,
+                         pages.tensor, f.lens.tensor, f.offsets.tensor, f.args);
+      vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    };
+    REQUIRE(setenv("VT_XPU_XE2_BATCHED_Q1", "0", 1) == 0);
+    run("split"); const auto expected = f.result();
+    (void)vt::xpu::DrainProfileEvents();
+    REQUIRE(setenv("VT_XPU_XE2_BATCHED_Q1", "1", 1) == 0);
+    PoisonAttentionScratch(gpu.q);
+    run("auto"); Accuracy(f.result(), expected, false, true);
+    const auto events = vt::xpu::DrainProfileEvents();
+    CHECK(std::count_if(events.begin(), events.end(), [](const auto& e) {
+      return e.stage == "attention_decode_xe2_batch";
+    }) == 1);
+  }
+}
+
 TEST_CASE("XPU long Q1 decode: bounded complete operator route probe"
           * doctest::skip(!std::getenv("VT_B70_LONG_Q1_PROBE"))) {
   const std::string_view name = std::getenv("VT_B70_LONG_Q1_PROBE");
@@ -2841,3 +2915,435 @@ TEST_CASE("XPU FP8 attention: captured Python M04 Q5 operator replay"
   }
   CHECK(vt::GetReferenceTierHits() == 0);
 }
+
+#ifdef VLLM_CPP_XPU_ONEDNN
+TEST_CASE("XPU batched Q1: captured C4 operands complete call screen"
+          * doctest::skip(!std::getenv("VT_B70_BATCHED_Q1_INPUT"))) {
+  const std::string prefix = std::getenv("VT_B70_BATCHED_Q1_INPUT");
+  nlohmann::json meta; std::ifstream(prefix + ".json") >> meta;
+  const auto read = [](const std::string& path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate); REQUIRE(bool(f));
+    const auto size = f.tellg(); REQUIRE(size >= 0);
+    std::vector<unsigned char> bytes(static_cast<size_t>(size)); f.seekg(0);
+    f.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+    REQUIRE(f.gcount() == static_cast<std::streamsize>(bytes.size())); return bytes;
+  };
+  const auto query_bytes = read(prefix + ".query.bin");
+  const auto captured_output = read(prefix + ".output.bin");
+  const auto cache_bytes = read(prefix + ".cache.bin");
+  const int blocks = meta.at("compact_blocks"), page = meta.at("page"), columns = meta.at("columns");
+  const auto lengths = meta.at("seq_lens").get<std::vector<int32_t>>();
+  const auto offsets = meta.at("query_start_loc").get<std::vector<int32_t>>();
+  const auto table = meta.at("compact_table").get<std::vector<int32_t>>();
+  REQUIRE(meta.at("batch") == 4); REQUIRE(offsets == std::vector<int32_t>{0, 1, 2, 3, 4});
+  REQUIRE(query_bytes.size() == 4 * 24 * 256 * sizeof(uint16_t));
+  REQUIRE(captured_output.size() == query_bytes.size());
+  REQUIRE(cache_bytes.size() == size_t(blocks) * meta.at("key_stride").at(0).get<size_t>());
+  REQUIRE(lengths.size() == 4); REQUIRE(table.size() == size_t(4 * columns));
+  Wave3AttentionEnv environment;
+  const char* key = "VT_XPU_XE2_BATCHED_Q1"; const bool present = std::getenv(key) != nullptr;
+  const std::string saved = present ? std::getenv(key) : "";
+  struct Restore { const char* key; bool present; std::string value;
+    ~Restore() { if (present) setenv(key, value.c_str(), 1); else unsetenv(key); }
+  } restore{key, present, saved};
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "2", 1) == 0);
+  REQUIRE(setenv("VT_XPU_XE2_DECODE_SPLITS", "32", 1) == 0);
+  REQUIRE(setenv("VT_XPU_ATTENTION", "auto", 1) == 0);
+  const bool profiled = std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  REQUIRE_FALSE(profiled);
+  Queue gpu(vt::DeviceType::kXPU); auto& backend = vt::GetBackend(gpu.q.device);
+  Buffer queries(gpu.q, DType::kF16, {4, 24, 256}), output(gpu.q, DType::kF16, {4, 24, 256});
+  Buffer cache(gpu.q, DType::kI8, {int64_t(cache_bytes.size())});
+  Buffer pages(gpu.q, DType::kI32, {4, columns}), lens(gpu.q, DType::kI32, {4}), qsl(gpu.q, DType::kI32, {5});
+  queries.upload(query_bytes.data()); cache.upload(cache_bytes.data());
+  pages.upload(table.data()); lens.upload(lengths.data()); qsl.upload(offsets.data());
+  auto kc = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, gpu.q.device, {blocks, page, 4, 256});
+  for (int i = 0; i < 4; ++i) kc.stride[i] = meta.at("key_stride").at(i).get<int64_t>();
+  auto vc = kc; vc.data = static_cast<unsigned char*>(cache.tensor.data) + meta.at("value_offset").get<size_t>();
+  for (int i = 0; i < 4; ++i) vc.stride[i] = meta.at("value_stride").at(i).get<int64_t>();
+  vt::PagedAttentionArgs args; args.scale = meta.at("scale"); args.causal = meta.at("causal");
+  args.k_scale = meta.at("k_scale"); args.v_scale = meta.at("v_scale");
+  args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+  args.max_seq_len = meta.at("max_seq_len"); args.query_start_loc_host = offsets.data();
+  const auto call = [&] {
+    vt::PagedAttention(gpu.q, output.tensor, queries.tensor, kc, vc, pages.tensor, lens.tensor, qsl.tensor, args);
+    backend.Synchronize(gpu.q);
+  };
+  REQUIRE(setenv(key, "0", 1) == 0); call();
+  const auto baseline = output.download();
+  CHECK(std::equal(baseline.begin(), baseline.end(), captured_output.begin(), captured_output.end()));
+  const auto reference = output.floats();
+  const auto sample = [&](const char* mode, const char* phase, int pair) {
+    REQUIRE(setenv(key, mode, 1) == 0); call(); call();
+    std::vector<double> times;
+    for (int i = 0; i < 7; ++i) {
+      const auto begin = std::chrono::steady_clock::now(); call();
+      times.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count());
+    }
+    Accuracy(output.floats(), reference, false, true);
+    std::cout << "BATCHED_Q1_OPERATOR " << nlohmann::json{{"fixture", prefix}, {"phase", phase}, {"pair", pair},
+        {"mode", mode}, {"complete_call_wall_us", times}, {"profiled", profiled},
+        {"seq_lens", lengths}, {"query_start_loc", offsets},
+        {"attention_workspace_bytes", vt::xpu::GetMemoryInfo().attention_workspace_bytes}}.dump() << std::endl;
+  };
+  sample("0", "AA", 0); sample("0", "AA", 1);
+  for (int pair = 0; pair < 3; ++pair) {
+    if (pair % 2 == 0) { sample("0", "AB", pair); sample("1", "AB", pair); }
+    else { sample("1", "AB", pair); sample("0", "AB", pair); }
+  }
+  const auto after = cache.download();
+  CHECK(std::equal(after.begin(), after.end(), cache_bytes.begin(), cache_bytes.end()));
+  CHECK(queries.download() == query_bytes);
+  CHECK(vt::xpu::GetMemoryInfo().attention_workspace_bytes == 16 * 1024 * 1024);
+}
+#endif
+
+#ifdef VLLM_CPP_XPU_ONEDNN
+namespace {
+struct BatchedQ1TestEnv {
+  const std::array<const char*, 5> names{{"VT_XPU_ATTENTION", "VT_XPU_XE2_LONG_DECODE",
+      "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_XE2_BATCHED_Q1", "VT_XPU_XE2_VERIFY"}};
+  std::array<std::string, 5> values;
+  std::array<bool, 5> present{};
+  BatchedQ1TestEnv() {
+    for (size_t i = 0; i < names.size(); ++i) {
+      const char* value = std::getenv(names[i]); present[i] = value != nullptr;
+      if (value) values[i] = value;
+    }
+    REQUIRE(setenv(names[0], "auto", 1) == 0);
+    REQUIRE(setenv(names[1], "2", 1) == 0);
+    REQUIRE(setenv(names[2], "32", 1) == 0);
+    REQUIRE(setenv(names[3], "1", 1) == 0);
+    REQUIRE(setenv(names[4], "1", 1) == 0);
+  }
+  ~BatchedQ1TestEnv() {
+    for (size_t i = 0; i < names.size(); ++i)
+      if (present[i]) setenv(names[i], values[i].c_str(), 1); else unsetenv(names[i]);
+  }
+};
+struct BatchedQ1LifecycleFixture {
+  Fixture f;
+  Buffer pages;
+  std::vector<int32_t> ids, lengths, offsets;
+  std::vector<unsigned char> original, current;
+  bool interleaved;
+  BatchedQ1LifecycleFixture(vt::Queue& q, int page, bool interleave)
+      : f(q, 4, 1, page * 4, true, false, page, DType::kF16, DType::kF16, DType::kF16, true),
+        pages(q, DType::kI32, {4, 4}), ids(16), lengths(4), offsets{0, 1, 2, 3, 4},
+        original(f.cache.download()), interleaved(interleave) {
+    if (interleaved) {
+      f.kc.stride[1] = 2048; f.kc.stride[2] = 512;
+      f.vc = f.kc; f.vc.data = static_cast<unsigned char*>(f.kc.data) + 256;
+    }
+    f.args.max_seq_len = page * 3;
+    f.args.query_start_loc_host = offsets.data();
+  }
+  void Populate(int requests, int revision, unsigned char poison = 0x7f) {
+    current.assign(f.cache.bytes, poison);
+    std::fill(ids.begin(), ids.end(), -999);
+    for (int r = 0; r < requests; ++r) {
+      // After B4->B3 the cancelled tail owner's pages replace request1's
+      // old pages. The old owner1 pages become NaN poison, detecting stale IDs.
+      const int owner = requests < 4 && r == 1 ? 3 : r;
+      for (int p = 0; p < 4; ++p) ids[r * 4 + p] = f.blocks - 1 - owner * 4 - p;
+      if (revision % 2 && r == 0) std::rotate(ids.begin(), ids.begin() + 1, ids.begin() + 3);
+      lengths[r] = 3 * f.page - r * 151 - revision * 37;
+      for (int row = 0; row < lengths[r]; ++row) for (int h = 0; h < 4; ++h) {
+        const size_t block = ids[r * 4 + row / f.page], offset = row % f.page;
+        const size_t source = block * f.page * 2048 + offset * 1024 + h * 256;
+        const size_t target = interleaved ? block * f.page * 2048 + offset * 2048 + h * 512 : source;
+        const size_t voff = interleaved ? 256 : size_t(f.page) * 1024;
+        std::memcpy(current.data() + target, original.data() + source, 256);
+        std::memcpy(current.data() + target + voff, original.data() + source + f.page * 1024, 256);
+      }
+    }
+    f.cache.upload(current.data()); pages.upload(ids.data()); f.lens.upload(lengths.data());
+    f.offsets.upload(offsets.data());
+    f.query.put(Random(f.query.tensor.Numel(), 9127 + requests * 100 + revision));
+  }
+  void Call(int requests, const char* mode, vt::Queue& queue,
+            const vt::Tensor* query = nullptr, vt::Tensor* output = nullptr,
+            bool synchronize = true, const vt::Tensor* table = nullptr) {
+    REQUIRE(setenv("VT_XPU_ATTENTION", mode, 1) == 0);
+    auto qs = query ? *query : f.query.tensor;
+    auto dst = output ? *output : f.out.tensor;
+    auto bt = table ? *table : pages.tensor;
+    auto ls = f.lens.tensor, qsl = f.offsets.tensor;
+    qs.shape[0] = dst.shape[0] = bt.shape[0] = ls.shape[0] = requests;
+    qsl.shape[0] = requests + 1;
+    vt::PagedAttention(queue, dst, qs, f.kc, f.vc, bt, ls, qsl, f.args);
+    if (synchronize) vt::GetBackend(queue.device).Synchronize(queue);
+  }
+  std::vector<float> Result(int requests, Buffer* output = nullptr) {
+    auto result = (output ? output : &f.out)->floats(); result.resize(requests * 24 * 256); return result;
+  }
+  void CheckTail(int requests, Buffer& output, uint16_t value) {
+    const auto raw = output.download(); size_t wrong = 0;
+    for (size_t i = size_t(requests) * 24 * 256 * 2; i < raw.size(); i += 2) {
+      uint16_t bits; std::memcpy(&bits, raw.data() + i, 2); wrong += bits != value;
+    }
+    CHECK(wrong == 0);
+  }
+};
+}
+
+TEST_CASE("XPU batched Q1: live pages partial cancellation alias and cross queue graphs") {
+  BatchedQ1TestEnv environment;
+  Queue gpu(vt::DeviceType::kXPU), other(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  REQUIRE(backend.SupportsGraphCapture());
+  for (bool interleaved : {false, true}) {
+    CAPTURE(interleaved);
+    BatchedQ1LifecycleFixture c(gpu.q, 1600, interleaved);
+    Buffer other_query(gpu.q, DType::kF16, {4, 24, 256}), other_out(gpu.q, DType::kF16, {4, 24, 256});
+    for (int requests : {4, 3, 2, 1}) {
+      CAPTURE(requests);
+      c.Populate(requests, 0);
+      other_query.put(Random(other_query.tensor.Numel(), 15191 + requests));
+      c.Call(requests, "auto", gpu.q);
+      c.Call(requests, "auto", other.q, &other_query.tensor, &other_out.tensor);
+      vt::BreakableGraph first, second;
+      { vt::GraphCaptureScope capture(backend, gpu.q, first, vt::GraphCaptureMode::kFull);
+        c.Call(requests, "auto", gpu.q, nullptr, nullptr, false); }
+      { vt::GraphCaptureScope capture(backend, other.q, second, vt::GraphCaptureMode::kFull);
+        c.Call(requests, "auto", other.q, &other_query.tensor, &other_out.tensor, false); }
+      REQUIRE(first.captured()); REQUIRE(second.captured());
+      const auto held = vt::xpu::GetMemoryInfo();
+      for (int revision : {1, 2}) for (unsigned char poison : {0, 0x7f}) {
+        CAPTURE(revision);
+        CAPTURE(int(poison));
+        c.Populate(requests, revision, poison);
+        other_query.put(Random(other_query.tensor.Numel(), 25513 + requests * 10 + revision));
+        const auto query_before = c.f.query.download(), other_query_before = other_query.download();
+        c.f.out.put(std::vector<float>(4 * 24 * 256, -7));
+        other_out.put(std::vector<float>(4 * 24 * 256, -9));
+        c.Call(requests, "split", gpu.q); const auto gold = c.Result(requests);
+        c.Call(requests, "auto", gpu.q); Accuracy(c.Result(requests), gold, false, true);
+        const auto expected = c.f.out.download();
+        c.Call(requests, "split", other.q, &other_query.tensor, &other_out.tensor);
+        const auto other_gold = c.Result(requests, &other_out);
+        c.Call(requests, "auto", other.q, &other_query.tensor, &other_out.tensor);
+        Accuracy(c.Result(requests, &other_out), other_gold, false, true);
+        const auto other_expected = other_out.download();
+        CHECK(expected != other_expected);
+        c.f.out.put(std::vector<float>(4 * 24 * 256, -7));
+        other_out.put(std::vector<float>(4 * 24 * 256, -9));
+        PoisonAttentionScratch(gpu.q);
+        first.Replay(gpu.q);
+        c.Call(requests, "auto", other.q, &other_query.tensor, &other_out.tensor, false);
+        second.Replay(other.q); first.Replay(gpu.q);
+        backend.Synchronize(gpu.q); backend.Synchronize(other.q);
+        xpu_test::SameBytes(c.f.out.download(), expected);
+        xpu_test::SameBytes(other_out.download(), other_expected);
+        xpu_test::SameBytes(c.f.cache.download(), c.current);
+        xpu_test::SameBytes(c.f.query.download(), query_before);
+        xpu_test::SameBytes(other_query.download(), other_query_before);
+        CHECK(std::memcmp(c.pages.download().data(), c.ids.data(), c.ids.size() * sizeof(int32_t)) == 0);
+        CHECK(std::memcmp(c.f.lens.download().data(), c.lengths.data(), c.lengths.size() * sizeof(int32_t)) == 0);
+        CHECK(std::memcmp(c.f.offsets.download().data(), c.offsets.data(), c.offsets.size() * sizeof(int32_t)) == 0);
+        c.CheckTail(requests, c.f.out, vt::F32ToF16(-7));
+        c.CheckTail(requests, other_out, vt::F32ToF16(-9));
+        const auto now = vt::xpu::GetMemoryInfo();
+        CHECK(now.attention_workspace_bytes == 16 * 1024 * 1024);
+        CHECK(now.allocated_bytes == held.allocated_bytes);
+        CHECK(now.pinned_bytes == held.pinned_bytes);
+        CHECK(now.graph_device_bytes == held.graph_device_bytes);
+      }
+      // A stale host-uniform hint cannot bypass fresh device graph validation.
+      const auto preserved = c.f.out.download();
+      if (requests > 1) {
+        auto bad = c.offsets; bad[1] = 0; c.f.offsets.upload(bad.data());
+        CHECK_THROWS_AS(first.Replay(gpu.q), std::runtime_error);
+        xpu_test::SameBytes(c.f.out.download(), preserved);
+        c.f.offsets.upload(c.offsets.data());
+      }
+      auto too_long = c.lengths; too_long[0] = c.f.args.max_seq_len + 1;
+      c.f.lens.upload(too_long.data());
+      CHECK_THROWS_AS(first.Replay(gpu.q), std::runtime_error);
+      xpu_test::SameBytes(c.f.out.download(), preserved); c.f.lens.upload(c.lengths.data());
+      // Destroy both graphs with their final cross-queue executions pending.
+      first.Replay(other.q); second.Replay(gpu.q);
+      first.Reset(); second.Reset();
+      backend.Synchronize(gpu.q); backend.Synchronize(other.q);
+      xpu_test::SameBytes(c.f.out.download(), preserved);
+      const auto original_query = c.f.query.download();
+      c.Call(requests, "auto", gpu.q, nullptr, &c.f.query.tensor);
+      const auto aliased = c.f.query.download();
+      CHECK(std::equal(aliased.begin(), aliased.begin() + requests * 24 * 256 * 2, preserved.begin()));
+      c.f.query.upload(original_query.data());
+    }
+  }
+}
+#endif
+
+#ifdef VLLM_CPP_XPU_ONEDNN
+TEST_CASE("XPU batched Q1: last capacity poison and overflow fallback") {
+  BatchedQ1TestEnv environment; Queue gpu(vt::DeviceType::kXPU);
+  auto& backend = vt::GetBackend(gpu.q.device);
+  const bool profile = std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1";
+  for (int page : {1600, 1664}) {
+    CAPTURE(page);
+    constexpr int batch = 4, blocks_per_owner = 130, columns = 129;
+    const int blocks = batch * blocks_per_owner, bound = 128 * page;
+    const size_t page_bytes = size_t(page) * 2048;
+    Buffer cache(gpu.q, DType::kI8, {int64_t(blocks * page_bytes)});
+    Buffer query(gpu.q, DType::kF16, {batch, 24, 256}), output(gpu.q, DType::kF16, {batch, 24, 256});
+    Buffer table(gpu.q, DType::kI32, {batch, columns}), lens(gpu.q, DType::kI32, {batch}), qsl(gpu.q, DType::kI32, {batch + 1});
+    const auto one = vt::StoreKvFp8E4M3(1.0f, 1.0f);
+    backend.Memset(gpu.q, cache.tensor.data, one, cache.bytes);
+    for (int r = 0; r < batch; ++r)
+      backend.Memset(gpu.q, static_cast<unsigned char*>(cache.tensor.data) +
+          (r * blocks_per_owner + 129) * page_bytes, 0x7f, page_bytes);
+    backend.Synchronize(gpu.q);
+    std::vector<int32_t> ids(batch * columns), lengths{bound, bound - 1, bound - page + 1, bound - page + 7};
+    std::vector<int32_t> offsets{0, 1, 2, 3, 4};
+    for (int r = 0; r < batch; ++r) for (int p = 0; p < columns; ++p)
+      ids[r * columns + p] = r * blocks_per_owner + 128 - p;
+    table.upload(ids.data()); lens.upload(lengths.data()); qsl.upload(offsets.data());
+    query.put(Random(query.tensor.Numel(), 64119, .25f));
+    auto kc = vt::Tensor::Contiguous(cache.tensor.data, DType::kI8, gpu.q.device, {blocks, page, 4, 256});
+    kc.stride[0] *= 2; auto vc = kc;
+    vc.data = static_cast<unsigned char*>(kc.data) + page * 1024;
+    vt::PagedAttentionArgs args; args.scale = 1.0f / 16;
+    args.kv_cache_dtype = vt::Fp8KVCacheDataType::kFp8E4M3;
+    args.max_seq_len = bound; args.query_start_loc_host = offsets.data();
+    const auto call = [&] {
+      vt::PagedAttention(gpu.q, output.tensor, query.tensor, kc, vc, table.tensor, lens.tensor, qsl.tensor, args);
+      backend.Synchronize(gpu.q);
+    };
+    const std::vector<float> expected(batch * 24 * 256, 1.0f);
+    for (const char* splits : {"16", "32"}) {
+      CAPTURE(splits);
+      REQUIRE(setenv("VT_XPU_XE2_DECODE_SPLITS", splits, 1) == 0);
+      args.max_seq_len = bound; lengths[0] = bound; lens.upload(lengths.data());
+      (void)vt::xpu::DrainProfileEvents(); call();
+      Accuracy(output.floats(), expected, false, true);
+      auto events = vt::xpu::DrainProfileEvents();
+      if (profile) CHECK(std::count_if(events.begin(), events.end(), [](const auto& e) {
+        return e.stage == "attention_decode_xe2_batch";
+      }) == 1);
+      CHECK(vt::xpu::GetMemoryInfo().attention_workspace_bytes == 16 * 1024 * 1024);
+      // The 129th live logical page is valid but outside the donor contract.
+      // Auto must compute through the existing fallback, never clamp the input.
+      args.max_seq_len = bound + 1; lengths[0] = bound + 1; lens.upload(lengths.data());
+      (void)vt::xpu::DrainProfileEvents(); call();
+      Accuracy(output.floats(), expected, false, true);
+      events = vt::xpu::DrainProfileEvents();
+      CHECK(std::none_of(events.begin(), events.end(), [](const auto& e) {
+        return e.stage == "attention_decode_xe2_batch";
+      }));
+      CHECK(vt::xpu::GetMemoryInfo().attention_workspace_bytes == 16 * 1024 * 1024);
+    }
+    std::vector<unsigned char> neighbor(page_bytes);
+    for (int r = 0; r < batch; ++r) {
+      backend.Copy(gpu.q, neighbor.data(), static_cast<unsigned char*>(cache.tensor.data) +
+          (r * blocks_per_owner + 129) * page_bytes, page_bytes);
+      backend.Synchronize(gpu.q);
+      CHECK(std::all_of(neighbor.begin(), neighbor.end(), [](unsigned char x) { return x == 0x7f; }));
+    }
+  }
+}
+#endif
+
+#ifdef VLLM_CPP_XPU_ONEDNN
+TEST_CASE("XPU batched Q1: default and unsupported packets keep existing routes") {
+  BatchedQ1TestEnv environment; Queue gpu(vt::DeviceType::kXPU);
+  BatchedQ1LifecycleFixture c(gpu.q, 1600, false); c.Populate(2, 0);
+  const char* flag = "VT_XPU_XE2_BATCHED_Q1";
+  const auto batch_events = [] {
+    const auto events = vt::xpu::DrainProfileEvents();
+    return std::count_if(events.begin(), events.end(), [](const auto& e) {
+      return e.stage == "attention_decode_xe2_batch";
+    });
+  };
+  REQUIRE(setenv(flag, "0", 1) == 0); c.Call(2, "auto", gpu.q);
+  const auto off = c.Result(2);
+  REQUIRE(unsetenv(flag) == 0); (void)vt::xpu::DrainProfileEvents();
+  c.Call(2, "auto", gpu.q); CHECK(batch_events() == 1);
+  Accuracy(c.Result(2), off, false, true);
+  const auto resolved_default = c.f.out.download();
+  REQUIRE(setenv(flag, "1", 1) == 0); c.Call(2, "auto", gpu.q);
+  xpu_test::SameBytes(c.f.out.download(), resolved_default);
+  REQUIRE(setenv(flag, "2", 1) == 0);
+  CHECK_THROWS_WITH_AS(c.Call(2, "auto", gpu.q),
+      doctest::Contains("VT_XPU_XE2_BATCHED_Q1 must be0/1"), std::runtime_error);
+  xpu_test::SameBytes(c.f.out.download(), resolved_default);
+  const auto fallback = [&](const vt::Tensor* query = nullptr, const vt::Tensor* table = nullptr) {
+    REQUIRE(setenv(flag, "0", 1) == 0);
+    c.Call(2, "auto", gpu.q, query, nullptr, true, table);
+    const auto expected = c.f.out.download();
+    REQUIRE(setenv(flag, "1", 1) == 0); (void)vt::xpu::DrainProfileEvents();
+    c.Call(2, "auto", gpu.q, query, nullptr, true, table);
+    CHECK(batch_events() == 0); xpu_test::SameBytes(c.f.out.download(), expected);
+  };
+  for (const auto& packet : {std::array<int32_t, 3>{0, 0, 2}, {0, 2, 2}}) {
+    std::copy(packet.begin(), packet.end(), c.offsets.begin());
+    c.f.offsets.upload(c.offsets.data()); fallback();
+  }
+  c.offsets = {0, 1, 2, 3, 4}; c.f.args.query_start_loc_host = c.offsets.data();
+  c.f.offsets.upload(c.offsets.data());
+  c.f.args.query_start_loc_host = nullptr; fallback();
+  c.f.args.query_start_loc_host = c.offsets.data();
+  for (DType dtype : {DType::kBF16, DType::kF32}) {
+    Buffer query(gpu.q, dtype, {4, 24, 256}); query.put(c.f.query.floats());
+    fallback(&query.tensor);
+  }
+  c.f.args.k_scale = .5f; c.f.args.v_scale = .25f; fallback();
+  c.f.args.k_scale = c.f.args.v_scale = 1.0f;
+  Buffer strided(gpu.q, DType::kI32, {4, 9}), padded(gpu.q, DType::kI32, {4, 5});
+  std::vector<int32_t> strided_ids(36, -999), padded_ids(20, -999);
+  for (int r = 0; r < 4; ++r) for (int p = 0; p < 4; ++p) {
+    strided_ids[r * 9 + 2 * p] = c.ids[r * 4 + p]; padded_ids[r * 5 + p] = c.ids[r * 4 + p];
+  }
+  strided.upload(strided_ids.data()); padded.upload(padded_ids.data());
+  auto strided_view = strided.tensor; strided_view.shape[1] = 4; strided_view.stride[1] = 2;
+  auto padded_view = padded.tensor; padded_view.shape[1] = 4;
+  fallback(nullptr, &strided_view); fallback(nullptr, &padded_view);
+  auto bad_query = c.f.query.tensor; bad_query.stride[0] += 16;
+  const auto preserved = c.f.out.download();
+  CHECK_THROWS_WITH_AS(c.Call(2, "auto", gpu.q, &bad_query),
+      doctest::Contains("must be contiguous"), std::runtime_error);
+  xpu_test::SameBytes(c.f.out.download(), preserved);
+  // Existing public strided-output materialization may still use the donor.
+  REQUIRE(setenv(flag, "1", 1) == 0); c.Call(2, "auto", gpu.q);
+  const auto expected = c.f.out.download();
+  Buffer wide(gpu.q, DType::kF16, {4, 24, 272}); wide.put(std::vector<float>(4 * 24 * 272, -7));
+  auto destination = wide.tensor; destination.shape[2] = 256;
+  c.Call(2, "auto", gpu.q, nullptr, &destination);
+  const auto written = wide.download(); size_t wrong = 0;
+  for (int r = 0; r < 4; ++r) for (int h = 0; h < 24; ++h) for (int d = 0; d < 272; ++d) {
+    uint16_t actual, wanted = vt::F32ToF16(-7);
+    std::memcpy(&actual, written.data() + ((r * 24 + h) * 272 + d) * 2, 2);
+    if (r < 2 && d < 256) std::memcpy(&wanted, expected.data() + ((r * 24 + h) * 256 + d) * 2, 2);
+    wrong += actual != wanted;
+  }
+  CHECK(wrong == 0);
+  // A uniform Q4 packet must stay on its already qualified packed route.
+  Fixture q4(gpu.q, 2, 4, 1601, true, false, 1600, DType::kF16, DType::kF16, DType::kF16, true);
+  Buffer q4_pages(gpu.q, DType::kI32, {2, 2}); const int32_t page_ids[] = {3, 2, 1, 0};
+  const int32_t q4_offsets[] = {0, 4, 8}; q4_pages.upload(page_ids);
+  q4.args.query_start_loc_host = q4_offsets;
+  std::vector<unsigned char> q4_expected;
+  for (const char* mode : {"0", "1"}) {
+    REQUIRE(setenv(flag, mode, 1) == 0); (void)vt::xpu::DrainProfileEvents();
+    vt::PagedAttention(gpu.q, q4.out.tensor, q4.query.tensor, q4.kc, q4.vc,
+        q4_pages.tensor, q4.lens.tensor, q4.offsets.tensor, q4.args);
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    const auto events = vt::xpu::DrainProfileEvents();
+    CHECK(std::none_of(events.begin(), events.end(), [](const auto& e) { return e.stage == "attention_decode_xe2_batch"; }));
+    CHECK(std::count_if(events.begin(), events.end(), [](const auto& e) { return e.stage == "attention_verify_complete"; }) == 1);
+    if (q4_expected.empty()) q4_expected = q4.out.download(); else xpu_test::SameBytes(q4.out.download(), q4_expected);
+  }
+  Fixture mixed(gpu.q, 2, 65, 2048, true, false, 1600, DType::kF16, DType::kF16, DType::kF16, true);
+  mixed.query.tensor.shape[0] = mixed.out.tensor.shape[0] = mixed.tokens = 129;
+  const int32_t mixed_offsets[] = {0, 1, 129}; mixed.offsets.upload(mixed_offsets);
+  mixed.args.query_start_loc_host = mixed_offsets;
+  std::vector<unsigned char> mixed_expected;
+  for (const char* mode : {"0", "1"}) {
+    REQUIRE(setenv(flag, mode, 1) == 0); (void)vt::xpu::DrainProfileEvents(); mixed.run("auto");
+    CHECK(batch_events() == 0);
+    if (mixed_expected.empty()) mixed_expected = mixed.out.download();
+    else xpu_test::SameBytes(mixed.out.download(), mixed_expected);
+  }
+}
+#endif

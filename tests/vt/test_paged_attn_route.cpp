@@ -21,6 +21,40 @@
 using vt::PagedAttnIsPrefill;
 using vt::PagedAttnUniformSpecShape;
 
+TEST_CASE("route: experimental batched Q1 requires exact live host widths") {
+  const char* key = "VT_XPU_XE2_BATCHED_Q1";
+  const bool present = std::getenv(key) != nullptr;
+  const std::string saved = present ? std::getenv(key) : "";
+  struct Restore {
+    const char* key; bool present; std::string saved;
+    ~Restore() { if (present) setenv(key, saved.c_str(), 1); else unsetenv(key); }
+  } restore{key, present, saved};
+  REQUIRE(unsetenv(key) == 0);
+  CHECK(vt::XpuBatchedQ1Enabled());
+  REQUIRE(setenv(key, "0", 1) == 0);
+  CHECK_FALSE(vt::XpuBatchedQ1Enabled());
+  REQUIRE(setenv(key, "1", 1) == 0);
+  CHECK(vt::XpuBatchedQ1Enabled());
+  const int32_t uniform[] = {0, 1, 2, 3, 4, 5};
+  for (int requests : {2, 3, 4}) {
+    CHECK(vt::XpuPureBatchedQ1Shape(requests, requests, uniform));
+    CHECK_FALSE(vt::XpuPureBatchedQ1Shape(requests, requests, nullptr));
+    CHECK_FALSE(vt::XpuPureBatchedQ1Shape(requests * 4, requests, uniform));
+    CHECK_FALSE(vt::XpuPureBatchedQ1Shape(INT64_MAX, requests, uniform));
+  }
+  for (int requests : {0, 1, 5})
+    CHECK_FALSE(vt::XpuPureBatchedQ1Shape(requests, requests, uniform));
+  for (const auto& offsets : {std::initializer_list<int32_t>{0, 0, 2},
+       {0, 2, 2}, {1, 1, 2}, {0, 1, 3}})
+    CHECK_FALSE(vt::XpuPureBatchedQ1Shape(2, 2, offsets.begin()));
+  const int32_t mixed[] = {0, 1, 4096};
+  CHECK_FALSE(vt::XpuPureBatchedQ1Shape(4096, 2, mixed));
+  for (const char* invalid : {"", "2", "01", "1 ", "auto"}) {
+    REQUIRE(setenv(key, invalid, 1) == 0);
+    CHECK_THROWS(vt::XpuBatchedQ1Enabled());
+  }
+}
+
 TEST_CASE("route: experimental long Q1 environment is bounded and preserves defaults") {
   struct Restore {
     std::string flag, splits;

@@ -1458,7 +1458,7 @@ struct XpuPolicyEnv {
       "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "VT_XPU_ATTN_SPLIT_REDUCE",
       "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
       "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
-      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED", "VT_XPU_ONEDNN_MIXED_PREFILL"};
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED", "VT_XPU_ONEDNN_MIXED_PREFILL", "VT_XPU_XE2_BATCHED_Q1"};
   std::array<std::string, std::size(names)> values;
   std::array<bool, std::size(names)> present{};
   XpuPolicyEnv() {
@@ -1490,7 +1490,7 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
   };
   const auto original = key();
   CHECK(key(4799) == original); CHECK(key(4800) == original); CHECK_FALSE(key(4801) == original);
-  constexpr const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual", "0", "16", "0", "0", "0", "1", "0", "1"};
+  constexpr const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual", "0", "16", "0", "0", "0", "1", "0", "1", "0"};
   static_assert(std::size(changed) == std::size(XpuPolicyEnv::names));
   for (size_t i = 0; i < std::size(XpuPolicyEnv::names); ++i) {
     REQUIRE(setenv(XpuPolicyEnv::names[i], changed[i], 1) == 0);
@@ -1526,6 +1526,46 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
   CHECK(key(4800) == key(4801));
   REQUIRE(setenv("VT_XPU_XE2_VERIFY", "1", 1) == 0);
   CHECK_FALSE(key(4800) == key(4801));  // Packed bound still retires when generic cap is off.
+}
+
+TEST_CASE("XPU batched Q1 graph identity binds route mode and launch bounds") {
+  XpuPolicyEnv env; char storage = 0;
+  auto cache = XpuPolicyKv(&storage); cache.num_blocks = 180;
+  REQUIRE(setenv("VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "0", 1) == 0);
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "2", 1) == 0);
+  CHECK(vllm::detail::BuildXpuAttentionGraphPolicy(4, 1, 4096, true, {cache}).kv[0][13] == 4800);
+  for (int page : {1600, 1664}) for (int requests : {2, 3, 4}) {
+    cache.block_size = page;
+    const auto key = [&](int length, int rows = 1, int count = 0) {
+      return vllm::detail::BuildXpuAttentionGraphPolicy(
+          count ? count : requests, rows, length, true, {cache});
+    };
+    REQUIRE(setenv("VT_XPU_XE2_BATCHED_Q1", "0", 1) == 0);
+    const auto off = key(4 * page);
+    CHECK(off.kv[0][13] == 0);
+    REQUIRE(setenv("VT_XPU_XE2_BATCHED_Q1", "1", 1) == 0);
+    CHECK_FALSE(key(4 * page) == off);
+    CHECK(key(4 * page).kv[0][13] == uint64_t(4 * page));
+    CHECK(key(4 * page).kv[0][14] == 32);
+    CHECK(key(40 * page + 1) == key(41 * page));
+    CHECK_FALSE(key(40 * page) == key(40 * page + 1));
+    CHECK(key(128 * page).kv[0][13] == uint64_t(128 * page));
+    CHECK(key(128 * page + 1).kv[0][13] == 0);
+    CHECK(key(4 * page, 4).kv[0][13] == 0);  // Q4 retains its existing route.
+    CHECK(key(4 * page, 1, 5).kv[0][13] == 0);
+    CHECK(key(960).boundaries[0] == 1);
+    CHECK(key(961).boundaries[0] == 0);
+    const auto c1 = key(4 * page, 1, 1);
+    REQUIRE(setenv("VT_XPU_XE2_BATCHED_Q1", "0", 1) == 0);
+    const auto c1_off = key(4 * page, 1, 1);
+    CHECK(c1.kv == c1_off.kv);
+    CHECK(c1.boundaries == c1_off.boundaries);
+    REQUIRE(setenv("VT_XPU_XE2_BATCHED_Q1", "1", 1) == 0);
+    REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "0", 1) == 0);
+    CHECK(key(4 * page).kv[0][13] == 0);
+    CHECK(key(960).kv[0][13] == 960);
+    REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "2", 1) == 0);
+  }
 }
 
 TEST_CASE("XPU experimental long Q1 graph identity binds bounded launch and mode") {

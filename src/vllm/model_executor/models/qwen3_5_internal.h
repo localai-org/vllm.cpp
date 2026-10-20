@@ -372,7 +372,7 @@ vt::DType GdnOutDType();
 // remain staged inputs; route, layout and host partition policy require retirement.
 struct XpuAttentionGraphPolicy {
   std::array<int64_t, 2> boundaries{};
-  std::array<std::string, 17> settings{};
+  std::array<std::string, 18> settings{};
   std::vector<std::array<uint64_t, 15>> kv;
   bool causal = false;
   bool operator==(const XpuAttentionGraphPolicy&) const = default;

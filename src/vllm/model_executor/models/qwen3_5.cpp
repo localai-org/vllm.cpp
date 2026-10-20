@@ -289,7 +289,9 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
     int64_t requests, int64_t query_rows, int32_t max_seq_len, bool causal,
     const std::vector<PagedKvCache>& caches) {
   XpuAttentionGraphPolicy key;
-  key.boundaries = {{requests == 1 && query_rows == 1 &&
+  const bool batched_q1 = requests >= 2 && requests <= 4 && query_rows == 1 &&
+      vt::XpuBatchedQ1Enabled();
+  key.boundaries = {{(requests == 1 || batched_q1) && query_rows == 1 &&
       vt::PagedAttnXpuShortDecodeBound(max_seq_len),
       vt::PagedAttnXpuLongSplitBound(max_seq_len)}};
   constexpr const char* names[] = {"VT_XPU_ATTENTION", "VT_XPU_XE2_VERIFY",
@@ -297,10 +299,10 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
       "VT_XPU_ATTN_SPLIT_MAX_PARTS", "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP",
       "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
       "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
-      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED", "VT_XPU_ONEDNN_MIXED_PREFILL"};
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED", "VT_XPU_ONEDNN_MIXED_PREFILL", "VT_XPU_XE2_BATCHED_Q1"};
   constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single",
       vt::kXpuLongDecodeDefault, vt::kXpuLongDecodeSplitsDefault, vt::kXpuGdnSpecSubgroupDefault,
-      vt::kXpuAttentionPreambleNativeFp32Default, vt::kXpuSmallSiluDefault, vt::kXpuConvPrefillTypedDefault, vt::kXpuGemmaLargeTypedDefault, vt::kXpuOneDnnMixedPrefillDefault};
+      vt::kXpuAttentionPreambleNativeFp32Default, vt::kXpuSmallSiluDefault, vt::kXpuConvPrefillTypedDefault, vt::kXpuGemmaLargeTypedDefault, vt::kXpuOneDnnMixedPrefillDefault, vt::kXpuBatchedQ1Default};
   static_assert(std::size(names) == std::size(defaults));
   static_assert(std::size(names) == std::tuple_size_v<decltype(key.settings)>);
   for (size_t i = 0; i < key.settings.size(); ++i) {
@@ -318,7 +320,7 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
     const uint32_t k_scale = std::bit_cast<uint32_t>(cache.k_scale);
     const uint32_t v_scale = std::bit_cast<uint32_t>(cache.v_scale);
     vt::XpuPagedDecodePlan decode;
-    if (requests == 1 && query_rows == 1 && causal &&
+    if ((requests == 1 || batched_q1) && query_rows == 1 && causal &&
         (key.settings[0] == "auto" || key.settings[0] == "verify") &&
         cache.dtype == vt::DType::kI8 && cache.fp8_kind == vt::Fp8KVCacheDataType::kFp8E4M3 &&
         cache.num_kv_heads == 4 && cache.head_size == 256 &&
