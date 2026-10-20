@@ -22,17 +22,32 @@
 //     on the hardened pool, a second return now throws instead).
 //  4. LRU VICTIM: the evicting budget evicts the LEAST recently used entry,
 //     not the most recent one (distinguished by which key hits next).
-//  5. DEFAULT OFF: `ProcessCache()` with `VT_KOLIBRI1_DEQUANT_CACHE_MB`
-//     unset is disabled (budget 0), pinned in a fork/exec'd helper whose
-//     environment provably lacks the variable. POSIX-only probe (fork/exec):
-//     preprocessor-gated so the file compiles under MSVC, where the probe is
-//     disabled-and-documented (maint-bot P2 on PR #3414).
+//  5. DEFAULT ON: `ProcessCache()` with `VT_KOLIBRI1_DEQUANT_CACHE_MB` unset
+//     is an ENABLED cache whose budget is DERIVED from the host's available
+//     memory, pinned in a fork/exec'd helper whose environment provably lacks
+//     the variable. POSIX-only probe (fork/exec): preprocessor-gated so the
+//     file compiles under MSVC, where the probe is disabled-and-documented
+//     (maint-bot P2 on PR #3414). THIS CASE USED TO ASSERT THE OPPOSITE (the
+//     cache OFF by default); the default flipped on 2026-10-20 because the
+//     cache is worth more than 2x on CPU decode, and the case was rewritten
+//     deliberately rather than deleted.
 //  6. RELOAD IDENTITY: a model reloaded at REUSED weight-buffer addresses
 //     (same geometry, different bytes) is served its own decode, never the
 //     previous model's cached bytes (maint-bot P1a on PR #3414).
 //  7. LEASE LIFETIME: a hit held live by one caller keeps its bytes intact
 //     while a second, barrier-synchronized caller evicts its entry and
 //     reuses the freed memory for scratch decodes (maint-bot P1b on PR #3414).
+//  8. THE KNOB: `0` disables, an explicit value sets the budget EXACTLY, and
+//     an unparseable value falls back to the default policy (it must not
+//     silently switch a default-ON lever off). Same fork/exec'd helper.
+//  9. THE POLICY: the pure derivation (floor, cap, divisor, the unknown
+//     nominal) is pinned without reading the host, so a policy change is a
+//     deterministic red and not a race against the machine's memory.
+// 10. BYTE IDENTITY AGAINST THE PRODUCTION UNCACHED PATH: the cached bytes
+//     are byte-identical to the bytes the PRODUCTION uncached dequant
+//     (`DequantFp8BlockUncached`, the body the forward runs with the cache
+//     disabled) produces for the same weight, cold and hot. The cache is a
+//     caching change only, and this is where that is proved.
 //
 // KNOWN LIMITS: byte-identity cannot catch a key weakened to scale-pointer
 // only (mitigated by weight-owned process-lifetime storage, not by a test),
@@ -62,6 +77,7 @@
 
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
+#include "vllm/model_executor/models/kolibri1_forward.h"  // the uncached dequant
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vt/device.h"
 
@@ -164,6 +180,33 @@ std::vector<uint16_t> RefDecode(const Fp8BlockWeight& w) {
       sc_cols, 0, w.n, w.k, w.block_n, w.block_k, out.data());
   return out;
 }
+
+#if !defined(_WIN32)
+// Exec the default-budget probe helper with a provably EMPTY environment and
+// the given mode, and return its exit status (-1 when the child did not exit
+// normally). The helper sets the knob itself for every mode except the
+// default one, so the environment stays empty in every case and the default
+// mode really observes an unset variable.
+int RunHelper(const char* mode) {
+  const pid_t pid = fork();
+  if (pid < 0) return -1;
+  if (pid == 0) {
+    char* envp[] = {nullptr};  // empty environment: the var is provably unset
+    if (mode == nullptr) {
+      execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper",
+             static_cast<char*>(nullptr), envp);
+    } else {
+      execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper",
+             const_cast<char*>(mode), static_cast<char*>(nullptr), envp);
+    }
+    _exit(127);  // exec failed — not a pass
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid) return -1;
+  if (!WIFEXITED(status)) return -1;
+  return WEXITSTATUS(status);
+}
+#endif  // !_WIN32
 
 uint64_t ChainStep(uint64_t h, const uint16_t* p, size_t count) {
   for (size_t i = 0; i < count; ++i) {
@@ -311,9 +354,10 @@ TEST_CASE("kolibri1 dequant cache: the evicting budget evicts the LRU entry, "
   CHECK_EQ(counters.misses - misses0, 4);
 }
 
-// ── 5. Default off: ProcessCache() with the env var unset is disabled ───────
-TEST_CASE("kolibri1 dequant cache: ProcessCache() defaults to a disabled "
-          "cache when VT_KOLIBRI1_DEQUANT_CACHE_MB is unset") {
+// ── 5. The DEFAULT is ON: the unset env var yields an enabled cache ──
+TEST_CASE("kolibri1 dequant cache: ProcessCache() defaults to an ENABLED "
+          "cache with a derived budget when VT_KOLIBRI1_DEQUANT_CACHE_MB is "
+          "unset") {
 #if defined(_WIN32)
   // PORTABILITY (maint-bot P2 on PR #3414): this probe exec's the helper
   // binary with a provably empty environment, which needs fork/execle —
@@ -321,29 +365,66 @@ TEST_CASE("kolibri1 dequant cache: ProcessCache() defaults to a disabled "
   // and documented here; the portable cache cases (1-4, 6, 7) still run.
   // Re-enable by porting the probe to CreateProcess with an empty
   // environment block.
-  WARN("default-off probe disabled on Windows (POSIX fork/exec only)");
+  WARN("default-budget probe disabled on Windows (POSIX fork/exec only)");
 #else
   // The budget is read ONCE per process at the static init inside
   // ProcessCache(). To pin the DEFAULT (and not whatever this process
   // happens to carry, or an earlier test case has already latched), the
   // assertion runs in a fork/exec'd helper binary launched with an
   // environment that provably lacks the variable; the helper exits 0 iff
-  // budget_bytes() == 0 and !enabled().
+  // the cache is ENABLED and its budget is the policy applied to the
+  // available-memory reading it derived it from.
   REQUIRE_EQ(std::getenv("VT_KOLIBRI1_DEQUANT_CACHE_MB"),
              static_cast<char*>(nullptr));
-  const pid_t pid = fork();
-  REQUIRE(pid >= 0);
-  if (pid == 0) {
-    char* envp[] = {nullptr};  // empty environment: the var is provably unset
-    execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper", static_cast<char*>(nullptr),
-           envp);
-    _exit(127);  // exec failed — not a pass
-  }
-  int status = 0;
-  REQUIRE_EQ(waitpid(pid, &status, 0), pid);
-  REQUIRE(WIFEXITED(status));
-  CHECK_EQ(WEXITSTATUS(status), 0);
+  CHECK_EQ(RunHelper(nullptr), 0);
 #endif
+}
+
+// ── 8. The knob: 0 disables, N is exact, junk falls back to the default ─
+TEST_CASE("kolibri1 dequant cache: VT_KOLIBRI1_DEQUANT_CACHE_MB disables at 0, "
+          "sets the budget exactly, and falls back to the default when "
+          "unparseable") {
+#if defined(_WIN32)
+  WARN("default-budget probe disabled on Windows (POSIX fork/exec only)");
+#else
+  // The OFF switch: the escape hatch that restores the original threaded
+  // pool decode, byte for byte.
+  CHECK_EQ(RunHelper("0"), 0);
+  // The EXACT budget: the shape the 2026-10-20 measurement was taken in
+  // (16 GiB), and the shape a caller pins when it wants a reproducible
+  // residency.
+  CHECK_EQ(RunHelper("16384"), 0);
+  CHECK_EQ(RunHelper("1"), 0);
+  // A MALFORMED value must not switch a default-ON lever off: the default
+  // policy applies instead.
+  CHECK_EQ(RunHelper("not-a-number"), 0);
+  CHECK_EQ(RunHelper(""), 0);
+  // A negative value is not a budget either.
+  CHECK_EQ(RunHelper("-1"), 0);
+#endif
+}
+
+// ── 9. The policy: pure, so a policy change is a deterministic red ─
+TEST_CASE("kolibri1 dequant cache: the default budget policy is the clamped "
+          "eighth of the available memory") {
+  using namespace vllm::kolibri1_dequant_cache;
+  // An UNKNOWN memory report uses the fixed nominal, not the cap and not a
+  // refusal.
+  CHECK_EQ(DefaultBudgetBytesFor(0), kDefaultBudgetNominalBytes);
+  // The FLOOR: a host with less than 8 GiB available still gets 1 GiB.
+  CHECK_EQ(DefaultBudgetBytesFor(1ull << 30), kDefaultBudgetMinBytes);
+  CHECK_EQ(DefaultBudgetBytesFor(4ull << 30), kDefaultBudgetMinBytes);
+  // The DIVISOR: the middle of the range is exactly the available eighth.
+  CHECK_EQ(DefaultBudgetBytesFor(64ull << 30), 8ull << 30);
+  CHECK_EQ(DefaultBudgetBytesFor(128ull << 30), 16ull << 30);
+  // The CAP: a host with 512 GiB available still gets 32 GiB.
+  CHECK_EQ(DefaultBudgetBytesFor(512ull << 30), kDefaultBudgetMaxBytes);
+  // The policy never leaves the documented band.
+  for (uint64_t avail = 0; avail <= (1ull << 40); avail += (1ull << 30)) {
+    const uint64_t b = DefaultBudgetBytesFor(avail);
+    CHECK(b >= kDefaultBudgetMinBytes);
+    CHECK(b <= kDefaultBudgetMaxBytes);
+  }
 }
 
 // ── 6. Reload identity: reused weight addresses, different model (P1a) ─────
@@ -456,4 +537,84 @@ TEST_CASE("kolibri1 dequant cache: a held hit's bytes survive a concurrent "
   (void)cache.GetOrDequant(wA);
   CHECK(counters.evictions - evictions0 >= 1);
   CHECK(counters.misses - misses0 >= 1);
+}
+
+// ── 10. Byte identity against the PRODUCTION uncached dequant ────────────────
+TEST_CASE("kolibri1 dequant cache: the cached bytes are byte-identical to the "
+          "production uncached dequant of the same weight") {
+  // THE CLAIM THIS CHANGE MUST NOT BREAK. The cache is a CACHING change, so
+  // the bytes it serves are the bytes the uncached path would have produced.
+  // The reference here is the PRODUCTION uncached dequant itself
+  // (`DequantFp8BlockUncached` — the body the CPU forward runs when the cache
+  // is disabled), not a transcription of it, so a divergence in either
+  // implementation is caught.
+  const int64_t kN = 512, kK = 2560;  // the shape the CACHE MISMATCH named
+  const Fp8BlockWeight w = MakeWeight(kN, kK, 128, 128, 5);
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  vllm::dense_attn::Dev d{vt::GetBackend(vt::DeviceType::kCPU), queue};
+  const vllm::dense_attn::DBuf uncached = vllm::DequantFp8BlockUncached(d, w);
+  const size_t bytes = static_cast<size_t>(kN * kK) * sizeof(uint16_t);
+  REQUIRE_EQ(uncached.bytes(), bytes);
+
+  Cache cache(bytes * 4);
+  // The COLD miss: the bytes the cache stores.
+  const auto cold = cache.GetOrDequant(w);
+  REQUIRE(static_cast<bool>(cold));
+  CHECK_EQ(std::memcmp(cold.data(), uncached.ptr(), bytes), 0);
+  // The HOT hit: the bytes the cache serves, which are the SAME resident
+  // bytes (a hit never re-decodes).
+  const auto hot = cache.GetOrDequant(w);
+  REQUIRE(static_cast<bool>(hot));
+  CHECK_EQ(std::memcmp(hot.data(), uncached.ptr(), bytes), 0);
+  CHECK_EQ(hot.data(), cold.data());
+  // And the cache really held it: the second call was a hit.
+  CHECK_EQ(vllm::kolibri1_dequant_cache::Counters().hits >= 1, true);
+}
+
+// ── 11. The fallback: a degraded cache leaves the forward on the uncached path
+TEST_CASE("kolibri1 dequant cache: a cache that cannot hold its bytes falls "
+          "back to the uncached path with the same bytes") {
+  // A weight no allocator can hold: 2^31 x 2^31 elements is 2^62 bf16
+  // values, 8 EiB. The decode allocation fails, so the cache degrades and
+  // hands back an EMPTY lease — the signal the production resolve reads as
+  // "use the uncached path". The forward must continue, not abort.
+  Fp8BlockWeight impossible;
+  impossible.n = 1ll << 31;
+  impossible.k = 1ll << 31;
+  impossible.block_n = 128;
+  impossible.block_k = 128;
+  impossible.packed.bytes = vllm::OwnedBytes(std::vector<uint8_t>(1, 0));
+  impossible.packed.dtype = vt::DType::kI8;
+  impossible.packed.rank = 2;
+  impossible.scale.bytes = vllm::OwnedBytes(std::vector<uint8_t>(4, 0));
+  impossible.scale.dtype = vt::DType::kF32;
+  impossible.scale.rank = 2;
+
+  Cache cache(1u << 30);
+  const auto& counters = vllm::kolibri1_dequant_cache::Counters();
+  const uint64_t failures0 = counters.alloc_failures;
+  const auto lease = cache.GetOrDequant(impossible);
+  CHECK(!static_cast<bool>(lease));    // the empty lease: the fallback signal
+  CHECK(!cache.enabled());              // the cache degraded itself
+  CHECK_EQ(cache.resident_bytes(), 0);  // and handed its memory back
+  CHECK_EQ(counters.alloc_failures - failures0, 1);
+
+  // The PRODUCTION resolve, on a REAL weight, with the degraded cache: it
+  // must take the uncached path and hand the GEMM the same bytes.
+  const int64_t kN = 64, kK = 512;
+  const Fp8BlockWeight w = MakeWeight(kN, kK, 32, 128, 7);
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  vllm::dense_attn::Dev d{vt::GetBackend(vt::DeviceType::kCPU), queue};
+  const auto degraded = vllm::ResolveFp8Projection(d, w, cache);
+  CHECK_EQ(degraded.cached, false);
+  const auto ref = RefDecode(w);
+  REQUIRE(degraded.wt.data != nullptr);
+  CHECK_EQ(std::memcmp(degraded.wt.data, ref.data(), ref.size() * 2), 0);
+
+  // And with a HEALTHY cache the same resolve takes the cached path and
+  // serves the same bytes: the fallback changes the route, not the result.
+  Cache healthy(1u << 30);
+  const auto cached = vllm::ResolveFp8Projection(d, w, healthy);
+  CHECK_EQ(cached.cached, true);
+  CHECK_EQ(std::memcmp(cached.wt.data, ref.data(), ref.size() * 2), 0);
 }

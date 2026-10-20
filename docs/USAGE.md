@@ -944,8 +944,13 @@ The explicit context limit keeps this example separate from the author's
 unverified million-token serving recipe. It does not limit weight memory.
 
 The loader retains FP8 blocks and BF16 tensors. The CPU forward dequantizes FP8
-projections when needed. Its optional dequantization cache defaults to disabled
-(`VT_KOLIBRI1_DEQUANT_CACHE_MB=0`), so enabling it adds a memory budget.
+projections when needed, and keeps the dequantized weights resident in a
+bounded cache that is on by default: the budget is derived from the host's
+available memory (`clamp(MemAvailable / 8, 1 GiB, 32 GiB)`), so it needs no
+configuration and never commits the process to a large allocation.
+`VT_KOLIBRI1_DEQUANT_CACHE_MB=0` disables the cache and restores the
+per-forward dequantization, and an explicit value sets the budget in MiB
+exactly.
 The registry also dispatches to a Tenstorrent forward with streamed experts.
 See the [Tenstorrent measurements and remaining gaps](gap-kolibri1-tt-captured-decode.md).
 GGUF loading and other device forwards, including CUDA, are refused.

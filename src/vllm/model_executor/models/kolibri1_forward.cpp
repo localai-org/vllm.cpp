@@ -110,13 +110,20 @@ void Report(int64_t calls) {
   for (const auto& [k, v] : Acc())
     std::fprintf(stderr, "[kolibri1-profile]   %-20s %10.2f s\n", k.c_str(), v);
   const auto& c = kolibri1_dequant_cache::Counters();
+  const auto& cache = kolibri1_dequant_cache::ProcessCache();
   std::fprintf(stderr,
                "[kolibri1-profile]   dequant_cache hits=%llu misses=%llu "
-               "evictions=%llu decode_calls=%llu\n",
+               "evictions=%llu decode_calls=%llu alloc_failures=%llu "
+               "budget_mib=%llu budget_source_mib=%llu enabled=%d\n",
                static_cast<unsigned long long>(c.hits),
                static_cast<unsigned long long>(c.misses),
                static_cast<unsigned long long>(c.evictions),
-               static_cast<unsigned long long>(c.decode_calls));
+               static_cast<unsigned long long>(c.decode_calls),
+               static_cast<unsigned long long>(c.alloc_failures),
+               static_cast<unsigned long long>(cache.budget_bytes() >> 20),
+               static_cast<unsigned long long>(cache.budget_source_bytes() >>
+                                              20),
+               cache.enabled() ? 1 : 0);
 }
 
 }  // namespace prof
@@ -268,24 +275,36 @@ struct ResolvedBT {
   kolibri1_dequant_cache::Lease dequant_lease;
 };
 
-ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
+ResolvedBT ResolveBTWithCache(Dev d, const Kolibri1Projection& w,
+                               kolibri1_dequant_cache::Cache& cache) {
   ResolvedBT r;
   if (w.IsBf16()) {
     r.wt = ResidentWeight(d, w.bf16);
     return r;
   }
-  if (kolibri1_dequant_cache::ProcessCache().enabled()) {
+  if (cache.enabled()) {
     prof::Scope prof("dequant_fp8_block");  // cache lookups + cold decodes
-    r.dequant_lease =
-        kolibri1_dequant_cache::ProcessCache().GetOrDequant(w.fp8_block);
+    r.dequant_lease = cache.GetOrDequant(w.fp8_block);
+  }
+  if (r.dequant_lease) {
     r.wt = dense_attn::MakeTensor(const_cast<uint16_t*>(r.dequant_lease.data()),
                                   DType::kBF16, d.q.device,
                                   {w.fp8_block.n, w.fp8_block.k});
-  } else {
-    r.wt_buf = DequantFp8Block(d, w.fp8_block);
-    r.wt = r.wt_buf.t();
+    return r;
   }
+  // THE FALLBACK: the cache is disabled, or it could not hold its bytes (an
+  // allocation failure: it degraded itself and handed back an EMPTY lease).
+  // The UNCACHED path below runs instead: the same decode, the same bytes,
+  // without the residency. A cache that cannot get memory must not take the
+  // forward down with it.
+  r.wt_buf = DequantFp8Block(d, w.fp8_block);
+  r.wt = r.wt_buf.t();
   return r;
+}
+
+// The production resolve: the process-wide dequant cache.
+ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
+  return ResolveBTWithCache(d, w, kolibri1_dequant_cache::ProcessCache());
 }
 
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              int64_t t, DType out_dtype = DType::kBF16,
@@ -300,9 +319,9 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // returned (a concurrent caller could evict and reuse the bytes mid-GEMM,
   // maint-bot P1b on PR #3414). The entries OWN their bytes (independent
   // allocations, never pool blocks — that ownership defect was v1's
-  // corruption). Budget 0 (the default) DISABLES the cache and keeps the
-  // original threaded pool decode, so main-line behavior is byte-for-byte
-  // unchanged unless the env var is set.
+  // corruption). The cache is ON by DEFAULT (2026-10-20) with a budget
+  // derived from the host's available memory; `VT_KOLIBRI1_DEQUANT_CACHE_MB=0`
+  // disables it and keeps the original threaded pool decode, byte-for-byte.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
   // BFDOT bf16 GEMV arm, DEFAULT on a FEAT_BF16 host (Bf16DotActive:
@@ -906,6 +925,22 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
 
 
 }  // namespace
+
+DBuf DequantFp8BlockUncached(Dev d, const Fp8BlockWeight& w) {
+  return DequantFp8Block(d, w);
+}
+
+ResolvedFp8Projection ResolveFp8Projection(Dev d, const Fp8BlockWeight& w,
+                                          kolibri1_dequant_cache::Cache& cache) {
+  Kolibri1Projection proj;
+  proj.fp8_block = w;
+  ResolvedBT r = ResolveBTWithCache(d, proj, cache);
+  ResolvedFp8Projection out;
+  out.cached = static_cast<bool>(r.dequant_lease);
+  out.wt = r.wt;
+  out.buf = std::move(r.wt_buf);
+  return out;
+}
 
 ForwardLogits ForwardKolibri1Forward(
     const std::vector<int32_t>& token_ids, const std::vector<int32_t>& positions,

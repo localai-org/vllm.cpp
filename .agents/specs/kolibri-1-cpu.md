@@ -405,6 +405,37 @@ than the harness's on the lowest-acceptance golden (verify T=1+kr for ~0.5
 emitted tokens/pass; aggregate still wins); batch>1 acceptance; real-traffic
 acceptance; serving-shaped k/window tuning (config, not code).
 
+DEQUANT CACHE DEFAULT FLIPPED ON (2026-10-20, branch
+`row/KOLIBRI1-DEQUANT-CACHE-DEFAULT`, issue
+ISSUE-LOCAL-01M5DMH6KQJSP9F8PFCQAAS4WH): the CPU fp8 decode path keeps its
+dequantised weights resident by default, because the shipped configuration was
+the slow one. The cache was OFF by default (budget 0), and the configuration
+is worth MORE THAN 2x on CPU decode: 4.02 tok/s with the cache off against
+9.07 tok/s with a 16 GiB budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32
+threads, empty-prompt 32-token decode; prefill p512 43.33 tok/s with the
+cache off). The DEFAULT budget is now DERIVED from the host's own memory
+report, `clamp(MemAvailable / 8, 1 GiB, 32 GiB)`, read through the house
+helper `vllm::v1::host_available_memory_bytes()` (the same probe the
+DeepSeek-V4 EXL3 host-residency budget uses): a fraction of what the host
+reports as handable, so a small machine is not committed to a large
+allocation, a floor that keeps the lever ON everywhere, and a cap that
+bounds the footprint. `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` still disables the
+cache (the original threaded pool dequant, byte for byte) and an explicit
+value still sets the budget exactly (16 GiB is the shape the measurement
+above was taken in); an unparseable value falls back to the default policy
+rather than switching a default-ON lever off. The budget is a BOUND, not a
+reservation, and an allocation that cannot be satisfied degrades the
+process to the uncached path instead of failing the forward: the cache
+drops its entries, reports itself disabled, and counts the degradation.
+NO NUMERICS CHANGE: the cache stores the DECODED weights and serves them
+unchanged, and the gate pins the cached bytes against the PRODUCTION
+uncached dequant (`DequantFp8BlockUncached`) byte for byte, cold and hot.
+The consequence to record: the routed-expert GEMV's warm-bf16 residency
+precondition is now met by default, so the bf16-dot tier (already the
+default on a FEAT_BF16 host since 2026-10-19) also covers the routed
+experts without an environment variable. The decode/prefill benchmark rows
+for the default configuration are PENDING the node-3 window.
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file
@@ -554,6 +585,11 @@ ONE pull request (developer's standing choice for this row).
   the pin `049a6a7bd2405b27d6d280d256bd3d585191c7ae`, `gateable = no`, and
   the issue that owns the GPU gateability measurement.
 - GPU gateability measurement for the aleph-alpha-inference oracle.
+- The decode and prefill benchmark rows for the DEFAULT dequant-cache
+  configuration (the derived budget), pending the node-3 window; the exact
+  commands are in the pull request body. The harness rows that mean
+  "cache off" must now pass `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` explicitly:
+  an UNSET variable is the default-ON configuration, not the off switch.
 - GGUF arms (k-quants), CUDA arm, Tenstorrent arm — later rows.
 - Reasoning parser / tool parser serving integration (plugin registers
   `kolibri1` reasoning + Hermes tool parsers).

@@ -202,6 +202,32 @@ collapses to ~2%, because that path is allocation-bound.
 |---|---|---|
 | `VT_KOLIBRI1_NUMA_INTERLEAVE` | **on** | `=0` (exactly) disables the guard entirely: the arenas allocate under the process's default policy and nothing touches the mempolicy. Unset or any other value leaves it on. Read on every guard construction (uncached), so a test binary can flip it mid-process; the call rate is per load and per cache miss, never per element. This is the A/B off switch and the first thing to set to `0` when a NUMA-policy defect is suspected on a multi-node host |
 
+## Kolibri-1 CPU dequant cache
+
+The Kolibri-1 CPU forward keeps the checkpoint's FP8 weights compressed and
+dequantises every used projection on every forward, so a decode step pays for
+~1.4 G elements of FP8-to-bf16 work. The dequant is a pure function of the
+weight bytes, so the decoded weights are kept resident in a bounded LRU cache
+(`src/vllm/model_executor/models/kolibri1_dequant_cache.h`). The cache is
+worth more than 2x on CPU decode: 4.02 tok/s with it off against 9.07 tok/s
+with a 16 GiB budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32 threads,
+empty-prompt 32-token decode; prefill p512 43.33 tok/s with it off), so the
+DEFAULT is the cached path.
+
+The default budget is DERIVED from the host's own memory report, so a small
+machine is not committed to a large allocation:
+`clamp(MemAvailable / 8, 1 GiB, 32 GiB)`. `MemAvailable` is the
+`/proc/meminfo` figure the kernel reports as handable without swapping, read
+through the same helper the DeepSeek-V4 EXL3 host-residency budget uses. The
+budget is a BOUND, not a reservation: entries are allocated one at a time and
+evicted under it. An allocation that cannot be satisfied degrades the process
+to the uncached path (the original threaded dequant) instead of failing the
+forward, and the degradation is counted in the `VT_KOLIBRI1_PROFILE` report.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `VT_KOLIBRI1_DEQUANT_CACHE_MB` | **on** (budget derived: `clamp(MemAvailable / 8, 1 GiB, 32 GiB)`) | The Kolibri-1 CPU dequant cache's residency budget, in MiB. `0` DISABLES the cache and restores the original threaded pool dequant, byte for byte; that is the escape hatch and the A/B off switch. Any other value sets the budget EXACTLY (16 GiB is the shape the 2026-10-20 measurement above was taken in, and the shape to pin when a reproducible residency matters). The variable UNSET is the default: ON, with the derived budget above. A value that is not a plain non-negative number of MiB is not a budget, and it falls back to the default policy rather than switching a default-ON lever off. The cache stores the DECODED weights, so the bytes it serves are the bytes the uncached path produces: the change is a caching change, never an arithmetic one |
+
 ## Rollback and bisect switches
 
 Default-on fast paths, each with an off switch. They exist so a suspected kernel
