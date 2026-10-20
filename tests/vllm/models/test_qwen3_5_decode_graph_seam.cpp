@@ -1496,6 +1496,9 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
     REQUIRE(setenv(XpuPolicyEnv::names[i], changed[i], 1) == 0);
     CHECK_FALSE(key() == original); unsetenv(XpuPolicyEnv::names[i]); CHECK(key() == original);
   }
+  REQUIRE(setenv("VT_XPU_SILU_SMALL_DECODE", "2", 1) == 0);
+  CHECK_FALSE(key() == original);  // Expanded coverage must retire the old graph.
+  unsetenv("VT_XPU_SILU_SMALL_DECODE"); CHECK(key() == original);
   const auto saved = caches[1];
   for (int field = 0; field < 11; ++field) {
     caches[1] = saved;

@@ -15,6 +15,7 @@
 #include <vector>
 #include <chrono>
 #include <iostream>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
 
@@ -567,7 +568,8 @@ TEST_CASE("XPU followup small-M SiLU: exhaustive current bytes and table graph o
   typed.Select(true); table.Select(true);
   constexpr int width = 17408;
   const bool profiled = std::getenv("VT_XPU_PROFILE") && std::string(std::getenv("VT_XPU_PROFILE")) == "1";
-  for (int rows : {1, 4}) {
+  for (int rows : {1, 2, 3, 4, 8, 12, 16}) {
+    const char* selected = rows == 1 || rows == 4 ? "1" : "2";
     CAPTURE(rows);
     Buffer input(qs.gpu, DType::kF16, {rows, 2 * width});
     Buffer reference(qs.gpu, DType::kF16, {rows, width});
@@ -588,7 +590,7 @@ TEST_CASE("XPU followup small-M SiLU: exhaustive current bytes and table graph o
         vt::SiluAndMul(qs.gpu, reference.t, input.t);
         const auto expected = reference.raw();
         (void)vt::xpu::DrainProfileEvents();
-        REQUIRE(setenv(key, "1", 1) == 0);
+        REQUIRE(setenv(key, selected, 1) == 0);
         vt::SiluAndMul(qs.gpu, candidate.t, input.t);
         P3SameFp16Behavior(candidate.raw(), expected);
         CHECK(input.raw() == before);
@@ -630,7 +632,7 @@ TEST_CASE("XPU followup small-M SiLU: exhaustive current bytes and table graph o
         }
         input.upload(bits.data()); REQUIRE(setenv(key, "0", 1) == 0);
         vt::SiluAndMul(qs.gpu, reference.t, input.t); const auto expected = reference.raw();
-        REQUIRE(setenv(key, "1", 1) == 0);
+        REQUIRE(setenv(key, selected, 1) == 0);
         graph.Replay(other); vt::GetBackend(other.device).Synchronize(other);
         P3SameFp16Behavior(candidate.raw(), expected);
       }
@@ -652,7 +654,8 @@ TEST_CASE("XPU followup small-M SiLU: actual-width strided refusal and shifted a
   } restore{key, present, saved};
   Queues qs; P3SiluEnv typed; P7SiluTableEnv table;
   typed.Select(true); table.Select(true);
-  constexpr int rows = 4, width = 17408, stride = 2 * width + 17;
+  constexpr int width = 17408, stride = 2 * width + 17;
+  for (int rows : {2, 3, 4, 8, 12, 16}) {
   Buffer padded(qs.gpu, DType::kF16, {rows, stride});
   Buffer reference(qs.gpu, DType::kF16, {rows, width});
   Buffer candidate(qs.gpu, DType::kF16, {rows, width});
@@ -665,7 +668,7 @@ TEST_CASE("XPU followup small-M SiLU: actual-width strided refusal and shifted a
   const auto before = padded.raw();
   candidate.upload(std::vector<uint16_t>(rows * width, 0x7e35).data());
   const auto unchanged = candidate.raw();
-  for (const char* selected : {"0", "1"}) {
+  for (const char* selected : {"0", "1", "2"}) {
     REQUIRE(setenv(key, selected, 1) == 0);
     // The public seam rejects noncontiguous operands before backend dispatch.
     CHECK_THROWS_WITH_AS(vt::SiluAndMul(qs.gpu, candidate.t, source),
@@ -682,11 +685,72 @@ TEST_CASE("XPU followup small-M SiLU: actual-width strided refusal and shifted a
   constexpr size_t shift = 4;
   auto alias = vt::Tensor::Contiguous(static_cast<unsigned char*>(contiguous.t.data) + shift,
       DType::kF16, qs.gpu.device, {rows, width});
-  REQUIRE(setenv(key, "1", 1) == 0); vt::SiluAndMul(qs.gpu, alias, contiguous.t);
+  REQUIRE(setenv(key, "2", 1) == 0); vt::SiluAndMul(qs.gpu, alias, contiguous.t);
   const auto after = contiguous.raw();
   P3SameBits(std::vector<unsigned char>(after.begin() + shift, after.begin() + shift + wanted.size()), wanted);
   CHECK(std::equal(after.begin(), after.begin() + shift, original.begin()));
   CHECK(std::equal(after.begin() + shift + wanted.size(), after.end(), original.begin() + shift + wanted.size()));
+  }
+}
+
+TEST_CASE("XPU followup small-M SiLU: expanded dtype and width fallback") {
+  P3SiluEnv typed; P7SiluTableEnv table; typed.Select(true); table.Select(true);
+  const char* key="VT_XPU_SILU_SMALL_DECODE";
+  const bool present=std::getenv(key)!=nullptr;const std::string saved=present?std::getenv(key):"";
+  struct Restore {const char* key;bool present;std::string value;
+    ~Restore(){if(present)setenv(key,value.c_str(),1);else unsetenv(key);}
+  } restore{key,present,saved};
+  Queues qs;
+  for(auto dtype:{DType::kF16,DType::kBF16,DType::kF32}) {
+    const int width=dtype==DType::kF16?17407:17408;
+    Buffer input(qs.gpu,dtype,{16,2*width}),reference(qs.gpu,dtype,{16,width}),candidate(qs.gpu,dtype,{16,width});
+    input.put(std::vector<float>(16*2*width,.25f));
+    REQUIRE(setenv(key,"1",1)==0);vt::SiluAndMul(qs.gpu,reference.t,input.t);
+    const auto expected=reference.raw();(void)vt::xpu::DrainProfileEvents();
+    REQUIRE(setenv(key,"2",1)==0);vt::SiluAndMul(qs.gpu,candidate.t,input.t);
+    P3SameBits(candidate.raw(),expected);
+    for(const auto& e:vt::xpu::DrainProfileEvents())CHECK(e.stage!="silu_and_mul_fp16_table");
+  }
+}
+
+TEST_CASE("XPU concurrency SiLU: captured graph operands complete call screen"
+          * doctest::skip(!std::getenv("VT_B70_CONCURRENCY_SILU_INPUT"))) {
+  const char* fixture=std::getenv("VT_B70_CONCURRENCY_SILU_INPUT");
+  std::ifstream file(fixture,std::ios::binary);REQUIRE(bool(file));
+  constexpr int width=17408,guard=32;
+  std::vector<uint16_t> real(16*2*width);file.read(reinterpret_cast<char*>(real.data()),real.size()*2);
+  REQUIRE(file.gcount()==static_cast<std::streamsize>(real.size()*2));REQUIRE(file.peek()==std::char_traits<char>::eof());
+  Queues qs;P3SiluEnv typed;P7SiluTableEnv table;typed.Select(true);table.Select(true);
+  const char* key="VT_XPU_SILU_SMALL_DECODE";const bool present=std::getenv(key)!=nullptr;
+  const std::string saved=present?std::getenv(key):"";
+  struct Restore {const char* key;bool present;std::string value;
+    ~Restore(){if(present)setenv(key,value.c_str(),1);else unsetenv(key);}
+  } restore{key,present,saved};
+  const bool profiled=std::getenv("VT_XPU_PROFILE")&&std::string(std::getenv("VT_XPU_PROFILE"))=="1";
+  for(int rows:{1,2,3,4,8,12,16}) {
+    Buffer input(qs.gpu,DType::kF16,{2*guard+rows*2*width});
+    Buffer reference(qs.gpu,DType::kF16,{2*guard+rows*width}),candidate(qs.gpu,DType::kF16,{2*guard+rows*width});
+    std::vector<uint16_t> data(input.bytes/2,0x7e35),poison(candidate.bytes/2,0x7e35);
+    std::copy_n(real.begin(),rows*2*width,data.begin()+guard);input.upload(data.data());reference.upload(poison.data());candidate.upload(poison.data());
+    auto src=vt::Tensor::Contiguous(static_cast<uint16_t*>(input.t.data)+guard,DType::kF16,qs.gpu.device,{rows,2*width});
+    auto ref=vt::Tensor::Contiguous(static_cast<uint16_t*>(reference.t.data)+guard,DType::kF16,qs.gpu.device,{rows,width});
+    auto dst=vt::Tensor::Contiguous(static_cast<uint16_t*>(candidate.t.data)+guard,DType::kF16,qs.gpu.device,{rows,width});
+    REQUIRE(setenv(key,"1",1)==0);vt::SiluAndMul(qs.gpu,ref,src);const auto expected=reference.raw(),before=input.raw();
+    const auto sample=[&](const char* arm,const std::string& phase,int pair){
+      REQUIRE(setenv(key,arm,1)==0);
+      for(int warm=0;warm<2;++warm)vt::SiluAndMul(qs.gpu,dst,src);
+      vt::GetBackend(qs.gpu.device).Synchronize(qs.gpu);(void)vt::xpu::DrainProfileEvents();
+      std::vector<double> times;
+      for(int i=0;i<7;++i){const auto begin=std::chrono::steady_clock::now();vt::SiluAndMul(qs.gpu,dst,src);vt::GetBackend(qs.gpu.device).Synchronize(qs.gpu);
+        times.push_back(std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-begin).count());}
+      P3SameBits(candidate.raw(),expected);CHECK(input.raw()==before);
+      std::cout<<"CONCURRENCY_SILU_OPERATOR "<<nlohmann::json{{"rows",rows},{"phase",phase},{"pair",pair},{"mode",arm},{"fixture",fixture},
+        {"complete_call_wall_us",times},{"profiled",profiled},{"exact_fp16_bytes",true},{"table_bytes",vt::xpu::GetMemoryInfo().fp16_silu_table_bytes}}.dump()<<std::endl;
+    };
+    sample("1","AA",0);sample("1","AA",1);
+    for(int pair=0;pair<3;++pair)if(pair%2==0){sample("1","AB",pair);sample("2","AB",pair);}else{sample("2","AB",pair);sample("1","AB",pair);}
+  }
+  CHECK(vt::xpu::GetMemoryInfo().fp16_silu_table_bytes==131072);
 }
 
 TEST_CASE("XPU P3 FP16 SiLU: threshold rows tail guards and shifted aliases") {

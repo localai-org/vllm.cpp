@@ -134,7 +134,8 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
       constexpr size_t local = 256;
       const size_t columns = (size_t(width) + local - 1) / local * local;
       const char* table_setting = std::getenv("VT_XPU_SILU_FP16_TABLE");
-      // Reuse the same immutable FP16 table for qualified small-row shapes.
+      // Reuse one immutable table for legacy and experimental small-row admission.
+      // Coverage mode changes no FP16 rounding, allocation or queue contract.
       // Setting0 preserves the typed expression for complete-call A/B.
       const std::string_view table_mode = table_setting ? table_setting : "1";
       VT_CHECK(table_mode == "0" || table_mode == "1", "Invalid VT_XPU_SILU_FP16_TABLE");
