@@ -11,6 +11,7 @@
 #include "vllm/entrypoints/chat_template.h"
 
 #include "vllm/model_executor/model_loader/gguf_reader.h"
+#include "vllm/v1/core/kv_cache_utils.h"
 #include "vllm/v1/engine/validation_error.h"  // refused kwarg -> HTTP 400
 
 #include <algorithm>
@@ -71,18 +72,60 @@ nlohmann::ordered_json DecodeHistoricalToolArguments(
                            : std::move(decoded);
 }
 
+// Google source captured_content/tool_body branches, checkpoint ee0ef602.
+// Payload fields are opaque here: this is rendering, not media admission.
+nlohmann::ordered_json GoogleContent(const openai::ChatMessage& m) {
+  using Json = nlohmann::ordered_json;
+  Json content;
+  if (m.template_content) {
+    content = *m.template_content;
+  } else if (m.content_parts) {
+    // Programmatic callers have no wire document. Only text is losslessly
+    // reconstructible; never silently flatten a modality in this path.
+    content = Json::array();
+    for (const auto& p : *m.content_parts) {
+      if (p.type != "text")
+        throw vllm::v1::InputValidationError("Google typed media requires retained content");
+      content.push_back({{"type", "text"}, {"text", p.text}});
+    }
+  } else if (m.content) {
+    content = *m.content;
+  }
+  if (content.is_string() || content.is_null()) return content;
+  if (!content.is_array())
+    throw vllm::v1::InputValidationError("Google content must be string, null or typed array");
+  for (auto& part : content) {
+    if (part.is_string()) part = Json{{"type", "text"}, {"text", part}};
+    if (!part.is_object() || !part.contains("type") || !part["type"].is_string())
+      throw vllm::v1::InputValidationError("Google content part requires a string type");
+    const auto type = part["type"].get<std::string>();
+    if (type == "text") {
+      if (!part.contains("text") || !part["text"].is_string())
+        throw vllm::v1::InputValidationError("Google text part requires string text");
+    } else if (type != "image" && type != "image_url" && type != "audio" &&
+               type != "input_audio" && type != "video") {
+      throw vllm::v1::InputValidationError("Unsupported Google content part type");
+    } else if (m.role == "system" || m.role == "developer") {
+      throw vllm::v1::InputValidationError("Google system/developer parts require text");
+    }
+  }
+  return content;
+}
+
 // Build the `messages` variable minja exposes to the template, mirroring what
 // transformers passes to `apply_chat_template`: a list of {role, content} maps,
 // carrying `tool_calls` (OpenAI shape) when a ChatMessage has them. ordered_json
 // keeps key order stable so `{{ message | tojson }}`-style branches are
 // deterministic.
 nlohmann::ordered_json BuildMessages(
-    const std::vector<openai::ChatMessage>& messages) {
+    const std::vector<openai::ChatMessage>& messages, bool google_e4b) {
   nlohmann::ordered_json arr = nlohmann::ordered_json::array();
   for (const openai::ChatMessage& m : messages) {
     nlohmann::ordered_json o = nlohmann::ordered_json::object();
     o["role"] = m.role;
-    if (m.content.has_value()) {
+    if (google_e4b) {
+      o["content"] = GoogleContent(m);
+    } else if (m.content.has_value()) {
       o["content"] = *m.content;
     } else {
       o["content"] = nullptr;
@@ -94,6 +137,8 @@ nlohmann::ordered_json BuildMessages(
     if (m.tool_call_id.has_value()) o["tool_call_id"] = *m.tool_call_id;
     if (m.name.has_value()) o["name"] = *m.name;
     if (m.reasoning.has_value()) o["reasoning"] = *m.reasoning;
+    if (google_e4b && m.template_reasoning_content)
+      o["reasoning_content"] = *m.template_reasoning_content;
     if (m.tool_calls.has_value()) {
       nlohmann::ordered_json calls = nlohmann::ordered_json::array();
       for (size_t i = 0; i < m.tool_calls->size(); ++i) {
@@ -280,13 +325,47 @@ void JsonDumps(minja::Value v, bool ensure_ascii, bool pretty,
 struct ParsedChatTemplate {
   std::shared_ptr<const minja::TemplateNode> root;  // null when parse failed
   std::string parse_error;                          // the parser's what()
+  bool google_e4b = false;
 };
 
 ParsedChatTemplate ParseChatTemplateKeepingError(
     const std::string& template_str) {
   ParsedChatTemplate parsed;
   try {
-    parsed.root = ParseChatTemplate(template_str);
+    // Exact Google checkpoint ee0ef602 (fixture SHA256). Do not infer content
+    // format for unrelated or modified templates. sha256_bytes returns raw bytes.
+    parsed.google_e4b = vllm::v1::sha256_bytes(template_str) == std::string(
+        "\x0a\x2c\x80\x73\xc8\x78\xab\x1d\xa0\x04\xbe\xe9\x33\xa9\x98\x60"
+        "\x65\x37\xbb\xb6\x20\x16\x31\x03\x52\xc7\x28\x5c\x3f\x01\xc5\xb5", 32);
+    auto source = template_str;
+    if (parsed.google_e4b) {
+      // Python/Jinja implicitly joins these adjacent diagnostic literals;
+      // minja does not. Join only the two known boundaries in this exact source.
+      const std::string boundary = "\"\n                            \"";
+      for (int i = 0; i < 2; ++i) {
+        const auto pos = source.find(boundary);
+        if (pos == std::string::npos) throw std::runtime_error("Google literal boundary missing");
+        source.erase(pos, boundary.size());
+      }
+    }
+    if (parsed.google_e4b) {
+      // minja treats an empty mapping as true; Python/Jinja treats it as false.
+      // Qualify truth tests, not `is mapping`: nested empty properties must
+      // still render {} in the mapping-only branches of the original source.
+      for (const std::string value : {"params", "params['properties']",
+                                      "value['items']"}) {
+        const auto condition = value == "value['items']"
+            ? "if value['items'] is mapping and " + value : "if " + value;
+        const auto original = condition + " -%}";
+        const auto pos = source.find(original);
+        if (pos == std::string::npos) {
+          throw std::runtime_error("Google schema condition missing");
+        }
+        source.replace(pos, original.size(),
+                       condition + " and " + value + " | length > 0 -%}");
+      }
+    }
+    parsed.root = ParseChatTemplate(source);
   } catch (const std::exception& e) {
     parsed.parse_error = e.what();
   }
@@ -307,7 +386,7 @@ std::string RenderChatTemplate(
     const minja::TemplateNode& root = *parsed.root;
 
     nlohmann::ordered_json top = nlohmann::ordered_json::object();
-    top["messages"] = BuildMessages(messages);
+    top["messages"] = BuildMessages(messages, parsed.google_e4b);
     top["add_generation_prompt"] = add_generation_prompt;
     // The ENGINE's own names, held so the kwargs loop below can ask what they
     // are. minja resolves a global, a filter and an is-test through ONE Context

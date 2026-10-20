@@ -11,6 +11,10 @@
 
 namespace vllm::parser {
 
+std::unique_ptr<engine::ParserEngine> get_parser_engine(const std::string& name) {
+  return get_parser_engine(name, name != "gemma4");
+}
+
 std::unique_ptr<engine::ParserEngine> get_parser_engine(
     const std::string& name, bool thinking,
     const engine::EngineTokenizer* tokenizer) {
@@ -63,10 +67,10 @@ std::unique_ptr<engine::ParserEngine> get_parser_engine(
     return std::make_unique<Glm47MoeParser>(thinking, tokenizer);
   }
   // gemma4 adds the _preprocess_feed (channel-opener injection) + _events_to_delta
-  // (thought-prefix strip) hooks (gemma4.py). thinking selects is_reasoning_end
-  // behaviour only (not the assembly config), so it is not threaded here.
+  // (thought-prefix strip) hooks. Thinking selects only reasoning-end policy;
+  // the initial assembly state remains CONTENT in either mode.
   if (name == "gemma4") {
-    return std::make_unique<Gemma4Parser>(tokenizer);
+    return std::make_unique<Gemma4Parser>(tokenizer, thinking);
   }
   // inkling adds the "args" wrapper-key unwrap + trailing-text single-pass flush
   // hooks (inkling.py); MESSAGE_HEADER-initial, no reasoning tokens.

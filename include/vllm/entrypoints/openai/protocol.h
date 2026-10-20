@@ -425,6 +425,10 @@ struct ChatMessage {
   // execution is malformed for templates that render tool_call_id/name.
   std::optional<std::string> tool_call_id{};
   std::optional<std::string> name{};
+  // Original content for explicitly scoped typed-template adapters. Keep the
+  // legacy flattened content and processor parts unchanged for other callers.
+  std::optional<nlohmann::json> template_content{};
+  std::optional<std::string> template_reasoning_content{};
 };
 
 // Ported from: vllm/entrypoints/openai/engine/protocol.py:350 (DeltaMessage).

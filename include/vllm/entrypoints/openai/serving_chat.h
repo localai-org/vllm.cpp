@@ -291,7 +291,8 @@ class OpenAIServingChat {
   // name is configured; else nullptr. ONE instance per request (the streaming
   // parse may be stateful, olmo3). Unlike tools, reasoning does not gate on
   // ToolsEnabled: a request without tools can still carry a chain-of-thought.
-  std::unique_ptr<ReasoningParser> MakeReasoningParser() const;
+  std::unique_ptr<ReasoningParser> MakeReasoningParser(
+      const ChatCompletionRequest& request) const;
 
   v1::LLMEngine* sync_engine_ = nullptr;
   v1::AsyncLLM* async_engine_ = nullptr;

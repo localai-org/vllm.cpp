@@ -44,10 +44,14 @@
 
 #include <cstdint>
 #include <vector>
+#include <limits>
+#include <string>
 
 namespace vllm::multimodal {
 
 struct Gemma4AudioConfig {
+  bool use_clipped_linears = true;
+  std::string hidden_act = "silu";
   int64_t hidden_size = 1024;
   int64_t num_layers = 12;
   int64_t num_heads = 8;
@@ -73,10 +77,10 @@ struct Gemma4AudioConfig {
   int64_t ffn_dim() const { return hidden_size * 4; }                    // 4096
 };
 
-// Gemma4ClippableLinear QAT activation clamp (all finite trained bounds).
+// Gemma4ClippableLinear QAT clamp; disabled clipping has true infinite bounds.
 struct AClip {
-  float in_min = -3.4e38f, in_max = 3.4e38f;
-  float out_min = -3.4e38f, out_max = 3.4e38f;
+  float in_min = -std::numeric_limits<float>::infinity(), in_max = std::numeric_limits<float>::infinity();
+  float out_min = -std::numeric_limits<float>::infinity(), out_max = std::numeric_limits<float>::infinity();
 };
 
 // A clippable Linear: weight [out,in] row-major f32 + the activation clamp.
@@ -132,6 +136,8 @@ struct Gemma4AudioCapture {
   std::vector<float> output_proj;         // [S, output_proj_dims]
 };
 
+// Optional embed_projection borrows the separately loaded connector without
+// copying the full tower; null uses w.embed_proj for existing callers.
 // Runs the USM-Conformer audio tower + audio projector on one clip.
 //   input_features : [T, feature_size] host f32 (log-mel; A1's product)
 //   feature_mask   : [T] host i32 (1=valid, 0=padding) — may be empty (all valid)
@@ -140,6 +146,7 @@ struct Gemma4AudioCapture {
 std::vector<float> Gemma4AudioForward(const std::vector<float>& input_features, int64_t n_frames,
                                       const std::vector<int32_t>& feature_mask,
                                       const Gemma4AudioWeights& w, const Gemma4AudioConfig& cfg,
-                                      Gemma4AudioCapture* capture = nullptr);
+                                      Gemma4AudioCapture* capture = nullptr,
+                                      const std::vector<float>* embed_projection = nullptr);
 
 }  // namespace vllm::multimodal

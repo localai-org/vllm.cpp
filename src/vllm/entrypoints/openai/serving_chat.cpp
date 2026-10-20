@@ -17,6 +17,7 @@
 
 #include "vllm/entrypoints/beam_search.h"
 #include "vllm/entrypoints/openai/chat_mm.h"  // HasMultiModalParts (mm seam gate)
+#include "vllm/entrypoints/openai/reasoning_parsers/request.h"
 #include "vllm/entrypoints/openai/request_logger.h"
 #include "vllm/entrypoints/openai/serving_utils.h"
 #include "vllm/entrypoints/openai/tool_parsers/structural_tags.h"
@@ -582,9 +583,10 @@ OpenAIServingChat::MakeParserEngine(const ChatCompletionRequest& request) const 
   return vllm::parser::get_parser_engine(tool_parser_name_);
 }
 
-std::unique_ptr<ReasoningParser> OpenAIServingChat::MakeReasoningParser() const {
+std::unique_ptr<ReasoningParser> OpenAIServingChat::MakeReasoningParser(
+    const ChatCompletionRequest& request) const {
   if (reasoning_parser_name_.empty()) return nullptr;
-  return get_reasoning_parser(reasoning_parser_name_);
+  return MakeRequestReasoningParser(reasoning_parser_name_, request);
 }
 
 OpenAIServingChat::OpenAIServingChat(v1::LLMEngine& engine,
@@ -834,7 +836,7 @@ ChatCompletionResult OpenAIServingChat::create_chat_completion(
   // when disabled (empty reasoning_parser_name_). Independent of tools. The
   // engine-backed parser does reasoning itself, so it is bypassed there.
   std::unique_ptr<ReasoningParser> reasoning_parser =
-      engine_parser != nullptr ? nullptr : MakeReasoningParser();
+      engine_parser != nullptr ? nullptr : MakeReasoningParser(request);
   const bool named_tool_choice = IsNamedToolChoice(request);
 
   SamplingParams sampling_params =

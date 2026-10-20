@@ -1,3 +1,4 @@
+#include "vllm/parser/gemma4.h"
 // See parser_engine_adapter.h. Ported from vllm/parser/engine/adapters.py:35 +
 // registered_adapters.py:48 @ 555967922.
 #include "vllm/entrypoints/openai/reasoning_parsers/parser_engine_adapter.h"
@@ -76,5 +77,16 @@ bool ParserEngineReasoningAdapter::is_reasoning_end(
 Qwen3ParserReasoningAdapter::Qwen3ParserReasoningAdapter(bool thinking)
     : ParserEngineReasoningAdapter(std::make_unique<vllm::parser::Qwen3Parser>(
           pe::qwen3_config(thinking, "qwen3"), thinking)) {}
+
+void ParserEngineReasoningAdapter::adjust_initial_state_from_prompt(
+    const std::vector<int>& prompt_token_ids) {
+  // Pinned a7c23ac96 adapters.py:68-69: direct forwarding, caller owns timing.
+  engine_->adjust_initial_state_from_prompt(prompt_token_ids);
+}
+
+Gemma4ParserReasoningAdapter::Gemma4ParserReasoningAdapter(
+    bool thinking, const pe::EngineTokenizer* tokenizer)
+    : ParserEngineReasoningAdapter(
+          std::make_unique<vllm::parser::Gemma4Parser>(tokenizer, thinking)) {}
 
 }  // namespace vllm::entrypoints::openai

@@ -15,9 +15,10 @@
 //     is_reasoning_end_streaming, count_reasoning_tokens) operates on token-ID
 //     spans. Those exist ONLY for the structured-decode engines (xgrammar) and
 //     are NOT needed by the serving-layer text extraction. We therefore give the
-//     ABC a default ctor, drop the tokenizer wiring, and make is_reasoning_end
+//     ABC a default ctor and make is_reasoning_end
 //     TEXT-based (over the accumulated output string). The other token-ID
-//     methods are dropped. Because the think markers are self-delimiting special
+//     methods are dropped. Gemma prompt preparation separately accepts IDs and
+//     borrows an EngineTokenizer through its explicit factory context. Because the think markers are self-delimiting special
 //     tokens (they carry their own '<','>','[',']'), a substring match over the
 //     detokenized text is equivalent to a token-ID membership test for a
 //     well-formed stream (e.g. "<test:think>" is NOT a substring of
@@ -36,6 +37,8 @@
 #include <vector>
 
 #include "vllm/entrypoints/openai/protocol.h"
+
+namespace vllm::parser::engine { class EngineTokenizer; }
 
 namespace vllm::entrypoints::openai {
 
@@ -57,6 +60,9 @@ class ReasoningParser {
 
   ReasoningParser(const ReasoningParser&) = delete;
   ReasoningParser& operator=(const ReasoningParser&) = delete;
+
+  // Caller invokes once before extraction. IDs are borrowed for this call only.
+  virtual void adjust_initial_state_from_prompt(const std::vector<int>&) {}
 
   // Ported from: abs_reasoning_parsers.py:146 (extract_reasoning). Split a
   // COMPLETE model-generated string into (reasoning, content). Non-streaming,
@@ -92,6 +98,12 @@ class ReasoningParser {
 // "minimax_m2", "minimax_m2_append_think", "step3", "olmo3", and the
 // engine-backed "qwen3"/"mimo" pair (reasoning_parsers/parser_engine_adapter.h).
 std::unique_ptr<ReasoningParser> get_reasoning_parser(const std::string& name);
+
+// Explicit Gemma context; tokenizer must outlive the returned parser. Other
+// families retain name-only defaults. Request kwargs interpretation is separate.
+std::unique_ptr<ReasoningParser> get_reasoning_parser(
+    const std::string& name, bool thinking,
+    const vllm::parser::engine::EngineTokenizer* tokenizer);
 
 // Every name get_reasoning_parser accepts, in factory order (the analogue of
 // `ReasoningParserManager.reasoning_parsers.keys()`, which upstream's

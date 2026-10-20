@@ -46,8 +46,13 @@
 // nuance for the strict gate.
 #pragma once
 
+#include "vllm/model_executor/models/gemma4_vision.h"
+#include "vllm/model_executor/models/gemma4_audio.h"
+#include <optional>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "vllm/model_executor/models/model_registry.h"
@@ -111,7 +116,30 @@ struct Gemma4LayerWeights {
 // Whole Gemma-4 text-model weights. tie_word_embeddings defaults TRUE (lm_head
 // aliases embed_tokens; the checkpoint has no lm_head.weight). PLE tables live at
 // model level (gemma4.py:986-1063).
+// Staged connector storage: owned raw [text_hidden, encoder_output] BF16.
+// Encoder execution and hook integration remain owed by the E4B baseline spec.
+struct Gemma4ModalityWeights {
+  nlohmann::json config;  // null when absent; retain encoder and clipping fields
+  OwnedTensor embedding_projection;
+};
+
+// Only frontend fields are validated here; not an executable full tower config.
+struct Gemma4AudioFrontendConfig {
+  int64_t hidden_size, sub_ch0, sub_ch1, input_width;
+  float rms_norm_eps;
+};
+
 struct Gemma4Weights {
+  // Complete owned host-F32 audio tower inventory; historical member name.
+  multimodal::Gemma4AudioWeights audio_frontend_weights;
+  std::optional<multimodal::Gemma4AudioConfig> audio_config;
+  std::optional<Gemma4AudioFrontendConfig> audio_frontend_config;
+  // Partial inventory: patch tensors and blocks; clipping/execution remain owed.
+  multimodal::Gemma4VisionWeights vision_patch_weights;
+  // Inventory configuration, not a claim of GQA execution by the MHA forward.
+  std::optional<multimodal::Gemma4VisionConfig> vision_config;
+  Gemma4ModalityWeights vision;
+  Gemma4ModalityWeights audio;
   bool tie_word_embeddings = true;
   OwnedTensor embed_tokens;             // bf16 [vocab, H]  (scaled by sqrt(H) at use)
   OwnedTensor embed_tokens_per_layer;   // bf16 [vocab, ple_dim*num_layers]
@@ -306,5 +334,44 @@ void ParseGemma4ForConditionalGenerationConfig(const HfConfig& config);
 v1::KVCacheConfig MakeGemma4ForConditionalGenerationKVCache(const HfConfig& config,
                                                             int block_size,
                                                             int num_blocks);
+
+// T03B: typed read-only view of the Gemma-4 multimodal special token IDs from
+// the wrapper config.json. The eight multimodal soft-token IDs and the
+// `eos_token_id` array live at the top level of the ForConditionalGeneration
+// wrapper; `bos_token_id`, `pad_token_id` and `vocab_size` live under the
+// nested `text_config` sub-dict (the same split LoadHfConfig already resolves
+// for the typed text fields). This is a pure read of `config.raw`; it does not
+// change any serving/forwarding path.
+struct Gemma4SpecialTokenIds {
+  int32_t audio_token_id = 0;
+  int32_t boa_token_id = 0;
+  int32_t boi_token_id = 0;
+  int32_t eoa_token_id = 0;
+  int32_t eoa_token_index = 0;
+  int32_t eoi_token_id = 0;
+  int32_t image_token_id = 0;
+  int32_t video_token_id = 0;
+  int32_t bos_token_id = 0;
+  int32_t pad_token_id = 0;
+  int32_t vocab_size = 0;
+  // Top-level `eos_token_id` is a JSON array (e.g. [1, 106]).
+  std::vector<int32_t> eos_token_ids;
+
+  explicit Gemma4SpecialTokenIds(const HfConfig& config);
+};
+
+// T03D: build the Gemma-4 video token replacement sequence for a list of frames.
+// Mirrors Python get_video_repl in gemma4_mm.py:412-447. For each frame i with
+// timestamp ts (seconds) and n soft tokens, emits encode(prefix) where prefix is
+// "MM:SS " for i==0 and " MM:SS " for i>0 (minutes=int(ts//60), seconds=int(ts%60),
+// both zero-padded to 2 digits), followed by boi, video repeated n times, eoi.
+// `encode` tokenizes the prefix string. Returns the concatenated token ids.
+// Throws (via VT_CHECK) if timestamps and num_soft_tokens_per_frame differ in
+// length. Empty inputs return an empty result.
+std::vector<int32_t> Gemma4VideoReplacement(
+    const std::vector<double>& timestamps,
+    const std::vector<int32_t>& num_soft_tokens_per_frame,
+    int32_t boi_token_id, int32_t eoi_token_id, int32_t video_token_id,
+    const std::function<std::vector<int32_t>(std::string_view)>& encode);
 
 }  // namespace vllm

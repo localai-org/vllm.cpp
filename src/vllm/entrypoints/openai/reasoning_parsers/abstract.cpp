@@ -21,6 +21,9 @@
 namespace vllm::entrypoints::openai {
 
 std::unique_ptr<ReasoningParser> get_reasoning_parser(const std::string& name) {
+  if (name == "gemma4") {
+    return std::make_unique<Gemma4ParserReasoningAdapter>();
+  }
   if (name == "think_auto") {
     return std::make_unique<ThinkAutoReasoningParser>();
   }
@@ -76,13 +79,22 @@ std::unique_ptr<ReasoningParser> get_reasoning_parser(const std::string& name) {
   return nullptr;
 }
 
+std::unique_ptr<ReasoningParser> get_reasoning_parser(
+    const std::string& name, bool thinking,
+    const vllm::parser::engine::EngineTokenizer* tokenizer) {
+  if (name == "gemma4") {
+    return std::make_unique<Gemma4ParserReasoningAdapter>(thinking, tokenizer);
+  }
+  return get_reasoning_parser(name);
+}
+
 // The enumeration of the factory above (see abstract.h). ADD A NAME HERE IN THE
 // SAME CHANGE THAT ADDS ITS FACTORY BRANCH.
 const std::vector<std::string>& reasoning_parser_names() {
   static const std::vector<std::string> names = {
       "think_auto", "deepseek_r1", "deepseek_v3", "holo2",
       "mistral", "minimax_m2", "minimax_m2_append_think", "step3", "olmo3",
-      "muse_glimmer", "qwen3", "mimo", "kolibri1",
+      "muse_glimmer", "qwen3", "mimo", "kolibri1", "gemma4",
   };
   return names;
 }

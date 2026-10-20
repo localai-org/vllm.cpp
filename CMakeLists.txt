@@ -1171,8 +1171,10 @@ add_library(vllm STATIC
   # LOAD-GGUF-MMPROJ (#821): the llama.cpp `clip` mmproj reader that fills the
   # SAME Qwen3VLVisionWeights from a SECOND GGUF file beside the language one.
   src/vllm/model_executor/models/clip_mmproj_gguf.cpp
+  src/vllm/model_executor/models/gemma4_vision_input.cpp
   src/vllm/model_executor/models/gemma4_vision.cpp
   src/vllm/model_executor/models/deepseek_v4_vision.cpp
+  src/vllm/model_executor/models/gemma4_audio_encoder.cpp
   src/vllm/model_executor/models/gemma4_audio.cpp
   src/vllm/model_executor/models/whisper_audio.cpp
   src/vllm/model_executor/models/qwen3_vl_text.cpp
@@ -1186,6 +1188,8 @@ add_library(vllm STATIC
   src/vllm/multimodal/processing/context.cpp
   src/vllm/multimodal/processing/processor.cpp
   src/vllm/multimodal/dots3_note_processor.cpp
+  src/vllm/multimodal/gemma4_image_processor.cpp
+  src/vllm/multimodal/gemma4_audio_processor.cpp
   src/vllm/multimodal/mel_filter_bank.cpp
   # Pillow's BICUBIC resampler, which is NOT torchvision's and NOT a four-tap
   # cubic (dots3-note W6c, #2537).
@@ -1370,6 +1374,7 @@ add_library(vllm STATIC
   src/vllm/entrypoints/openai/mm_chat_nano_nemotron_vl.cpp
   src/vllm/entrypoints/openai/mm_chat_dots3note.cpp
   src/vllm/entrypoints/openai/mm_chat_qwen3vl.cpp
+  src/vllm/entrypoints/openai/mm_chat_gemma4.cpp
   src/vllm/entrypoints/openai/serving_utils.cpp
   src/vllm/entrypoints/openai/serving_completion.cpp
   src/vllm/entrypoints/openai/serving_chat.cpp
@@ -1395,6 +1400,7 @@ add_library(vllm STATIC
   src/vllm/entrypoints/openai/tool_parsers/granite.cpp
   src/vllm/entrypoints/openai/tool_parsers/granite4.cpp
   src/vllm/entrypoints/openai/tool_parsers/granite_20b_fc.cpp
+  src/vllm/entrypoints/openai/reasoning_parsers/request.cpp
   src/vllm/entrypoints/openai/reasoning_parsers/abstract.cpp
   src/vllm/entrypoints/openai/reasoning_parsers/detect.cpp
   src/vllm/entrypoints/openai/reasoning_parsers/think_auto.cpp
@@ -1434,6 +1440,7 @@ add_library(vllm STATIC
   src/vllm/entrypoints/openai/reasoning_parsers/muse_glimmer.cpp
   src/vllm/entrypoints/openai/reasoning_parsers/kolibri1.cpp
   src/vllm/parser/engine/incremental_lexer.cpp
+  src/vllm/parser/engine/tokenizer_bridge.cpp
   src/vllm/parser/engine/token_id_scanner.cpp
   src/vllm/parser/engine/streaming_parser_engine.cpp
   src/vllm/parser/engine/configs.cpp

@@ -28,6 +28,7 @@
 #include "vllm/model_executor/models/gemma4.h"
 #include "vllm/model_executor/models/gemma4_moe.h"
 #include "vt/fused_ops.h"
+#include "vllm/model_executor/models/gemma4_loaded.h"
 #include "vllm/model_executor/models/qwen3_5.h"         // ForwardLogits (shared carrier)
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
 #include "vllm/v1/kv_cache_dtype.h"
@@ -59,21 +60,6 @@ inline constexpr ModelInfo kGemma4Info{
 // Owned-or-borrowed weights (mirrors Qwen3VLLoadedModel): the mm e2e gate BORROWS
 // the loaded weights so the driver and the model share ONE Gemma4Weights (no
 // multi-GB copy on the unified-memory box).
-class Gemma4LoadedModel final : public LoadedModel {
- public:
-  Gemma4LoadedModel(const ModelRegistration& registration, Gemma4Weights weights)
-      : LoadedModel(registration),
-        owned_weights_(std::move(weights)),
-        weights_(&*owned_weights_) {}
-  Gemma4LoadedModel(const ModelRegistration& registration,
-                    const Gemma4Weights& weights, BorrowedWeightsTag)
-      : LoadedModel(registration), weights_(&weights) {}
-  const Gemma4Weights& weights() const { return *weights_; }
-
- private:
-  std::optional<Gemma4Weights> owned_weights_;
-  const Gemma4Weights* weights_ = nullptr;
-};
 
 std::unique_ptr<LoadedModel> LoadGemma4ForConditionalGeneration(
     const ModelRegistration& registration, const HfConfig& config,
@@ -168,14 +154,16 @@ ForwardLogits ForwardGemma4ForConditionalGeneration(
       input.config.vocab_size);
 }
 
-const ModelFactory kGemma4Factory{
-    .parse_config = &ParseGemma4ForConditionalGenerationConfig,
-    .load_weights = &LoadGemma4ForConditionalGeneration,
-    .prepare = &PrepareGemma4ForConditionalGeneration,
-    .forward = &ForwardGemma4ForConditionalGeneration,
-    .make_kv_cache = &MakeGemma4ForConditionalGenerationKVCache,
-    .is_dense_model = true,
-};
+const ModelFactory kGemma4Factory = [] {
+  auto factory = kGemma4MmHooks;
+  factory.parse_config = &ParseGemma4ForConditionalGenerationConfig;
+  factory.load_weights = &LoadGemma4ForConditionalGeneration;
+  factory.prepare = &PrepareGemma4ForConditionalGeneration;
+  factory.forward = &ForwardGemma4ForConditionalGeneration;
+  factory.make_kv_cache = &MakeGemma4ForConditionalGenerationKVCache;
+  factory.is_dense_model = true;
+  return factory;
+}();
 
 }  // namespace
 

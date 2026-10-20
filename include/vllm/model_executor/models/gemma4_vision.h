@@ -42,6 +42,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "vt/backend.h"
@@ -61,6 +62,9 @@ struct Gemma4VisionConfig {
   int64_t text_hidden_size = 2560;  // E4B text_config.hidden_size
   float rms_norm_eps = 1e-6f;
   double rope_theta = 100.0;
+  bool use_clipped_linears = false;
+  // Loader accepts only the existing tanh-GELU, unbiased, unstandardized path.
+  float attention_dropout = 0.0f;  // Retained; inference does not apply dropout.
 
   int64_t patch_dim() const { return 3 * patch_size * patch_size; }  // 768
 };
@@ -70,8 +74,10 @@ struct Gemma4VisionConfig {
 // are per-linear scalars stored in the checkpoint. patch_embedder.input_proj and
 // embed_vision.embedding_projection are PLAIN nn.Linear (no clip).
 struct Clip {
-  float in_min = -3.4e38f, in_max = 3.4e38f;    // +/-inf default == no-op
-  float out_min = -3.4e38f, out_max = 3.4e38f;
+  float in_min = -std::numeric_limits<float>::infinity(),
+        in_max = std::numeric_limits<float>::infinity();    // +/-inf default == no-op
+  float out_min = -std::numeric_limits<float>::infinity(),
+        out_max = std::numeric_limits<float>::infinity();
 };
 
 // All weights host-side row-major RAW BF16 BITS (`uint16_t`, as torch stores:
@@ -81,11 +87,11 @@ struct Clip {
 // `qwen3_vl_vision.h` for the mirror argument and the bit-identity proof).
 struct Gemma4VisionBlockWeights {
   std::vector<uint16_t> input_ln, post_attn_ln, pre_ff_ln, post_ff_ln;  // [H]
-  std::vector<uint16_t> q_proj, k_proj, v_proj, o_proj;  // [H,H]  (nh*head_dim==H)
+  std::vector<uint16_t> q_proj, k_proj, v_proj, o_proj;  // Q [nh*hd,H], K/V [nkv*hd,H], O [H,nh*hd]
   std::vector<uint16_t> q_norm, k_norm;                  // [head_dim]
   std::vector<uint16_t> gate_proj, up_proj;              // [I,H]
   std::vector<uint16_t> down_proj;                       // [H,I]
-  // QAT clamps (q/k/v share in-clamp; gate/up share in- AND out-clamp).
+  // Independent QAT bounds per source ClippableLinear; equality is not required.
   Clip q_clip, k_clip, v_clip, o_clip, gate_clip, up_clip, down_clip;
 };
 
@@ -105,10 +111,18 @@ struct Gemma4VisionWeights {
 // Per-stage captures for the G2-impl unit gates (all host f32, valid rows only).
 struct Gemma4VisionCapture {
   std::vector<float> patch_embed_out;  // [n_valid, H]
+  std::vector<float> attention_out;  // last block, pre-o-projection [n_valid,H]
+  std::vector<float> mlp_out;        // last block, post-norm [n_valid,H]
   std::vector<float> encoder_out;      // [n_valid, H]
   std::vector<float> pooled;           // [n_soft, H]  (post sqrt(hidden) fp32, bf16-rounded)
   std::vector<float> projected;        // [n_soft, text_hidden]
 };
+
+// Validate the actual tower input boundary before backend allocation; returns
+// the nonempty contiguous valid prefix. Positions encode the padding mask.
+int64_t ValidateGemma4VisionInput(const std::vector<float>& pixels,
+                                 const std::vector<int64_t>& positions,
+                                 int64_t n_total, const Gemma4VisionConfig& cfg);
 
 // Runs the tower on one image. pixel_values is [n_total, patch_dim] host f32 in
 // [0,1]; position_ids is [n_total, 2] host i64 ((x,y); (-1,-1)==padding, trailing

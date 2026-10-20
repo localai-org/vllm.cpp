@@ -17,8 +17,8 @@
 // tools declare typed params has its assembled arguments coerced to the declared
 // types (parser_engine.py:365 _fix_arg_types); with no schema the path is identity
 // (byte-identical, unchanged). RESIDUAL (tracked, .agents/specs/
-// parser-assembly-c8.md): the responses/prompt-state hooks
-// (adjust_initial_state_from_prompt is a base no-op).
+// parser-assembly-c8.md): responses hooks. Prompt preparation is a base no-op
+// overridden by Gemma for engine-local parse_delta calls.
 #pragma once
 
 #include <functional>
@@ -130,11 +130,22 @@ class ParserEngine {
   void initialize_streaming(
       std::optional<ParserState> initial_state = std::nullopt);
   std::optional<oai::DeltaMessage> finish_streaming();
+  virtual void adjust_initial_state_from_prompt(
+      const std::vector<int>& prompt_token_ids);
 
   // ── Streaming ─────────────────────────────────────────────────────
   std::optional<oai::DeltaMessage> parse_delta(
       const std::string& delta_text, const std::vector<int>& delta_token_ids,
       const ParserRequest& request, bool finished);
+
+  // Borrowed for this call only: nullptr means absent; an empty vector is present.
+  // Existing four-argument callers retain their symbol. Untyped address-taking
+  // must select an overload; virtual/layout changes require a consumer rebuild.
+  std::optional<oai::DeltaMessage> parse_delta(
+      const std::string& delta_text, const std::vector<int>& delta_token_ids,
+      const ParserRequest& request, bool finished,
+      const std::vector<int>* prompt_token_ids);
+
 
   // parser_engine.py:519 extract_reasoning_streaming — the REASONING face of the
   // incremental parse: initialize, feed the delta, assemble. Upstream takes the
@@ -221,6 +232,8 @@ class ParserEngine {
   std::optional<std::string> strip_content_whitespace(const std::string& content,
                                                       bool tools_called) const;
   ParserState engine_state() const { return engine_.state(); }
+  // Prepare only the lexer/state machine, preserving assembly bookkeeping.
+  void prepare_streaming_state(ParserState state);
 
   ParserEngineConfig config_;
   std::vector<ToolCallSlot> tool_slots_;
@@ -275,6 +288,7 @@ class ParserEngine {
   bool has_reasoning_ = false;
   bool reasoning_ended_ = true;
   bool streaming_initialized_ = false;
+  bool prompt_streaming_prepared_ = false;
 
   std::vector<ParserTool> tools_;
   std::string deferred_reasoning_;

@@ -109,6 +109,9 @@ struct AudioKwargs {
   std::vector<int64_t> chunk_num_samples;
   std::vector<int64_t> chunk_num_tokens;
 
+  // Gemma4: optional frame mask, 1=valid, 0=trailing padding.
+  std::vector<int32_t> feature_mask;
+
   bool empty() const { return n_frames == 0; }
 };
 

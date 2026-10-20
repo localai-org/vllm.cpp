@@ -21,7 +21,6 @@
 #include <cstring>
 #include <vector>
 
-#include "vllm/model_executor/models/merged_qkv_fold.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
 #include "vt/tensor.h"
@@ -143,10 +142,10 @@ void Linear(Queue& q, Buf& out, Tensor x, Tensor w) { vt::MatmulBT(q, out.tensor
 
 struct DevBlock {
   DevW input_ln, post_attn_ln, pre_ff_ln, post_ff_ln;
-  DevW qkv_proj;  // [3H, H] fused (q rows, then k rows, then v rows) — C2 fold
+  DevW q_proj, k_proj, v_proj;
   DevW o_proj;
   DevW q_norm, k_norm;
-  DevW gate_up;  // [2I, H] fused (gate rows then up rows)
+  DevW gate_proj, up_proj;
   DevW down_proj;
 };
 
@@ -184,7 +183,42 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
                                        const std::vector<int64_t>& position_ids, int64_t n_total,
                                        const Gemma4VisionWeights& w, const Gemma4VisionConfig& cfg,
                                        Backend& b, Gemma4VisionCapture* cap) {
+  const int64_t L = ValidateGemma4VisionInput(pixel_values, position_ids, n_total, cfg);
+  VT_CHECK(cfg.hidden_size > 0 && cfg.num_heads > 0 && cfg.head_dim > 0 &&
+               cfg.num_heads <= INT64_MAX / cfg.head_dim &&
+               cfg.num_heads * cfg.head_dim == cfg.hidden_size &&
+               cfg.num_kv_heads == cfg.num_heads && cfg.head_dim % 4 == 0 &&
+               cfg.depth > 0 && cfg.intermediate_size > 0 && cfg.text_hidden_size > 0 &&
+               std::isfinite(cfg.rms_norm_eps) && cfg.rms_norm_eps > 0 &&
+               std::isfinite(cfg.rope_theta) && cfg.rope_theta > 0,
+           "gemma4 vision: unsupported execution config (MHA required)");
+  auto size = [](int64_t rows, int64_t cols) {
+    VT_CHECK(rows > 0 && cols > 0 && rows <= INT64_MAX / cols / 2 &&
+                 static_cast<uint64_t>(rows) <= SIZE_MAX / sizeof(float) / cols,
+             "gemma4 vision: weight size overflow");
+    return static_cast<size_t>(rows * cols);
+  };
+  const auto hid = cfg.hidden_size, imid = cfg.intermediate_size;
+  VT_CHECK(w.input_proj.size() == size(hid, cfg.patch_dim()) &&
+               w.position_embedding_table.size() == size(cfg.position_embedding_size, hid) * 2 &&
+               w.embed_projection.size() == size(cfg.text_hidden_size, hid) &&
+               w.blocks.size() == static_cast<size_t>(cfg.depth), "gemma4 vision: weight shape");
+  for (const auto& block : w.blocks) {
+    for (const auto* v : {&block.q_proj, &block.k_proj, &block.v_proj, &block.o_proj})
+      VT_CHECK(v->size() == size(hid, hid), "gemma4 vision: attention weight shape");
+    for (const auto* v : {&block.gate_proj, &block.up_proj, &block.down_proj})
+      VT_CHECK(v->size() == size(hid, imid), "gemma4 vision: MLP weight shape");
+    for (const auto* v : {&block.input_ln, &block.post_attn_ln, &block.pre_ff_ln, &block.post_ff_ln})
+      VT_CHECK(v->size() == static_cast<size_t>(hid), "gemma4 vision: norm weight shape");
+    VT_CHECK(block.q_norm.size() == static_cast<size_t>(cfg.head_dim) &&
+                 block.k_norm.size() == static_cast<size_t>(cfg.head_dim), "gemma4 vision: head norm shape");
+  }
   Queue q = b.CreateQueue();
+  struct QueueGuard {
+    Backend& backend;
+    Queue& queue;
+    ~QueueGuard() { backend.DestroyQueue(queue); }
+  } queue_guard{b, q};
   const int64_t H = cfg.hidden_size;
   const int64_t nh = cfg.num_heads;
   const int64_t hd = cfg.head_dim;
@@ -192,17 +226,6 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
   const int64_t PD = cfg.patch_dim();
   const int64_t k = cfg.pooling_kernel_size;
   const float eps = cfg.rms_norm_eps;
-
-  // --- valid-prefix length (padding (-1,-1) is a trailing contiguous block) ---
-  int64_t n_valid = n_total;
-  for (int64_t r = 0; r < n_total; ++r) {
-    if (position_ids[static_cast<size_t>(r) * 2] < 0 &&
-        position_ids[static_cast<size_t>(r) * 2 + 1] < 0) {
-      n_valid = r;
-      break;
-    }
-  }
-  const int64_t L = n_valid;
 
   // --- host precompute: 2-D pos-embed lookup (x_emb + y_emb), valid rows -------
   // position_embedding_table [2, pos_embed_size, H]; table[0]=x, table[1]=y.
@@ -270,26 +293,14 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
     d.post_attn_ln = MakeDevBf16(b, q, bw.post_attn_ln, {H});
     d.pre_ff_ln = MakeDevBf16(b, q, bw.pre_ff_ln, {H});
     d.post_ff_ln = MakeDevBf16(b, q, bw.post_ff_ln, {H});
-    // C2 fold: pack q/k/v [H,H] into one resident merged qkv_proj [3H,H] (q rows,
-    // then k rows, then v rows) so the QKV projection is ONE MatmulBT + a
-    // contiguous QkvSplit. Mirrors the existing gate_up concat below. BIT-exact
-    // vs three separate [H,H] GEMMs (same bf16 bytes, per-slice output clamp
-    // stays on the split outputs in the forward).
-    std::vector<uint16_t> qkv(bw.q_proj.size() + bw.k_proj.size() + bw.v_proj.size());
-    std::memcpy(qkv.data(), bw.q_proj.data(), bw.q_proj.size() * sizeof(uint16_t));
-    std::memcpy(qkv.data() + bw.q_proj.size(), bw.k_proj.data(),
-                bw.k_proj.size() * sizeof(uint16_t));
-    std::memcpy(qkv.data() + bw.q_proj.size() + bw.k_proj.size(), bw.v_proj.data(),
-                bw.v_proj.size() * sizeof(uint16_t));
-    d.qkv_proj = MakeDevBf16(b, q, qkv, {3 * H, H});
+    d.q_proj = MakeDevBf16(b, q, bw.q_proj, {H, H});
+    d.k_proj = MakeDevBf16(b, q, bw.k_proj, {H, H});
+    d.v_proj = MakeDevBf16(b, q, bw.v_proj, {H, H});
     d.o_proj = MakeDevBf16(b, q, bw.o_proj, {H, H});
     d.q_norm = MakeDevBf16(b, q, bw.q_norm, {hd});
     d.k_norm = MakeDevBf16(b, q, bw.k_norm, {hd});
-    std::vector<uint16_t> gate_up(bw.gate_proj.size() + bw.up_proj.size());
-    std::memcpy(gate_up.data(), bw.gate_proj.data(), bw.gate_proj.size() * sizeof(uint16_t));
-    std::memcpy(gate_up.data() + bw.gate_proj.size(), bw.up_proj.data(),
-                bw.up_proj.size() * sizeof(uint16_t));
-    d.gate_up = MakeDevBf16(b, q, gate_up, {2 * I, H});
+    d.gate_proj = MakeDevBf16(b, q, bw.gate_proj, {I, H});
+    d.up_proj = MakeDevBf16(b, q, bw.up_proj, {I, H});
     d.down_proj = MakeDevBf16(b, q, bw.down_proj, {H, I});
   }
   // weight-less norms (v_norm on head_dim, projector pre-norm on H): ones vectors.
@@ -326,7 +337,6 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
 
   Buf n1(b, q, DType::kBF16, {L, H});
   Buf qb(b, q, DType::kBF16, {L, H}), kb(b, q, DType::kBF16, {L, H}), vb(b, q, DType::kBF16, {L, H});
-  Buf qkv(b, q, DType::kBF16, {L, 3 * H});  // C2 merged-qkv GEMM scratch [L,3H]
   Buf ao(b, q, DType::kBF16, {L, nh, hd});
   Buf attn(b, q, DType::kBF16, {L, H});
   Buf n2(b, q, DType::kBF16, {L, H});
@@ -340,20 +350,19 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
     const Gemma4VisionBlockWeights& cw = w.blocks[static_cast<size_t>(l)];
     // residual = h ; h = input_layernorm(h)
     vt::RmsNorm(q, n1.tensor(), hidden.tensor(), d.input_ln.tensor(), rms);
-    // q/k/v projections. q/k/v share the input clamp (same source n1); each has
-    // its own output clamp. clamp(input) -> linear -> clamp(output).
-    ClampDevice(b, q, n1, L * H, cw.q_clip.in_min, cw.q_clip.in_max);
-    // C2 fold: ONE MatmulBT over the merged qkv_proj [3H,H] (no bias in Gemma-4
-    // vision) + a contiguous QkvSplit into qb/kb/vb. BIT-identical to the three
-    // separate [H,H] Linears: the merged GEMM's per-output-row reduction is the
-    // same math and QkvSplit is a pure contiguous copy. The per-slice OUTPUT
-    // clamp epilogue stays below, applied to the split qb/kb/vb exactly as before.
-    models::FusedMergedQkvBiasSplit(q, qkv.tensor(), qb.tensor(), kb.tensor(),
-                                    vb.tensor(), n1.tensor(), d.qkv_proj.tensor(),
-                                    /*qkv_bias=*/nullptr);
-    ClampDevice(b, q, qb, L * H, cw.q_clip.out_min, cw.q_clip.out_max);
-    ClampDevice(b, q, kb, L * H, cw.k_clip.out_min, cw.k_clip.out_max);
-    ClampDevice(b, q, vb, L * H, cw.v_clip.out_min, cw.v_clip.out_max);
+    // Each source ClippableLinear owns independent bounds. Never mutate the
+    // shared normalized input, even when one checkpoint happens to match them.
+    auto clipped_linear = [&](Buf& out, Buf& input, const DevW& weight,
+                              const Clip& clip, int64_t in_width, int64_t out_width) {
+      Buf clamped(b, q, DType::kBF16, {L, in_width});
+      b.Copy(q, clamped.tensor().data, input.tensor().data, clamped.bytes);
+      ClampDevice(b, q, clamped, L * in_width, clip.in_min, clip.in_max);
+      Linear(q, out, clamped.tensor(), weight.tensor());
+      ClampDevice(b, q, out, L * out_width, clip.out_min, clip.out_max);
+    };
+    clipped_linear(qb, n1, d.q_proj, cw.q_clip, H, H);
+    clipped_linear(kb, n1, d.k_proj, cw.k_clip, H, H);
+    clipped_linear(vb, n1, d.v_proj, cw.v_clip, H, H);
 
     // view [L, nh, hd]
     auto view3 = [&](Buf& buf) {
@@ -399,6 +408,7 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
     // full non-causal attention over the L valid patches, scale 1.0.
     const vt::AttentionArgs aargs{attn_scale, /*causal=*/false};
     vt::AttentionDenseFlash(q, ao.tensor(), q3, k3, v3, aargs);
+    if (cap != nullptr) cap->attention_out = DownloadBf16(q, ao, L, H);
 
     // o_proj + post_attention_layernorm + residual add.
     Tensor ao2 = ao.tensor();
@@ -414,18 +424,22 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
     vt::RmsNorm(q, attn.tensor(), attn.tensor(), d.post_attn_ln.tensor(), rms);
     vt::Add(q, hidden.tensor(), hidden.tensor(), attn.tensor());
 
-    // residual = h ; h = pre_feedforward_layernorm(h) ; GeGLU ; post_ff ; +res.
-    // gate/up share BOTH in- and out-clamp -> clamp n2 once, then the fused [L,2I]
-    // gate_up output once, before GeluAndMul.
     vt::RmsNorm(q, n2.tensor(), hidden.tensor(), d.pre_ff_ln.tensor(), rms);
-    ClampDevice(b, q, n2, L * H, cw.gate_clip.in_min, cw.gate_clip.in_max);
-    Linear(q, gu, n2.tensor(), d.gate_up.tensor());  // [L, 2I]
-    ClampDevice(b, q, gu, L * 2 * I, cw.gate_clip.out_min, cw.gate_clip.out_max);
-    vt::GeluAndMul(q, act.tensor(), gu.tensor());     // gelu_tanh(gate)*up -> [L,I]
+    Buf gate(b, q, DType::kBF16, {L, I}), up(b, q, DType::kBF16, {L, I});
+    clipped_linear(gate, n2, d.gate_proj, cw.gate_clip, H, I);
+    clipped_linear(up, n2, d.up_proj, cw.up_clip, H, I);
+    // Preserve the public fused activation layout, but not shared clipping.
+    for (int64_t row = 0; row < L; ++row) {
+      auto* dst = gu.tensor().Ptr<uint16_t>() + row * 2 * I;
+      b.Copy(q, dst, gate.tensor().Ptr<uint16_t>() + row * I, static_cast<size_t>(I) * 2);
+      b.Copy(q, dst + I, up.tensor().Ptr<uint16_t>() + row * I, static_cast<size_t>(I) * 2);
+    }
+    vt::GeluAndMul(q, act.tensor(), gu.tensor());
     ClampDevice(b, q, act, L * I, cw.down_clip.in_min, cw.down_clip.in_max);
     Linear(q, mlp, act.tensor(), d.down_proj.tensor());
     ClampDevice(b, q, mlp, L * H, cw.down_clip.out_min, cw.down_clip.out_max);
     vt::RmsNorm(q, mlp.tensor(), mlp.tensor(), d.post_ff_ln.tensor(), rms);
+    if (cap != nullptr) cap->mlp_out = DownloadBf16(q, mlp, L, H);
     vt::Add(q, hidden.tensor(), hidden.tensor(), mlp.tensor());
   }
   std::vector<float> enc = DownloadBf16(q, hidden, L, H);
@@ -457,7 +471,8 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
   std::vector<float> pooled_f(static_cast<size_t>(n_soft) * H);
   std::vector<uint16_t> pooled_bf(static_cast<size_t>(n_soft) * H);
   for (int64_t i = 0; i < n_soft * H; ++i) {
-    const float v = static_cast<float>(pool[static_cast<size_t>(i)] * root_h);
+    const float average = vt::BF16ToF32(vt::F32ToBF16(static_cast<float>(pool[static_cast<size_t>(i)])));
+    const float v = average * static_cast<float>(root_h);
     pooled_bf[static_cast<size_t>(i)] = vt::F32ToBF16(v);
     pooled_f[static_cast<size_t>(i)] = vt::BF16ToF32(pooled_bf[static_cast<size_t>(i)]);
   }
@@ -472,7 +487,6 @@ std::vector<float> Gemma4VisionForward(const std::vector<float>& pixel_values,
   std::vector<float> out = DownloadBf16(q, projected, n_soft, cfg.text_hidden_size);
   if (cap != nullptr) cap->projected = out;
 
-  b.DestroyQueue(q);
   return out;
 }
 

@@ -20,7 +20,10 @@ namespace vllm::parser {
 // engine-backed format. `thinking` selects the reasoning-enabled config
 // variant; `tokenizer` (optional) is only needed for token-ID-driven streams.
 std::unique_ptr<engine::ParserEngine> get_parser_engine(
-    const std::string& name, bool thinking = true,
+    const std::string& name, bool thinking,
     const engine::EngineTokenizer* tokenizer = nullptr);
+
+// Omitted thinking is false for Gemma; all other families retain true.
+std::unique_ptr<engine::ParserEngine> get_parser_engine(const std::string& name);
 
 }  // namespace vllm::parser

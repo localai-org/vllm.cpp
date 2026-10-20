@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "vt/dtype.h"
+#include "vllm/multimodal/audio_fft.h"
 
 namespace vllm {
 namespace models {
@@ -28,33 +29,6 @@ double HzToMel(double hz) { return 1127.0 * std::log(1.0 + hz / 700.0); }
 // Iterative radix-2 FFT. `n` is a power of two; the caller only needs the first
 // n/2 + 1 bins of a real transform, but computing the full complex one keeps
 // this short and it is not on a hot path.
-void Fft(std::vector<std::complex<double>>& a) {
-  const size_t n = a.size();
-  for (size_t i = 1, j = 0; i < n; ++i) {
-    size_t bit = n >> 1;
-    for (; j & bit; bit >>= 1) {
-      j ^= bit;
-    }
-    j ^= bit;
-    if (i < j) {
-      std::swap(a[i], a[j]);
-    }
-  }
-  for (size_t len = 2; len <= n; len <<= 1) {
-    const double ang = -2.0 * kPi / static_cast<double>(len);
-    const std::complex<double> wl(std::cos(ang), std::sin(ang));
-    for (size_t i = 0; i < n; i += len) {
-      std::complex<double> w(1.0, 0.0);
-      for (size_t k = 0; k < len / 2; ++k) {
-        const std::complex<double> u = a[i + k];
-        const std::complex<double> v = a[i + k + len / 2] * w;
-        a[i + k] = u + v;
-        a[i + k + len / 2] = u - v;
-        w *= wl;
-      }
-    }
-  }
-}
 
 }  // namespace
 
@@ -172,7 +146,7 @@ std::vector<float> Extract(const Config& cfg, const std::vector<float>& audio,
                            : 0.0;
       buf[static_cast<size_t>(i)] = std::complex<double>(x, 0.0);
     }
-    Fft(buf);
+    multimodal::AudioFft(buf);
 
     for (int64_t m = 0; m < cfg.mel_bins; ++m) {
       double acc = 0.0;

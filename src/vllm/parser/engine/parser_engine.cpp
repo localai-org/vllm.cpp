@@ -298,6 +298,7 @@ void ParserEngine::initialize_streaming(
 
 void ParserEngine::reset(std::optional<ParserState> initial_state) {
   engine_.reset(initial_state);
+  prompt_streaming_prepared_ = false;
   reasoning_ended_ = !has_reasoning_;
   tool_slots_.clear();
   deferred_content_.clear();
@@ -348,10 +349,30 @@ std::optional<oai::DeltaMessage> ParserEngine::finish_streaming() {
   return std::nullopt;
 }
 
+void ParserEngine::adjust_initial_state_from_prompt(
+    const std::vector<int>& /*prompt_token_ids*/) {}
+
+void ParserEngine::prepare_streaming_state(ParserState state) {
+  engine_.reset(state);
+  streaming_initialized_ = true;
+}
+
 std::optional<oai::DeltaMessage> ParserEngine::parse_delta(
     const std::string& delta_text, const std::vector<int>& delta_token_ids,
     const ParserRequest& request, bool finished) {
+  return parse_delta(delta_text, delta_token_ids, request, finished, nullptr);
+}
+
+std::optional<oai::DeltaMessage> ParserEngine::parse_delta(
+    const std::string& delta_text, const std::vector<int>& delta_token_ids,
+    const ParserRequest& request, bool finished,
+    const std::vector<int>* prompt_token_ids) {
   initialize_history_tool_call_cnt(request);
+  // a7c23ac96d parser_engine.py:455-461: the hook may reset this flag.
+  if (!prompt_streaming_prepared_ && prompt_token_ids) {
+    adjust_initial_state_from_prompt(*prompt_token_ids);
+    prompt_streaming_prepared_ = true;
+  }
   check_skip_tool_parsing(request);
   std::vector<SemanticEvent> events = feed(delta_text, delta_token_ids);
   if (finished) {

@@ -902,6 +902,9 @@ struct ModelFactory {
   // multimodal path off for them entirely rather than merely inert.
   ModelEncodeMmFn encode_mm = nullptr;
   ModelEmbedMmFn embed_mm = nullptr;
+  // Callable reference hooks need not imply complete runner/serving support.
+  // Defaults preserve all existing registrations. Direct dispatch is unaffected.
+  bool mm_inputs_ready = true;
   // OPTIONAL even for a multimodal model: null is upstream's `uses_mrope ==
   // False`, and the runner then leaves `MmEmbedInputs::mrope_positions` empty
   // and the model reads the ordinary 1-D positions.

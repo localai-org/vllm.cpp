@@ -780,7 +780,7 @@ bool ModelRegistry::IsDenseModel(const LoadedModel& model) {
 // ── ENG-MM-INPUT-PIPELINE P2 (#2379) ────────────────────────────────────────
 bool ModelRegistry::SupportsMmInputs(const LoadedModel& model) {
   const ModelFactory& factory = *model.registration().factory;
-  return factory.encode_mm != nullptr && factory.embed_mm != nullptr;
+  return factory.mm_inputs_ready && factory.encode_mm != nullptr && factory.embed_mm != nullptr;
 }
 
 bool ModelRegistry::UsesMrope(const LoadedModel& model) {

@@ -24,8 +24,13 @@ namespace vllm::parser {
 
 class Gemma4Parser : public engine::ParserEngine {
  public:
-  explicit Gemma4Parser(const engine::EngineTokenizer* tokenizer = nullptr)
-      : engine::ParserEngine(engine::gemma4_config(), tokenizer) {}
+  explicit Gemma4Parser(const engine::EngineTokenizer* tokenizer = nullptr,
+                        bool thinking = false);
+
+  void adjust_initial_state_from_prompt(
+      const std::vector<int>& prompt_token_ids) override;
+
+  bool is_reasoning_end(const std::string& text) const override;
 
  protected:
   // gemma4.py:418 _reset — also clears the prefix-strip / first-feed state.
@@ -46,6 +51,9 @@ class Gemma4Parser : public engine::ParserEngine {
                     const engine::ParserRequest& request) override;
 
  private:
+  bool thinking_;
+  std::vector<int> prompt_boundary_ids_;
+
   // gemma4.py:414-416 per-request state.
   std::string reasoning_text_;
   bool prefix_stripped_ = false;

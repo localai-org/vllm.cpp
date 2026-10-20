@@ -57,6 +57,9 @@ class ParserEngineReasoningAdapter : public ReasoningParser {
       std::unique_ptr<vllm::parser::engine::ParserEngine> engine);
   ~ParserEngineReasoningAdapter() override;
 
+  void adjust_initial_state_from_prompt(
+      const std::vector<int>& prompt_token_ids) override;
+
   // adapters.py:69 extract_reasoning (under _skip_tool_parsing).
   ExtractedReasoning extract_reasoning(
       const std::string& model_output,
@@ -83,6 +86,14 @@ class Qwen3ParserReasoningAdapter final : public ParserEngineReasoningAdapter {
   // `thinking` mirrors chat_template_kwargs["enable_thinking"] (qwen3.py:226),
   // whose upstream default is True.
   explicit Qwen3ParserReasoningAdapter(bool thinking = true);
+};
+
+// Pinned a7c23ac96 registered_adapters.py:43-46; Gemma defaults false.
+class Gemma4ParserReasoningAdapter final : public ParserEngineReasoningAdapter {
+ public:
+  explicit Gemma4ParserReasoningAdapter(
+      bool thinking = false,
+      const vllm::parser::engine::EngineTokenizer* tokenizer = nullptr);
 };
 
 }  // namespace vllm::entrypoints::openai

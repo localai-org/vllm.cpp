@@ -1,0 +1,1823 @@
+{
+  "scope": "Gemma4-named Python test files in pinned recursive GitHub trees; declared test symbols only, not inherited or collected parameter expansions. Source inspection, none executed. Unified and assistant variants are inventory context, not E4B proof.",
+  "files": [
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4/__init__.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tests": []
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4/test_image_processing_gemma4.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4/test_image_processing_gemma4.py",
+      "sha256": "409b7b4b790cf22202489b5700bc59d90d74da89dea03b0d0033e6c89dc9e1c7",
+      "tests": [
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_call_numpy_4_channels",
+          "line": 111,
+          "decorators": [
+            "unittest.skip(\"Gemma4 patchification requires RGB (3-channel) images; 4-channel inputs are unsupported.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_image_processor_properties",
+          "line": 118,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_image_processor_defaults",
+          "line": 131,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_image_processor_from_dict_with_kwargs",
+          "line": 143,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_output_keys",
+          "line": 152,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_aspect_ratio_preserving_resize_dimensions",
+          "line": 162,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_max_soft_tokens_values",
+          "line": 189,
+          "decorators": [
+            "parameterized.expand([(70), (140), (280), (560), (1120)])"
+          ]
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_position_ids_structure",
+          "line": 206,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ImageProcessingTest.test_padding_patches_are_zero",
+          "line": 236,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4/test_modeling_gemma4.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4/test_modeling_gemma4.py",
+      "sha256": "559571814dc2615da7aa13f7aa172ccf85df753422f31b0c54b8958cc46b3e5f",
+      "tests": [
+        {
+          "symbol": "Gemma4TextModelTest.test_num_layers_is_small",
+          "line": 103,
+          "decorators": [
+            "unittest.skip(\"We need 4 layers to correctly test cache sharing.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_model_rope_scaling_frequencies",
+          "line": 107,
+          "decorators": [
+            "unittest.skip(\"Gemma4 uses different rope per layer type, which is not compatible with this test\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_model_rope_scaling_from_config",
+          "line": 112,
+          "decorators": [
+            "parameterized.expand([(\"linear\",), (\"dynamic\",), (\"yarn\",)])",
+            "unittest.skip(\"Gemma4 uses different rope per layer type, which is not compatible with this test\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_generate_from_random_inputs_embeds",
+          "line": 118,
+          "decorators": [
+            "unittest.skip(\n        \"Gemma4 cannot use random inputs_embeds, as it needs to reverse them when input_ids is not provided\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_sdpa_padding_matches_padding_free_with_position_ids",
+          "line": 125,
+          "decorators": [
+            "unittest.skip(\n        \"Flaky on CI, but not locally on Mac. If model is set to fp32 instead of bf16, not flaky anymore.\"\n        \"TODO Cyril: investigate where the loss of precision between bf16 and fp32 comes from.\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_tp_generation_quantized",
+          "line": 131,
+          "decorators": [
+            "unittest.skip(\n        \"Fails after fully removing the unused weights, even if `forward` is exactly the same. Investigate why.\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_flash_attn_2_equivalence",
+          "line": 135,
+          "decorators": [
+            "unittest.skip(GEMMA4_RANDOM_MOE_FA2_SKIP_REASON)"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_flash_attn_2_inference_equivalence",
+          "line": 139,
+          "decorators": [
+            "unittest.skip(GEMMA4_RANDOM_MOE_FA2_SKIP_REASON)"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_flash_attn_2_inference_equivalence_right_padding",
+          "line": 143,
+          "decorators": [
+            "unittest.skip(GEMMA4_RANDOM_MOE_FA2_SKIP_REASON)"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_all_bidirectional_attention_uses_bidirectional_mask",
+          "line": 146,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_model_training",
+          "line": 161,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_flash_attn_2_can_compile_with_attention_mask_None_without_graph_break",
+          "line": 168,
+          "decorators": [
+            "unittest.skip(\n        \"Under non-bf16 dtypes, MoE grouped_mm falls back to \"\n        \"_grouped_mm_fallback_backward which is incompatible with torch.compile under 'reduce-overhead' mode\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4TextModelTest.test_torch_compile_for_training",
+          "line": 175,
+          "decorators": [
+            "unittest.skip(\n        \"Under non-bf16 dtypes, MoE grouped_mm falls back to \"\n        \"_grouped_mm_fallback_backward which is incompatible with torch.compile under 'reduce-overhead' mode\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_get_image_features_hidden_states",
+          "line": 289,
+          "decorators": [
+            "unittest.skip(\"The tester has no image in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_get_image_features_attentions",
+          "line": 293,
+          "decorators": [
+            "unittest.skip(\"The tester has no image in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_get_image_features_output",
+          "line": 298,
+          "decorators": [
+            "parameterized.expand([True, False, None])",
+            "unittest.skip(\"The tester has no image in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_get_video_features_hidden_states",
+          "line": 302,
+          "decorators": [
+            "unittest.skip(\"The tester has no videos in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_get_video_features_attentions",
+          "line": 306,
+          "decorators": [
+            "unittest.skip(\"The tester has no videos in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_get_video_features_output",
+          "line": 311,
+          "decorators": [
+            "parameterized.expand([True, False, None])",
+            "unittest.skip(\"The tester has no videos in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_num_layers_is_small",
+          "line": 315,
+          "decorators": [
+            "unittest.skip(\"We need 4 layers to correctly test cache sharing.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_generate_from_random_inputs_embeds",
+          "line": 319,
+          "decorators": [
+            "unittest.skip(\"Gemma4 needs correct embeddings for per-layer-input computation, random won't work!\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_flash_attn_2_inference_equivalence",
+          "line": 323,
+          "decorators": [
+            "unittest.skip(GEMMA4_RANDOM_MOE_FA2_SKIP_REASON)"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_flash_attn_2_inference_equivalence_right_padding",
+          "line": 327,
+          "decorators": [
+            "unittest.skip(GEMMA4_RANDOM_MOE_FA2_SKIP_REASON)"
+          ]
+        },
+        {
+          "symbol": "Gemma4Audio2TextModelTest.test_audio_rel_pos_encoding_uses_context_size_from_config",
+          "line": 330,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_training",
+          "line": 492,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_get_audio_features_hidden_states",
+          "line": 511,
+          "decorators": [
+            "unittest.skip(\"The tester has no audios in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_get_audio_features_attentions",
+          "line": 515,
+          "decorators": [
+            "unittest.skip(\"The tester has no audios in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_get_audio_features_output",
+          "line": 520,
+          "decorators": [
+            "parameterized.expand([True, False, None])",
+            "unittest.skip(\"The tester has no audios in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_get_video_features_hidden_states",
+          "line": 524,
+          "decorators": [
+            "unittest.skip(\"The tester has no videos in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_get_video_features_attentions",
+          "line": 528,
+          "decorators": [
+            "unittest.skip(\"The tester has no videos in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_get_video_features_output",
+          "line": 533,
+          "decorators": [
+            "parameterized.expand([True, False, None])",
+            "unittest.skip(\"The tester has no videos in input dict\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_num_layers_is_small",
+          "line": 537,
+          "decorators": [
+            "unittest.skip(\"We need 4 layers to correctly test cache sharing.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_generate_from_random_inputs_embeds",
+          "line": 541,
+          "decorators": [
+            "unittest.skip(\"Gemma4 needs correct embeddings for per-layer-input computation, random won't work!\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_cpu_offload",
+          "line": 547,
+          "decorators": [
+            "unittest.skip(\n        \"Randomly starts failing after module order changed in the __init__ because accelertate is not robust enough\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_disk_offload_bin",
+          "line": 553,
+          "decorators": [
+            "unittest.skip(\n        \"Randomly starts failing after module order changed in the __init__ because accelertate is not robust enough\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_disk_offload_safetensors",
+          "line": 559,
+          "decorators": [
+            "unittest.skip(\n        \"Randomly starts failing after module order changed in the __init__ because accelertate is not robust enough\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_per_layer_inputs_are_correctly_forwarded",
+          "line": 562,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4Vision2TextModelTest.test_attention_mask_composition",
+          "line": 605,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_with_image",
+          "line": 684,
+          "decorators": [
+            "require_deterministic_for_xpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_with_image_batch",
+          "line": 709,
+          "decorators": [
+            "require_deterministic_for_xpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_multiimage",
+          "line": 764,
+          "decorators": [
+            "require_deterministic_for_xpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_text_only_multigpu",
+          "line": 801,
+          "decorators": [
+            "require_torch_multi_gpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_text_only",
+          "line": 830,
+          "decorators": [
+            "require_deterministic_for_xpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_states_sharing_with_and_without_cache",
+          "line": 856,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_generation_beyond_sliding_window",
+          "line": 882,
+          "decorators": [
+            "parameterized.expand([(\"sdpa\",), (\"eager\",)])",
+            "require_deterministic_for_xpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_export_text_only",
+          "line": 930,
+          "decorators": [
+            "pytest.mark.torch_export_test"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4/test_processing_gemma4.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4/test_processing_gemma4.py",
+      "sha256": "34180fdc7be70651febc8e1de7de0388cc3b8b0d3aa9d3d09a921020bf201a6e",
+      "tests": [
+        {
+          "symbol": "Gemma4ProcessorTest.test_get_num_vision_tokens",
+          "line": 91,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ProcessorTest.test_text_with_image_tokens",
+          "line": 121,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ProcessorTest.test_special_mm_token_truncation",
+          "line": 151,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ProcessorTest.test_get_num_multimodal_tokens_matches_processor_call",
+          "line": 176,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ProcessorTest.test_get_num_audio_tokens",
+          "line": 205,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4ProcessorTest.test_apply_chat_template_video_frame_sampling",
+          "line": 235,
+          "decorators": [
+            "unittest.skip(\"This test seems to be loading a different video, check for all models and fix\")"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_assistant/__init__.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_assistant/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tests": []
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_assistant/test_modeling_gemma4_assistant.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_assistant/test_modeling_gemma4_assistant.py",
+      "sha256": "0e5f470052919cb380d13cd566fe8be69a672031d8b38a937eec080c696032f2",
+      "tests": [
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_with_image",
+          "line": 66,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4IntegrationTest.test_model_text_only",
+          "line": 90,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified/__init__.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tests": []
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified/test_feature_extraction_gemma4_unified.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified/test_feature_extraction_gemma4_unified.py",
+      "sha256": "ba20eb516dfdd11a28d85b2dbd0bb024110baa1d994ef3f205209756a551becc",
+      "tests": [
+        {
+          "symbol": "Gemma4UnifiedAudioFeatureExtractionTest.test_chunking_shape",
+          "line": 87,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAudioFeatureExtractionTest.test_chunking_preserves_values",
+          "line": 100,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAudioFeatureExtractionTest.test_batch_padding_longest",
+          "line": 113,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAudioFeatureExtractionTest.test_max_length_truncation",
+          "line": 129,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAudioFeatureExtractionTest.test_return_tensors_pt",
+          "line": 138,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAudioFeatureExtractionTest.test_numpy_and_pt_outputs_match",
+          "line": 150,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified/test_image_processing_gemma4_unified.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified/test_image_processing_gemma4_unified.py",
+      "sha256": "7861383e8ddf95972e49ec2debc67239882120bc638e3e7a40f8eff7e1d8a058",
+      "tests": [
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_call_numpy_4_channels",
+          "line": 110,
+          "decorators": [
+            "unittest.skip(\"Gemma4Unified patchification requires RGB (3-channel) images; 4-channel inputs are unsupported.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_image_processor_properties",
+          "line": 117,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_image_processor_defaults",
+          "line": 130,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_image_processor_from_dict_with_kwargs",
+          "line": 142,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_output_keys",
+          "line": 151,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_aspect_ratio_preserving_resize_dimensions",
+          "line": 161,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_max_soft_tokens_values",
+          "line": 188,
+          "decorators": [
+            "parameterized.expand([(70), (140), (280), (560), (1120)])"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_position_ids_structure",
+          "line": 206,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedImageProcessingTest.test_padding_patches_are_zero",
+          "line": 236,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified/test_modeling_gemma4_unified.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified/test_modeling_gemma4_unified.py",
+      "sha256": "e8ab60f1fc341aedfcd0e3b235d7d83c8db8b5fc869eaec3a6893815e994e5ad",
+      "tests": [
+        {
+          "symbol": "Gemma4UnifiedTextModelTest.test_num_layers_is_small",
+          "line": 100,
+          "decorators": [
+            "unittest.skip(\"We need 4 layers to correctly test cache sharing.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedTextModelTest.test_model_rope_scaling_frequencies",
+          "line": 104,
+          "decorators": [
+            "unittest.skip(\"Gemma4Unified uses different rope per layer type, which is not compatible with this test\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedTextModelTest.test_model_rope_scaling_from_config",
+          "line": 109,
+          "decorators": [
+            "parameterized.expand([(\"linear\",), (\"dynamic\",), (\"yarn\",)])",
+            "unittest.skip(\"Gemma4Unified uses different rope per layer type, which is not compatible with this test\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedTextModelTest.test_sdpa_padding_matches_padding_free_with_position_ids",
+          "line": 116,
+          "decorators": [
+            "unittest.skip(\n        \"Flaky on CI, but not locally on Mac. If model is set to fp32 instead of bf16, not flaky anymore.\"\n        \"TODO Cyril/Anton: investigate where the loss of precision between bf16 and fp32 comes from.\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedTextModelTest.test_tp_generation_quantized",
+          "line": 122,
+          "decorators": [
+            "unittest.skip(\n        \"Same as gemma4: Fails after fully removing the unused weights, even if `forward` is exactly the same. Investigate why.\"\n    )"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedTextModelTest.test_flash_attn_2_equivalence",
+          "line": 125,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAudio2TextModelTest.test_num_layers_is_small",
+          "line": 262,
+          "decorators": [
+            "unittest.skip(\"We need 4 layers to correctly test cache sharing.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedAudio2TextModelTest.test_reverse_loading_mapping",
+          "line": 266,
+          "decorators": [
+            "unittest.skip(\"Conversions only happen when a vision embedder is included!\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedVision2TextModelTest.test_num_layers_is_small",
+          "line": 419,
+          "decorators": [
+            "unittest.skip(\"We need 4 layers to correctly test cache sharing.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedVision2TextModelTest.test_sdpa_can_dispatch_on_flash",
+          "line": 423,
+          "decorators": [
+            "unittest.skip(\"We use vision based masks that use `block_sequence_ids` which force mask materialization\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_with_image",
+          "line": 618,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_with_image_batch",
+          "line": 641,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_multiimage",
+          "line": 687,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_text_only_multigpu",
+          "line": 722,
+          "decorators": [
+            "require_torch_multi_gpu"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_text_only",
+          "line": 749,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_states_sharing_with_and_without_cache",
+          "line": 773,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_generation_beyond_sliding_window",
+          "line": 798,
+          "decorators": [
+            "parameterized.expand([(\"sdpa\",), (\"eager\",)])"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_with_audio",
+          "line": 841,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_model_with_audio_batch",
+          "line": 878,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedIntegrationTest.test_export_text_only",
+          "line": 932,
+          "decorators": [
+            "pytest.mark.torch_export_test"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified/test_processing_gemma4_unified.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified/test_processing_gemma4_unified.py",
+      "sha256": "a8a1f06cbdc61b5705744259c8985ce2a647f5afef65949e735c5065000e9343",
+      "tests": [
+        {
+          "symbol": "Gemma4UnifiedProcessorTest.test_get_num_vision_tokens",
+          "line": 90,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedProcessorTest.test_text_with_image_tokens",
+          "line": 120,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedProcessorTest.test_special_mm_token_truncation",
+          "line": 150,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedProcessorTest.test_get_num_multimodal_tokens_matches_processor_call",
+          "line": 175,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedProcessorTest.test_apply_chat_template_video_frame_sampling",
+          "line": 205,
+          "decorators": [
+            "unittest.skip(\"This test seems to be loading a different video, check for all models and fix\")"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified/test_video_processing_gemma4_unified.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified/test_video_processing_gemma4_unified.py",
+      "sha256": "7c8c78e441516323da9cc659e4bb5febbc91e79fa6443d2e1484b6784e58615b",
+      "tests": [
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_call_numpy_4_channels",
+          "line": 115,
+          "decorators": [
+            "unittest.skip(\"Gemma4Unified patchification requires RGB (3-channel) videos; 4-channel inputs are unsupported.\")"
+          ]
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_call_sample_frames",
+          "line": 118,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_video_processor_from_dict_with_kwargs",
+          "line": 142,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_video_processor_defaults",
+          "line": 151,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_unsupported_max_soft_tokens_raises",
+          "line": 158,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_output_keys",
+          "line": 162,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_position_ids_structure",
+          "line": 170,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_padding_patches_are_zero",
+          "line": 188,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedVideoProcessingTest.test_num_soft_tokens_per_video",
+          "line": 200,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified_assistant/__init__.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified_assistant/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tests": []
+    },
+    {
+      "repository": "huggingface/transformers",
+      "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+      "path": "tests/models/gemma4_unified_assistant/test_modeling_gemma4_unified_assistant.py",
+      "url": "https://raw.githubusercontent.com/huggingface/transformers/a08ace4bbd97e721c98751deec37d87b026acadc/tests/models/gemma4_unified_assistant/test_modeling_gemma4_unified_assistant.py",
+      "sha256": "03a0d175fedc9c4b74e0d91d5943b829bfd47c1ada73261583917598dc5456ec",
+      "tests": [
+        {
+          "symbol": "Gemma4UnifiedAssistantIntegrationTest.test_model_with_image",
+          "line": 66,
+          "decorators": []
+        },
+        {
+          "symbol": "Gemma4UnifiedAssistantIntegrationTest.test_model_text_only",
+          "line": 90,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/kernels/moe/test_gemma4router.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/kernels/moe/test_gemma4router.py",
+      "sha256": "e491fc7367dba1f52f9813cb2c468d0124cb74a4a2ff0ed1f80001bc165bb3a4",
+      "tests": [
+        {
+          "symbol": "test_gemma4_routing_kernel_triton",
+          "line": 23,
+          "decorators": [
+            "pytest.mark.parametrize(\"num_tokens\", [1, 2, 2048, 250000])",
+            "pytest.mark.parametrize(\"num_experts\", [128])",
+            "pytest.mark.parametrize(\"topk\", [8])",
+            "pytest.mark.parametrize(\"dtype\", [torch.bfloat16, torch.half, torch.float32])"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/lora/test_gemma4_tp.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/lora/test_gemma4_tp.py",
+      "sha256": "451d5ef81e3c2c03cb2ca7f7b64e4bfa2e18cdc2b615ec29b7337772229c92dc",
+      "tests": [
+        {
+          "symbol": "test_gemma4_lora",
+          "line": 54,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_lora_tp2",
+          "line": 72,
+          "decorators": [
+            "multi_gpu_test(num_gpus=2)"
+          ]
+        },
+        {
+          "symbol": "test_gemma4_lora_tp4",
+          "line": 91,
+          "decorators": [
+            "multi_gpu_test(num_gpus=4)"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/models/multimodal/processing/test_gemma4.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/models/multimodal/processing/test_gemma4.py",
+      "sha256": "3b4350154e3c5d3b24450a7e022ae2e302e7e6449eb76bf0caf6c61d57cac79c",
+      "tests": [
+        {
+          "symbol": "test_gemma4_image_schema_accepts_variable_patch_counts",
+          "line": 28,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_image_batching_keeps_variable_patch_counts_unstacked",
+          "line": 41,
+          "decorators": []
+        },
+        {
+          "symbol": "test_compute_num_soft_tokens_does_not_exceed_max_soft_tokens",
+          "line": 75,
+          "decorators": [
+            "pytest.mark.parametrize(\n    \"image_width,image_height,max_soft_tokens\",\n    [\n        # Production repro: a 3x900 image (extreme aspect ratio) made the\n        # prompt-side estimator return 289 while the HF Gemma 4 image\n        # processor's vision tower output capped at 280, producing the\n        # \"Attempted to assign 280 multimodal tokens to 289 placeholders\"\n        # mismatch that crashed EngineCore.\n        (900, 3, 280),\n        (3, 900, 280),\n        # Same pathology should hold for the video-frame budget (70 tokens).\n        (900, 3, 70),\n        # And for any other supported budget.\n        (4000, 2, 1120),\n    ],\n)",
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_get_mm_max_tokens_per_item_respects_configured_max_soft_tokens",
+          "line": 125,
+          "decorators": [
+            "pytest.mark.parametrize(\n    (\"mm_processor_kwargs\", \"expected_image_tokens\"),\n    [\n        ({}, 280),\n        ({\"max_soft_tokens\": 70}, 70),\n        ({\"max_soft_tokens\": 280}, 280),\n        ({\"max_soft_tokens\": 1120}, 1120),\n        ({\"images_kwargs\": {\"max_soft_tokens\": 560}}, 560),\n        ({\"images_kwargs\": None}, 280),\n        ({\"images_kwargs\": \"not-a-dict\"}, 280),\n    ],\n)",
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_get_mm_max_tokens_per_item_respects_configured_video_num_frames",
+          "line": 159,
+          "decorators": [
+            "pytest.mark.parametrize(\n    (\"limit_mm_per_prompt\", \"expected_video_tokens\"),\n    [\n        ({\"video\": 1}, 32 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1}}, 32 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 1}}, 1 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 8}}, 8 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 32}}, 32 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 40}}, 32 * (70 + 2 + 6)),\n    ],\n)",
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_get_prompt_updates_respects_nested_max_soft_tokens",
+          "line": 181,
+          "decorators": [
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_video_cache_is_independent_of_image_kwargs",
+          "line": 210,
+          "decorators": [
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_MODEL_ID])",
+            "pytest.mark.parametrize(\"kwargs_on_init\", [False, True])",
+            "pytest.mark.parametrize(\n    \"image_kwargs\", [{\"rescale_factor\": 1 / 127.5}, {\"max_soft_tokens\": 560}]\n)",
+            "pytest.mark.parametrize(\"video_uuid\", [None, \"same-video\"])"
+          ]
+        },
+        {
+          "symbol": "test_limit_mm_per_prompt",
+          "line": 272,
+          "decorators": [
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_encoder_chunk_tight_budget_fits_in_free",
+          "line": 318,
+          "decorators": []
+        },
+        {
+          "symbol": "test_encoder_chunk_roomy_gpu_keeps_batching",
+          "line": 328,
+          "decorators": []
+        },
+        {
+          "symbol": "test_encoder_chunk_zero_patches_is_safe",
+          "line": 338,
+          "decorators": []
+        },
+        {
+          "symbol": "test_encoder_chunk_zero_position_embedding_size_is_safe",
+          "line": 344,
+          "decorators": []
+        },
+        {
+          "symbol": "test_encoder_chunk_no_free_memory_falls_back_to_one",
+          "line": 351,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/models/multimodal/processing/test_gemma4_unified.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/models/multimodal/processing/test_gemma4_unified.py",
+      "sha256": "890bebce64ff606c9f7030d5cd51535504f38c24b659da65345afac71360204a",
+      "tests": [
+        {
+          "symbol": "test_gemma4_unified_image_schema_accepts_variable_patch_counts",
+          "line": 26,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_unified_image_batching_keeps_variable_patch_counts_unstacked",
+          "line": 39,
+          "decorators": []
+        },
+        {
+          "symbol": "test_compute_num_soft_tokens_does_not_exceed_max_soft_tokens",
+          "line": 66,
+          "decorators": [
+            "pytest.mark.parametrize(\n    \"image_width,image_height,max_soft_tokens\",\n    [\n        (900, 3, 280),\n        (3, 900, 280),\n        (900, 3, 70),\n        (4000, 2, 1120),\n    ],\n)",
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_UNIFIED_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_get_mm_max_tokens_per_item_respects_configured_max_soft_tokens",
+          "line": 106,
+          "decorators": [
+            "pytest.mark.parametrize(\n    (\"mm_processor_kwargs\", \"expected_image_tokens\"),\n    [\n        ({}, 280),\n        ({\"max_soft_tokens\": 70}, 70),\n        ({\"max_soft_tokens\": 280}, 280),\n        ({\"max_soft_tokens\": 1120}, 1120),\n        ({\"images_kwargs\": {\"max_soft_tokens\": 560}}, 560),\n        ({\"images_kwargs\": None}, 280),\n        ({\"images_kwargs\": \"not-a-dict\"}, 280),\n    ],\n)",
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_UNIFIED_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_get_mm_max_tokens_per_item_respects_configured_video_num_frames",
+          "line": 140,
+          "decorators": [
+            "pytest.mark.parametrize(\n    (\"limit_mm_per_prompt\", \"expected_video_tokens\"),\n    [\n        ({\"video\": 1}, 32 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1}}, 32 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 1}}, 1 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 8}}, 8 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 32}}, 32 * (70 + 2 + 6)),\n        ({\"video\": {\"count\": 1, \"num_frames\": 40}}, 32 * (70 + 2 + 6)),\n    ],\n)",
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_UNIFIED_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_get_prompt_updates_respects_nested_max_soft_tokens",
+          "line": 162,
+          "decorators": [
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_UNIFIED_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_limit_mm_per_prompt",
+          "line": 186,
+          "decorators": [
+            "pytest.mark.parametrize(\"model_id\", [GEMMA4_UNIFIED_MODEL_ID])"
+          ]
+        },
+        {
+          "symbol": "test_dummy_audio_length_falls_back_for_the_unified_extractor",
+          "line": 213,
+          "decorators": []
+        },
+        {
+          "symbol": "test_dummy_audio_length_still_uses_fft_length_for_the_tower_extractor",
+          "line": 235,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/parser/engine/test_gemma4_streaming_reasoning.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/parser/engine/test_gemma4_streaming_reasoning.py",
+      "sha256": "a6e9da3c883db84172140bca04fe925a28523cf66a8daaa0177ba76c3526ab32",
+      "tests": [
+        {
+          "symbol": "TestGemma4StreamingReasoningThenToolCall.test_tool_call_extracted",
+          "line": 190,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4StreamingReasoningThenToolCall.test_tool_call_text_not_in_content",
+          "line": 225,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4StreamingReasoningThenToolCall.test_reasoning_extracted",
+          "line": 244,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4PromptOpenReasoning.test_reasoning_not_leaked_into_content",
+          "line": 304,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4PromptOpenReasoning.test_post_reasoning_text_in_content",
+          "line": 326,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4PromptOpenReasoning.test_new_turn_prompt_unchanged",
+          "line": 343,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4PreInitReasoningRobustness.test_model_emitted_channel_open_after_new_turn",
+          "line": 404,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4PreInitReasoningRobustness.test_redundant_channel_open_swallowed_after_open_channel_prompt",
+          "line": 442,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChannelLessOutputConsistency.test_streaming_channel_less_output_is_content",
+          "line": 501,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChannelLessOutputConsistency.test_streaming_matches_non_streaming",
+          "line": 522,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ReasoningTruncationWithHoldback.test_reasoning_not_truncated",
+          "line": 682,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ReasoningTruncationWithHoldback.test_both_tool_calls_extracted",
+          "line": 700,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ReasoningTruncationWithHoldback.test_tool_call_text_not_in_content",
+          "line": 719,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_no_tool_calls",
+          "line": 765,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_single_tool_call",
+          "line": 774,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_multiple_arguments",
+          "line": 784,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_text_before_tool_call",
+          "line": 798,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_multiple_tool_calls",
+          "line": 811,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_nested_arguments",
+          "line": 825,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_number_and_boolean",
+          "line": 839,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_no_arguments",
+          "line": 853,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_hyphenated_function_name",
+          "line": 862,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingToolCalls.test_dotted_function_name",
+          "line": 869,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_basic_streaming",
+          "line": 883,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_multi_arg",
+          "line": 903,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_no_extra_brace",
+          "line": 922,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_text_before_tool",
+          "line": 938,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_numeric_args",
+          "line": 951,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_empty_args",
+          "line": 967,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_split_delimiter",
+          "line": 978,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_bool_split",
+          "line": 995,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_number_split",
+          "line": 1009,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingToolCallEdgeCases.test_streaming_trailing_bare_bool",
+          "line": 1023,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingReasoningPlusToolCalls.test_extract_tool_calls_from_full_text",
+          "line": 1056,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingReasoningPlusToolCalls.test_extract_reasoning_from_full_text",
+          "line": 1069,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingReasoningPlusToolCalls.test_bug_report_scenario",
+          "line": 1078,
+          "decorators": []
+        },
+        {
+          "symbol": "TestNonStreamingReasoningPlusToolCalls.test_both_extractions_independent",
+          "line": 1098,
+          "decorators": []
+        },
+        {
+          "symbol": "TestAdapterExtractReasoning.test_preserves_tool_text_in_content",
+          "line": 1123,
+          "decorators": []
+        },
+        {
+          "symbol": "TestAdapterExtractReasoning.test_skip_tool_parsing_restored_after_extraction",
+          "line": 1134,
+          "decorators": []
+        },
+        {
+          "symbol": "TestAdapterExtractReasoning.test_no_reasoning_returns_none",
+          "line": 1141,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaAwareTypeCoercion.test_streaming_string_param_not_coerced",
+          "line": 1183,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaAwareTypeCoercion.test_streaming_mixed_types",
+          "line": 1198,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaAwareTypeCoercion.test_streaming_matches_non_streaming",
+          "line": 1214,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaCoercionBoolNumberNull.test_bool_param_coerced",
+          "line": 1267,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaCoercionBoolNumberNull.test_number_whole_normalized",
+          "line": 1274,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaCoercionBoolNumberNull.test_null_coerced_when_nullable",
+          "line": 1281,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaCoercionBoolNumberNull.test_null_stays_string_without_null_schema",
+          "line": 1287,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4SchemaCoercionBoolNumberNull.test_streaming_type_stability",
+          "line": 1296,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4NestedSchemaCoercion.test_nested_object_coerced",
+          "line": 1363,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareThoughtWithoutChannelOpener.test_bare_thought_reasoning_then_tool_call",
+          "line": 1408,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareThoughtWithoutChannelOpener.test_bare_thought_larger_batches",
+          "line": 1428,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareThoughtWithoutChannelOpener.test_normal_content_not_classified_as_reasoning",
+          "line": 1444,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareThoughtWithoutChannelOpener.test_bare_thought_token_at_end_of_stream",
+          "line": 1467,
+          "decorators": []
+        },
+        {
+          "symbol": "TestCommaInStringValueRegression.test_batched_streaming_comma_in_value",
+          "line": 1564,
+          "decorators": []
+        },
+        {
+          "symbol": "TestCommaInStringValueRegression.test_batched_streaming_multiple_commas",
+          "line": 1585,
+          "decorators": []
+        },
+        {
+          "symbol": "TestCommaInStringValueRegression.test_non_streaming_comma_in_value",
+          "line": 1605,
+          "decorators": []
+        },
+        {
+          "symbol": "TestCommaInStringValueRegression.test_non_streaming_multiple_commas",
+          "line": 1613,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4IsReasoningEnd.test_is_reasoning_end",
+          "line": 1650,
+          "decorators": [
+            "pytest.mark.parametrize(\n        (\"ids\", \"thinking\", \"ended\"),\n        [\n            ([CHANNEL_START_ID, 3000, CHANNEL_END_ID], True, True),\n            ([CHANNEL_START_ID, 3000, TOOL_CALL_START_ID], True, True),\n            ([CHANNEL_START_ID, 3000], True, False),\n            ([NEW_TURN_ID, 9100], True, False),\n            ([CHANNEL_END_ID, NEW_TURN_ID, 9100], True, False),\n            ([NEW_TURN_ID, 9100], False, True),\n            # The bundled template's thinking-off prompt: closed channel.\n            ([NEW_TURN_ID, 9100, CHANNEL_START_ID, 3000, CHANNEL_END_ID], False, True),\n            # A marker still wins with thinking off: the grammar honours it.\n            ([CHANNEL_START_ID, 3000], False, False),\n            # A tool-call opener after the channel closed: still ended.\n            (\n                [CHANNEL_START_ID, 3000, CHANNEL_END_ID, TOOL_CALL_START_ID, 9200],\n                True,\n                True,\n            ),\n        ],\n    )"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/reasoning/test_gemma4_reasoning_parser.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/reasoning/test_gemma4_reasoning_parser.py",
+      "sha256": "3b39c1a5615199b11e9b28ae0dbc76607dd34042ee76e0d550f278903cbaaa41",
+      "tests": [
+        {
+          "symbol": "test_gemma4_reasoning",
+          "line": 224,
+          "decorators": [
+            "pytest.mark.parametrize(\"streaming, param_dict\", TEST_CASES)"
+          ]
+        },
+        {
+          "symbol": "test_gemma4_adjust_request",
+          "line": 252,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_new_turn_reasoning_end_matches_enable_thinking",
+          "line": 273,
+          "decorators": [
+            "pytest.mark.parametrize(\n    (\"chat_template_kwargs\", \"expected_is_reasoning_end\"),\n    [\n        pytest.param({}, True, id=\"omitted_enable_thinking\"),\n        pytest.param({\"enable_thinking\": False}, True, id=\"thinking_disabled\"),\n        pytest.param({\"enable_thinking\": True}, False, id=\"thinking_enabled\"),\n    ],\n)"
+          ]
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/renderers/test_gemma4_chat_template.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/renderers/test_gemma4_chat_template.py",
+      "sha256": "1638681a36481e81010ec56090878e257d47d770b5c2e2b08ca3f0e1f3c3ba4f",
+      "tests": [
+        {
+          "symbol": "TestGemma4ChatTemplate.test_basic_multiturn_thinking_disabled",
+          "line": 34,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_basic_multiturn_thinking_enabled",
+          "line": 50,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_system_message",
+          "line": 71,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_thinking_enabled",
+          "line": 80,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_tool_declarations",
+          "line": 91,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_tool_calls_in_assistant",
+          "line": 123,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_tool_responses_openai_style",
+          "line": 145,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_tool_responses_legacy_style",
+          "line": 175,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_generation_prompt_not_after_tool_response",
+          "line": 203,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_reasoning_in_tool_chains",
+          "line": 230,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_reasoning_not_before_last_user",
+          "line": 254,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_strip_thinking_in_model_content",
+          "line": 276,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_multi_turn_tool_chain",
+          "line": 290,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_format_argument_types",
+          "line": 321,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_tool_response_with_multimodal_content",
+          "line": 347,
+          "decorators": []
+        },
+        {
+          "symbol": "TestGemma4ChatTemplate.test_tool_response_with_all_modalities",
+          "line": 381,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/tool_parsers/test_gemma4_tool_parser.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/tool_parsers/test_gemma4_tool_parser.py",
+      "sha256": "8b1eaf587c904e91a4aef3632c70051ff1b1262e6fd73ddd2fc771627894e94b",
+      "tests": [
+        {
+          "symbol": "TestParseGemma4Args.test_empty_string",
+          "line": 129,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_whitespace_only",
+          "line": 132,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_single_string_value",
+          "line": 135,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_string_value_with_comma",
+          "line": 139,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_multiple_string_values",
+          "line": 143,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_integer_value",
+          "line": 149,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_float_value",
+          "line": 153,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_boolean_true",
+          "line": 157,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_boolean_false",
+          "line": 161,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_null_value",
+          "line": 165,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_mixed_types",
+          "line": 169,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_nested_object",
+          "line": 180,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_array_of_strings",
+          "line": 184,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_delimited_keys_stripped",
+          "line": 188,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_unterminated_string",
+          "line": 199,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_empty_value",
+          "line": 204,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_empty_value_partial_withheld",
+          "line": 209,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_empty_value_after_other_keys_partial_withheld",
+          "line": 217,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_trailing_dot_float_partial_withheld",
+          "line": 222,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Args.test_malformed_partial_array",
+          "line": 243,
+          "decorators": [
+            "pytest.mark.timeout(5)"
+          ]
+        },
+        {
+          "symbol": "TestParseGemma4Array.test_string_array",
+          "line": 249,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Array.test_empty_array",
+          "line": 253,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Array.test_bare_values",
+          "line": 257,
+          "decorators": []
+        },
+        {
+          "symbol": "TestParseGemma4Array.test_string_element_with_closing_bracket",
+          "line": 262,
+          "decorators": [
+            "pytest.mark.timeout(5)"
+          ]
+        },
+        {
+          "symbol": "TestParseGemma4Array.test_stray_closing_bracket",
+          "line": 267,
+          "decorators": [
+            "pytest.mark.timeout(5)"
+          ]
+        },
+        {
+          "symbol": "TestParseGemma4Array.test_trailing_dot_float_partial_withheld",
+          "line": 271,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_no_tool_calls",
+          "line": 287,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_single_tool_call",
+          "line": 295,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_multiple_arguments",
+          "line": 307,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_text_before_tool_call",
+          "line": 322,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_multiple_tool_calls",
+          "line": 335,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_nested_arguments",
+          "line": 349,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_tool_call_with_number_and_boolean",
+          "line": 364,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_incomplete_tool_call",
+          "line": 380,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_hyphenated_function_name",
+          "line": 390,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_dotted_function_name",
+          "line": 400,
+          "decorators": []
+        },
+        {
+          "symbol": "TestExtractToolCalls.test_no_arguments",
+          "line": 410,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_basic_streaming_single_tool",
+          "line": 512,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_multi_arg",
+          "line": 541,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_no_extra_brace",
+          "line": 561,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_no_unquoted_keys",
+          "line": 583,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_name_no_call_prefix",
+          "line": 603,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_text_before_tool_call",
+          "line": 617,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_numeric_args",
+          "line": 638,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_boolean_split_across_chunks",
+          "line": 655,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_false_split_across_chunks",
+          "line": 670,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_number_split_across_chunks",
+          "line": 685,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_empty_args",
+          "line": 700,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_split_delimiter_no_invalid_json",
+          "line": 712,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_does_not_duplicate_plain_text_after_tool_call",
+          "line": 741,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_html_argument_does_not_duplicate_tag_prefixes",
+          "line": 761,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_single_chunk_complete_tool_call",
+          "line": 818,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_multi_chunk_batched_tool_calls",
+          "line": 849,
+          "decorators": []
+        },
+        {
+          "symbol": "TestStreamingExtraction.test_streaming_trailing_bare_bool_not_duplicated",
+          "line": 874,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_bare_opener_non_streaming",
+          "line": 908,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_documented_form_still_works",
+          "line": 918,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_bare_opener_multiple_args",
+          "line": 928,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_malformed_no_brace_bounded",
+          "line": 941,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_malformed_then_well_formed",
+          "line": 950,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_bare_malformed_then_well_formed",
+          "line": 964,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_three_mixed_calls",
+          "line": 977,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_colon_in_content_not_broken",
+          "line": 991,
+          "decorators": []
+        },
+        {
+          "symbol": "TestBareAndMalformedOpeners.test_bare_opener_empty_args",
+          "line": 1002,
+          "decorators": []
+        }
+      ]
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "revision": "a7c23ac96d7806e7c7e7d862eadbce5a33529b94",
+      "path": "tests/tool_use/test_gemma4_responses_adjust_request.py",
+      "url": "https://raw.githubusercontent.com/vllm-project/vllm/a7c23ac96d7806e7c7e7d862eadbce5a33529b94/tests/tool_use/test_gemma4_responses_adjust_request.py",
+      "sha256": "bd45981f2952049638e3d51d3e1ebe24538b84fdf7e7cd49d0bc6de04a45fb8e",
+      "tests": [
+        {
+          "symbol": "test_gemma4_adjust_request_sets_skip_special_tokens_on_responses",
+          "line": 123,
+          "decorators": []
+        },
+        {
+          "symbol": "test_tool_parser_adjust_request_builds_valid_response_text_config",
+          "line": 144,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_required_skips_structured_outputs_chatcompletion",
+          "line": 173,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_named_skips_structured_outputs_chatcompletion",
+          "line": 189,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_required_skips_structured_outputs_responses",
+          "line": 204,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_named_skips_structured_outputs_responses",
+          "line": 217,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_keeps_special_tokens_with_tools_thinking_disabled",
+          "line": 232,
+          "decorators": []
+        },
+        {
+          "symbol": "test_gemma4_keeps_skip_special_tokens_false_when_nothing_to_preserve",
+          "line": 248,
+          "decorators": []
+        }
+      ]
+    }
+  ]
+}

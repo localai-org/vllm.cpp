@@ -53,6 +53,10 @@
 
 namespace vllm::multimodal {
 
+// HTK centres, triangles in Hz, norm=None; double [frequency, mel].
+std::vector<double> MelFilterBankHtk(int frequency_bins, int mel_bins,
+                                     double min_hz, double max_hz, int sample_rate);
+
 // `audio_utils.hertz_to_mel(freq, mel_scale="slaney")` (:285-296) and its
 // inverse `mel_to_hertz` (:321-331). Exposed because they are the piece a
 // reviewer is most likely to want to check independently.

@@ -128,4 +128,24 @@ std::vector<float> MelFilterBankSlaneyTransposed(int num_frequency_bins,
   return out;
 }
 
+std::vector<double> MelFilterBankHtk(int frequency_bins, int mel_bins,
+                                     double min_hz, double max_hz, int sample_rate) {
+  if (frequency_bins < 2 || mel_bins < 1 || mel_bins > 4096 ||
+      sample_rate <= 0 || !std::isfinite(min_hz) || !std::isfinite(max_hz) ||
+      min_hz < 0 || max_hz <= min_hz || max_hz > sample_rate / 2)
+    throw std::invalid_argument("MelFilterBankHtk: invalid configuration");
+  const auto mel = Linspace(2595 * std::log10(1 + min_hz / 700),
+                            2595 * std::log10(1 + max_hz / 700), mel_bins + 2);
+  std::vector<double> hz(mel.size());
+  for (size_t i = 0; i < hz.size(); ++i) hz[i] = 700 * (std::pow(10., mel[i] / 2595) - 1);
+  const auto freq = Linspace(0, sample_rate / 2, frequency_bins);
+  std::vector<double> out(static_cast<size_t>(frequency_bins) * mel_bins);
+  for (int k = 0; k < frequency_bins; ++k)
+    for (int m = 0; m < mel_bins; ++m)
+      out[static_cast<size_t>(k) * mel_bins + m] = std::max(0., std::min(
+          (freq[k] - hz[m]) / (hz[m+1] - hz[m]),
+          (hz[m+2] - freq[k]) / (hz[m+2] - hz[m+1])));
+  return out;
+}
+
 }  // namespace vllm::multimodal

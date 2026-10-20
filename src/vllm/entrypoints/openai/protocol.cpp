@@ -439,6 +439,9 @@ static ChatContentPart ParseChatContentPart(const nlohmann::json& part) {
 
 void from_json(const nlohmann::json& j, ChatMessage& m) {
   GetOr(j, "role", m.role);
+  if (auto it = j.find("content"); it != j.end()) m.template_content = *it;
+  if (auto it = j.find("reasoning_content"); it != j.end() && it->is_string())
+    m.template_reasoning_content = it->get<std::string>();
   // Content may be a bare string (T0, byte-identical) OR a multimodal
   // content-part array (ROAD-V1-MM serving W1; chat_utils.py
   // _parse_chat_message_content_parts). The array form fills content_parts AND

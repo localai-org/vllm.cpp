@@ -2882,6 +2882,17 @@ if(VLLM_CPP_SERVER)
     NANO_NEMOTRON_VL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/fixtures")
   vllm_cpp_add_test(test_deepseek_v4_mm_chat
     vllm/entrypoints/openai/test_deepseek_v4_mm_chat.cpp)
+  # Gemma4 mm chat seam (row
+  # MODEL-MM-gemma4-mm-gemma4-for-conditional-generation).
+  vllm_cpp_add_test(test_gemma4_e4b_mm_chat
+    vllm/entrypoints/openai/test_gemma4_e4b_mm_chat.cpp)
+  target_compile_definitions(test_gemma4_e4b_mm_chat PRIVATE
+    GEMMA4_E4B_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+  # Gemma4 image chat path (T10B).
+  vllm_cpp_add_test(test_gemma4_e4b_mm_chat_image
+    vllm/entrypoints/openai/test_gemma4_e4b_mm_chat_image.cpp)
+  target_compile_definitions(test_gemma4_e4b_mm_chat_image PRIVATE
+    GEMMA4_E4B_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
   # The language and projector GGUF fixtures live beside the model gates, and
   # they are shared with the W3B/W4 suites so the artifact is described once.
   target_include_directories(test_deepseek_v4_mm_chat PRIVATE
@@ -4771,3 +4782,257 @@ vllm_cpp_add_test(test_qwen38_27b_radixark_w4a4_notice
   vllm/models/test_qwen38_27b_radixark_w4a4_notice.cpp)
 target_include_directories(test_qwen38_27b_radixark_w4a4_notice PRIVATE
   ${CMAKE_SOURCE_DIR}/src)
+
+# Bounded CPU loader gate: compile real loader translation units rather than
+# force-linking every model/backend registrar in vllm. Section collection removes
+# unrelated Qwen entrypoints, not any function reachable from the Gemma loader.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_executable(test_gemma4_e4b_loader
+    vllm/models/test_gemma4_e4b_loader.cpp
+    ../src/vllm/multimodal/gemma4_audio_processor.cpp
+    ../src/vllm/multimodal/mel_filter_bank.cpp
+    ../src/vllm/model_executor/models/gemma4_audio_encoder.cpp
+    ../src/vllm/model_executor/models/gemma4_audio.cpp
+    ../src/vllm/model_executor/models/model_registry.cpp
+    ../src/vt/tensor.cpp
+    ../src/vt/backend.cpp
+    ../src/vllm/model_executor/models/gemma4_weights.cpp
+    ../src/vllm/model_executor/models/qwen3_5_weights.cpp
+    ../src/vllm/model_executor/model_loader/safetensors_reader.cpp
+    ../src/vllm/model_executor/model_loader/read_only_file_mapping.cpp
+    ../src/vllm/model_executor/model_loader/nvfp4_dequant.cpp
+    ../src/vllm/model_executor/model_loader/mxfp4_dequant.cpp
+    ../src/vt/dtype.cpp
+    ../src/vllm/transformers_utils/hf_config.cpp)
+  target_include_directories(test_gemma4_e4b_loader PRIVATE
+    ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(test_gemma4_e4b_loader PRIVATE vllm_test_main)
+  target_compile_options(test_gemma4_e4b_loader PRIVATE -ffunction-sections -fdata-sections)
+  target_link_options(test_gemma4_e4b_loader PRIVATE -Wl,--gc-sections)
+  vllm_cpp_set_warnings(test_gemma4_e4b_loader)
+  add_test(NAME test_gemma4_e4b_loader COMMAND test_gemma4_e4b_loader)
+else()
+  vllm_cpp_add_test(test_gemma4_e4b_loader vllm/models/test_gemma4_e4b_loader.cpp)
+endif()
+
+target_compile_definitions(test_gemma4_e4b_loader PRIVATE
+  E4B_CONFIG_PATH="${CMAKE_SOURCE_DIR}/tests/fixtures/gemma4_e4b_google/config.json")
+# Do not accept an empty executable or skipped cases as this synthetic gate.
+set_tests_properties(test_gemma4_e4b_loader PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +48 [|] +48 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE")
+
+# T05A bounded frontend: real TUs, no full-library linkage.
+add_executable(test_gemma4_e4b_audio_processor
+  vllm/multimodal/test_gemma4_e4b_audio_processor.cpp
+  ../src/vllm/multimodal/gemma4_audio_processor.cpp
+  ../src/vllm/multimodal/mel_filter_bank.cpp)
+target_include_directories(test_gemma4_e4b_audio_processor PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_gemma4_e4b_audio_processor PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_gemma4_e4b_audio_processor)
+add_test(NAME test_gemma4_e4b_audio_processor COMMAND test_gemma4_e4b_audio_processor)
+set_tests_properties(test_gemma4_e4b_audio_processor PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +5 [|] +5 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE")
+
+# T04A decoded RGB prerequisite: bounded real production TUs, no backend mock.
+add_executable(test_gemma4_e4b_image_processor
+  vllm/multimodal/test_gemma4_e4b_image_processor.cpp
+  ../src/vllm/multimodal/gemma4_image_processor.cpp
+  ../src/vllm/model_executor/models/gemma4_vision_input.cpp)
+target_include_directories(test_gemma4_e4b_image_processor PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_gemma4_e4b_image_processor PRIVATE vllm_test_main)
+vllm_cpp_set_warnings(test_gemma4_e4b_image_processor)
+add_test(NAME test_gemma4_e4b_image_processor COMMAND test_gemma4_e4b_image_processor)
+target_compile_definitions(test_gemma4_e4b_image_processor PRIVATE
+  E4B_RESIZE_FIXTURES="${CMAKE_SOURCE_DIR}/tests/fixtures/gemma4_e4b_resize")
+set_tests_properties(test_gemma4_e4b_image_processor PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +4 [|] +4 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE")
+
+# T04C: actual CPU provider closure, not the whole model/backend archive.
+get_target_property(E4B_LOADER_SOURCES test_gemma4_e4b_loader SOURCES)
+list(REMOVE_ITEM E4B_LOADER_SOURCES vllm/models/test_gemma4_e4b_loader.cpp)
+add_executable(test_gemma4_e4b_vision_execution
+  vllm/models/test_gemma4_e4b_vision_execution.cpp
+  ${E4B_LOADER_SOURCES}
+  ../src/vllm/multimodal/gemma4_image_processor.cpp
+  ../src/vllm/model_executor/models/gemma4_vision.cpp
+  ../src/vllm/model_executor/models/gemma4_vision_input.cpp
+  ../src/vt/ops.cpp ../src/vt/op_provider.cpp
+  ../src/vt/cpu/cpu_backend.cpp ../src/vt/cpu/cpu_ops.cpp
+  ../src/vt/cpu/cpu_threadpool.cpp ../src/vt/cpu/cpu_matmul_elem.cpp
+  ../src/vt/cpu/cpu_isa_x86.cpp ../src/vt/cpu/cpu_isa_arm.cpp
+  ../src/vt/cpu/cpu_quant_dequant.cpp ../src/vt/cpu/cpu_layernorm.cpp)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  target_sources(test_gemma4_e4b_vision_execution PRIVATE
+    ../src/vt/cpu/cpu_matmul_elem_f16c.cpp
+    ../src/vt/cpu/cpu_matmul_elem_avx2.cpp
+    ../src/vt/cpu/cpu_matmul_elem_avx512.cpp)
+  set_source_files_properties(../src/vt/cpu/cpu_matmul_elem_f16c.cpp PROPERTIES COMPILE_OPTIONS "-mf16c")
+  set_source_files_properties(../src/vt/cpu/cpu_matmul_elem_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mf16c")
+  set_source_files_properties(../src/vt/cpu/cpu_matmul_elem_avx512.cpp PROPERTIES COMPILE_OPTIONS "-mavx512f;-mavx512bw;-mavx512vl;-mf16c")
+endif()
+target_include_directories(test_gemma4_e4b_vision_execution PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_gemma4_e4b_vision_execution PRIVATE vllm_test_main)
+target_compile_options(test_gemma4_e4b_vision_execution PRIVATE -ffunction-sections -fdata-sections)
+target_link_options(test_gemma4_e4b_vision_execution PRIVATE -Wl,--gc-sections)
+target_compile_definitions(test_gemma4_e4b_vision_execution PRIVATE
+  E4B_VISION_FIXTURES="${CMAKE_SOURCE_DIR}/tests/fixtures/gemma4_e4b_vision")
+vllm_cpp_set_warnings(test_gemma4_e4b_vision_execution)
+add_test(NAME test_gemma4_e4b_vision_execution COMMAND test_gemma4_e4b_vision_execution)
+set_tests_properties(test_gemma4_e4b_vision_execution PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +5 [|] +5 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE")
+get_target_property(E4B_EXEC_SOURCES test_gemma4_e4b_vision_execution SOURCES)
+list(REMOVE_ITEM E4B_EXEC_SOURCES vllm/models/test_gemma4_e4b_vision_execution.cpp)
+get_target_property(E4B_EXISTING_SOURCES test_gemma4_e4b_loader SOURCES)
+list(REMOVE_ITEM E4B_EXEC_SOURCES ${E4B_EXISTING_SOURCES})
+target_sources(test_gemma4_e4b_loader PRIVATE ${E4B_EXEC_SOURCES})
+
+# T03A: bounded production renderer/protocol closure, no libvllm or stubs.
+add_executable(test_gemma4_e4b_template
+  vllm/entrypoints/test_gemma4_e4b_template.cpp
+  vllm/entrypoints/test_chat_template.cpp
+  ../src/vllm/entrypoints/chat_template.cpp
+  ../src/vllm/entrypoints/openai/protocol.cpp
+  ../src/vllm/model_executor/model_loader/gguf_reader.cpp
+  ../src/vllm/model_executor/model_loader/read_only_file_mapping.cpp)
+target_include_directories(test_gemma4_e4b_template PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+if(TARGET vllm::sanitize_test_shared)
+  # Under sanitizers, link the shared library for kv_cache typeinfo/vtable
+  # symbols instead of compiling kv_cache_utils.cpp directly.  The direct
+  # compilation triggers UBSan typeinfo references for the polymorphic KV
+  # cache spec hierarchy that the linker cannot resolve without the key
+  # functions (virtual destructors are =default in the header).
+  target_link_libraries(test_gemma4_e4b_template PRIVATE vllm::sanitize_test_shared vllm_test_main)
+else()
+  target_link_libraries(test_gemma4_e4b_template PRIVATE vllm_test_main)
+  target_sources(test_gemma4_e4b_template PRIVATE ../src/vllm/v1/core/kv_cache_utils.cpp)
+endif()
+if(MSVC)
+  target_compile_options(test_gemma4_e4b_template PRIVATE /Gy /Gw)
+  target_link_options(test_gemma4_e4b_template PRIVATE /OPT:REF)
+else()
+  target_compile_options(test_gemma4_e4b_template PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_gemma4_e4b_template PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_gemma4_e4b_template PRIVATE -Wl,--gc-sections)
+  endif()
+endif()
+target_compile_definitions(test_gemma4_e4b_template PRIVATE VLLM_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+vllm_cpp_set_warnings(test_gemma4_e4b_template)
+add_test(NAME test_gemma4_e4b_template COMMAND test_gemma4_e4b_template)
+set_tests_properties(test_gemma4_e4b_template PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +48 [|] +48 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE"
+  ENVIRONMENT "VT_CPU_THREADS=1")
+
+# Bounded real-provider factory gate; no libvllm or tool-factory substitution.
+add_executable(test_gemma4_e4b_reasoning_end
+  ../src/vllm/parser/engine/tokenizer_bridge.cpp
+  ../src/vllm/tokenizer/tokenizer.cpp
+  ../src/vllm/tokenizer/bpe.cpp
+  ../src/vllm/tokenizer/pretokenizer.cpp
+  ../src/vllm/tokenizer/unicode_data.cpp
+  vllm/parser/test_tokenizer_bridge.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/request.cpp
+  vllm/parser/test_gemma4_e4b_request.cpp
+  vllm/entrypoints/openai/reasoning_parsers/test_qwen3.cpp
+  vllm/entrypoints/openai/reasoning_parsers/test_kolibri1.cpp
+  vllm/parser/test_gemma4_e4b_adapter.cpp
+  vllm/parser/test_gemma4_e4b_reasoning_end.cpp
+  vllm/parser/test_gemma4_e4b_prompt_state.cpp
+  vllm/parser/engine/test_parser_engine_assembly.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/abstract.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/parser_engine_adapter.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/basic.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/identity.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/deepseek_r1.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/deepseek_v3.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/mistral.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/minimax_m2.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/step3.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/olmo3.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/muse_glimmer.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/kolibri1.cpp
+  ../src/vllm/entrypoints/openai/reasoning_parsers/think_auto.cpp
+  ../src/vllm/parser/parser_manager.cpp
+  ../src/vllm/parser/gemma4.cpp
+  ../src/vllm/parser/qwen3.cpp
+  ../src/vllm/parser/kimi_k2.cpp
+  ../src/vllm/parser/glm47_moe.cpp
+  ../src/vllm/parser/inkling.cpp
+  ../src/vllm/parser/engine/configs.cpp
+  ../src/vllm/parser/engine/parser_engine.cpp
+  ../src/vllm/parser/engine/streaming_parser_engine.cpp
+  ../src/vllm/parser/engine/incremental_lexer.cpp
+  ../src/vllm/parser/engine/token_id_scanner.cpp
+  ../src/vllm/entrypoints/openai/tool_parsers/utils.cpp
+  ../src/vllm/entrypoints/openai/tool_parsers/abstract.cpp)
+# Reuse the template gate's real GGUF providers in the bounded Makefiles lane.
+# Other generators compile the same real sources rather than guessing paths.
+if(CMAKE_GENERATOR STREQUAL "Unix Makefiles")
+  foreach(provider gguf_reader read_only_file_mapping)
+    set(provider_object "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/test_gemma4_e4b_template.dir/__/src/vllm/model_executor/model_loader/${provider}.cpp${CMAKE_CXX_OUTPUT_EXTENSION}")
+    set_source_files_properties("${provider_object}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    target_sources(test_gemma4_e4b_reasoning_end PRIVATE "${provider_object}")
+  endforeach()
+  add_dependencies(test_gemma4_e4b_reasoning_end test_gemma4_e4b_template)
+else()
+  target_sources(test_gemma4_e4b_reasoning_end PRIVATE
+    ../src/vllm/model_executor/model_loader/gguf_reader.cpp
+    ../src/vllm/model_executor/model_loader/read_only_file_mapping.cpp)
+endif()
+target_include_directories(test_gemma4_e4b_reasoning_end PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_gemma4_e4b_reasoning_end PRIVATE vllm_test_main)
+if(MSVC)
+  target_compile_options(test_gemma4_e4b_reasoning_end PRIVATE /Gy /Gw)
+  target_link_options(test_gemma4_e4b_reasoning_end PRIVATE /OPT:REF)
+else()
+  target_compile_options(test_gemma4_e4b_reasoning_end PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_gemma4_e4b_reasoning_end PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_gemma4_e4b_reasoning_end PRIVATE -Wl,--gc-sections)
+  endif()
+endif()
+if(TARGET vllm::sanitize_test_shared)
+  # Under sanitizers, link the shared library to provide typeinfo/vtable
+  # symbols for polymorphic parser hierarchies (tool parsers, reasoning
+  # parsers) whose key functions live in TUs not compiled into this target.
+  # UBSan data references the typeinfo; without the shared library the linker
+  # reports undefined reference to typeinfo for every parser subclass.
+  target_link_libraries(test_gemma4_e4b_reasoning_end PRIVATE vllm::sanitize_test_shared)
+endif()
+vllm_cpp_set_warnings(test_gemma4_e4b_reasoning_end)
+add_test(NAME test_gemma4_e4b_reasoning_end COMMAND test_gemma4_e4b_reasoning_end)
+set_tests_properties(test_gemma4_e4b_reasoning_end PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +43 [|] +43 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE"
+  ENVIRONMENT "VT_CPU_THREADS=1")
+
+# T03D: video token replacement sequence builder.
+add_executable(test_gemma4_e4b_video_repl
+  ../src/vllm/model_executor/models/gemma4_weights.cpp
+  vllm/parser/test_gemma4_e4b_video_repl.cpp)
+target_include_directories(test_gemma4_e4b_video_repl PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_gemma4_e4b_video_repl PRIVATE vllm_test_main)
+if(MSVC)
+  target_compile_options(test_gemma4_e4b_video_repl PRIVATE /Gy /Gw)
+  target_link_options(test_gemma4_e4b_video_repl PRIVATE /OPT:REF)
+else()
+  target_compile_options(test_gemma4_e4b_video_repl PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_gemma4_e4b_video_repl PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_gemma4_e4b_video_repl PRIVATE -Wl,--gc-sections)
+  endif()
+endif()
+vllm_cpp_set_warnings(test_gemma4_e4b_video_repl)
+add_test(NAME test_gemma4_e4b_video_repl COMMAND test_gemma4_e4b_video_repl)
+set_tests_properties(test_gemma4_e4b_video_repl PROPERTIES
+  PASS_REGULAR_EXPRESSION "test cases: +7 [|] +7 passed [|] +0 failed [|] +0 skipped"
+  FAIL_REGULAR_EXPRESSION "Status: FAILURE"
+  ENVIRONMENT "VT_CPU_THREADS=1")
