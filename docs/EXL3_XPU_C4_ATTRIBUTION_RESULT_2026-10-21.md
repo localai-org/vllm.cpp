@@ -54,7 +54,7 @@ kernel, verified against the recorded route events and PTI names.
 That is the entire old eligible kernel cost, an upper limit on recoverable GPU
 work. It is not a predicted serving speedup, and the new complete call still
 pays validation, dispatch, scratch/reduction and queue-completion costs. This
-route cannot be credited with the entire approximately24% native/Python C4
+route cannot be credited with the entire approximately 24% native/Python C4
 throughput gap.
 
 ## Cold admission and warmup
@@ -123,7 +123,7 @@ Diagnostic executable SHA-256: `ea9c5d692062694814ea0609a0d3fcd94ca7bd4fc07a435c
 The library matches the retained reviewed auto/2 library. Build/source identity,
 commands, receipts, original fixtures, per-cycle host/device records and raw PTI
 captures are retained under `phase-next-pro-c4-profile-v1`. Its `analysis.json`,
-`cold-kernel-analysis.json`, `cold-attribution.json` and`q1-fraction.json` keep
+`cold-kernel-analysis.json`, `cold-attribution.json` and `q1-fraction.json` keep
 the detailed definitions, counts and arithmetic. Mixed-work controls remain in
 `phase-next-pro-attribution-v1`, `phase-next-pro-mixed-control-v1` and
 `phase-next-pro-mixed-candidate-v1`. This cost account establishes a bounded

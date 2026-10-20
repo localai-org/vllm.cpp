@@ -231,13 +231,22 @@ K/128<=144 and the shared bounded preparation policy (72MiB maximum by default).
 diagnostic publication fallback. This retains the original completion fence;
 the measured event-lease variant was rejected and is not implemented.
 
-Bounded B1/Q1 FP16/E4M3 decode defaults to long-decode mode `2`, extending
+Bounded Q1 FP16/E4M3 decode defaults to long-decode mode `2`, extending
 its checked route to at most 128 physical pages (204,800 tokens at page size
 1,600). Existing hardware, layout, unit-scale, scratch and graph-metadata guards
 remain required. Unsupported calls fall back. `VT_XPU_XE2_LONG_DECODE=1`
 retains the previous route through three physical pages; `0` retains the
 diagnostic control. `VT_XPU_XE2_DECODE_SPLITS` accepts `16`/`32` (default `32`).
-This path does not admit arbitrary batched Q1 or Q4 verification.
+`VT_XPU_XE2_BATCHED_Q1=1` is now the default for exact B2-B4 one-query-per-request
+packets with offsets `[0,1,...,B]` under the same bounds; explicit `0` restores
+the original batched fallback. Q4, ragged, mixed and unsupported packets retain
+their existing routes. See the [batched-Q1 qualification](EXL3_XPU_BATCHED_Q1_RESULT_2026-10-21.md)
+for detecting tests, complete-call and paired-serving results.
+
+Expanded small-row SiLU mode `2` remains experimental; default mode `1` retains
+rows1/4. Mixed oneDNN prefill mode `1` remains experimental; default mode `0`
+retains its prior route. See the [SiLU result](EXL3_XPU_CONCURRENCY_SILU_RESULT_2026-10-20.md)
+and [mixed-prefill result](EXL3_XPU_MIXED_PREFILL_RESULT_2026-10-20.md).
 
 Recurrent-prefix alignment defaults to request-stable `auto`. Prompts fitting
 the resolved nominal scheduling capacity avoid an additional forced split;
@@ -248,7 +257,7 @@ or `off`/`0` to disable the extra split. Natural cache hits remain possible.
 Auto trades some short warm hits for lower cold costs; invalid spellings fail.
 
 The [2026-10-20 auto/2 comparison](benchmarks/exl3-auto2-2026-10-20/README.md)
-contains the fresh full text-serving matrix, focused qualification, explicit
+contains the previous completed baseline matrix, focused qualification, explicit
 short-prefix and 16K/C4 tradeoffs, known strict-format failure and incomplete
 fresh MTP0/C2 mixed-batch diagnostic. Earlier attention reports retain their
 original narrower source pins and scope.

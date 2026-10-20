@@ -1,10 +1,10 @@
-# Batched pure-Q1 attention on B70: qualification in progress
+# Batched pure-Q1 attention on B70: qualified bounded default
 
 The candidate adds exact B2-B4 one-query-per-request admission to the existing
-bounded Xe2 decode donor. `VT_XPU_XE2_BATCHED_Q1=1` opts in; the current compiled
-default is `0`. Original B1 behavior remains. Q4, ragged and mixed packets retain
+bounded Xe2 decode donor. `VT_XPU_XE2_BATCHED_Q1` now defaults to `1`; explicit `0` rolls back
+to the original batched fallback. Original B1 behavior remains. Q4, ragged and mixed packets retain
 their existing routes. The experiment uses current request-stable auto/long2
-with SiLU1 and mixed-prefill0; each new mechanism is isolated.
+with SiLU 1 and mixed-prefill 0; each new mechanism is isolated.
 
 ## Route and storage contract
 
@@ -75,7 +75,7 @@ not a claim of 84-87% higher model throughput. See the [attribution result](EXL3
 
 - RED: exactly three missing route-admission assertions for B2/B3/B4 fail before
   the donor extension; old fallback outputs still match the reference.
-- Final same-process GPU guard set: four cases / 1,741 assertions pass. It covers
+- Final same-process GPU guard set: four cases / 1,880 assertions pass. It covers
   heterogeneous queries/lengths/page order, both supported cache layouts, zero
   versus NaN neighbor/tail poison, B4->B3->B2->B1, replacement of a cancelled
   owner's pages, aliasing, unchanged inputs/metadata/KV, invalid live metadata,
@@ -87,7 +87,7 @@ not a claim of 84-87% higher model throughput. See the [attribution result](EXL3
   strided/padded tables and unsupported query layout preserve fallback/refusal.
   Existing strided-output materialization preserves guards. Q4 remains on its
   qualified packed route; mixed Q1+prefill does not enter the new route.
-- Host policy: one case / 36 assertions pass. Graph policy: three cases / 249
+- Host policy: one case / 36 assertions pass. Graph policy: three cases / 250
   assertions pass, including page/capacity/mode transitions and B1 parameters.
 - Existing B1 numeric/layout/poison retention: one case / 1,426 assertions pass.
   No full test suite was run.
@@ -112,25 +112,59 @@ claim. The known strict closing-fence failure and separate incomplete default
 64K MTP0/C2 liveness remain explicit. The earlier opt-in mixed-prefill bounded
 completion is preserved separately; it is not this test.
 
-## Remaining focused checks before a promotion decision
+## Final short-context and NaN-scratch checks
 
-Cross-queue and cross-route scratch clobbering pass. Explicit NaN filling of
-the whole shared reservation and newly batched one-split contexts at or below
-960 tokens are still pending. These focused test additions will run after the
-frozen serving workers finish; no compilation or second GPU workload will be
-introduced into the scored runs. They are part of the existing correctness
-contract, not a replacement for the original C4 serving evidence.
+After all 16 scored workers finished, test-only checks explicitly filled the
+entire shared 16-MiB reservation with NaNs in both F16/F32 views and exercised
+B2/B3/B4 at contexts 1/960/961/4096, including one-split launches. The intermediate
+four-case set passed 1,875 assertions without changing the product library or
+serving executable. After changing the default literal to 1, detecting tests of
+the actual unset/default route brought the final set to 1,880 passing assertions.
+Policy 1 / 36 and graph 3 / 250 also passed, including the unset/default bounded launch.
+No compile or second GPU workload overlapped scored workers.
 
-## Serving disposition: pending
+## Serving disposition: promoted
 
-The predeclared 16-worker original-fixture screen is running: two C4-4K A/A
-workers, three alternating A/B pairs at C4-4K and C4-16K, and one C1-4K sentinel
-pair. Both arms use the same frozen executable, auto/2, SiLU1, mixed-prefill0,
-original stochastic HTTP payloads and 1,024-token caps. All profilers/traces are
-off. Actual child flags, cold computed work, cache hits, preemptions, overlap
-counter/window, TTFT/E2E, accepted/proposed drafts, outputs and host cgroups are
-retained. A completed operator/lifecycle PASS alone does not promote the route.
-No new full native/Python matrix has been started.
+All 16 predeclared workers completed: two C4-4K A/A controls, three alternating
+A/B pairs per C4 context and one C1-4K sentinel pair. Both arms used the same
+frozen executable, auto/2, SiLU 1, mixed-prefill 0, original stochastic HTTP
+payloads and 1,024-token caps. Profilers/traces were off; original child flags,
+raw metrics, outputs, resource receipts and sample order are retained.
+
+| Case | Pair | Flag0 aggregate decode tok/s | Flag1 aggregate decode tok/s | Decode change | Client TTFT change | Client E2E change | Control accepted/proposed | Candidate accepted/proposed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C4-4K | 1 | 140.838 | 144.066 | +2.291% | +0.140% | -1.205% | 2575/4563 | 2561/4608 |
+| C4-4K | 2 | 139.987 | 143.875 | +2.777% | -0.205% | -2.002% | 2566/4599 | 2565/4602 |
+| C4-4K | 3 | 132.785 | 137.178 | +3.308% | +0.033% | -2.350% | 2496/4809 | 2496/4809 |
+| C4-16K | 1 | 125.516 | 133.803 | +6.603% | +0.056% | -2.655% | 2603/4488 | 2594/4512 |
+| C4-16K | 2 | 125.515 | 133.139 | +6.074% | +0.013% | -1.960% | 2603/4488 | 2615/4437 |
+| C4-16K | 3 | 125.518 | 134.209 | +6.925% | -0.086% | -2.654% | 2603/4488 | 2594/4512 |
+
+Decode is aggregate generated-counter throughput in the fully overlapping C4
+window. TTFT/E2E are client latencies, not summed GPU compute durations. All
+workers completed; cold committed prefill was 16,292/65,460 tokens for 4K/16K,
+with zero cache hits and zero preemptions. Accepted/proposed counts above cover
+the full wave; overlap-window counts are separately retained in the raw report.
+
+The new C4-4K A/A pair differed by -3.515% decode, +0.733% TTFT, +1.142% E2E.
+A prior comparable auto/2 A/A pair differed by -4.835% decode. These are observed
+pairs, not confidence bounds. The 4K median +2.777% decode is a positive trend
+below observed A/A variation, not an independently noise-qualified gain.
+Every 16K gain exceeds both observed control differences and agrees with the
+complete-call result. The 16K medians are +6.603% decode, +0.013% TTFT and -2.654%
+E2E. The C1 sentinel was effectively unchanged: -0.001% client post-first-token
+decode, -0.099% TTFT and -0.008% E2E, with exact output hashes.
+
+This supports bounded B2-B4 Q1 promotion on the intended concurrent long-context
+workload, not statistical significance or a universal speedup. Stochastic C4
+output hashes and MTP trajectories can differ, including between A/A controls.
+Numerical-contract checks and exact ownership/lifetime checks remain separate.
+The already accepted auto/2 baseline costs are not attributed to this patch.
+
+The promoted combination must have a fresh full native/Python matrix before its
+comparison is published. That run uses compiled auto/long2/batched-Q1=1,
+SiLU 1/mixed-prefill 0 with all five policy overrides unset. The earlier completed
+auto/2 matrix remains historical evidence and is not relabelled as this build.
 
 ## Exact identity and raw evidence
 
@@ -148,3 +182,13 @@ Raw evidence remains in `phase-next-pro-q1-operands-v1`,
 `phase-next-pro-q1-candidate-v1`, `phase-next-pro-q1-model-lifecycle-v1` and
 `phase-next-pro-q1-serving-v1`. Failures, original sample vectors and earlier
 identities are preserved; no partial worker is relabelled as passed.
+
+Promoted-default executable SHA-256:
+`c87739a6986b13de1240213ba0ed12075cea05b007ec6cc79c754e5042ed9f07`.
+Its exact eight source/test hashes and the focused test binaries are in
+`phase-next-pro-q1-promoted-v1/identity.json`; qualification and raw evidence links
+are in `qualification.json`. These files bind product source revision
+`5fcad5dcab817a7462b5c884243c9b168d4b2843` by content equivalence. The build used
+the recorded previous commit plus a working delta; it is not claimed to be a
+clean-HEAD build. The only post-screen production change is default 0->1;
+additional NaN/short-context/default checks are test-only.
