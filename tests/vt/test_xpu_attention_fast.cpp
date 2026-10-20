@@ -467,6 +467,67 @@ TEST_CASE("XPU long Q1 decode: live graph metadata poison and scratch ownership"
   CHECK(vt::GetReferenceTierHits()==0);
 }
 
+TEST_CASE("XPU EXL3 mixed oneDNN admission preserves offsets masks and aliases"
+          * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
+  struct Restore {
+    std::string flag, mode;
+    bool has_flag = false, has_mode = false;
+    Restore() {
+      if (const char* v = std::getenv("VT_XPU_ONEDNN_MIXED_PREFILL")) { flag=v; has_flag=true; }
+      if (const char* v = std::getenv("VT_XPU_ATTENTION")) { mode=v; has_mode=true; }
+    }
+    ~Restore() {
+      if(has_flag)setenv("VT_XPU_ONEDNN_MIXED_PREFILL",flag.c_str(),1);else unsetenv("VT_XPU_ONEDNN_MIXED_PREFILL");
+      if(has_mode)setenv("VT_XPU_ATTENTION",mode.c_str(),1);else unsetenv("VT_XPU_ATTENTION");
+    }
+  } restore;
+  Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);
+  for (const std::vector<int32_t>& widths : {std::vector<int32_t>{1,129}, {129,1,3}, {1,0,129,1}}) {
+    const int requests=static_cast<int>(widths.size());
+    Fixture ref(cpu.q,requests,129,1601,true,false,1600,DType::kF16,DType::kF32);
+    Fixture got(gpu.q,requests,129,1601,true,false,1600,DType::kF16,DType::kF16);
+    std::vector<int32_t> offsets{0}, lengths;
+    for(int32_t rows:widths) { offsets.push_back(offsets.back()+rows); lengths.push_back(rows==1?1601:257); }
+    for(Fixture* f:{&ref,&got}) {
+      f->tokens=offsets.back();f->query.tensor.shape[0]=f->out.tensor.shape[0]=f->tokens;
+      f->lens.upload(lengths.data());f->offsets.upload(offsets.data());
+    }
+    ref.run("reference");const auto expected=ref.result();
+    const auto cache=got.cache.download(), table=got.table.download(), lens=got.lens.download(), qsl=got.offsets.download();
+    for(const char* setting:{"unset","0","1"}) {
+      if(setting[0]=='u')unsetenv("VT_XPU_ONEDNN_MIXED_PREFILL");
+      else setenv("VT_XPU_ONEDNN_MIXED_PREFILL",setting,1);
+      (void)vt::xpu::DrainProfileEvents();got.run("auto");
+      Accuracy(got.result(),expected,false,true);
+      int sdpa=0;for(const auto& e:vt::xpu::DrainProfileEvents())sdpa+=e.stage=="exl3_onednn_sdpa";
+      const int nonempty=static_cast<int>(std::count_if(widths.begin(),widths.end(),[](int x){return x>0;}));
+      CHECK(sdpa==(setting[0]=='1'?4*nonempty:0));
+    }
+    // The public operator must stage aliases before the oneDNN output copy.
+    auto alias=got.query.tensor;
+    vt::PagedAttention(gpu.q,alias,alias,got.kc,got.vc,got.table.tensor,got.lens.tensor,got.offsets.tensor,got.args);
+    vt::GetBackend(gpu.q.device).Synchronize(gpu.q);
+    auto actual=got.query.floats();actual.resize(got.tokens*24*256);Accuracy(actual,expected,false,true);
+    xpu_test::SameBytes(got.cache.download(),cache);xpu_test::SameBytes(got.table.download(),table);
+    xpu_test::SameBytes(got.lens.download(),lens);xpu_test::SameBytes(got.offsets.download(),qsl);
+  }
+  // All-Q1 batches must retain their existing route even in explicit SDPA mode.
+  for(int requests:{2,3,4}) {
+    Fixture ref(cpu.q,requests,1,257,true,false,1600,DType::kF16,DType::kF32);
+    Fixture got(gpu.q,requests,1,257,true,false,1600,DType::kF16,DType::kF16);
+    ref.run("reference");(void)vt::xpu::DrainProfileEvents();got.run("exl3_onednn");
+    Accuracy(got.result(),ref.result(),false,true);
+    int sdpa=0;for(const auto& e:vt::xpu::DrainProfileEvents())sdpa+=e.stage=="exl3_onednn_sdpa";
+    CHECK(sdpa==0);
+  }
+  Fixture invalid(gpu.q,2,129,257,true,false,1600,DType::kF16,DType::kF16);
+  for(const char* spelling:{"","bad","01","1 ","auto"}) {
+    setenv("VT_XPU_ONEDNN_MIXED_PREFILL",spelling,1);
+    CHECK_THROWS_AS(invalid.run("exl3_onednn"),std::runtime_error);
+  }
+  CHECK(vt::GetReferenceTierHits()==0);
+}
+
 TEST_CASE("XPU EXL3 oneDNN attention: exact page boundaries scales and query padding"
           * doctest::skip(!std::getenv("VT_XPU_PROFILE"))) {
   Queue cpu(vt::DeviceType::kCPU), gpu(vt::DeviceType::kXPU);

@@ -35,6 +35,7 @@
 #include "vt/xpu_gdn_policy.h"
 #include "vt/xpu_attention_preamble_policy.h"
 #include "vt/xpu_silu_policy.h"
+#include "vt/xpu_prefill_policy.h"
 #include "vllm/model_executor/models/dense_fp8_block_gemm.h"  // MODEL-FP8-BLOCK-LINEAR (#1189 M4)
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
@@ -296,10 +297,10 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
       "VT_XPU_ATTN_SPLIT_MAX_PARTS", "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP",
       "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
       "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
-      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED"};
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED", "VT_XPU_ONEDNN_MIXED_PREFILL"};
   constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single",
       vt::kXpuLongDecodeDefault, vt::kXpuLongDecodeSplitsDefault, vt::kXpuGdnSpecSubgroupDefault,
-      vt::kXpuAttentionPreambleNativeFp32Default, vt::kXpuSmallSiluDefault, vt::kXpuConvPrefillTypedDefault, vt::kXpuGemmaLargeTypedDefault};
+      vt::kXpuAttentionPreambleNativeFp32Default, vt::kXpuSmallSiluDefault, vt::kXpuConvPrefillTypedDefault, vt::kXpuGemmaLargeTypedDefault, vt::kXpuOneDnnMixedPrefillDefault};
   static_assert(std::size(names) == std::size(defaults));
   static_assert(std::size(names) == std::tuple_size_v<decltype(key.settings)>);
   for (size_t i = 0; i < key.settings.size(); ++i) {

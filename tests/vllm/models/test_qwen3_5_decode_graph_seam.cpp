@@ -1458,7 +1458,7 @@ struct XpuPolicyEnv {
       "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP", "VT_XPU_ATTN_SPLIT_REDUCE",
       "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
       "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
-      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED"};
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED", "VT_XPU_ONEDNN_MIXED_PREFILL"};
   std::array<std::string, std::size(names)> values;
   std::array<bool, std::size(names)> present{};
   XpuPolicyEnv() {
@@ -1490,7 +1490,7 @@ TEST_CASE("P1: XPU attention graph policy keys routes partitions and every cache
   };
   const auto original = key();
   CHECK(key(4799) == original); CHECK(key(4800) == original); CHECK_FALSE(key(4801) == original);
-  constexpr const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual", "0", "16", "0", "0", "0", "1", "0"};
+  constexpr const char* changed[] = {"verify", "1", "0", "64", "64", "0", "scalar", "q16", "residual", "0", "16", "0", "0", "0", "1", "0", "1"};
   static_assert(std::size(changed) == std::size(XpuPolicyEnv::names));
   for (size_t i = 0; i < std::size(XpuPolicyEnv::names); ++i) {
     REQUIRE(setenv(XpuPolicyEnv::names[i], changed[i], 1) == 0);

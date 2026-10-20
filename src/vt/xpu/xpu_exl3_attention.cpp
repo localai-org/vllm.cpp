@@ -5,6 +5,7 @@
 #include "xpu_fp8.h"
 #include "xpu_gptq4.h"
 #include "xpu_kernels.h"
+#include "vt/xpu_prefill_policy.h"
 
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <oneapi/dnnl/dnnl_graph_sycl.hpp>
@@ -122,9 +123,16 @@ bool PagedAttentionExl3OneDnnKernel(Queue& q, Tensor& out, const Tensor& query,
   backend.Copy(q, lengths.data(), seq_lens.data, lengths.size()*sizeof(int32_t));
   backend.Copy(q, offsets.data(), query_start_loc.data, offsets.size()*sizeof(int32_t));
   backend.Synchronize(q);
+  bool has_prefill = false;
+  for (int64_t r = 0; r < requests; ++r)
+    has_prefill |= offsets[r+1] - offsets[r] > 1;
+  // Keep pure Q1 on its existing decode route. A single decode row must not
+  // divert an otherwise supported mixed prefill batch from exact-length SDPA.
+  // Query padding already places each logical row at its causal end position.
+  const int minimum_rows = XpuOneDnnMixedPrefillEnabled() && requests > 1 && has_prefill ? 1 : 2;
   for (int64_t r = 0; r < requests; ++r) {
     const auto rows = offsets[r+1] - offsets[r];
-    if (rows != 0 && (rows < 2 || rows > 4096 || lengths[r] < rows || lengths[r] > 262144))
+    if (rows != 0 && (rows < minimum_rows || rows > 4096 || lengths[r] < rows || lengths[r] > 262144))
       return false;
   }
   auto& cache = DeviceCache(q.device.index);
