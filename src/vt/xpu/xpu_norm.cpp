@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "xpu_qk_norm.h"
+#include "vt/xpu_norm_policy.h"
 namespace vt::xpu {
 namespace {
 template <bool Residual>
@@ -95,6 +96,72 @@ void Gemma5120ShortRowsKernel(Queue& q, View dst, View src, View w, View res,
   RecordProfileEvent(q, "rms_norm_gemma5120_fp16", event);
 }
 
+template <bool Residual, int Width>
+void Gemma5120TypedLargeKernel(Queue& q, View dst, View src, View w, View res,
+                               int64_t rows, float eps) {
+  static_assert(Width == 32 || Width == 64);
+  // Same virtual lanes, four accumulators, chunk tree and SG16 tree as the
+  // generic route. The public RMSNorm seam requires contiguous operands.
+  const auto* input = static_cast<const sycl::half*>(src.data);
+  const auto* weight = static_cast<const sycl::half*>(w.data);
+  auto* residual = static_cast<sycl::half*>(res.data);
+  auto* output = static_cast<sycl::half*>(dst.data);
+  const auto value_at = [=](int64_t row, int col) {
+#pragma clang fp contract(off)
+    const float value = static_cast<float>(input[row * 5120 + col]);
+    if constexpr (Residual)
+      return value + static_cast<float>(residual[row * 5120 + col]);
+    return value;
+  };
+  constexpr int lanes = 16, workgroup = 128;
+  const auto global = ((rows * lanes + workgroup - 1) / workgroup) * workgroup;
+  const auto event = NativeQueue(q).parallel_for(
+      sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(workgroup)),
+      [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(16)]] {
+#pragma clang fp contract(off)
+    const int64_t row = item.get_global_linear_id() / lanes;
+    if (row >= rows) return;
+    const int lane = item.get_local_linear_id() % lanes;
+    float first[Width / 32], second[Width / 32];
+    constexpr int chunks = Width / 32;
+    for (int chunk = 0; chunk < chunks; ++chunk) {
+      float partial[2];
+      for (int half = 0; half < 2; ++half) {
+        float regs[4] = {};
+        for (int col = 4 * (32 * chunk + lane + half * lanes); col < 5120;
+             col += 4 * Width) {
+          for (int j = 0; j < 4; ++j) {
+            const float value = value_at(row, col + j);
+            regs[j] += value * value;
+          }
+        }
+        partial[half] = ((regs[0] + regs[1]) + regs[2]) + regs[3];
+      }
+      first[chunk] = partial[0]; second[chunk] = partial[1];
+    }
+    for (int offset = chunks / 2; offset > 0; offset /= 2)
+      for (int chunk = 0; chunk < offset; ++chunk) {
+        first[chunk] += first[chunk + offset];
+        second[chunk] += second[chunk + offset];
+      }
+    auto group = item.get_sub_group();
+    float a = first[0], b = second[0];
+    for (int offset = 1; offset < lanes; offset *= 2) {
+      a += sycl::shift_group_left(group, a, offset);
+      b += sycl::shift_group_left(group, b, offset);
+    }
+    // MeanOps projects with an F32 reciprocal factor, not division by D.
+    const float mean = sycl::group_broadcast(group, a + b, 0) * (1.0f / 5120.0f);
+    const float inverse = sycl::rsqrt(mean + eps);
+    for (int col = lane; col < 5120; col += lanes) {
+      const float value = value_at(row, col);
+      if constexpr (Residual) residual[row * 5120 + col] = sycl::half(value);
+      output[row * 5120 + col] = sycl::half(Gemma5120OutputValue(
+          value, inverse, static_cast<float>(weight[col])));
+    }
+  });
+  RecordProfileEvent(q, "rms_norm_gemma5120_typed_fp16", event);
+}
 template <bool Residual>
 void Gemma5120Kernel(Queue& q, View dst, View src, View w, View res,
                      int64_t rows, float eps) {
@@ -106,6 +173,13 @@ void Gemma5120Kernel(Queue& q, View dst, View src, View w, View res,
   const int width = 1024 / height;
   if (rows > 0 && rows <= 16) {
     Gemma5120ShortRowsKernel<Residual>(q, dst, src, w, res, rows, width, eps);
+    return;
+  }
+  if (rows >= 17 && rows <= 4096 && vt::XpuGemmaLargeTyped()) {
+    if (width == 64)
+      Gemma5120TypedLargeKernel<Residual, 64>(q, dst, src, w, res, rows, eps);
+    else
+      Gemma5120TypedLargeKernel<Residual, 32>(q, dst, src, w, res, rows, eps);
     return;
   }
   constexpr int lanes = 16, workgroup = 128;

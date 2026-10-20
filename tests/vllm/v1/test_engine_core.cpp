@@ -286,12 +286,16 @@ TEST_CASE("EngineCore.step: prefix lookup statistics survive a tokenless prefill
   CHECK(observed.scheduler_stats.prefix_cache_stats.requests == 1);
   CHECK(observed.scheduler_stats.prefix_cache_stats.queries == 80);
   CHECK(observed.scheduler_stats.prefix_cache_stats.hits == 0);
+  CHECK(observed.scheduler_stats.num_prefill_kv_computed_tokens == 16);
   CHECK(scheduler->requests.at("0")->output_token_ids.empty());
 
   // Subsequent tokenless chunks must not duplicate the admission observation.
   const auto [second, executed_again] = step();
   CHECK(executed_again);
-  CHECK(second.empty());
+  REQUIRE(second.size() == 1);
+  CHECK(second.at(0).outputs.empty());
+  CHECK(second.at(0).scheduler_stats.prefix_cache_stats.requests == 0);
+  CHECK(second.at(0).scheduler_stats.num_prefill_kv_computed_tokens == 16);
   engine.abort_requests({"0"});
   CHECK(step().first.empty());
 }

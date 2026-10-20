@@ -46,6 +46,9 @@ bool WithSamplingWorkspace(Queue& q, size_t bytes, const std::function<void(void
 bool WithFp16SiluTable(Queue& q,
     const std::function<sycl::event(void*)>& initialize,
     const std::function<void(const void*)>& launch);
+// Shared original FP16 initializer and immutable owner; no per-consumer table.
+bool WithFp16SiluValues(Queue& q,
+    const std::function<void(const void*)>& launch);
 bool WithGatedSiluTable(Queue& q,
     const std::function<sycl::event(void*)>& initialize,
     const std::function<void(const void*)>& launch);

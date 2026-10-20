@@ -173,6 +173,73 @@ TEST_CASE("PR11 hybrid prefix hits require a published snapshot and retain it un
   REQUIRE(manager->reset_prefix_cache()); CHECK_FALSE(index->Contains(first.block_hashes[1]));
 }
 
+TEST_CASE("PR11 hybrid prefix salt isolation survives pin eviction abort and reset") {
+  init_none_hash(sha256_cbor);
+  auto cfg = MakeHybridConfig(16, 40);
+  cfg.recurrent_prefix_snapshots =
+      std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(1, 16);
+  auto index = cfg.recurrent_prefix_snapshots;
+  auto manager = MakeManager(cfg, 16);
+  auto salted = [](const std::string& id, const std::string& salt) {
+    Request request(id, Range(0, 65), vllm::SamplingParams{}, 0.0);
+    request.cache_salt = salt;
+    request.block_hasher_ = get_request_block_hasher(16, sha256_cbor);
+    request.update_block_hashes();
+    return request;
+  };
+  auto a = salted("cold-a", "tenant-a");
+  auto b = salted("cold-b", "tenant-b");
+  REQUIRE(a.block_hashes != b.block_hashes);
+  for (auto* request : {&a, &b}) {
+    REQUIRE(manager->allocate_slots(*request, 65).has_value());
+    manager->free(*request);
+    manager->new_step_starts();
+  }
+  auto snapshot_a = index->Reserve(a.block_hashes[1], 32);
+  REQUIRE(snapshot_a.has_value());
+  index->Publish(*snapshot_a);
+  auto waiting_a = salted("waiting", "tenant-a");
+  auto waiting_b = salted("waiting", "tenant-b");
+  CHECK(manager->get_computed_blocks(waiting_b).second == 0);
+  CHECK_FALSE(index->Pinned("waiting").has_value());
+  CHECK(manager->get_computed_blocks(waiting_a).second == 32);
+  REQUIRE(index->Pinned("waiting").has_value());
+  CHECK(index->Pinned("waiting")->hash == a.block_hashes[1]);
+  CHECK_FALSE(index->Reserve(b.block_hashes[1], 32).has_value());
+  CHECK_FALSE(manager->reset_prefix_cache());
+  CHECK(manager->get_computed_blocks(waiting_a).second == 32);
+
+  // Reusing a waiting request id with a different salt must release its pin.
+  CHECK(manager->get_computed_blocks(waiting_b).second == 0);
+  CHECK_FALSE(index->Pinned("waiting").has_value());
+  auto snapshot_b = index->Reserve(b.block_hashes[1], 32);
+  REQUIRE(snapshot_b.has_value());
+  CHECK_FALSE(index->Contains(a.block_hashes[1]));
+  CHECK(manager->get_computed_blocks(waiting_a).second == 0);
+  CHECK(manager->get_computed_blocks(waiting_b).second == 0);
+  CHECK_FALSE(manager->reset_prefix_cache());
+  // Simulate a failed state copy: no tenant may observe the reserved row.
+  index->Abort(*snapshot_b);
+  CHECK(manager->get_computed_blocks(waiting_a).second == 0);
+  CHECK(manager->get_computed_blocks(waiting_b).second == 0);
+  CHECK_THROWS_AS(index->Publish(*snapshot_b), std::logic_error);
+  snapshot_b = index->Reserve(b.block_hashes[1], 32);
+  REQUIRE(snapshot_b.has_value());
+  index->Publish(*snapshot_b);
+  CHECK(manager->get_computed_blocks(waiting_a).second == 0);
+  auto [blocks, tokens] = manager->get_computed_blocks(waiting_b);
+  CHECK(tokens == 32);
+  REQUIRE(index->Pinned("waiting").has_value());
+  CHECK(index->Pinned("waiting")->hash == b.block_hashes[1]);
+  REQUIRE(manager->allocate_slots(waiting_b, 65 - tokens, tokens, blocks).has_value());
+  manager->free(waiting_b); // cancellation/free must release the pending restore
+  CHECK_FALSE(index->Pinned("waiting").has_value());
+  REQUIRE(manager->reset_prefix_cache());
+  CHECK_FALSE(index->Contains(a.block_hashes[1]));
+  CHECK_FALSE(index->Contains(b.block_hashes[1]));
+  CHECK(manager->get_computed_blocks(waiting_b).second == 0);
+}
+
 // ---------------------------------------------------------------------------
 // get_computed_blocks: prefix reuse across two requests (test_prefill)
 // ---------------------------------------------------------------------------

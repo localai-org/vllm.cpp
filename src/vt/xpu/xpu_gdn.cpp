@@ -1,6 +1,7 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "vt/xpu_gdn_policy.h"
+#include "vt/xpu_conv_policy.h"
 #include <sycl/ext/intel/math.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +36,50 @@ inline bool Initial(View flags, int64_t row) {
                                  : static_cast<const int32_t*>(flags.data)[row] != 0;
 }
 inline float Silu(float x) { return x / (1.0f + sycl::exp(-x)); }
+
+template<int Tile>
+void TypedConvPrefill(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
+                      const Tensor* bias, Tensor& state, const Tensor& initial,
+                      bool activation) {
+  constexpr int64_t channels = 10240, taps = 4, width = 3;
+  const int64_t tokens = x.shape[0], stride = x.stride[0];
+  const auto* input = static_cast<const sycl::half*>(x.data);
+  const auto* weights = static_cast<const sycl::half*>(weight.data);
+  const auto* biases = bias ? static_cast<const float*>(bias->data) : nullptr;
+  auto* output = static_cast<float*>(out.data);
+  auto* cache = static_cast<float*>(state.data);
+  const View flags(initial);
+  const auto groups = (tokens + Tile - 1) / Tile;
+  const auto output_event = NativeQueue(q).parallel_for(sycl::range<1>(groups * channels), [=](sycl::id<1> item) {
+    const int64_t first = (item[0] / channels) * Tile, channel = item[0] % channels;
+    const bool keep = Initial(flags,0);
+    float accumulators[Tile];
+    for (int u = 0; u < Tile; ++u) accumulators[u] = biases ? biases[channel] : 0.0f;
+    // Per-output tap order and all FP32 nodes match the original kernel. Only
+    // typed addressing and reuse across adjacent tokens change here.
+    for (int64_t j = 0; j < taps; ++j) {
+      const float w = static_cast<float>(weights[channel * taps + j]);
+      for (int u = 0; u < Tile; ++u) if (first + u < tokens) {
+        const int64_t token = first + u - width + j;
+        const float value = token >= 0 ? static_cast<float>(input[token * stride + channel]) :
+            keep ? cache[channel * width + width + token] : 0.0f;
+        accumulators[u] += w * value;
+      }
+    }
+    for (int u = 0; u < Tile; ++u) if (first + u < tokens)
+      output[(first + u) * channels + channel] = activation ? Silu(accumulators[u]) : accumulators[u];
+  });
+  const char* stage = Tile == 1 ? "conv1d_prefill_typed_1" : Tile == 2 ?
+      "conv1d_prefill_typed_2" : "conv1d_prefill_typed_4";
+  RecordProfileEvent(q,stage,output_event);
+  // Same in-order queue and separate launch: all history reads complete first.
+  // Keep raw F16 activations promoted to F32, never convolved/SiLU output.
+  const auto state_event = NativeQueue(q).parallel_for(sycl::range<1>(channels * width), [=](sycl::id<1> item) {
+    const int64_t channel = item[0] / width, j = item[0] % width;
+    cache[channel * width + j] = static_cast<float>(input[(tokens - width + j) * stride + channel]);
+  });
+  RecordProfileEvent(q,"conv1d_prefill_typed_state",state_event);
+}
 }
 
 void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
@@ -60,6 +105,24 @@ void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor&
     // history write in a later launch so early outputs still see the old state.
     if (parallel_prefill && sequences == 1 && x.shape[0] >= std::max<int64_t>(512, width)) {
       const auto tokens = x.shape[0];
+      const int tile = XpuConvPrefillTypedTile();
+      if (tile && tokens <= 4096 && channels == 10240 && taps == 4 && state_width == 3 &&
+          x.dtype == DType::kF16 && weight.dtype == DType::kF16 && target.dtype == DType::kF32 &&
+          state.dtype == DType::kF32 && (!bias || bias->dtype == DType::kF32)) {
+        VT_CHECK(uint64_t(src.stride[0]) <= (SIZE_MAX / sizeof(sycl::half) - channels) /
+                     uint64_t(tokens - 1), "XPU typed conv input span overflow");
+        VT_CHECK(x.data && weight.data && target.data && state.data &&
+                 reinterpret_cast<uintptr_t>(x.data) % alignof(sycl::half) == 0 &&
+                 reinterpret_cast<uintptr_t>(weight.data) % alignof(sycl::half) == 0 &&
+                 reinterpret_cast<uintptr_t>(target.data) % alignof(float) == 0 &&
+                 reinterpret_cast<uintptr_t>(state.data) % alignof(float) == 0 &&
+                 (!bias || (bias->data && reinterpret_cast<uintptr_t>(bias->data) % alignof(float) == 0)),
+                 "XPU typed conv requires aligned nonnull operands");
+        if (tile == 1) TypedConvPrefill<1>(q,target,x,weight,bias,state,initial,activation);
+        else if (tile == 2) TypedConvPrefill<2>(q,target,x,weight,bias,state,initial,activation);
+        else TypedConvPrefill<4>(q,target,x,weight,bias,state,initial,activation);
+        return;
+      }
       const auto output_event = NativeQueue(q).parallel_for(sycl::range<1>(tokens * channels), [=](sycl::id<1> item) {
         const int64_t t = item[0] / channels, channel = item[0] % channels;
         const bool use_history = Initial(flags, 0);

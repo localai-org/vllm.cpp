@@ -12,11 +12,56 @@
 // spec-as-decode conjunct re-reds the verify-routing case).
 #include <doctest/doctest.h>
 #include <initializer_list>
+#include <cstdlib>
+#include <string>
 
 #include "vt/paged_attn_route.h"
+#include "vt/xpu_paged_decode_policy.h"
 
 using vt::PagedAttnIsPrefill;
 using vt::PagedAttnUniformSpecShape;
+
+TEST_CASE("route: experimental long Q1 environment is bounded and preserves defaults") {
+  struct Restore {
+    std::string flag, splits;
+    bool had_flag, had_splits;
+    ~Restore() {
+      if (had_flag) setenv("VT_XPU_XE2_LONG_DECODE", flag.c_str(), 1);
+      else unsetenv("VT_XPU_XE2_LONG_DECODE");
+      if (had_splits) setenv("VT_XPU_XE2_DECODE_SPLITS", splits.c_str(), 1);
+      else unsetenv("VT_XPU_XE2_DECODE_SPLITS");
+    }
+  } restore{std::getenv("VT_XPU_XE2_LONG_DECODE") ? std::getenv("VT_XPU_XE2_LONG_DECODE") : "",
+            std::getenv("VT_XPU_XE2_DECODE_SPLITS") ? std::getenv("VT_XPU_XE2_DECODE_SPLITS") : "",
+            std::getenv("VT_XPU_XE2_LONG_DECODE") != nullptr,
+            std::getenv("VT_XPU_XE2_DECODE_SPLITS") != nullptr};
+  REQUIRE(setenv("VT_XPU_XE2_DECODE_SPLITS", "32", 1) == 0);
+  // The local B70 default now includes the qualified bounded long route.
+  // Explicit mode1 remains the rollback to the original three-page policy.
+  REQUIRE(unsetenv("VT_XPU_XE2_LONG_DECODE") == 0);
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(65491, 1600).max_keys == 65600);
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(65491, 1600).splits == 32);
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(204801, 1600).max_keys == 0);
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "1", 1) == 0);
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(65491, 1600).max_keys == 0);
+  REQUIRE(setenv("VT_XPU_XE2_LONG_DECODE", "2", 1) == 0);
+  for (const int64_t page : {1600, 1664}) {
+    for (const char* splits : {"16", "32"}) {
+      REQUIRE(setenv("VT_XPU_XE2_DECODE_SPLITS", splits, 1) == 0);
+      for (const int64_t length : {960, 961, 4096, 4800, 4801, 16384,
+                                   65491, 131070, 199673}) {
+        const auto plan = vt::XpuPagedDecodePlanFromEnvironment(length, page);
+        CHECK(plan.max_keys == (length <= 960 ? 960 : ((length - 1) / page + 1) * page));
+        CHECK(plan.splits == (length <= 960 ? 1 : std::stoi(splits)));
+      }
+      CHECK(vt::XpuPagedDecodePlanFromEnvironment(128 * page, page).max_keys == 128 * page);
+      CHECK(vt::XpuPagedDecodePlanFromEnvironment(128 * page + 1, page).max_keys == 0);
+    }
+  }
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(INT64_MAX, 1600).max_keys == 0);
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(65491, 16).max_keys == 0);
+  CHECK(vt::XpuPagedDecodePlanFromEnvironment(-1, 1600).max_keys == 0);
+}
 
 TEST_CASE("route: XPU long C1 decode buckets and bounded splits") {
   for (int64_t page : {1600, 1664}) {

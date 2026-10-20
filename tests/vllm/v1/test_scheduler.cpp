@@ -27,6 +27,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -37,8 +38,11 @@
 #include "vllm/entrypoints/model_loader.h"
 #include "vllm/sampling_params.h"
 #include "vllm/v1/core/kv_cache_utils.h"
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 #include "vllm/v1/core/sched/scheduler.h"
+#include "vllm/v1/core/sched/recurrent_prefix_policy.h"
 #include "vllm/v1/engine/types.h"
+#include "vllm/v1/metrics/loggers.h"
 #include "vllm/v1/kv_cache_interface.h"
 #include "vllm/multimodal/inputs.h"  // MultiModalFeatureSpec (P2, #2379)
 #include "vllm/v1/request.h"
@@ -337,7 +341,324 @@ TEST_CASE("Scheduler.schedule: chunked prefill splits a long prompt") {
   CHECK_FALSE(req->is_prefill_chunk);  // prefill complete.
 }
 
+TEST_CASE("Scheduler metrics: count completed prompt computation independently of cache hits") {
+  auto scheduler = CreateScheduler(16, 30);
+  vllm::v1::metrics::PrometheusStatLogger logger("computed", 8192);
+  const std::string metric = "vllm:prefill_kv_computed_tokens_total{model_name=\"computed\",engine=\"0\"} ";
+  auto computed = [&]() {
+    const auto text = logger.Expose();
+    const auto pos = text.find(metric);
+    return pos == std::string::npos ? -1.0 : std::stod(text.substr(pos + metric.size()));
+  };
+  CHECK(computed() == 0);
+  auto cold = CreateRequests(1, 81, {"cold"});
+  AddRequest(*scheduler, std::move(cold[0]));
+  int total = 0;
+  for (const int chunk : {30, 30, 21}) {
+    const auto step = scheduler->schedule();
+    CHECK(step.num_scheduled_tokens.at("cold") == chunk);
+    CHECK(computed() == total);  // scheduling is not successful execution
+    scheduler->update_from_output(step, MakeRunnerOutput({{"cold", {}}}));
+    logger.Record(scheduler->make_stats(), {});
+    total += chunk;
+    CHECK(computed() == total);
+  }
+  scheduler->finish_requests("cold", RequestStatus::kFinishedAborted);
+  auto warm = CreateRequests(1, 81, {"warm"});
+  AddRequest(*scheduler, std::move(warm[0]));
+  auto step = scheduler->schedule();
+  REQUIRE(step.num_scheduled_tokens.at("warm") == 1);
+  REQUIRE(step.scheduled_new_reqs.at(0).num_computed_tokens == 80);
+  CHECK(computed() == 81);
+  scheduler->update_from_output(step, MakeRunnerOutput({{"warm", {7}}}));
+  logger.Record(scheduler->make_stats(), {});
+  CHECK(computed() == 82);  // actual one-token recompute, not logical81
+  step = scheduler->schedule();
+  scheduler->update_from_output(step, MakeRunnerOutput({{"warm", {8}}}));
+  logger.Record(scheduler->make_stats(), {});
+  CHECK(computed() == 82);  // decode tokens are not prompt computation
+  scheduler->finish_requests("warm", RequestStatus::kFinishedAborted);
+
+  auto aborted = CreateRequests(1, 17, {"aborted"});
+  AddRequest(*scheduler, std::move(aborted[0]));
+  step = scheduler->schedule();
+  scheduler->finish_requests("aborted", RequestStatus::kFinishedAborted);
+  scheduler->update_from_output(step, MakeRunnerOutput({{"aborted", {}}}));
+  logger.Record(scheduler->make_stats(), {});
+  CHECK(computed() == 82);  // aborted output cannot commit a measurement
+}
+
+TEST_CASE("Scheduler metrics: completed frames use captured positions and ignore discarded outputs") {
+  auto scheduler = CreateScheduler(16, 30);
+  auto requests = CreateRequests(1, 81, {"frames"});
+  auto* request = AddRequest(*scheduler, std::move(requests[0]));
+  const auto first = scheduler->schedule();
+  const auto second = scheduler->schedule();
+  REQUIRE(request->num_computed_tokens == 60);
+  scheduler->update_from_output(first, MakeRunnerOutput({{"frames", {}}}));
+  CHECK(scheduler->make_stats().num_prefill_kv_computed_tokens == 30);
+  scheduler->update_from_output(second, MakeRunnerOutput({{"frames", {}}}));
+  CHECK(scheduler->make_stats().num_prefill_kv_computed_tokens == 30);
+  const auto discarded = scheduler->schedule();
+  request->async_tokens_to_discard = 1;
+  scheduler->update_from_output(discarded, MakeRunnerOutput({{"frames", {}}}));
+  CHECK(scheduler->make_stats().num_prefill_kv_computed_tokens == 0);
+  scheduler->finish_requests("frames", RequestStatus::kFinishedAborted);
+  scheduler->schedule();
+  CHECK(scheduler->make_stats().num_prefill_kv_computed_tokens == 0);
+}
+
 // ---------------------------------------------------------------------------
+// Host-only publication seam: model GPU completion at each real scheduler
+// endpoint, then use the production index/coordinator for the warm lookup.
+// This does not claim to exercise the device copy or restored numerical state.
+TEST_CASE("Scheduler.schedule: B70 recurrent warm prefix reaches a reusable publication boundary") {
+  struct AlignEnvironment {
+    std::optional<std::string> previous;
+    explicit AlignEnvironment(std::optional<bool> enabled) {
+      if (const char* value = std::getenv("VT_RECURRENT_PREFIX_ALIGN")) previous = value;
+      if (enabled) setenv("VT_RECURRENT_PREFIX_ALIGN", *enabled ? "1" : "0", 1);
+      else unsetenv("VT_RECURRENT_PREFIX_ALIGN");
+    }
+    ~AlignEnvironment() {
+      if (previous) setenv("VT_RECURRENT_PREFIX_ALIGN", previous->c_str(), 1);
+      else unsetenv("VT_RECURRENT_PREFIX_ALIGN");
+    }
+  };
+  init_none_hash(sha256_cbor);
+  // Same real index/topology with the feature off, and with caching off,
+  // must retain the original4096 endpoints and zero coordinated hit.
+  // Mode3 exercises the enabled local default with no environment override.
+  for (const int mode : {0, 1, 2, 3}) {
+  AlignEnvironment align_environment(mode == 3 ? std::nullopt : std::optional<bool>(mode != 0));
+  const bool caching = mode != 2;
+  CAPTURE(mode);
+  for (const int prompt_tokens : {4091, 4096, 4097, 16382, 65469}) {
+    for (const int drafts : {0, 3}) {
+      CAPTURE(prompt_tokens);
+      CAPTURE(drafts);
+      constexpr int block = 1600;
+      SchedulerConfig cfg;
+      cfg.max_num_seqs = 16;
+      cfg.max_num_batched_tokens = 4096;
+      cfg.enable_chunked_prefill = true;
+      cfg.max_model_len = 262144;
+      cfg.watermark = 0.0;
+      KVCacheConfig kv;
+      kv.num_blocks = 180;
+      kv.mtp_draft_shares_target_pages = drafts > 0;
+      kv.kv_cache_groups.emplace_back(std::vector<std::string>{"attention"},
+          std::make_shared<FullAttentionSpec>(block, 1, 1, DType::kF32));
+      kv.kv_cache_groups.emplace_back(std::vector<std::string>{"gdn"},
+          std::make_shared<vllm::v1::MambaSpec>(block,
+              std::vector<std::vector<int64_t>>{{1, 1}},
+              std::vector<DType>{DType::kF32}, std::nullopt, "align", drafts));
+      auto snapshots = std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(4, block);
+      kv.recurrent_prefix_snapshots = snapshots;
+      std::optional<SpeculativeConfig> spec;
+      if (drafts) spec = SpeculativeConfig::ResolveMtp(1, drafts);
+      Scheduler scheduler(cfg, kv, block, caching, nullptr, std::move(spec));
+      const std::vector<int32_t> prompt(prompt_tokens, 42);
+      auto hasher = get_request_block_hasher(block, sha256_cbor);
+      auto cold = std::make_unique<Request>("cold", prompt, SamplingParams{}, 0.0, hasher);
+      Request* request = AddRequest(scheduler, std::move(cold));
+      std::vector<int> endpoints;
+      while (request->num_computed_tokens < prompt_tokens) {
+        REQUIRE(endpoints.size() < 32);
+        const auto out = scheduler.schedule();
+        REQUIRE(out.num_scheduled_tokens.at("cold") > 0);
+        REQUIRE(out.num_scheduled_tokens.at("cold") <= 4096);
+        const int end = request->num_computed_tokens;
+        endpoints.push_back(end);
+        // Match publish_recurrent_prefixes: never invent intermediate state.
+        if (end > 0 && end % block == 0 && end <= prompt_tokens) {
+          const auto reservation = snapshots->Reserve(request->block_hashes.at(end / block - 1), end);
+          if (reservation) snapshots->Publish(*reservation);
+        }
+        scheduler.update_from_output(out, MakeRunnerOutput({{"cold", {}}}));
+      }
+      const auto hashes = request->block_hashes;
+      scheduler.finish_requests("cold", RequestStatus::kFinishedAborted);
+      Request warm("warm", prompt, SamplingParams{}, 0.0, hasher);
+      const int observed_hit = scheduler.kv_cache_manager->get_computed_blocks(warm).second;
+      snapshots->Release("warm");
+      if (mode == 0 || mode == 2 || (mode == 3 && prompt_tokens <= 4096)) {
+        CHECK(observed_hit == 0);
+        CHECK(endpoints.front() == std::min(prompt_tokens, 4096));
+        CHECK(std::none_of(endpoints.begin(), endpoints.end(),
+                           [](int end) { return end % block == 0; }));
+        continue;
+      }
+
+      // Independent positive metadata control: let the coordinator determine
+      // its longest safe hit (including MTP's draft-page exclusion), with real
+      // cached blocks and synthetic completed snapshots for the last pages.
+      for (int i = std::max(0, int(hashes.size()) - 4); i < int(hashes.size()); ++i) {
+        const auto reservation = snapshots->Reserve(hashes[i], (i + 1) * block);
+        if (reservation) snapshots->Publish(*reservation);
+      }
+      const int safe_hit = scheduler.kv_cache_manager->get_computed_blocks(warm).second;
+      std::string endpoint_text;
+      for (const int end : endpoints) endpoint_text += std::to_string(end) + " ";
+      CAPTURE(endpoint_text);
+      REQUIRE(safe_hit > 0);
+      CHECK(safe_hit == ((prompt_tokens - 1) / block - (drafts ? 1 : 0)) * block);
+      CHECK(observed_hit == safe_hit);
+      CHECK(std::find(endpoints.begin(), endpoints.end(), safe_hit) != endpoints.end());
+    }
+  }
+  }
+}
+
+// The auto decision uses the original prompt and configured chunk capacity,
+// including when preceding requests leave only part of this step's budget.
+TEST_CASE("Scheduler.schedule: recurrent prefix auto preserves short prompt geometry") {
+  struct AlignmentEnvironment {
+    std::optional<std::string> previous;
+    explicit AlignmentEnvironment(const char* mode) {
+      if (const char* value = std::getenv("VT_RECURRENT_PREFIX_ALIGN")) previous = value;
+      if (mode) setenv("VT_RECURRENT_PREFIX_ALIGN", mode, 1);
+      else unsetenv("VT_RECURRENT_PREFIX_ALIGN");
+    }
+    ~AlignmentEnvironment() {
+      if (previous) setenv("VT_RECURRENT_PREFIX_ALIGN", previous->c_str(), 1);
+      else unsetenv("VT_RECURRENT_PREFIX_ALIGN");
+    }
+  };
+  init_none_hash(sha256_cbor);
+  for (const char* mode : {static_cast<const char*>(nullptr), "auto", "force", "1", "off", "0"}) {
+    AlignmentEnvironment environment(mode);
+    const std::string mode_name = mode ? mode : "unset";
+    const bool force = mode && (std::string(mode) == "force" || std::string(mode) == "1");
+    const bool off = mode && (std::string(mode) == "off" || std::string(mode) == "0");
+    for (const int nominal : {2048, 4096, 8192}) {
+      for (const int prompt_tokens : {nominal - 5, nominal - 1, nominal, nominal + 1}) {
+        for (const int drafts : {0, 3}) {
+          for (const int predecessors : {0, 1, 3}) {
+            CAPTURE(mode_name);
+            CAPTURE(nominal);
+            CAPTURE(prompt_tokens);
+            CAPTURE(drafts);
+            CAPTURE(predecessors);
+            constexpr int block = 1600;
+            SchedulerConfig cfg;
+            cfg.max_num_seqs = 4;
+            // Exercise an explicit scheduled-token capacity distinct from the
+            // allocation budget. The scheduler uses the resolved capacity.
+            cfg.max_num_batched_tokens = 8192;
+            cfg.max_num_scheduled_tokens = nominal;
+            cfg.max_model_len = 262144;
+            cfg.enable_chunked_prefill = true;
+            cfg.watermark = 0.0;
+            KVCacheConfig kv;
+            kv.num_blocks = 180;
+            kv.mtp_draft_shares_target_pages = drafts > 0;
+            kv.kv_cache_groups.emplace_back(std::vector<std::string>{"attention"},
+                std::make_shared<FullAttentionSpec>(block, 1, 1, DType::kF32));
+            kv.kv_cache_groups.emplace_back(std::vector<std::string>{"gdn"},
+                std::make_shared<vllm::v1::MambaSpec>(block,
+                    std::vector<std::vector<int64_t>>{{1, 1}},
+                    std::vector<DType>{DType::kF32}, std::nullopt, "align", drafts));
+            kv.recurrent_prefix_snapshots =
+                std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(4, block);
+            std::optional<SpeculativeConfig> spec;
+            if (drafts) spec = SpeculativeConfig::ResolveMtp(1, drafts);
+            Scheduler scheduler(cfg, kv, block, true, nullptr, std::move(spec));
+            auto hasher = get_request_block_hasher(block, sha256_cbor);
+            // Three different preceding requests make this a C4 budget test.
+            for (int i = 0; i < predecessors; ++i) {
+              AddRequest(scheduler, std::make_unique<Request>(
+                  "preceding" + std::to_string(i), std::vector<int32_t>(127, i + 1),
+                  SamplingParams{}, 0.0, hasher));
+            }
+            Request* request = AddRequest(scheduler, std::make_unique<Request>(
+                "probe", std::vector<int32_t>(prompt_tokens, 42),
+                SamplingParams{}, 0.0, hasher));
+            const int available = nominal - predecessors * 127;
+            const int candidate = std::min(prompt_tokens, available);
+            const int boundary = ((prompt_tokens - 1) / block - (drafts ? 1 : 0)) * block;
+            const bool align = force || (!off && prompt_tokens > nominal);
+            const int expected = align && boundary > 0 && boundary < candidate
+                                     ? boundary : candidate;
+            const auto first = scheduler.schedule();
+            CHECK(first.num_scheduled_tokens.at("probe") == expected);
+            CHECK(request->num_computed_tokens == expected);
+            std::vector<std::pair<std::string, std::vector<int32_t>>> results;
+            for (const auto& [id, count] : first.num_scheduled_tokens) {
+              (void)count;
+              results.emplace_back(id, std::vector<int32_t>{});
+            }
+            scheduler.update_from_output(first, MakeRunnerOutput(results));
+            for (int i = 0; i < predecessors; ++i)
+              scheduler.finish_requests("preceding" + std::to_string(i), RequestStatus::kFinishedAborted);
+            // Retain the prompt's classification after moving to RUNNING and
+            // after competing requests leave. Never use remaining length.
+            if (expected < prompt_tokens) {
+              const int remaining = prompt_tokens - expected;
+              const int next_candidate = std::min(nominal, remaining);
+              const int next_expected = align && expected < boundary &&
+                                            boundary - expected < next_candidate
+                                            ? boundary - expected : next_candidate;
+              const auto second = scheduler.schedule();
+              CHECK(second.num_scheduled_tokens.at("probe") == next_expected);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("Scheduler recurrent publication policy: mode parsing preserves rollback aliases") {
+  using vllm::v1::ParseRecurrentPrefixAlignmentMode;
+  using Mode = vllm::v1::RecurrentPrefixAlignmentMode;
+  CHECK(ParseRecurrentPrefixAlignmentMode(nullptr) == Mode::kAuto);
+  CHECK(ParseRecurrentPrefixAlignmentMode("auto") == Mode::kAuto);
+  CHECK(ParseRecurrentPrefixAlignmentMode("force") == Mode::kForce);
+  CHECK(ParseRecurrentPrefixAlignmentMode("1") == Mode::kForce);
+  CHECK(ParseRecurrentPrefixAlignmentMode("off") == Mode::kOff);
+  CHECK(ParseRecurrentPrefixAlignmentMode("0") == Mode::kOff);
+  for (const char* invalid : {"", "2", "automatic", "1force"}) {
+    CHECK_THROWS_AS(ParseRecurrentPrefixAlignmentMode(invalid), std::invalid_argument);
+  }
+}
+
+TEST_CASE("Scheduler recurrent publication policy: bounded chunk and last-token safety") {
+  using vllm::v1::ClampRecurrentPrefixPublication;
+  // Boundaries below, on, and above complete pages; both MTP policies; the
+  // final prompt token is always computed. Include non-production page sizes.
+  for (const int block : {16, 1600, 1664}) {
+    for (const int prompt : {1, 1599, 1600, 1601, 3199, 3200, 3201,
+                             4096, 4800, 4801, 16382, 65469}) {
+      for (const bool draft : {false, true}) {
+        for (const int budget : {1, 1599, 1600, 4096}) {
+          int position = 0;
+          int shortened = 0;
+          while (position < prompt) {
+            const int original = std::min(budget, prompt - position);
+            const int count = ClampRecurrentPrefixPublication(
+                prompt, position, original, block, draft);
+            REQUIRE(count > 0);
+            REQUIRE(count <= original);
+            if (count != original) {
+              ++shortened;
+              CHECK((position + count) % block == 0);
+              CHECK(position + count < prompt);
+              if (draft) CHECK(position + count + block < prompt);
+            }
+            position += count;
+          }
+          CHECK(position == prompt);
+          CHECK(shortened <= 1);
+          // Decode and rollback positions after the chosen prompt boundary
+          // cannot be clamped by this policy.
+          CHECK(ClampRecurrentPrefixPublication(prompt, prompt, 4, block, draft) == 4);
+        }
+      }
+    }
+  }
+}
+
 // Running decode: after prefill completes, an appended output token (simulating
 // the model runner sample) makes the request schedule as a cached (diff) req
 // with exactly 1 new token. (SchedulerOutput new-vs-cached shape.)

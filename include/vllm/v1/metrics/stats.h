@@ -193,6 +193,9 @@ struct SchedulerStats {
   // zero-valued aggregate. `PrometheusStatLogger::Record` folds it into the
   // spec_decode counter families when it is present (loggers.py:1140-1143).
   std::optional<spec_decode::SpecDecodingStats> spec_decoding_stats;
+  // Prompt positions actually completed by the runner in this observation.
+  // Excludes cached/external positions and decode; includes recomputation.
+  int64_t num_prefill_kv_computed_tokens = 0;
 };
 
 // Ported from: @dataclass FinishedRequestStats (vllm/v1/metrics/stats.py:236-259).

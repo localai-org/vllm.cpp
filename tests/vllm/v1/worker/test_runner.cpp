@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -43,6 +44,7 @@
 #include "vllm/v1/kv_cache_dtype.h"
 #include "vllm/v1/attention/registry.h"
 #include "vllm/v1/core/kv_cache_utils.h"
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 #include "vllm/v1/kv_cache_interface.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
@@ -573,6 +575,64 @@ TEST_CASE("runner: KV allocation from KVCacheConfig (full-attn + GDN state)") {
   CHECK(gs.conv_state.shape[0] == kNumBlocks);
   CHECK(gs.conv_state.shape[1] == conv_dim);
   CHECK(gs.conv_state.shape[2] == c.linear_conv_kernel_dim - 1);
+}
+
+TEST_CASE("runner: recurrent prefix restores exact SSM and convolution bytes after slot poisoning") {
+  const auto config = MakeConfig();
+  const auto weights = MakeWeights(config);
+  auto kv = MakeKvConfig(config);
+  kv.recurrent_prefix_snapshots =
+      std::make_shared<vllm::v1::RecurrentPrefixSnapshotIndex>(4, kBlockSize);
+  const auto index = kv.recurrent_prefix_snapshots;
+  GPUModelRunner runner(config, weights, kv, Q(), 8, kMaxModelLen, 64);
+  std::vector<int32_t> prompt(kBlockSize + 1);
+  for (size_t i = 0; i < prompt.size(); ++i) prompt[i] = int(i % 31) + 1;
+  auto cold = MakeNewReq("cold", prompt, {}, 0, {0, 1}, 0, Greedy());
+  cold.prompt_block_hashes = {"exact-prefix"};
+  CHECK_FALSE(runner.execute_model(NewStep({cold}, {{"cold", kBlockSize}})).has_value());
+  CHECK(runner.sample_tokens(std::nullopt).sampled_token_ids[0].empty());
+  REQUIRE(index->Contains("exact-prefix"));
+  REQUIRE(index->Pin("probe", "exact-prefix"));
+  const int snapshot_slot = int(runner.gdn_state_slots()) - index->capacity() +
+                            index->Pinned("probe")->slot;
+  index->Release("probe");
+  const auto state_bytes = [&](int slot) {
+    std::vector<std::vector<unsigned char>> result;
+    for (const auto& layer : runner.gdn_state()) {
+      for (const auto& tensor : layer.states) {
+        const size_t bytes = size_t(tensor.stride[0]) * vt::SizeOf(tensor.dtype);
+        const auto* data = static_cast<const unsigned char*>(tensor.data) + slot * bytes;
+        result.emplace_back(data, data + bytes);
+      }
+    }
+    return result;
+  };
+  const auto prefix_state = state_bytes(0);
+  REQUIRE(prefix_state.size() == 6);  // SSM + convolution, all three GDN layers.
+  CHECK(state_bytes(snapshot_slot) == prefix_state);
+  const auto* page = static_cast<const unsigned char*>(runner.attn_kv()[0].data);
+  const std::vector<unsigned char> prefix_kv(page, page + runner.fa_page_size_bytes());
+  CHECK_FALSE(runner.execute_model(DecodeStep("cold", kBlockSize, 0)).has_value());
+  const auto cold_output = runner.sample_tokens(std::nullopt).sampled_token_ids;
+  const auto final_state = state_bytes(0);
+  CHECK(final_state != prefix_state);
+  CHECK(state_bytes(snapshot_slot) == prefix_state);
+
+  // A new owner must restore from the immutable row, not reuse old live state.
+  for (const auto& layer : runner.gdn_state())
+    for (const auto& tensor : layer.states)
+      std::memset(tensor.data, 0x5a, size_t(tensor.stride[0]) * vt::SizeOf(tensor.dtype));
+  REQUIRE(index->Pin("warm", "exact-prefix"));
+  auto warm = MakeNewReq("warm", prompt, {}, kBlockSize, {0, 1}, 0, Greedy());
+  warm.prompt_block_hashes = {"exact-prefix"};
+  auto step = NewStep({warm}, {{"warm", 1}});
+  step.finished_req_ids.insert("cold");
+  CHECK_FALSE(runner.execute_model(step).has_value());
+  CHECK_FALSE(index->Pinned("warm").has_value());
+  CHECK(runner.sample_tokens(std::nullopt).sampled_token_ids == cold_output);
+  CHECK(state_bytes(0) == final_state);
+  CHECK(state_bytes(snapshot_slot) == prefix_state);
+  CHECK(std::vector<unsigned char>(page, page + runner.fa_page_size_bytes()) == prefix_kv);
 }
 
 // SPEC-MTP I5d-pre LATENT-BUG FIX: with a THIRD `fa_draft` full-attention group

@@ -131,7 +131,9 @@ class Sampler {
   // NO per-step cudaMalloc/cudaFree/cudaHostAlloc (each device-syncs). Mirrors
   // vLLM's persistent sampled-id + pinned buffers (gpu_model_runner.py:873-878).
   std::vector<int64_t> greedy_argmax_host(vt::Queue& q, const vt::Tensor& logits,
-                                          int64_t n) const;
+                                          int64_t n,
+                                          const vt::Tensor* raw_logprobs = nullptr,
+                                          std::optional<LogprobsTensors>* compact_out = nullptr) const;
 
   LogprobsMode logprobs_mode_;
   // Persistent greedy-argmax scratch (pimpl; defined in sampler.cpp). Lazily

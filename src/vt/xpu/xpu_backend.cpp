@@ -6,6 +6,7 @@
 #include "vt/xpu.h"
 #include "vt/xpu_graph_metadata.h"
 #include "vt/xpu_profile_span.h"
+#include "vt/xpu_memory_policy.h"
 #include "vt/gdn_fp16_plan.h"
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #include <sycl/ext/oneapi/experimental/graph.hpp>
@@ -250,7 +251,8 @@ class XpuBackend final : public Backend {
     bytes = std::max(bytes, size_t{1});
     std::lock_guard<std::mutex> lock(c.mutex);
     VT_CHECK(c.recordings.empty(), "XPU graph capture requires preallocated device buffers");
-    VT_CHECK(bytes <= c.budget - c.allocated - c.graph_bytes, "XPU device allocation exceeds memory budget");
+    VT_CHECK(XpuDeviceAllocationFits(c.budget, c.allocated, c.graph_bytes, bytes),
+             "XPU device allocation exceeds memory budget");
     const auto alloc_start = HostProfileEnabled() ? SteadyNs() : 0;
     void* p = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
     VT_CHECK(p != nullptr, "XPU device USM allocation failed");
@@ -1019,7 +1021,7 @@ bool WithImmutableSiluTable(Queue& q, ImmutableTable& table, size_t bytes,
   if (!table.data) {
     {
       std::lock_guard lock(c.mutex);
-      if (bytes > c.budget - c.allocated - c.graph_bytes) return false;
+      if (!XpuDeviceAllocationFits(c.budget, c.allocated, c.graph_bytes, bytes)) return false;
       void* storage = sycl::aligned_alloc_device(64, bytes, c.device, c.context);
       VT_CHECK(storage, allocation_message);
       try { c.allocations.emplace(storage, bytes); }

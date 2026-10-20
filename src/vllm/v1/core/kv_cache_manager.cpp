@@ -5,6 +5,8 @@
 #include "vllm/v1/core/kv_cache_manager.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -140,9 +142,14 @@ std::pair<KVCacheBlocks, int> KVCacheManager::get_computed_blocks(
 
   if (auto index = kv_cache_config.recurrent_prefix_snapshots) {
     const int boundary = num_new_computed_tokens / index->block_tokens();
-    if (num_new_computed_tokens % index->block_tokens() != 0 || boundary <= 0 ||
-        size_t(boundary) > request.block_hashes.size() ||
-        !index->Pin(request.request_id, request.block_hashes[size_t(boundary - 1)])) {
+    const bool eligible = num_new_computed_tokens % index->block_tokens() == 0 &&
+        boundary > 0 && size_t(boundary) <= request.block_hashes.size();
+    const bool pinned = eligible &&
+        index->Pin(request.request_id, request.block_hashes[size_t(boundary - 1)]);
+    if (std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+      std::fprintf(stderr, "PREFIX_PIN tokens=%d eligible=%d success=%d\n",
+                   num_new_computed_tokens, int(eligible), int(pinned));
+    if (!pinned) {
       computed_blocks = empty_kv_cache_blocks.blocks;
       num_new_computed_tokens = 0;
       index->Release(request.request_id);

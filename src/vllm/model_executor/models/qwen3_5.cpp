@@ -19,15 +19,22 @@
 
 #include "vllm/model_executor/models/decode_graph_sizes.h"
 #include "vllm/model_executor/models/kv_cache_route.h"  // KV-FP8 W3 store/read route
-#include "vllm/model_executor/models/dense_exl3_linear.h"  // MODEL-QWEN35-EXL3 (#2495): the EXL3 linear seam
+#include "vllm/model_executor/models/dense_exl3_linear.h"
+#include "vt/xpu_mlp_policy.h"  // MODEL-QWEN35-EXL3 (#2495): the EXL3 linear seam
 #include "vllm/model_executor/layers/quantization/exl3_checkpoint.h"
 #include "vllm/model_executor/models/dense_gptq4_linear.h"
 #ifdef VLLM_CPP_XPU
 #include "vt/xpu.h"
+#include "vt/xpu_profile_span.h"
+#include "vt/xpu_argmax_plan.h"
+#include "vt/xpu_sampling.h"
 #endif
+#include "vt/xpu_conv_policy.h"
+#include "vt/xpu_norm_policy.h"
 #include "vt/xpu_paged_decode_policy.h"
 #include "vt/xpu_gdn_policy.h"
 #include "vt/xpu_attention_preamble_policy.h"
+#include "vt/xpu_silu_policy.h"
 #include "vllm/model_executor/models/dense_fp8_block_gemm.h"  // MODEL-FP8-BLOCK-LINEAR (#1189 M4)
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/device_pool.h"  // DevicePool/Pool/AuxPool/ActivePool (shared)
@@ -40,6 +47,7 @@
 #include "vllm/model_executor/models/qwen3_5_dense_mm.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5_internal.h"
+#include "vllm/model_executor/models/mtp_concat.h"
 #include "vllm/model_executor/models/qwen3_5_gdn_replay.h"
 #include "vllm/model_executor/device_placement.h"
 #include "vllm/model_executor/moe_placement_seam.h"
@@ -288,10 +296,12 @@ detail::XpuAttentionGraphPolicy detail::BuildXpuAttentionGraphPolicy(
       "VT_XPU_ATTN_SPLIT_MAX_PARTS", "VT_XPU_ATTN_SPLIT_ACTIVE_PAGE_CAP",
       "VT_XPU_ATTN_SPLIT_REDUCE", "VT_XPU_ATTN_PREFILL_TILE", "VT_XPU_ATTN_PROBABILITY",
       "VT_XPU_XE2_LONG_DECODE", "VT_XPU_XE2_DECODE_SPLITS", "VT_XPU_GDN_SPEC_SUBGROUP",
-      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32"};
+      "VT_XPU_ATTN_PREAMBLE_NATIVE_FP32", "VT_XPU_SILU_SMALL_DECODE", "VT_XPU_CONV_PREFILL_TYPED_TILE", "VT_XPU_GEMMA_LARGE_TYPED"};
   constexpr const char* defaults[] = {"auto", "0", "1", "", "", "1", "auto", "auto", "single",
       vt::kXpuLongDecodeDefault, vt::kXpuLongDecodeSplitsDefault, vt::kXpuGdnSpecSubgroupDefault,
-      vt::kXpuAttentionPreambleNativeFp32Default};
+      vt::kXpuAttentionPreambleNativeFp32Default, vt::kXpuSmallSiluDefault, vt::kXpuConvPrefillTypedDefault, vt::kXpuGemmaLargeTypedDefault};
+  static_assert(std::size(names) == std::size(defaults));
+  static_assert(std::size(names) == std::tuple_size_v<decltype(key.settings)>);
   for (size_t i = 0; i < key.settings.size(); ++i) {
     const char* setting = std::getenv(names[i]);
     key.settings[i] = setting ? setting : defaults[i];
@@ -8417,6 +8427,13 @@ DBuf DenseMlpBlock(Dev d, const DenseMlpWeights& w, const HfConfig& cfg,
   // `qwen3.cpp:136-145` does for the Llama/Qwen3 dense MLP -- the model calls
   // one method and never asks which scheme it bound.
   if (w.IsExl3()) {
+    // No policy parse or new producer route for M1/M4 verification/decode.
+    if (T >= 512 && T <= 4096 && d.q.device.type == vt::DeviceType::kXPU &&
+        d.activation_dtype == DType::kF16 &&
+        vt::XpuMlpSiluPrepare(T, I, cfg.hidden_size)) {
+      if (auto fused = dense_exl3::PreparedSiluMlp(d, dh, w.gate_proj_exl3,
+              w.up_proj_exl3, w.down_proj_exl3, w.gate_up_exl3)) return std::move(*fused);
+    }
     DBuf act = dense_exl3::GateUp(d, dh, w.gate_up_proj, w.gate_proj_exl3,
                                   w.up_proj_exl3, I, &w.gate_up_exl3);
     (void)T;
@@ -8793,6 +8810,22 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
   const float eps = static_cast<float>(config.rms_norm_eps);
   const DType draft_dtype = ActDType(device);
 
+  // Diagnostics submit no commands or allocate when collection is off. The
+  // existing M1/M4 head keeps the portable copy route and is never profiled here.
+#ifdef VLLM_CPP_XPU
+  std::optional<vt::xpu::ProfileSpan> head_span;
+  if (tokens >= 512 && device.q.device.type == vt::DeviceType::kXPU)
+    head_span.emplace(vt::xpu::BeginProfileSpan(device.q));
+#endif
+  const auto observer = tokens >= 512 ? detail::mtp_head_tensor_observer : nullptr;
+  const auto finish_head = [&](DBuf output) {
+#ifdef VLLM_CPP_XPU
+    if (head_span) vt::xpu::EndProfileSpan(device.q, "mtp_head_complete", std::move(*head_span));
+#endif
+    if (observer) observer(device.q, "fc_output", output.t());
+    return output;
+  };
+
   DBuf device_ids, embedding;
   Tensor embedding_view;
   if (inputs_embeds != nullptr) {
@@ -8819,34 +8852,42 @@ DBuf MtpHeadHidden(Dev device, const Qwen3_5MTPWeights& weights,
   vt::RmsNorm(device.q, target_norm.t(), target_hidden_states, hidden_norm_weight,
               vt::RmsNormArgs{eps, true});
 
-  // torch.cat([embedding_norm, target_norm], -1), row by row (portable, exact).
-  DBuf concatenated(device, draft_dtype, {tokens, 2 * hidden_size});
-  const size_t row_bytes =
-      static_cast<size_t>(hidden_size) * vt::SizeOf(draft_dtype);
-  auto* cat = static_cast<uint8_t*>(concatenated.ptr());
-  const auto* embed = static_cast<const uint8_t*>(embedding_norm.t().data);
-  const auto* target = static_cast<const uint8_t*>(target_norm.t().data);
-  for (int64_t token = 0; token < tokens; ++token) {
-    const size_t source_offset = static_cast<size_t>(token) * row_bytes;
-    const size_t target_offset = static_cast<size_t>(token) * 2 * row_bytes;
-    device.b.Copy(device.q, cat + target_offset, embed + source_offset, row_bytes);
-    device.b.Copy(device.q, cat + target_offset + row_bytes, target + source_offset,
-                  row_bytes);
+  if (observer) {
+    observer(device.q, "embedding_norm", embedding_norm.t());
+    observer(device.q, "target_norm", target_norm.t());
   }
+  // Keep all three DBuf owners and the same destination. Only the qualified
+  // long FP16 XPU form replaces per-row D2D submissions with two shared Copies.
+  DBuf concatenated(device, draft_dtype, {tokens, 2 * hidden_size});
+#ifdef VLLM_CPP_XPU
+  std::optional<vt::xpu::ProfileSpan> concat_span;
+  if (tokens >= 512 && device.q.device.type == vt::DeviceType::kXPU)
+    concat_span.emplace(vt::xpu::BeginProfileSpan(device.q));
+#endif
+  const bool qualified_concat = device.q.device.type == vt::DeviceType::kXPU &&
+      draft_dtype == DType::kF16 && hidden_size == 5120 && tokens >= 512 && tokens <= 4096;
+  const bool strided = qualified_concat && detail::MtpConcatStridedEnabled();
+  const bool pack = qualified_concat && detail::MtpConcatPackEnabled();
+  detail::ConcatMtpNormalized(device.b, device.q, concatenated.t(), embedding_norm.t(),
+                              target_norm.t(), strided, pack);
+#ifdef VLLM_CPP_XPU
+  if (concat_span) vt::xpu::EndProfileSpan(device.q, "mtp_concat_complete", std::move(*concat_span));
+#endif
+  if (observer) observer(device.q, "concatenated", concatenated.t());
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): the fc-cat projection through the ONE
   // EXL3 linear seam when the checkpoint quantized it, in the same activation
   // dtype that the decoder layer below consumes. There
   // is no second matmul: `dense_exl3::Linear` forwards to
   // `layers::Exl3LinearMethod`, which calls `dense_attn::Exl3MatmulD`.
   if (weights.IsExl3()) {
-    return dense_exl3::Linear(device, concatenated.t(), weights.fc,
-                              weights.fc_exl3, draft_dtype);
+    return finish_head(dense_exl3::Linear(device, concatenated.t(), weights.fc,
+                                        weights.fc_exl3, draft_dtype));
   }
   if (weights.IsGptq4Draft()) {
-    return dense_gptq4::Packed(device, concatenated.t(), weights.fc_gptq4,
-                               dense_gptq4::Projection::kMtpFc);
+    return finish_head(dense_gptq4::Packed(device, concatenated.t(), weights.fc_gptq4,
+                                         dense_gptq4::Projection::kMtpFc));
   }
-  return MatmulBf16D(device, concatenated.t(), weights.fc);
+  return finish_head(MatmulBf16D(device, concatenated.t(), weights.fc));
 }
 
 template <class Weights>
@@ -10559,10 +10600,35 @@ std::vector<int32_t> Qwen3_5MTPModel::SelectDraftTokens(
     VT_CHECK(!compact.Empty() && logits.vocab == 65536,
              "EXL3 MTP selection: expected compact logits and validated token map");
     Tensor map = ResidentWeight(device, compact.token_ids);
-    DBuf chosen(device, DType::kI32, {logits.rows});
-    vt::MappedGreedyArgmax(queue, chosen.t(), logits.device_tensor, map, compact.target_vocab);
+    VT_CHECK(uint64_t(logits.rows) <= std::min<uint64_t>(SIZE_MAX, INT64_MAX) / sizeof(int32_t), "MTP selection ID bytes overflow");
+    const size_t id_bytes = size_t(logits.rows) * sizeof(int32_t);
+    size_t storage_bytes = id_bytes;
+#ifdef VLLM_CPP_XPU
+    const int tile = vt::XpuMappedArgmaxTile(logits.rows, logits.vocab, compact.target_vocab);
+    vt::XpuMappedSelectionLayout layout{};
+    if (tile) {
+      layout = vt::XpuMappedSelectionBuffers(logits.rows, logits.vocab, tile);
+      storage_bytes = layout.total_bytes;
+    }
+#endif
+    // Extend the existing chosen-ID owner. Its terminal copy/sync already
+    // completes every consumer before this pool block is returned; there is no
+    // additional allocation/lease or wait per selection. Pool misses enter the
+    // backend's checked remaining-budget admission, warm hits reuse storage.
+    DBuf chosen(device, DType::kI8, {int64_t(storage_bytes)});
+    Tensor chosen_ids = Tensor::Contiguous(chosen.ptr(), DType::kI32, queue.device, {logits.rows});
+#ifdef VLLM_CPP_XPU
+    if (tile) {
+      auto scratch = Tensor::Contiguous(static_cast<unsigned char*>(chosen.ptr()) + layout.scratch_offset,
+          DType::kI8, queue.device, {int64_t(layout.scratch_bytes)});
+      vt::xpu::TiledMappedGreedyArgmax(queue, chosen_ids, logits.device_tensor, map,
+                                     compact.target_vocab, scratch, tile);
+    } else
+#endif
+    vt::MappedGreedyArgmax(queue, chosen_ids, logits.device_tensor, map, compact.target_vocab);
     std::vector<int32_t> ids(static_cast<size_t>(logits.rows));
-    chosen.Download(device, ids.data());  // synchronizes before releasing consumers
+    device.b.Copy(queue, ids.data(), chosen_ids.data, id_bytes); // IDs only, not partials.
+    device.b.Synchronize(queue); // Existing completion before releasing the owner.
     for (const auto id : ids)
       VT_CHECK(id >= 0 && id < compact.target_vocab,
                "EXL3 MTP selection: invalid map or nonfinite draft logits");

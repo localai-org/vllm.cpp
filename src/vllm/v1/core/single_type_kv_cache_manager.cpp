@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -686,9 +688,18 @@ std::vector<std::vector<KVCacheBlock*>> MambaManager::find_longest_cache_hit(
     if (i >= static_cast<int>(block_hashes.size())) {
       continue;
     }
-    if (prefix_snapshots && !prefix_snapshots->Contains(block_hashes[i])) continue;
+    if (prefix_snapshots) {
+      const bool contains = prefix_snapshots->Contains(block_hashes[i]);
+      if (std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+        std::fprintf(stderr, "PREFIX_CONTAINS tokens=%d success=%d\n",
+                     (i + 1) * effective_block_size, int(contains));
+      if (!contains) continue;
+    }
     std::optional<std::vector<KVCacheBlock*>> cached_block =
         pool.get_cached_block(block_hashes[i], kv_cache_group_ids);
+    if (prefix_snapshots && std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+      std::fprintf(stderr, "PREFIX_STATE_BLOCK tokens=%d success=%d\n",
+                   (i + 1) * effective_block_size, int(cached_block.has_value()));
     if (cached_block.has_value()) {
       // Mamba prefix caching aligns block_size across attention and mamba
       // layers so the hit length is block-aligned.

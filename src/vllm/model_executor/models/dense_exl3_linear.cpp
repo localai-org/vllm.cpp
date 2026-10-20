@@ -5,6 +5,8 @@
 
 #include <cstring>
 #include <limits>
+#include <cstdlib>
+#include <string_view>
 
 #include "vllm/model_executor/layers/quantization/exl3.h"
 
@@ -97,6 +99,57 @@ dense_attn::DBuf Linear(dense_attn::Dev d, const vt::Tensor& x,
                         const OwnedTensor& bf16_w, const Exl3Weight& exl3_w,
                         vt::DType out_dtype) {
   return layers::MakeLinearMethod(bf16_w, exl3_w)->Apply(d, x, out_dtype);
+}
+
+std::optional<dense_attn::DBuf> PreparedSiluMlp(dense_attn::Dev d,
+    const vt::Tensor& x, const Exl3Weight& gate, const Exl3Weight& up,
+    const Exl3Weight& down, Exl3GroupedWeight& grouped) {
+  using vt::DType;
+  if (d.q.device.type != vt::DeviceType::kXPU || d.activation_dtype != DType::kF16 ||
+      x.dtype != DType::kF16 || x.rank != 2 || x.shape[0] < 512 || x.shape[0] > 4096 ||
+      gate.Empty() || up.Empty() || down.Empty() ||
+      gate.codebook != 2 || up.codebook != 2 || down.codebook != 2 ||
+      gate.OutFeatures() != 17408 || up.OutFeatures() != 17408 ||
+      down.InFeatures() != 17408 || down.OutFeatures() != 5120) return std::nullopt;
+  const int64_t rows = x.shape[0], k = down.InFeatures(), n = down.OutFeatures();
+  const int panel = vt::Exl3W8A8ModelPanelColumns();
+  (void)vt::PlanExl3W8A8(rows, k, n, 1, down.Bits(), panel);
+  // The existing packed group retains separate gate/up transforms and owners.
+  auto gu = GroupedLinear(d, x, {&gate, &up}, grouped);
+  auto trellis = dense_attn::ResidentWeight(d, down.trellis);
+  auto suh = dense_attn::ResidentWeight(d, down.suh);
+  // Same immutable source storage as the ordinary single-weight EXL3 wrapper.
+  suh = vt::Tensor::Contiguous(suh.data, DType::kF16, d.q.device, {1, k});
+  auto svh = dense_attn::ResidentWeight(d, down.svh);
+  if (down.single_source_map.rank == 0) {
+    down.single_source_map.dtype = DType::kI32;
+    down.single_source_map.rank = 1;
+    down.single_source_map.shape[0] = n / 128;
+  }
+  auto map = dense_attn::ResidentWeight(d, down.single_source_map, {}, [&](vt::Tensor& t) {
+    d.b.Memset(d.q, t.data, 0, t.Bytes());
+  });
+  dense_attn::DBuf out(d, DType::kF16, {rows, n});
+  const vt::Exl3GroupedLinearArgs args{down.Bits(), down.codebook, down.name.c_str(), panel};
+  const char* table = std::getenv("VT_XPU_SILU_FP16_TABLE");
+  VT_CHECK(!table || std::string_view(table) == "0" || std::string_view(table) == "1",
+           "Invalid VT_XPU_SILU_FP16_TABLE");
+  const char* typed = std::getenv("VT_XPU_SILU_FP16_TYPED");
+  if ((!table || std::string_view(table) == "1") &&
+      (!typed || std::string_view(typed) != "0") &&
+      vt::detail::TryExl3GroupedW8A8SiluModel(d.q, out.t(), gu.t(), trellis, suh, svh,
+          map, args, down.single_source_map.d_dev, down.w8a8_model_map)) return out;
+  // A refusal has not published out. Reuse that SAME owner and the completed
+  // gate/up tensor, so fallback neither repeats gate/up nor retains another Y.
+  dense_attn::DBuf act(d, DType::kF16, {rows, k});
+  vt::SiluAndMul(d.q, act.t(), gu.t());
+  // Match ordinary GateUp's lifetime: this same-queue consumer now owns all
+  // reads. Return the completed producer's owner to the existing queue-safe
+  // pool before the down projection, with no new fence or recomputed gate/up.
+  gu = dense_attn::DBuf{};
+  vt::detail::Exl3GroupedW8A8Model(d.q, out.t(), act.t(), trellis, suh, svh, map,
+      args, down.single_source_map.d_dev, down.w8a8_model_map);
+  return out;
 }
 
 dense_attn::DBuf GateUp(dense_attn::Dev d, const vt::Tensor& x,

@@ -39,7 +39,7 @@ void Exl3GemmKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&
                     const Tensor&, Tensor&, const Exl3GemmArgs&);
 void Exl3GroupedLinearKernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, Tensor&, Tensor&, const Exl3GroupedLinearArgs&);
-void Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
+bool Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, Tensor&, Tensor&, const Exl3GroupedLinearArgs&);
 // Eager diagnostic only: capture the selected packed/reference leaf's F32
 // intermediate in caller-owned storage. Refuses fused/prefill routes instead

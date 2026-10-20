@@ -1,5 +1,9 @@
+#include "vt/concat_plan.h"
+#include "vt/xpu_copy.h"
 #include "xpu_common.h"
 #include "xpu_kernels.h"
+#include "vt/xpu_silu_policy.h"
+#include "vt/xpu_sigmoid_gate_policy.h"
 #include <sycl/ext/intel/math.hpp>
 #include <cstdlib>
 #include <string_view>
@@ -47,6 +51,31 @@ void CopyKernel(Queue& q, Tensor& out, const Tensor& in) {
     RecordProfileEvent(q, "copy_convert", event);
   });
 }
+// One typed contiguous-input packing alternative to generic strided Copy.
+void ConcatRowsF16(Queue& q, Tensor& out, const Tensor& left, const Tensor& right) {
+  VT_CHECK(q.device.type == DeviceType::kXPU, "concat F16 pack: XPU queue required");
+  const auto layout = ValidateConcatRows(q, out, left, right);
+  VT_CHECK(left.dtype == DType::kF16, "concat F16 pack: F16 storage required");
+  if (!layout.rows) return;
+  for (const void* p : {out.data, left.data, right.data})
+    VT_CHECK(reinterpret_cast<uintptr_t>(p) % alignof(uint16_t) == 0,
+             "concat F16 pack: two-byte alignment required");
+  TraceXpuOp(OpId::kCopy, q, {&out, &left, &right});
+  auto* dst = static_cast<uint16_t*>(out.data);
+  const auto* a = static_cast<const uint16_t*>(left.data);
+  const auto* b = static_cast<const uint16_t*>(right.data);
+  const size_t rows = size_t(layout.rows), hidden = size_t(layout.hidden);
+  const auto event = NativeQueue(q).parallel_for(sycl::range<2>(rows, hidden),
+      [=](sycl::id<2> item) {
+        const size_t row = item[0], column = item[1];
+        const size_t source = row * hidden + column;
+        const size_t target = row * (2 * hidden) + column;
+        dst[target] = a[source];
+        dst[target + hidden] = b[source];
+      });
+  RecordProfileEvent(q, "concat_rows_f16_pack", event);
+}
+
 void AddKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   TraceXpuOp(OpId::kAdd, q, {&out, &a, &b});
   FloatTensor(out); FloatTensor(a); FloatTensor(b);
@@ -74,6 +103,21 @@ void MoeSiluMulKernel(Queue& q, Tensor& out, const Tensor& gate, const Tensor& u
     RecordProfileEvent(q, "moe_silu_mul", event);
   });
 }
+bool WithFp16SiluValues(Queue& q, const std::function<void(const void*)>& launch) {
+  constexpr size_t local = 256;
+  return WithFp16SiluTable(q, [&](void* storage) {
+    auto* table = static_cast<sycl::half*>(storage);
+    const auto event = NativeQueue(q).parallel_for(
+        sycl::nd_range<1>(65536, local), [=](sycl::nd_item<1> item) {
+      const auto bits = uint16_t(item.get_global_linear_id());
+      const float gate = float(sycl::bit_cast<sycl::half>(bits));
+      const float denominator = 1.0f + sycl::exp(-gate);
+      table[bits] = sycl::half(sycl::ext::intel::math::fdiv_rn(gate, denominator));
+    });
+    RecordProfileEvent(q, "silu_fp16_table_build", event);
+    return event;
+  }, launch);
+}
 void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
   TraceXpuOp(OpId::kSiluAndMul, q, {&out, &in});
   FloatTensor(out); FloatTensor(in);
@@ -82,29 +126,19 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
     const auto width = out.shape[1];
     const char* typed = std::getenv("VT_XPU_SILU_FP16_TYPED");
     if (target.dtype == DType::kF16 && in.dtype == DType::kF16 &&
-        target.IsContiguous() && in.IsContiguous() && out.shape[0] >= 64 &&
+        target.IsContiguous() && in.IsContiguous() &&
+        (out.shape[0] >= 64 || XpuSmallSiluDecode(out.shape[0], width)) &&
         width > 0 && (typed == nullptr || std::string_view(typed) != "0")) {
       const auto* input = static_cast<const sycl::half*>(in.data);
       auto* output = static_cast<sycl::half*>(target.data);
       constexpr size_t local = 256;
       const size_t columns = (size_t(width) + local - 1) / local * local;
       const char* table_setting = std::getenv("VT_XPU_SILU_FP16_TABLE");
-      // Exact device-generated FP16 materialization; small-row decode retains
-      // its original route. Setting0 preserves the typed expression for A/B.
+      // Reuse the same immutable FP16 table for qualified small-row shapes.
+      // Setting0 preserves the typed expression for complete-call A/B.
       const std::string_view table_mode = table_setting ? table_setting : "1";
       VT_CHECK(table_mode == "0" || table_mode == "1", "Invalid VT_XPU_SILU_FP16_TABLE");
-      if (table_mode == "1" && WithFp16SiluTable(q, [&](void* storage) {
-        auto* table = static_cast<sycl::half*>(storage);
-        const auto event = NativeQueue(q).parallel_for(
-            sycl::nd_range<1>(65536, local), [=](sycl::nd_item<1> item) {
-          const auto bits = uint16_t(item.get_global_linear_id());
-          const float gate = float(sycl::bit_cast<sycl::half>(bits));
-          const float denominator = 1.0f + sycl::exp(-gate);
-          table[bits] = sycl::half(sycl::ext::intel::math::fdiv_rn(gate, denominator));
-        });
-        RecordProfileEvent(q, "silu_fp16_table_build", event);
-        return event;
-      }, [&](const void* storage) {
+      if (table_mode == "1" && WithFp16SiluValues(q, [&](const void* storage) {
         const auto* table = static_cast<const sycl::half*>(storage);
         const auto event = NativeQueue(q).parallel_for(
             sycl::nd_range<2>(sycl::range<2>(size_t(out.shape[0]), columns),
@@ -154,10 +188,34 @@ void SiluAndMulKernel(Queue& q, Tensor& out, const Tensor& in) {
     RecordProfileEvent(q, "silu_and_mul", event);
   });
 }
+namespace {
+void TypedSigmoidGateF16(Queue& q,Tensor& out,const Tensor& attn,const Tensor& gate) {
+  auto* dst = static_cast<sycl::half*>(out.data);
+  const auto* av = static_cast<const sycl::half*>(attn.data);
+  const auto* gv = static_cast<const float*>(gate.data);
+  const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()),
+      [=](sycl::id<1> item) {
+    const int64_t i = item[0];
+    // Preserve F32 gate inputs. Sigmoid itself narrows to F16 BEFORE multiply.
+    const float value = gv[i];
+    const sycl::half sigmoid = sycl::ext::intel::math::fdiv_rn(
+        1.0f,1.0f + sycl::exp(-value));
+    dst[i] = sycl::half(float(av[i]) * float(sigmoid));
+  });
+  RecordProfileEvent(q,"sigmoid_gate_fp16_typed",event);
+}
+}  // namespace
 void SigmoidGateKernel(Queue& q, Tensor& out, const Tensor& attn, const Tensor& gate) {
   TraceXpuOp(OpId::kSigmoidGateBf16, q, {&out, &attn, &gate});
   FloatTensor(out); FloatTensor(attn); FloatTensor(gate);
   WithOutput(q, out, {&attn, &gate}, [&](Tensor& target) {
+    if (target.rank == 2 && attn.rank == 2 && gate.rank == 2 &&
+        target.dtype == DType::kF16 && attn.dtype == DType::kF16 &&
+        gate.dtype == DType::kF32 &&
+        target.IsContiguous() && attn.IsContiguous() && gate.IsContiguous() && vt::XpuSigmoidGateTyped(target.shape[0],target.shape[1])) {
+      TypedSigmoidGateF16(q,target,attn,gate);
+      return;
+    }
     const View dst(target), av(attn), gv(gate);
     const auto event = NativeQueue(q).parallel_for(sycl::range<1>(out.Numel()), [=](sycl::id<1> item) {
       const auto i = item[0];

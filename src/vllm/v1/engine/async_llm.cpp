@@ -569,15 +569,17 @@ void AsyncLLM::RunOutputHandler() {
       engine_core_.abort_requests_async(processed.reqs_to_abort);
 
       // async_llm.py:697-702 — fold this step's SchedulerStats + IterationStats
-      // into the registry. A stats-only prefix lookup from a tokenless prefill
-      // chunk must also reach the logger; its empty IterationStats contributes
+      // into the registry. Prefix lookups and completed prompt work from a
+      // tokenless chunk also reach the logger; empty IterationStats contributes
       // no token or completion timing sample.
       //
       // Deliberately OUTSIDE output_processor_mutex_: the logger's own mutex is
       // then a leaf lock that can never take part in a cycle with the
       // output-processor lock or a collector's condition variable.
       if (logger != nullptr &&
-          (!outputs.outputs.empty() || outputs.scheduler_stats.prefix_cache_stats.queries > 0)) {
+          (!outputs.outputs.empty() ||
+           outputs.scheduler_stats.num_prefill_kv_computed_tokens > 0 ||
+           outputs.scheduler_stats.prefix_cache_stats.queries > 0)) {
         logger->Record(outputs.scheduler_stats, iteration_stats);
       }
     }

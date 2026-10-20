@@ -92,6 +92,7 @@
 #include "vllm/distributed/kv_events.h"  // KVEventsConfig, EventPublisher
 #include "vllm/v1/core/kv_cache_manager.h"
 #include "vllm/v1/core/sched/output.h"
+#include "vllm/v1/core/sched/recurrent_prefix_policy.h"
 #include "vllm/v1/core/sched/request_queue.h"
 #include "vllm/v1/engine/types.h"  // ModelRunnerOutput, EngineCoreOutputs
 #include "vllm/v1/kv_cache_interface.h"
@@ -425,6 +426,7 @@ class Scheduler {
   // on a step that produced no observation so make_stats() never re-reports a
   // stale delta.
   PrefixCacheStats last_prefix_cache_stats_;
+  int64_t last_prefill_kv_computed_tokens_ = 0;
 
   // This step's speculative-decoding aggregate, stashed by update_from_output
   // for make_stats() (#2770). Same arrangement, and the same reason, as
@@ -561,6 +563,9 @@ class Scheduler {
   // check can convert its block-granular match into tokens for the threshold
   // comparison (see maybe_reorder_waiting_for_lpm).
   int block_size_ = 0;
+  bool align_recurrent_prefix_publication_ = false;
+  RecurrentPrefixAlignmentMode recurrent_prefix_alignment_mode_ =
+      RecurrentPrefixAlignmentMode::kAuto;
   // max_num_encoder_input_tokens (scheduler.py:226-228): the PER-STEP encoder
   // compute budget in encoder tokens, reset at the top of every schedule().
   int max_num_encoder_input_tokens_ = 0;

@@ -5,7 +5,9 @@
 #include "xpu_common.h"
 #include "xpu_kernels.h"
 #include "xpu_gptq4.h"
+#include "xpu_exl3_prepare.h"
 #include "vt/exl3_grouped.h"
+#include "vt/exl3_w8a8_initialization_policy.h"
 #include "vt/exl3_w8a8_panel_plan.h"
 #pragma clang diagnostic pop
 #include <exl3xpu/exl3_esimd.h>
@@ -92,69 +94,7 @@ struct ValidateOutputScale {
 // private until the host has checked the existing two-word status. Bad blocks
 // become finite zeros before narrowing; a bad row uses scale1/inv0, so there
 // is never a float-to-INT8 conversion of NaN, Inf or an out-of-range value.
-template<int TPR, int NB>
-struct PrepareRows {
-  ::exl3::HadInQ8Kernel<sycl::half> input;
-  uint32_t* valid;
-  void operator()(sycl::nd_item<1> it) const SYCL_ESIMD_KERNEL {
-    using namespace sycl::ext::intel::esimd;
-    slm_init<TPR * (sizeof(float) + sizeof(uint32_t))>();
-    const int t = it.get_local_id(0), row = it.get_group(0);
-    const int m = row % input.M, g = row / input.M, blocks = input.Kdim / 128;
-    simd<sycl::half, 128 * NB> buf;
-    simd<float, 128> mx = 0.0f;
-    bool finite = true;
-#pragma unroll
-    for (int j = 0; j < NB; ++j) {
-      const int kb = t + j * TPR;
-      if (kb < blocks) {
-        auto xi = block_load<sycl::half, 128>(input.x + size_t(m) * input.x_stride + kb * 128);
-        auto su = block_load<sycl::half, 128>(input.suh + size_t(g) * input.Kdim + kb * 128);
-        bool block_finite = !((xi.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any() &&
-                            !((su.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any();
-        auto v = convert<float>(xi) * convert<float>(su);
-        block_finite &= !((v.bit_cast_view<uint32_t>() & 0x7fffffffu) >= 0x477ff000u).any();
-        if (!block_finite) v = 0.0f;
-        simd<sycl::half, 128> product = convert<sycl::half>(v);
-        block_finite &= !((product.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any();
-        v = convert<float>(product);
-        ::exl3::fwht128(v);
-        v *= ::exl3::kRsqrt128;
-        block_finite &= !((v.bit_cast_view<uint32_t>() & 0x7fffffffu) >= 0x477ff000u).any();
-        if (!block_finite) v = 0.0f;
-        simd<sycl::half, 128> vh = convert<sycl::half>(v);
-        block_finite &= !((vh.bit_cast_view<uint16_t>() & 0x7c00u) == 0x7c00u).any();
-        if (!block_finite) vh = sycl::half(0.0f);
-        finite &= block_finite;
-        buf.template select<128, 1>(j * 128) = vh;
-        mx = max(mx, abs(convert<float>(vh)));
-      }
-    }
-    slm_scalar_store<float>(t * sizeof(float), hmax<float>(mx));
-    slm_scalar_store<uint32_t>(TPR * sizeof(float) + t * sizeof(uint32_t), finite ? 1u : 0u);
-    barrier();
-    const bool row_finite = (slm_block_load<uint32_t, TPR>(TPR * sizeof(float)) == 1u).all();
-    const float amax = hmax<float>(slm_block_load<float, TPR>(0));
-    const float scale = row_finite && amax > 0.0f ? amax / 127.0f : 1.0f;
-    const float inv = row_finite ? 1.0f / scale : 0.0f;
-    if (t == 0) {
-      input.sx[size_t(g) * input.Ms + m] = scale;
-      if (!row_finite)
-        atomic_update<atomic_op::store, uint32_t, 1>(valid, simd<uint32_t, 1>(0u),
-                                                    simd<uint32_t, 1>(0u));
-    }
-#pragma unroll
-    for (int j = 0; j < NB; ++j) {
-      const int kb = t + j * TPR;
-      if (kb < blocks) {
-        const simd<sycl::half, 128> b = buf.template select<128, 1>(j * 128);
-        const auto rounded = rnde<float>(convert<float>(b) * inv);
-        block_store<int8_t, 128>(input.xq + (size_t(g) * input.Ms + m) * input.Kdim + kb * 128,
-                                 convert<int8_t>(rounded));
-      }
-    }
-  }
-};
+using detail::PrepareRows;
 
 template<int Bits>
 void Reconstruct(Queue& q, const Tensor& tr, Tensor& panel, int k, int n,
@@ -170,11 +110,13 @@ struct PreparedActivation {
   size_t bytes;
 };
 
-void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
+bool DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     const Tensor& suh, const Tensor& svh, const Tensor& shard,
     Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args,
-    const PreparedActivation* activation = nullptr) {
-  const int m = int(in.shape[0]), k = int(in.shape[1]), n = int(out.shape[1]);
+    const PreparedActivation* activation = nullptr, const uint16_t* silu_table = nullptr,
+    bool caller_owned_workspace = false) {
+  const bool fused = args.input_producer == Exl3W8A8InputProducer::kSiluMul;
+  const int m = int(in.shape[0]), k = int(fused ? suh.shape[1] : in.shape[1]), n = int(out.shape[1]);
   const int groups = int(suh.shape[0]);
   auto plan = PlanExl3W8A8(m, k, n, groups, args.bits, args.w8a8_panel_columns);
   // The checked planner owns alignment and size arithmetic. Preserve its
@@ -182,6 +124,12 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   const size_t preparation_bytes = plan.intermediate_offset;
   const size_t qbytes = plan.row_scale_offset - plan.activation_offset;
   const size_t sbytes = preparation_bytes - plan.row_scale_offset;
+  if (fused) {
+    const char* setting = std::getenv("VT_XPU_W8A8_PREPARE");
+    if (k / 128 > 144 || (setting && std::string_view(setting) != "1") ||
+        !Exl3W8A8PreparationAdmitted(preparation_bytes)) return false;
+    VT_CHECK(silu_table, "EXL3 W8A8 SiLU requires its immutable table owner");
+  }
   if (activation) {
     // Only the private model descriptor omits published xq/sx storage. Keep
     // the identical padded F16 Y, weight scale/status region and panel layout.
@@ -201,7 +149,7 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
         (!prepare_setting || std::string_view(prepare_setting) == "1") &&
         Exl3W8A8PreparationAdmitted(preparation_bytes)) {
       const size_t compact_bytes = plan.workspace_bytes - plan.intermediate_offset;
-      bool consumed = false;
+      bool consumed = false, completed = false;
       // Retain the existing workspace -> preparation lock order on all queues.
       // The preparation callback now encloses every oneDNN and tail consumer;
       // its completion fence retires the direct view before reuse or growth.
@@ -214,13 +162,16 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
           auto weights = Tensor::Contiguous(static_cast<uint8_t*>(storage) + compact_bytes,
               DType::kI8, q.device, {k, plan.weight_panel_columns});
           const PreparedActivation view{prepared, preparation_bytes};
-          DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args, &view);
+          completed = DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights,
+                                    args, &view, silu_table);
         });
       });
-      if (consumed) return;
+      if (consumed) return completed;
+      if (fused) return false;
       // Insufficient preparation budget retains the original checked path.
       // The compact attempt has not written output, scratch or panel data.
     }
+    bool completed = false;
     const bool acquired = WithExl3W8A8Workspace(q, plan.workspace_bytes + plan.weight_panel_bytes,
         [&](void* storage) {
           auto scratch = Tensor::Contiguous(storage, DType::kI8, q.device,
@@ -231,10 +182,11 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
           // These exact plan-sized private descriptors satisfy scratch layout;
           // the recursive kernel retains all alignment/overlap/arithmetic checks.
           // Keep the model certificate across this private workspace recursion.
-          DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights, args);
+          completed = DispatchW8A8(q, out, in, tr, suh, svh, shard, scratch, weights,
+                                    args, nullptr, silu_table);
         });
     VT_CHECK(acquired, "EXL3 W8A8 shared scratch exceeds device memory budget");
-    return;
+    return completed;
   }
   TraceXpuOp(OpId::kExl3GroupedW8A8, q,
              {&out, &in, &tr, &suh, &svh, &shard, &workspace, &panel});
@@ -283,16 +235,20 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
       : reinterpret_cast<float*>(bytes + plan.row_scale_offset);
   auto* y = reinterpret_cast<sycl::half*>(bytes + plan.intermediate_offset);
   auto* sw = reinterpret_cast<float*>(bytes + plan.weight_scale_offset);
-  // Both GPU checks use spare words in the existing 64-byte scale region.
-  // Read their results together before output/panel/activation writes. This
-  // avoids a separate metadata allocation, readback and retirement drain.
+  // Model-owned scratch keeps its existing two status words. Explicit public
+  // workspaces borrow PRIVATE status below, so even their reserved bytes stay
+  // unchanged on failure. The model path keeps the same lease/bytes/waits.
   auto* valid = reinterpret_cast<uint32_t*>(sw + 1);
-  NativeQueue(q).single_task([=] { valid[0] = 1; valid[1] = 1; });
-  Launch(q, n / 128, 8, ValidateOutputScale{sv_bits, n, valid + 1},
-         "exl3_w8a8_validate_svh");
+  const auto initialize_checks = [&] {
+    auto* flags = valid;
+    NativeQueue(q).single_task([=] { flags[0] = 1; flags[1] = 1; });
+    Launch(q,n / 128,8,ValidateOutputScale{sv_bits,n,flags + 1},
+           "exl3_w8a8_validate_svh");
+  };
+  if (!caller_owned_workspace) initialize_checks();
   ::exl3::HadInQ8Kernel<sycl::half> input{
       static_cast<const sycl::half*>(in.data), static_cast<const sycl::half*>(suh.data),
-      xq, sx, m, k, groups, k, plan.padded_rows};
+      xq, sx, m, k, groups, fused ? 2 * k : k, plan.padded_rows};
   const auto check_status = [&] {
     std::array<uint32_t, 2> finite{};
     backend.Copy(q, finite.data(), valid, sizeof(finite));
@@ -301,45 +257,86 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     VT_CHECK(finite[0], "EXL3 W8A8 requires finite inputs and finite FP16 transformed rows");
   };
   const char* prepare_setting = std::getenv("VT_XPU_W8A8_PREPARE");
-  bool prepared = false;
+  bool prepared = false, rows_validated = false;
   const auto prepare_checked = [&](void* storage) {
     auto candidate = input;
     candidate.xq = static_cast<int8_t*>(storage);
     candidate.sx = reinterpret_cast<float*>(static_cast<uint8_t*>(storage) + qbytes);
-    NativeQueue(q).memset(candidate.xq, 0, qbytes);
-    NativeQueue(q).parallel_for(sycl::range<1>(size_t(groups) * plan.padded_rows),
-        [=](sycl::id<1> i) { candidate.sx[i[0]] = 1.0f; });
+    detail::InitializePreparedRows(q,candidate,qbytes,
+        Exl3W8A8SkipFullInitialization(m,plan.padded_rows));
+    if (fused) {
+      const detail::SiluMulActivationInput producer{silu_table};
+      if (k / 128 <= 48)
+        Launch(q, int64_t(groups) * m * 8, 8,
+               PrepareRows<8, 6, detail::SiluMulActivationInput>{candidate, valid, producer},
+               "exl3_w8a8_prepare_silu_mul_checked");
+      else
+        Launch(q, int64_t(groups) * m * 16, 16,
+               PrepareRows<16, 9, detail::SiluMulActivationInput>{candidate, valid, producer},
+               "exl3_w8a8_prepare_silu_mul_checked");
+    } else {
     if (k / 128 <= 48)
       Launch(q, int64_t(groups) * m * 8, 8, PrepareRows<8, 6>{candidate, valid},
              "exl3_w8a8_prepare_checked");
     else
       Launch(q, int64_t(groups) * m * 16, 16, PrepareRows<16, 9>{candidate, valid},
              "exl3_w8a8_prepare_checked");
+    }
     check_status();
     return candidate;
   };
-  // Exact checked preparation is the default;0 restores the original route.
-  // Unsupported K or insufficient private budget keeps the existing checks.
-  if (activation) {
-    VT_CHECK(activation->bytes >= qbytes + sbytes, "EXL3 W8A8 prepared storage too small");
+  const auto commit_prepared = [&](const auto& candidate) {
+    RecordGraphWrite(q,workspace.data,Span(workspace));
+    const auto qe = NativeQueue(q).memcpy(xq,candidate.xq,qbytes);
+    const auto se = NativeQueue(q).memcpy(sx,candidate.sx,sbytes);
+    RecordProfileEvent(q,"exl3_w8a8_prepared_commit",qe);
+    RecordProfileEvent(q,"exl3_w8a8_prepared_commit",se);
+  };
+  const auto validate_rows = [&] {
+    Launch(q,int64_t(groups) * m * (k / 128),8,ValidateRows{input,valid},
+           "exl3_w8a8_validate_rows");
+    check_status();
+    rows_validated = true;
+  };
+  const bool prepare_enabled =
+      (!prepare_setting || std::string_view(prepare_setting) == "1") && k / 128 <= 144;
+  if (caller_owned_workspace) {
+    VT_CHECK(!activation && !fused,"public W8A8 has only the ordinary tensor producer");
+    constexpr size_t status_bytes = 64;
+    const auto public_checks = [&](void* storage,bool make_preparation) {
+      valid = static_cast<uint32_t*>(storage);
+      initialize_checks();
+      if (make_preparation) {
+        const auto candidate = prepare_checked(static_cast<uint8_t*>(storage) + status_bytes);
+        commit_prepared(candidate);
+        prepared = true;
+        rows_validated = true;
+      } else validate_rows();
+    };
+    bool checked = false;
+    if (prepare_enabled && qbytes + sbytes <= SIZE_MAX - status_bytes &&
+        Exl3W8A8PreparationAdmitted(qbytes + sbytes + status_bytes)) {
+      checked = WithExl3W8A8Preparation(q,qbytes + sbytes + status_bytes,
+          [&](void* storage) { public_checks(storage,true); });
+    }
+    if (!checked) {
+      checked = WithExl3W8A8Preparation(q,status_bytes,
+          [&](void* storage) { public_checks(storage,false); });
+    }
+    VT_CHECK(checked,"EXL3 W8A8 private validation exceeds device memory budget");
+    // The lease has completed status readback and any preparation commit. No
+    // later consumer reads these private flags; GEMM uses the caller's payload.
+  } else if (activation) {
+    VT_CHECK(activation->bytes >= qbytes + sbytes,"EXL3 W8A8 prepared storage too small");
     (void)prepare_checked(activation->storage);
     prepared = true;
-  } else if ((!prepare_setting || std::string_view(prepare_setting) == "1") && k / 128 <= 144) {
-    prepared = WithExl3W8A8Preparation(q, qbytes + sbytes, [&](void* storage) {
-      const auto candidate = prepare_checked(storage);
-      // Public preparation stays untouched on either validation failure.
-      RecordGraphWrite(q, workspace.data, Span(workspace));
-      const auto qe = NativeQueue(q).memcpy(xq, candidate.xq, qbytes);
-      const auto se = NativeQueue(q).memcpy(sx, candidate.sx, sbytes);
-      RecordProfileEvent(q, "exl3_w8a8_prepared_commit", qe);
-      RecordProfileEvent(q, "exl3_w8a8_prepared_commit", se);
+  } else if (prepare_enabled) {
+    prepared = WithExl3W8A8Preparation(q,qbytes + sbytes,[&](void* storage) {
+      commit_prepared(prepare_checked(storage));
     });
   }
-  if (!prepared) {
-    Launch(q, int64_t(groups) * m * (k / 128), 8, ValidateRows{input, valid},
-         "exl3_w8a8_validate_rows");
-    check_status();
-  }
+  if (!prepared && fused) return false;
+  if (!prepared && !rows_validated) validate_rows();
 
   for (const Tensor* t : {&out, &workspace, &panel}) RecordGraphWrite(q, t->data, Span(*t));
   // Poison/stale padding is never consumed by GEMM. The active producer writes
@@ -396,22 +393,45 @@ void DispatchW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
         {"weight_panel_bytes", plan.weight_panel_bytes}, {"workspace_bytes", plan.workspace_bytes},
         {"weight_panel_columns", plan.weight_panel_columns}, {"panel_submissions", panels.size()},
         {"direct_preparation", activation != nullptr},
+        {"input_producer", fused ? "silu_mul_fp16" : "tensor"},
         {"input_dtype", Name(in.dtype)}, {"output_dtype", Name(out.dtype)}};
     std::fprintf(stderr, "EXL3_W8A8_DISPATCH %s\n", event.dump().c_str());
   }
+  return true;
 }
 }  // namespace
 
-void Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
+bool Exl3GroupedW8A8Kernel(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     const Tensor& suh, const Tensor& svh, const Tensor& shard,
     Tensor& workspace, Tensor& panel, const Exl3GroupedLinearArgs& args) {
-  DispatchW8A8(q, out, in, tr, suh, svh, shard, workspace, panel, args);
+  if (args.input_producer == Exl3W8A8InputProducer::kTensor)
+    return DispatchW8A8(q,out,in,tr,suh,svh,shard,workspace,panel,args,
+                        nullptr,nullptr,workspace.rank != 0);
+  VT_CHECK(args.input_producer == Exl3W8A8InputProducer::kSiluMul &&
+               workspace.rank == 0 && panel.rank == 0,
+           "EXL3 SiLU W8A8 requires the model-owned managed route");
+  const auto plan = PlanExl3W8A8(in.shape[0], suh.shape[1], out.shape[1],
+      suh.shape[0], args.bits, args.w8a8_panel_columns);
+  const char* prepare = std::getenv("VT_XPU_W8A8_PREPARE");
+  if (suh.shape[1] / 128 > 144 || (prepare && std::string_view(prepare) != "1") ||
+      !Exl3W8A8PreparationAdmitted(plan.intermediate_offset)) return false;
+  const uint16_t* table = nullptr;
+  // Readiness is joined on this queue by the original table owner. Its storage
+  // is immutable until context teardown, which drains ALL owned queues first.
+  // Release the initialization mutex before the existing W8A8 completion lease;
+  // no extra wait or serialization of other table readers is introduced.
+  if (!WithFp16SiluValues(q, [&](const void* storage) {
+        table = static_cast<const uint16_t*>(storage);
+      })) return false;
+  return DispatchW8A8(q, out, in, tr, suh, svh, shard, workspace, panel,
+                      args, nullptr, table);
 }
 #else
-void Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&,
+bool Exl3GroupedW8A8Kernel(Queue&, Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, Tensor&, Tensor&,
     const Exl3GroupedLinearArgs&) {
   VT_CHECK(false, "EXL3 W8A8 requires VLLM_CPP_XPU_ONEDNN=ON (oneDNN 3.13.0)");
+  return false;
 }
 #endif
 }  // namespace vt::xpu

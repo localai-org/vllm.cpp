@@ -2156,6 +2156,7 @@ void GPUModelRunner::copy_recurrent_state_slot(int64_t source, int64_t destinati
 
 void GPUModelRunner::publish_recurrent_prefixes(const StepInputs& step) {
   if (!recurrent_prefix_snapshots_) return;
+  const bool trace = std::getenv("VT_PREFIX_SNAPSHOT_TRACE") != nullptr;
   const int block = recurrent_prefix_snapshots_->block_tokens();
   for (size_t row = 0; row < step.seq_lens.size(); ++row) {
     const auto& id = *input_batch_.req_ids[row];
@@ -2163,18 +2164,27 @@ void GPUModelRunner::publish_recurrent_prefixes(const StepInputs& step) {
     const int tokens = step.seq_lens[row];
     // The current prefill computes one final recurrent state per request.
     // Publish only that exact boundary, never hashes of intermediate pages.
-    if (tokens <= 0 || tokens % block || tokens > request.num_prompt_tokens ||
-        size_t(tokens / block) > request.prompt_block_hashes.size()) continue;
+    const char* skip_reason = tokens <= 0 ? "empty" :
+        tokens % block ? "unaligned" :
+        tokens > request.num_prompt_tokens ? "after_prompt" :
+        size_t(tokens / block) > request.prompt_block_hashes.size() ? "missing_hash" : nullptr;
+    if (skip_reason) {
+      if (trace) std::cerr << "PREFIX_SKIP tokens=" << tokens << " reason=" << skip_reason << "\n";
+      continue;
+    }
     auto reservation = recurrent_prefix_snapshots_->Reserve(request.prompt_block_hashes[size_t(tokens / block - 1)], tokens);
+    if (trace) std::cerr << "PREFIX_RESERVE tokens=" << tokens << " success=" << bool(reservation) << "\n";
     if (!reservation) continue;
     try {
       copy_recurrent_state_slot(gdn_slot_of_req_.at(id), prefix_snapshot_base_ + reservation->slot);
       vt::GetBackend(queue_.device).Synchronize(queue_);
       recurrent_prefix_snapshots_->Publish(*reservation);
-      if (std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+      if (trace)
         std::cerr << "PREFIX_PUBLISH request=" << id << " tokens=" << tokens << " slot=" << reservation->slot << "\n";
     } catch (...) {
-      recurrent_prefix_snapshots_->Abort(*reservation); throw;
+      recurrent_prefix_snapshots_->Abort(*reservation);
+      if (trace) std::cerr << "PREFIX_ABORT tokens=" << tokens << "\n";
+      throw;
     }
   }
 }

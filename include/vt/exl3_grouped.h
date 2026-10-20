@@ -16,6 +16,8 @@ struct Exl3SmallMPlan {
 };
 Exl3SmallMPlan PlanExl3SmallM(int64_t m, int64_t k, int64_t n, int bits);
 
+enum class Exl3W8A8InputProducer : uint8_t { kTensor, kSiluMul };
+
 struct Exl3GroupedLinearArgs {
   int bits = 4;
   int codebook = 2;
@@ -25,8 +27,16 @@ struct Exl3GroupedLinearArgs {
   // Private model dispatch payload. All public grouped overloads discard it;
   // caller-provided tensors always undergo their actual map readback/check.
   const Exl3W8A8ModelMap* model_map = nullptr;
+  // Private model-only producer; public tensor APIs discard this payload.
+  Exl3W8A8InputProducer input_producer = Exl3W8A8InputProducer::kTensor;
 };
 using Exl3GroupedLinearFn = void (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
+    const Tensor&, const Tensor&, const Tensor&, Tensor&, Tensor&,
+    const Exl3GroupedLinearArgs&);
+
+// Same W8A8 implementation: false means a model-only producer could not
+// acquire its private preparation/table budget, without publishing output.
+using Exl3GroupedW8A8Fn = bool (*)(Queue&, Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, Tensor&, Tensor&,
     const Exl3GroupedLinearArgs&);
 
@@ -111,6 +121,13 @@ void Exl3GroupedLinearModel(Queue&, Tensor& out, const Tensor& in,
 // Only model-resident immutable maps may use this seam. All ordinary operand,
 // activation, scale, alias and workspace checks still execute. The cache owns
 // its map allocation, is bounded by its projection owner and is never global.
+// F16[M,2K] gate/up input, same model certificate and output as above.
+// Both FP16 activation checkpoints are preserved in registers. False is a
+// pre-publication refusal; the caller retains the materialized tensor route.
+bool TryExl3GroupedW8A8SiluModel(Queue&, Tensor& out, const Tensor& gate_up,
+    const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& map,
+    const Exl3GroupedLinearArgs&, const std::shared_ptr<void>& resident_owner,
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache);
 void Exl3GroupedW8A8Model(Queue&, Tensor& out, const Tensor& in,
     const Tensor& trellis, const Tensor& suh, const Tensor& svh, const Tensor& map,
     const Exl3GroupedLinearArgs&, const std::shared_ptr<void>& resident_owner,

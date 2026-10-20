@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string_view>
 
 namespace vt::xpu {
@@ -106,6 +107,10 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
   // Split-K may reuse this queue later and needs the full persistent workspace.
   VT_CHECK(total <= 16 * 1024 * 1024, "verification workspace exceeds Split-K allocation");
   return WithAttentionWorkspace(q, 16 * 1024 * 1024, [&](void* storage) {
+    const bool profile = ProfileQueueEventsEnabled();
+    std::optional<sycl::event> begin;
+    const auto submitted = profile ? HostProfileClockNs() : 0;
+    if (profile) begin = NativeQueue(q).ext_oneapi_submit_barrier();
     auto* ptr = static_cast<unsigned char*>(storage);
     auto* packed_q = reinterpret_cast<uint16_t*>(ptr); ptr += Align(packed_bytes);
     auto* packed_out = reinterpret_cast<uint16_t*>(ptr); ptr += Align(packed_bytes);
@@ -188,6 +193,12 @@ bool PagedAttentionXe2VerifyKernel(Queue& q, Tensor& out, const Tensor& query,
                                 group_head) * 256 + dim];
     });
     RecordProfileEvent(q, "attention_verify_unpack", unpack);
+    if (profile) {
+      const auto end = NativeQueue(q).ext_oneapi_submit_barrier();
+      RecordProfileSpan(q, "attention_verify_complete", *begin, end, submitted,
+          "rows=" + std::to_string(rows) + " requests=" + std::to_string(requests) +
+          " splits=" + std::to_string(splits) + " bytes=" + std::to_string(total));
+    }
   });
 }
 }  // namespace vt::xpu

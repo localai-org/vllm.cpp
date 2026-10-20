@@ -213,11 +213,12 @@ std::vector<RequestOutput> LLMEngine::step() {
     // detokenizer stopped them but EngineCore did not signal it itself).
     engine_core_.abort_requests(processed.reqs_to_abort);
 
-    // Record prefix lookups even when this chunk has no sampled token.
+    // Record prefix lookups and completed prompt work even without a token.
     // IterationStats is empty for that observation, so it adds no token or
     // completion timing sample.
     if (stat_logger_ != nullptr &&
         (!engine_core_outputs.outputs.empty() ||
+         engine_core_outputs.scheduler_stats.num_prefill_kv_computed_tokens > 0 ||
          engine_core_outputs.scheduler_stats.prefix_cache_stats.queries > 0)) {
       stat_logger_->Record(engine_core_outputs.scheduler_stats, iteration_stats);
     }

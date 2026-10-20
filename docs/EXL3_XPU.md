@@ -231,15 +231,27 @@ K/128<=144 and the shared bounded preparation policy (72MiB maximum by default).
 diagnostic publication fallback. This retains the original completion fence;
 the measured event-lease variant was rejected and is not implemented.
 
-Bounded C1 FP16/E4M3 decode now defaults to the32-split Xe2 route through
-three physical pages (4800 keys for page1600,4992 for page1664),under its existing
-pinned hardware/layout/unit-scale guards. The short route remains one split
-through960. Launch buckets and split controls participate in graph identity;
-fresh device metadata must fit the captured bucket. The existing16MiB attention
-workspace holds partial outputs and reduction statistics. Internal
-`VT_XPU_XE2_LONG_DECODE=0` retains the diagnostic control;
-`VT_XPU_XE2_DECODE_SPLITS` accepts16/32 (default32). Other forms retain fallback.
-See `EXL3_XPU_LONG_C1_ATTENTION_RESULT_2026-10-15.md` for bounded qualification.
+Bounded B1/Q1 FP16/E4M3 decode defaults to long-decode mode `2`, extending
+its checked route to at most 128 physical pages (204,800 tokens at page size
+1,600). Existing hardware, layout, unit-scale, scratch and graph-metadata guards
+remain required. Unsupported calls fall back. `VT_XPU_XE2_LONG_DECODE=1`
+retains the previous route through three physical pages; `0` retains the
+diagnostic control. `VT_XPU_XE2_DECODE_SPLITS` accepts `16`/`32` (default `32`).
+This path does not admit arbitrary batched Q1 or Q4 verification.
+
+Recurrent-prefix alignment defaults to request-stable `auto`. Prompts fitting
+the resolved nominal scheduling capacity avoid an additional forced split;
+longer eligible prompts retain the existing safe publication boundary. The
+original prompt length controls admission under concurrency. Use
+`VT_RECURRENT_PREFIX_ALIGN=force` or `1` for forced short-prefix alignment,
+or `off`/`0` to disable the extra split. Natural cache hits remain possible.
+Auto trades some short warm hits for lower cold costs; invalid spellings fail.
+
+The [2026-10-20 auto/2 comparison](benchmarks/exl3-auto2-2026-10-20/README.md)
+contains the fresh full text-serving matrix, focused qualification, explicit
+short-prefix and 16K/C4 tradeoffs, known strict-format failure and incomplete
+fresh MTP0/C2 mixed-batch diagnostic. Earlier attention reports retain their
+original narrower source pins and scope.
 
 Speculative GDN uses the subgroup-distributed recurrence by default for the
 existing bounded typed-FP16 Q/K/V/output, FP32 gates/state admission (up to C4,

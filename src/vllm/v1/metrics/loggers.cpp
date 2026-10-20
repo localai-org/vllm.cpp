@@ -155,6 +155,9 @@ PrometheusStatLogger::PrometheusStatLogger(std::string served_model_name,
       "Histogram of time spent in DECODE phase for request.", labels,
       RequestLatencyBuckets());
 
+  registry_.RegisterCounter("vllm:prefill_kv_computed_tokens",
+      "Prompt tokens actually completed by the runner, excluding cached tokens.", labels);
+
   // ── Static config Info ────────────────────────────────────────────────────
   registry_.RegisterInfo("vllm:cache_config_info",
                          "Information of the LLMEngine CacheConfig.",
@@ -171,6 +174,7 @@ PrometheusStatLogger::PrometheusStatLogger(std::string served_model_name,
       "vllm:prefix_cache_hits",
       "vllm:num_preemptions",
       "vllm:prompt_tokens",
+      "vllm:prefill_kv_computed_tokens",
       "vllm:prompt_tokens_cached",
       "vllm:generation_tokens",
       "vllm:request_prompt_tokens",
@@ -243,6 +247,8 @@ void PrometheusStatLogger::Record(const SchedulerStats& s,
   // Iteration counters (loggers.py:1191-1205).
   Inc("vllm:num_preemptions", static_cast<double>(it.num_preempted_reqs));
   Inc("vllm:prompt_tokens", static_cast<double>(it.num_prompt_tokens));
+  Inc("vllm:prefill_kv_computed_tokens",
+      static_cast<double>(s.num_prefill_kv_computed_tokens));
   Inc("vllm:prompt_tokens_cached",
       static_cast<double>(it.num_prompt_tokens_cached));
   Inc("vllm:generation_tokens", static_cast<double>(it.num_generation_tokens));

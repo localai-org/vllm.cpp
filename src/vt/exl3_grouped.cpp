@@ -63,10 +63,12 @@ Exl3W8A8Plan PlanExl3W8A8(int64_t m, int64_t k, int64_t n,
 namespace {
 Exl3W8A8Plan ValidateW8A8Operands(Queue& q, const Tensor& out, const Tensor& in,
     const Tensor& tr, const Tensor& suh, const Tensor& svh, const Tensor& shard,
-    const Exl3GroupedLinearArgs& args) {
+    const Exl3GroupedLinearArgs& args, bool silu_input = false) {
   VT_CHECK(in.rank == 2 && out.rank == 2 && suh.rank == 2,
            "EXL3 W8A8 requires rank-2 input/output/suh");
-  const int64_t m = in.shape[0], k = in.shape[1], n = out.shape[1];
+  const int64_t m = in.shape[0], k = silu_input ? suh.shape[1] : in.shape[1], n = out.shape[1];
+  VT_CHECK(!silu_input || (k > 0 && k <= INT32_MAX && in.shape[1] == 2 * k),
+           "EXL3 W8A8 SiLU requires contiguous gate/up [M,2K]");
   const auto plan = PlanExl3W8A8(m, k, n, suh.shape[0], args.bits, args.w8a8_panel_columns);
   VT_CHECK(args.codebook == 2 && out.shape[0] == m &&
                in.dtype == DType::kF16 && out.dtype == DType::kF16,
@@ -102,7 +104,7 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
     VT_CHECK(t->IsContiguous(), "EXL3 W8A8 requires contiguous tensors");
     VT_CHECK(t->device == q.device, "EXL3 W8A8 device mismatch");
   }
-  reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
+  reinterpret_cast<Exl3GroupedW8A8Fn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
       q, out, in, tr, suh, svh, shard, workspace, panel,
       {args.bits, args.codebook, args.debug_name, args.w8a8_panel_columns});
 }
@@ -115,7 +117,7 @@ void Exl3GroupedW8A8(Queue& q, Tensor& out, const Tensor& in, const Tensor& tr,
   // Rank-zero private scratch signals the managed overload to the registered
   // XPU operator. The explicit public overload never admits rank-zero scratch.
   Tensor workspace, panel;
-  reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
+  reinterpret_cast<Exl3GroupedW8A8Fn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
       q, out, in, tr, suh, svh, shard, workspace, panel,
       {args.bits, args.codebook, args.debug_name, args.w8a8_panel_columns});
 }
@@ -153,33 +155,54 @@ const std::vector<Exl3W8A8Panel>& Exl3W8A8ModelMap::Panels(int columns) const {
   return panels_[columns == 128 ? 0 : columns == 1024 ? 1 : 2];
 }
 
+namespace {
+std::shared_ptr<const Exl3W8A8ModelMap> W8A8ModelMetadata(
+    Queue& q, const Tensor& map, int groups,
+    const std::shared_ptr<void>& resident_owner,
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache) {
+  const char* setting = std::getenv("VT_XPU_W8A8_MODEL_MAP");
+  const std::string_view mode = setting ? setting : "1";
+  VT_CHECK(mode == "0" || mode == "1", "Invalid VT_XPU_W8A8_MODEL_MAP");
+  if (mode == "0") return {};
+  auto metadata = cache.Load();
+  if (!metadata || !metadata->Matches(map, groups, resident_owner)) {
+    metadata = std::make_shared<const Exl3W8A8ModelMap>(q, map, groups, resident_owner);
+    cache.Store(metadata);
+  }
+  return metadata;
+}
+}  // namespace
+
 void detail::Exl3GroupedW8A8Model(Queue& q, Tensor& out, const Tensor& in,
     const Tensor& tr, const Tensor& suh, const Tensor& svh, const Tensor& map,
     const Exl3GroupedLinearArgs& args, const std::shared_ptr<void>& resident_owner,
     SharedPtrCache<const Exl3W8A8ModelMap>& cache) {
   (void)ValidateW8A8Operands(q, out, in, tr, suh, svh, map, args);
   VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 shared W8A8 requires XPU");
-  const char* setting = std::getenv("VT_XPU_W8A8_MODEL_MAP");
-  // Model maps are immutable for their allocation generation. The public
-  // tensor entry points still validate their actual device contents each call.
-  const std::string_view mode = setting ? setting : "1";
-  VT_CHECK(mode == "0" || mode == "1", "Invalid VT_XPU_W8A8_MODEL_MAP");
-  if (mode == "0") {
-    Exl3GroupedW8A8(q, out, in, tr, suh, svh, map, args);
-    return;
-  }
-  auto metadata = cache.Load();
-  if (!metadata || !metadata->Matches(map, int(suh.shape[0]), resident_owner)) {
-    metadata = std::make_shared<const Exl3W8A8ModelMap>(q, map, int(suh.shape[0]), resident_owner);
-    cache.Store(metadata);
-  }
+  auto metadata = W8A8ModelMetadata(q, map, int(suh.shape[0]), resident_owner, cache);
   auto owned_args = args;
   // A call retains its exact immutable generation even if another queue
   // publishes a replacement in the model slot while this call is executing.
   owned_args.model_map = metadata.get();
+  owned_args.input_producer = Exl3W8A8InputProducer::kTensor;
   Tensor workspace, panel;
-  reinterpret_cast<Exl3GroupedLinearFn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
+  reinterpret_cast<Exl3GroupedW8A8Fn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
       q, out, in, tr, suh, svh, map, workspace, panel, owned_args);
+}
+
+bool detail::TryExl3GroupedW8A8SiluModel(Queue& q, Tensor& out, const Tensor& gate_up,
+    const Tensor& tr, const Tensor& suh, const Tensor& svh, const Tensor& map,
+    const Exl3GroupedLinearArgs& args, const std::shared_ptr<void>& resident_owner,
+    SharedPtrCache<const Exl3W8A8ModelMap>& cache) {
+  (void)ValidateW8A8Operands(q, out, gate_up, tr, suh, svh, map, args, true);
+  VT_CHECK(q.device.type == DeviceType::kXPU, "EXL3 SiLU W8A8 requires XPU");
+  auto metadata = W8A8ModelMetadata(q, map, int(suh.shape[0]), resident_owner, cache);
+  auto owned_args = args;
+  owned_args.model_map = metadata.get();
+  owned_args.input_producer = Exl3W8A8InputProducer::kSiluMul;
+  Tensor workspace, panel;
+  return reinterpret_cast<Exl3GroupedW8A8Fn>(GetOp(OpId::kExl3GroupedW8A8, q.device.type))(
+      q, out, gate_up, tr, suh, svh, map, workspace, panel, owned_args);
 }
 
 Exl3SmallMPlan PlanExl3SmallM(int64_t m, int64_t k, int64_t n, int bits) {

@@ -91,6 +91,7 @@ std::pair<std::map<int, EngineCoreOutputs>, bool> EngineCore::step() {
   engine_core_outputs.timestamp = MonotonicSeconds();
   std::map<int, EngineCoreOutputs> outputs_by_client;
   if (!engine_core_outputs.outputs.empty() ||
+      engine_core_outputs.scheduler_stats.num_prefill_kv_computed_tokens > 0 ||
       engine_core_outputs.scheduler_stats.prefix_cache_stats.queries > 0) {
     const int client_index = engine_core_outputs.engine_index;
     outputs_by_client.emplace(client_index, std::move(engine_core_outputs));
@@ -263,6 +264,7 @@ EngineCore::step_with_batch_queue() {
 
   std::map<int, EngineCoreOutputs> outputs_by_client;
   if (!engine_core_outputs.outputs.empty() ||
+      engine_core_outputs.scheduler_stats.num_prefill_kv_computed_tokens > 0 ||
       engine_core_outputs.scheduler_stats.prefix_cache_stats.queries > 0) {
     const int client_index = engine_core_outputs.engine_index;
     outputs_by_client.emplace(client_index, std::move(engine_core_outputs));

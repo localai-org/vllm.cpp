@@ -1,7 +1,9 @@
 #include "xpu_common.h"
+#include "xpu_logsoftmax_split.h"
 #include "xpu_kernels.h"
 #include "vt/sample_common.h"
 #include "vt/xpu_sampling.h"
+#include "vt/xpu_argmax_plan.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -82,6 +84,32 @@ void ComputeProbsKernel(Queue& q, Tensor& probs, const Tensor& logits) {
 void ComputeLogprobsKernel(Queue& q, Tensor& probs, const Tensor& logits) {
   TraceXpuOp(OpId::kComputeLogprobs, q, {&probs, &logits});
   WithOutput(q, probs, {&logits}, [&](Tensor& target) { Normalize<1>(q, target, logits); });
+}
+void SplitRawLogprobsM1(Queue& q, Tensor& output, const Tensor& logits, Tensor& state) {
+  VT_CHECK(q.device.type == DeviceType::kXPU && logits.device == q.device &&
+               output.device == q.device && state.device == q.device,
+           "XPU split raw logprobs requires operands on the queue device");
+  VT_CHECK(logits.rank == 2 && output.rank == 2 && state.rank == 1 &&
+               logits.dtype == DType::kF32 && output.dtype == DType::kF32 &&
+               state.dtype == DType::kF32 && logits.shape[0] == 1 &&
+               logits.shape[1] == 248320 && output.shape[0] == 1 &&
+               output.shape[1] == 248320 && state.shape[0] == 2 &&
+               logits.IsContiguous() && output.IsContiguous() && state.IsContiguous(),
+           "XPU split raw logprobs requires contiguous F32[1,248320] and two F32 state values");
+  for (const Tensor* t : std::initializer_list<const Tensor*>{&logits,&output,&state})
+    VT_CHECK(t->data && reinterpret_cast<uintptr_t>(t->data) % alignof(float) == 0,
+             "XPU split raw logprobs requires aligned nonnull operands");
+  VT_CHECK(!Overlap(output,logits) && !Overlap(output,state) && !Overlap(logits,state),
+           "XPU split raw logprobs operands must not alias");
+  TraceXpuOp(OpId::kComputeLogprobs,q,{&output,&logits,&state});
+  RecordGraphWrite(q,output.data,output.Bytes());
+  RecordGraphWrite(q,state.data,state.Bytes());
+  const auto events = detail::SubmitSplitRawLogsoftmax(q,
+      static_cast<float*>(output.data),static_cast<const float*>(logits.data),
+      static_cast<float*>(state.data),logits.shape[1]);
+  constexpr const char* stages[] = {"raw_logsoftmax_maximum","raw_logsoftmax_exp",
+                                  "raw_logsoftmax_sum","raw_logsoftmax_output"};
+  for (size_t i = 0; i < events.size(); ++i) RecordProfileEvent(q,stages[i],events[i]);
 }
 void ApplyMinPKernel(Queue& q, Tensor& logits, const Tensor& min_p) {
   TraceXpuOp(OpId::kApplyMinP, q, {&logits, &min_p});
@@ -469,6 +497,133 @@ void GreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits) {
   });
   RecordProfileEvent(q, "greedy_argmax", event);
 }
+namespace {
+struct alignas(16) ArgmaxPartial {
+  float value;
+  uint32_t valid;
+  int64_t id;
+};
+static_assert(sizeof(ArgmaxPartial) == kXpuArgmaxPartialBytes);
+constexpr int64_t ArgmaxInvalid = std::numeric_limits<int64_t>::max();
+
+// No floating arithmetic: preserve the strict scan's smallest-ID tie rule,
+// signed zeros, infinities and ignored later NaNs at both reduction stages.
+inline void UpdateArgmax(float& best, int64_t& id, float value, int64_t candidate) {
+  if (value > best || (value == best && candidate < id)) {
+    best = value;
+    id = candidate;
+  }
+}
+inline void ReduceArgmax(sycl::nd_item<1> item,
+                         sycl::local_accessor<float> values,
+                         sycl::local_accessor<int64_t> ids) {
+  const auto lane = item.get_local_id(0);
+  item.barrier(sycl::access::fence_space::local_space);
+  for (size_t step = SamplingLanes / 2; step; step /= 2) {
+    if (lane < step) {
+      float best = values[lane];
+      int64_t id = ids[lane];
+      UpdateArgmax(best, id, values[lane + step], ids[lane + step]);
+      values[lane] = best;
+      ids[lane] = id;
+    }
+    item.barrier(sycl::access::fence_space::local_space);
+  }
+}
+
+template<class Id>
+void LaunchTiledArgmax(Queue& q, Id* output, const float* input,
+                       ArgmaxPartial* partials, size_t rows, int64_t vocab, int tile) {
+  const size_t tiles = 1 + size_t(vocab - 1) / size_t(tile);
+  const auto partial_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> values(SamplingLanes, h);
+    sycl::local_accessor<int64_t> ids(SamplingLanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * tiles * SamplingLanes, SamplingLanes),
+                   [=](sycl::nd_item<1> item) {
+      const auto group = item.get_group(0), lane = item.get_local_id(0);
+      const size_t row = group / tiles;
+      const int64_t begin = int64_t(group % tiles) * tile;
+      const int64_t end = sycl::min(begin + tile, vocab);
+      float best = NegInf;
+      int64_t id = ArgmaxInvalid;
+      for (int64_t col = begin + lane; col < end; col += SamplingLanes)
+        UpdateArgmax(best, id, input[row * vocab + col], col);
+      values[lane] = best;
+      ids[lane] = id;
+      ReduceArgmax(item, values, ids);
+      if (!lane) partials[group] = {values[0], uint32_t(ids[0] != ArgmaxInvalid), ids[0]};
+    });
+  });
+  RecordProfileEvent(q, "greedy_argmax_tiled_partials", partial_event);
+  // NativeQueue is in-order. Caller-owned scratch survives both submissions
+  // and every graph replay; no host wait, pool lease or allocation is needed.
+  const auto merge_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> values(SamplingLanes, h);
+    sycl::local_accessor<int64_t> ids(SamplingLanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * SamplingLanes, SamplingLanes),
+                   [=](sycl::nd_item<1> item) {
+      const auto row = item.get_group(0), lane = item.get_local_id(0);
+      // Uniform branch before barriers: column-zero NaN wins in the CPU scan.
+      if (sycl::isnan(input[row * vocab])) { if (!lane) output[row] = 0; return; }
+      float best = NegInf;
+      int64_t id = ArgmaxInvalid;
+      for (size_t t = lane; t < tiles; t += SamplingLanes) {
+        const auto partial = partials[row * tiles + t];
+        if (partial.valid) UpdateArgmax(best, id, partial.value, partial.id);
+      }
+      values[lane] = best;
+      ids[lane] = id;
+      ReduceArgmax(item, values, ids);
+      if (!lane) output[row] = static_cast<Id>(ids[0]);
+    });
+  });
+  RecordProfileEvent(q, "greedy_argmax_tiled_merge", merge_event);
+}
+}  // namespace
+
+static void CheckTiledArgmaxOperands(Queue& q, const Tensor& token_ids, const Tensor& logits,
+                                      const Tensor& scratch, int tile) {
+  VT_CHECK(q.device.type == DeviceType::kXPU && logits.device == q.device &&
+           token_ids.device == q.device && scratch.device == q.device,
+           "XPU tiled argmax requires operands on the queue's device");
+  VT_CHECK(logits.rank == 2 && logits.dtype == DType::kF32 && token_ids.rank == 1 &&
+           (token_ids.dtype == DType::kI64 || token_ids.dtype == DType::kI32) &&
+           token_ids.shape[0] == logits.shape[0], "XPU tiled argmax shape/dtype mismatch");
+  const auto rows = logits.shape[0], vocab = logits.shape[1];
+  // Check sizes before IsContiguous/Overlap, whose arithmetic assumes bounded
+  // dimensions. All refusals precede writes to output and scratch.
+  const auto required = XpuTiledArgmaxWorkspaceBytes(rows, vocab, tile);
+  VT_CHECK(token_ids.dtype != DType::kI32 || vocab <= std::numeric_limits<int32_t>::max(),
+           "XPU tiled argmax vocabulary exceeds I32 token IDs");
+  VT_CHECK(logits.IsContiguous() && token_ids.IsContiguous(),
+           "XPU tiled argmax requires contiguous logits and token IDs");
+  VT_CHECK(scratch.rank == 1 && scratch.dtype == DType::kI8 && scratch.shape[0] >= 0 &&
+           uint64_t(scratch.shape[0]) <= kXpuArgmaxMaxWorkspaceBytes && scratch.IsContiguous(),
+           "XPU tiled argmax requires a bounded contiguous I8 workspace");
+  VT_CHECK(uint64_t(scratch.shape[0]) >= required, "XPU tiled argmax insufficient workspace");
+  if (!rows) return;
+  VT_CHECK(logits.data && token_ids.data && scratch.data &&
+           reinterpret_cast<uintptr_t>(logits.data) % alignof(float) == 0 &&
+           reinterpret_cast<uintptr_t>(token_ids.data) % SizeOf(token_ids.dtype) == 0 &&
+           reinterpret_cast<uintptr_t>(scratch.data) % alignof(ArgmaxPartial) == 0,
+           "XPU tiled argmax requires nonnull aligned operands");
+  VT_CHECK(!Overlap(logits, token_ids) && !Overlap(logits, scratch) && !Overlap(token_ids, scratch),
+           "XPU tiled argmax operands must not alias");
+}
+
+void TiledGreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits,
+                      Tensor& scratch, int tile) {
+  CheckTiledArgmaxOperands(q, token_ids, logits, scratch, tile);
+  const auto rows = logits.shape[0], vocab = logits.shape[1];
+  if (!rows) return;
+  TraceXpuOp(OpId::kGreedyArgmax, q, {&token_ids, &logits, &scratch});
+  auto* partials = static_cast<ArgmaxPartial*>(scratch.data);
+  const auto* input = static_cast<const float*>(logits.data);
+  if (token_ids.dtype == DType::kI64)
+    LaunchTiledArgmax(q, static_cast<int64_t*>(token_ids.data), input, partials, rows, vocab, tile);
+  else
+    LaunchTiledArgmax(q, static_cast<int32_t*>(token_ids.data), input, partials, rows, vocab, tile);
+}
 void MappedGreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits,
                               const Tensor& global_ids, int64_t target_vocab) {
   TraceXpuOp(OpId::kMappedGreedyArgmax, q, {&token_ids, &logits, &global_ids});
@@ -516,11 +671,193 @@ void MappedGreedyArgmaxKernel(Queue& q, Tensor& token_ids, const Tensor& logits,
   RecordProfileEvent(q, "mapped_greedy_argmax", event);
 }
 
-void GreedyRejectionSampleKernel(Queue& q, Tensor& sampled,
-                                 Tensor& num_sampled, Tensor& target_argmax,
-                                 const Tensor& logits,
-                                 const Tensor& draft_sampled,
-                                 const Tensor& cu_num_logits) {
+namespace {
+// The mapped contract rejects any invalid operand, not only a winning one.
+// Keep that flag alongside the comparison and carry it through every tile.
+inline void ReduceMappedArgmax(sycl::nd_item<1> item,
+                               sycl::local_accessor<float> values,
+                               sycl::local_accessor<int64_t> ids,
+                               sycl::local_accessor<uint32_t> invalid) {
+  const auto lane = item.get_local_id(0);
+  item.barrier(sycl::access::fence_space::local_space);
+  for (size_t step = SamplingLanes / 2; step; step /= 2) {
+    if (lane < step) {
+      float best = values[lane];
+      int64_t id = ids[lane];
+      UpdateArgmax(best, id, values[lane + step], ids[lane + step]);
+      values[lane] = best;
+      ids[lane] = id;
+      invalid[lane] |= invalid[lane + step];
+    }
+    item.barrier(sycl::access::fence_space::local_space);
+  }
+}
+}
+
+void TiledMappedGreedyArgmax(Queue& q, Tensor& token_ids, const Tensor& logits,
+                            const Tensor& global_ids, int64_t target_vocab,
+                            Tensor& scratch, int tile) {
+  VT_CHECK(q.device.type == DeviceType::kXPU && logits.device == q.device &&
+           token_ids.device == q.device && global_ids.device == q.device && scratch.device == q.device,
+           "XPU tiled mapped argmax requires operands on the queue's device");
+  VT_CHECK(logits.rank == 2 && logits.dtype == DType::kF32 && token_ids.rank == 1 &&
+           token_ids.dtype == DType::kI32 && token_ids.shape[0] == logits.shape[0] &&
+           global_ids.rank == 1 && global_ids.dtype == DType::kI32 && global_ids.shape[0] == logits.shape[1] &&
+           target_vocab > 0 && target_vocab <= std::numeric_limits<int32_t>::max(),
+           "XPU tiled mapped argmax shape/dtype/target vocabulary mismatch");
+  const auto rows = logits.shape[0], vocab = logits.shape[1];
+  const auto required = XpuTiledArgmaxWorkspaceBytes(rows, vocab, tile);
+  VT_CHECK(logits.IsContiguous() && token_ids.IsContiguous() && global_ids.IsContiguous(),
+           "XPU tiled mapped argmax requires contiguous logits, IDs and map");
+  VT_CHECK(scratch.rank == 1 && scratch.dtype == DType::kI8 && scratch.shape[0] >= 0 &&
+           uint64_t(scratch.shape[0]) <= kXpuArgmaxMaxWorkspaceBytes && scratch.IsContiguous(),
+           "XPU tiled mapped argmax requires a bounded contiguous I8 workspace");
+  VT_CHECK(uint64_t(scratch.shape[0]) >= required, "XPU tiled mapped argmax insufficient workspace");
+  if (!rows) return;
+  VT_CHECK(logits.data && token_ids.data && global_ids.data && scratch.data &&
+           reinterpret_cast<uintptr_t>(logits.data) % alignof(float) == 0 &&
+           reinterpret_cast<uintptr_t>(token_ids.data) % alignof(int32_t) == 0 &&
+           reinterpret_cast<uintptr_t>(global_ids.data) % alignof(int32_t) == 0 &&
+           reinterpret_cast<uintptr_t>(scratch.data) % alignof(ArgmaxPartial) == 0,
+           "XPU tiled mapped argmax requires nonnull aligned operands");
+  VT_CHECK(!Overlap(logits, token_ids) && !Overlap(global_ids, token_ids) &&
+           !Overlap(logits, scratch) && !Overlap(global_ids, scratch) && !Overlap(token_ids, scratch),
+           "XPU tiled mapped argmax output/workspace must not alias inputs or each other");
+  TraceXpuOp(OpId::kMappedGreedyArgmax, q, {&token_ids, &logits, &global_ids, &scratch});
+  const size_t tiles = 1 + size_t(vocab - 1) / size_t(tile);
+  const auto* input = static_cast<const float*>(logits.data);
+  const auto* mapping = static_cast<const int32_t*>(global_ids.data);
+  auto* output = static_cast<int32_t*>(token_ids.data);
+  auto* partials = static_cast<ArgmaxPartial*>(scratch.data);
+  const auto partial_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> values(SamplingLanes, h);
+    sycl::local_accessor<int64_t> ids(SamplingLanes, h);
+    sycl::local_accessor<uint32_t> invalid(SamplingLanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * tiles * SamplingLanes, SamplingLanes),
+                   [=](sycl::nd_item<1> item) {
+      const auto group = item.get_group(0), lane = item.get_local_id(0);
+      const size_t row = group / tiles;
+      const int64_t begin = int64_t(group % tiles) * tile;
+      const int64_t end = sycl::min(begin + tile, vocab);
+      float best = NegInf;
+      int64_t id = ArgmaxInvalid;
+      uint32_t bad = 0;
+      for (int64_t col = begin + lane; col < end; col += SamplingLanes) {
+        const float value = input[row * vocab + col];
+        const int32_t global = mapping[col];
+        bad |= !sycl::isfinite(value) || global < 0 || global >= target_vocab;
+        UpdateArgmax(best, id, value, global);
+      }
+      values[lane] = best; ids[lane] = id; invalid[lane] = bad;
+      ReduceMappedArgmax(item, values, ids, invalid);
+      // Bit0: a comparison candidate exists. Bit1: some operand is invalid.
+      if (!lane) partials[group] = {values[0], uint32_t(ids[0] != ArgmaxInvalid) | (invalid[0] << 1), ids[0]};
+    });
+  });
+  RecordProfileEvent(q, "mapped_greedy_argmax_tiled_partials", partial_event);
+  const auto merge_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    sycl::local_accessor<float> values(SamplingLanes, h);
+    sycl::local_accessor<int64_t> ids(SamplingLanes, h);
+    sycl::local_accessor<uint32_t> invalid(SamplingLanes, h);
+    h.parallel_for(sycl::nd_range<1>(rows * SamplingLanes, SamplingLanes),
+                   [=](sycl::nd_item<1> item) {
+      const auto row = item.get_group(0), lane = item.get_local_id(0);
+      float best = NegInf;
+      int64_t id = ArgmaxInvalid;
+      uint32_t bad = 0;
+      for (size_t t = lane; t < tiles; t += SamplingLanes) {
+        const auto partial = partials[row * tiles + t];
+        bad |= partial.valid >> 1;
+        if (partial.valid & 1) UpdateArgmax(best, id, partial.value, partial.id);
+      }
+      values[lane] = best; ids[lane] = id; invalid[lane] = bad;
+      ReduceMappedArgmax(item, values, ids, invalid);
+      if (!lane) output[row] = invalid[0] ? -1 : static_cast<int32_t>(ids[0]);
+    });
+  });
+  RecordProfileEvent(q, "mapped_greedy_argmax_tiled_merge", merge_event);
+}
+
+void CompactRawLogprobs0(Queue& q, Tensor& output, const Tensor& raw_logprobs,
+                         const Tensor& selected_ids, Tensor& scratch) {
+  VT_CHECK(q.device.type == DeviceType::kXPU && raw_logprobs.device == q.device &&
+           selected_ids.device == q.device && output.device == q.device && scratch.device == q.device,
+           "XPU compact logprobs requires operands on the queue device");
+  VT_CHECK(raw_logprobs.rank == 2 && raw_logprobs.dtype == DType::kF32 &&
+           selected_ids.rank == 1 && selected_ids.dtype == DType::kI64 &&
+           selected_ids.shape[0] == raw_logprobs.shape[0],
+           "XPU compact logprobs requires F32 matrix and one I64 ID per row");
+  const auto rows = raw_logprobs.shape[0], vocab = raw_logprobs.shape[1];
+  const auto required = XpuCompactLogprobsWorkspaceBytes(rows, vocab);
+  VT_CHECK(vocab <= std::numeric_limits<int32_t>::max(), "XPU compact logprobs rank exceeds I32");
+  const auto output_bytes = size_t(rows) * sizeof(SelectedLogprobRecord);
+  const auto byte_buffer = [&](const Tensor& t, size_t minimum, size_t maximum) {
+    return t.rank == 1 && t.dtype == DType::kI8 && t.shape[0] >= 0 &&
+           uint64_t(t.shape[0]) >= minimum && uint64_t(t.shape[0]) <= maximum && t.IsContiguous();
+  };
+  VT_CHECK(raw_logprobs.IsContiguous() && selected_ids.IsContiguous() &&
+           byte_buffer(output, output_bytes, kXpuArgmaxMaxWorkspaceBytes) &&
+           byte_buffer(scratch, required, kXpuArgmaxMaxWorkspaceBytes / 4),
+           "XPU compact logprobs requires bounded contiguous output and scratch");
+  if (!rows) return;
+  VT_CHECK(raw_logprobs.data && selected_ids.data && output.data && scratch.data &&
+           reinterpret_cast<uintptr_t>(raw_logprobs.data) % alignof(float) == 0 &&
+           reinterpret_cast<uintptr_t>(selected_ids.data) % alignof(int64_t) == 0 &&
+           reinterpret_cast<uintptr_t>(output.data) % alignof(SelectedLogprobRecord) == 0 &&
+           reinterpret_cast<uintptr_t>(scratch.data) % alignof(int32_t) == 0,
+           "XPU compact logprobs requires aligned nonnull operands");
+  VT_CHECK(!Overlap(output, scratch) && !Overlap(output, raw_logprobs) &&
+           !Overlap(output, selected_ids) && !Overlap(scratch, raw_logprobs) &&
+           !Overlap(scratch, selected_ids), "XPU compact logprobs output/scratch must not alias");
+  RecordGraphWrite(q, output.data, output_bytes);
+  RecordGraphWrite(q, scratch.data, required);
+  const auto* values = static_cast<const float*>(raw_logprobs.data);
+  const auto* ids = static_cast<const int64_t*>(selected_ids.data);
+  auto* partials = static_cast<int32_t*>(scratch.data);
+  auto* records = static_cast<SelectedLogprobRecord*>(output.data);
+  constexpr int64_t tile = 4096;
+  const size_t tiles = 1 + size_t(vocab - 1) / size_t(tile);
+  const auto rank_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    h.parallel_for(sycl::nd_range<1>(rows * tiles * SamplingLanes, SamplingLanes),
+                   [=](sycl::nd_item<1> item) {
+      const auto group = item.get_group(0), lane = item.get_local_id(0);
+      const size_t row = group / tiles;
+      const int64_t id = ids[row];
+      if (id < 0 || id >= vocab) { if (!lane) partials[group] = -1; return; }
+      const float selected = values[row * vocab + id];
+      const int64_t begin = int64_t(group % tiles) * tile;
+      const int64_t end = sycl::min(begin + tile, vocab);
+      int32_t count = 0;
+      for (int64_t col = begin + lane; col < end; col += SamplingLanes)
+        count += values[row * vocab + col] >= selected;
+      // Only integer addition is reduced; the stored logprobs are untouched.
+      count = sycl::reduce_over_group(item.get_group(), count, sycl::plus<int32_t>());
+      if (!lane) partials[group] = count;
+    });
+  });
+  RecordProfileEvent(q, "compact_logprobs0_rank_partials", rank_event);
+  const auto gather_event = NativeQueue(q).submit([&](sycl::handler& h) {
+    h.parallel_for(sycl::nd_range<1>(rows * SamplingLanes, SamplingLanes),
+                   [=](sycl::nd_item<1> item) {
+      const auto row = item.get_group(0), lane = item.get_local_id(0);
+      const auto id = ids[row];
+      if (id < 0 || id >= vocab) {
+        if (!lane) records[row] = {id, 0.f, -1};
+        return;
+      }
+      int32_t count = 0;
+      for (size_t t = lane; t < tiles; t += SamplingLanes) count += partials[row * tiles + t];
+      count = sycl::reduce_over_group(item.get_group(), count, sycl::plus<int32_t>());
+      if (!lane) records[row] = {id, values[row * vocab + id], count};
+    });
+  });
+  RecordProfileEvent(q, "compact_logprobs0_gather", gather_event);
+}
+
+static void GreedyRejectionSampleImpl(Queue& q, Tensor& sampled,
+                                       Tensor& num_sampled, Tensor& target_argmax,
+                                       const Tensor& logits, const Tensor& draft_sampled,
+                                       const Tensor& cu_num_logits, Tensor* scratch, int tile) {
   TraceXpuOp(OpId::kGreedyRejectionSample, q,
              {&sampled, &num_sampled, &target_argmax, &logits,
               &draft_sampled, &cu_num_logits});
@@ -544,45 +881,49 @@ void GreedyRejectionSampleKernel(Queue& q, Tensor& sampled,
 
   // Target decisions for all expanded rows. The lowest token id wins ties,
   // including an all -inf row; a NaN in column zero follows the CPU oracle.
-  constexpr size_t lanes = 128;
-  const auto argmax_event = NativeQueue(q).submit([&](sycl::handler& h) {
-    sycl::local_accessor<float> best_values(lanes, h);
-    sycl::local_accessor<int32_t> best_ids(lanes, h);
-    h.parallel_for(sycl::nd_range<1>(rows * lanes, lanes),
-                   [=](sycl::nd_item<1> item) {
-      const int64_t row = item.get_group(0), lane = item.get_local_id(0);
-      if (sycl::isnan(values[row * vocab])) {
-        if (lane == 0) argmax[row] = 0;
-        return;
-      }
-      float best = NegInf;
-      int32_t index = std::numeric_limits<int32_t>::max();
-      for (int64_t col = lane; col < vocab; col += lanes) {
-        const float value = values[row * vocab + col];
-        if (value > best || (value == best && col < index)) {
-          best = value;
-          index = static_cast<int32_t>(col);
+  if (scratch) {
+    TiledGreedyArgmax(q, target_argmax, logits, *scratch, tile);
+  } else {
+    constexpr size_t lanes = 128;
+    const auto argmax_event = NativeQueue(q).submit([&](sycl::handler& h) {
+      sycl::local_accessor<float> best_values(lanes, h);
+      sycl::local_accessor<int32_t> best_ids(lanes, h);
+      h.parallel_for(sycl::nd_range<1>(rows * lanes, lanes),
+                     [=](sycl::nd_item<1> item) {
+        const int64_t row = item.get_group(0), lane = item.get_local_id(0);
+        if (sycl::isnan(values[row * vocab])) {
+          if (lane == 0) argmax[row] = 0;
+          return;
         }
-      }
-      best_values[lane] = best;
-      best_ids[lane] = index;
-      item.barrier(sycl::access::fence_space::local_space);
-      for (int64_t step = lanes / 2; step; step /= 2) {
-        if (lane < step) {
-          const float value = best_values[lane + step];
-          const int32_t id = best_ids[lane + step];
-          if (value > best_values[lane] ||
-              (value == best_values[lane] && id < best_ids[lane])) {
-            best_values[lane] = value;
-            best_ids[lane] = id;
+        float best = NegInf;
+        int32_t index = std::numeric_limits<int32_t>::max();
+        for (int64_t col = lane; col < vocab; col += lanes) {
+          const float value = values[row * vocab + col];
+          if (value > best || (value == best && col < index)) {
+            best = value;
+            index = static_cast<int32_t>(col);
           }
         }
+        best_values[lane] = best;
+        best_ids[lane] = index;
         item.barrier(sycl::access::fence_space::local_space);
-      }
-      if (lane == 0) argmax[row] = best_ids[0];
+        for (int64_t step = lanes / 2; step; step /= 2) {
+          if (lane < step) {
+            const float value = best_values[lane + step];
+            const int32_t id = best_ids[lane + step];
+            if (value > best_values[lane] ||
+                (value == best_values[lane] && id < best_ids[lane])) {
+              best_values[lane] = value;
+              best_ids[lane] = id;
+            }
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+        }
+        if (lane == 0) argmax[row] = best_ids[0];
+      });
     });
-  });
-  RecordProfileEvent(q, "greedy_rejection_argmax", argmax_event);
+    RecordProfileEvent(q, "greedy_rejection_argmax", argmax_event);
+  }
 
   // One independent sequential acceptance walk per request. The caller owns
   // argmax scratch until this queued kernel completes.
@@ -607,6 +948,55 @@ void GreedyRejectionSampleKernel(Queue& q, Tensor& sampled,
     counts[req] = static_cast<int32_t>(accepted + 1);
   });
   RecordProfileEvent(q, "greedy_rejection_accept", accept_event);
+}
+
+void GreedyRejectionSampleKernel(Queue& q, Tensor& sampled, Tensor& num_sampled,
+                                 Tensor& target_argmax, const Tensor& logits,
+                                 const Tensor& draft_sampled, const Tensor& cu_num_logits) {
+  GreedyRejectionSampleImpl(q, sampled, num_sampled, target_argmax, logits,
+                            draft_sampled, cu_num_logits, nullptr, 0);
+}
+
+void TiledGreedyRejectionSample(Queue& q, Tensor& sampled, Tensor& num_sampled,
+                                Tensor& target_argmax, const Tensor& logits,
+                                const Tensor& draft_sampled, const Tensor& cu_num_logits,
+                                Tensor& scratch, int tile) {
+  // Validate everything before live metadata validation or any output write.
+  CheckTiledArgmaxOperands(q, target_argmax, logits, scratch, tile);
+  const auto rows = logits.shape[0];
+  VT_CHECK(rows <= std::numeric_limits<int32_t>::max() && target_argmax.dtype == DType::kI32,
+           "XPU tiled rejection requires bounded I32 row IDs");
+  VT_CHECK(cu_num_logits.rank == 1 && cu_num_logits.dtype == DType::kI32 &&
+           cu_num_logits.shape[0] >= 1 && cu_num_logits.shape[0] <= rows + 1 &&
+           cu_num_logits.device == q.device && cu_num_logits.IsContiguous(),
+           "XPU tiled rejection requires bounded contiguous I32 offsets");
+  const auto requests = cu_num_logits.shape[0] - 1;
+  VT_CHECK((rows == 0) == (requests == 0), "XPU tiled rejection rows/requests mismatch");
+  const auto vector_ok = [&](const Tensor& t, int64_t n) {
+    return t.rank == 1 && t.shape[0] == n && t.dtype == DType::kI32 &&
+           t.device == q.device && t.IsContiguous();
+  };
+  VT_CHECK(vector_ok(draft_sampled, rows) && vector_ok(num_sampled, requests),
+           "XPU tiled rejection requires contiguous I32 drafts and counts");
+  VT_CHECK(sampled.rank == 2 && sampled.shape[0] == requests && sampled.shape[1] > 0 &&
+           sampled.shape[1] <= std::numeric_limits<int32_t>::max() &&
+           uint64_t(requests) <= uint64_t(std::numeric_limits<int64_t>::max()) /
+               sizeof(int32_t) / uint64_t(sampled.shape[1]) &&
+           sampled.dtype == DType::kI32 && sampled.device == q.device && sampled.IsContiguous(),
+           "XPU tiled rejection requires bounded contiguous I32 output rows");
+  if (!rows) return;
+  for (const Tensor* t : std::initializer_list<const Tensor*>{&draft_sampled, &cu_num_logits, &sampled, &num_sampled})
+    VT_CHECK(t->data && reinterpret_cast<uintptr_t>(t->data) % alignof(int32_t) == 0,
+             "XPU tiled rejection requires aligned nonnull operands");
+  const Tensor* outputs[]{&sampled, &num_sampled, &target_argmax, &scratch};
+  for (size_t i = 0; i < 4; ++i) {
+    for (size_t j = i + 1; j < 4; ++j)
+      VT_CHECK(!Overlap(*outputs[i], *outputs[j]), "XPU tiled rejection outputs must not alias");
+    for (const Tensor* input : {&logits, &draft_sampled, &cu_num_logits})
+      VT_CHECK(!Overlap(*outputs[i], *input), "XPU tiled rejection output/input alias");
+  }
+  GreedyRejectionSampleImpl(q, sampled, num_sampled, target_argmax, logits,
+                            draft_sampled, cu_num_logits, &scratch, tile);
 }
 
 void SampleOneHotRejection(Queue& q, Tensor& sampled, Tensor& num_sampled,
