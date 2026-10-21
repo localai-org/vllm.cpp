@@ -7,6 +7,10 @@ ISSUE-LOCAL-01M5B60NEFSEHYZXMR6FSS1RAF (the upstream probe). Branch
 (Blackhole) under the file mutex `${GPU_LOCK:-$HOME/gpu.lock}`. No product code
 changed; this file is the record.
 
+The probe this document rests on, its raw output and the harness micro's raw
+output are preserved next to it, in
+`docs/bench-evidence/tt-rms-norm-compute-config-20261021/`.
+
 ## 1. The question
 
 Two replays of the same captured in-model norm rows read two different
@@ -149,6 +153,13 @@ through the micro):
 | `/tmp/build-p150-base/tests/test_kolibri1_tt_b2ii` (2026-10-17 20:35) | `/tmp/umdtrial-install` | **1.0072** | **1.00771** | **0.995782** |
 | `/tmp/vllm-newsubstrate/build/tests/test_kolibri1_tt_b2ii` (2026-10-20 00:22) | `/tmp/umdtrial-new-install` | **0.980947** | **1.0033** | **0.996982** |
 
+The raw output of that sweep is preserved with this document as
+`harness_replay_matrix.log`. It is the harness micro's own stdout, one block
+per (binary, substrate, row) combination, and every number in the table above
+is in it as the micro's `tt/host2=` line. Its `exit=1` blocks are the
+cross-over of section 2.4: the binary built against one substrate does not
+run on the other.
+
 Both readings reproduce exactly, so both records are confirmed as measurements
 and not as transcription errors. The pinned reading is stable: two repeats
 read 1.0072 and 0.991758 (tt/cpu) both times.
@@ -170,7 +181,8 @@ A standalone ttnn program (one translation unit, linked against each
 substrate) replays the same rows and selects the compute-kernel configuration
 explicitly. Its default arm reproduces the harness numbers exactly
 (1.007197 on the pinned substrate, 0.980947 on the upstream substrate, and the
-same 676 differing elements on row 000), so it measures the same path.
+same 676 differing elements on row 000), so it measures the same path. Its
+source is preserved with this document as `probe_rms_norm_config.cpp`.
 
 `ratio_bf16` is the sum of the device bf16 output divided by the sum of the
 host-double bf16 oracle, the quantity the harness prints as `tt/host2`:
@@ -192,6 +204,15 @@ The same five modes on the upstream substrate give byte-identical numbers:
 | 2 | 0.980947 | 1.003302 | 0.996982 |
 | 3 | 0.980947 | 1.003302 | 0.996982 |
 | 4 | 0.995718 | 1.009895 | 0.995782 |
+
+Both tables are recomputable from the raw output of the probe, preserved with
+this document as `probe_rms_norm_config_matrix.log` (sha256
+`c638a8f24b321926cdaacaca5f29a1afb1453db2d8bcebd54b6392abeca7af20`). It is
+the probe matrix in the raw, one line per (substrate, row, mode) triple: the
+substrate is tagged `probe_pin` for the pinned install and `probe_new` for the
+upstream install, and each line carries the `ratio_bf16` and `ratio_f32` the
+tables above quote together with the count of differing elements. Every cell
+of both tables is a `ratio_bf16` value in that log.
 
 Two results follow.
 
@@ -218,6 +239,17 @@ predictable from the row magnitude:
 | `normrow-004` | 1x2560 | 5.5 | 1.007708 | 1.003302 |
 | `normrow-005` | 1x2560 | 0.503906 | 0.995723 | 0.989580 |
 | `normrow-007` | 48x128 | 1.44531 | 0.989715 | 1.001155 |
+
+The `max|x|` column is the maximum over the whole captured block, not over the
+first row the probe replays, so for the 48x128 rows it differs from the
+`max|x|` the harness micro prints in `harness_replay_matrix.log`, which is the
+first-row maximum.
+
+The three rows the preserved probe matrix covers (000, 001 and 004) read
+back out of `probe_rms_norm_config_matrix.log` at the default mode, on both
+substrates. The four remaining rows of this table (002, 003, 005 and 007) are
+not in that log, and no artifact for them is preserved in this tree, so their
+cells cannot be recomputed from the repository alone.
 
 The record in ISSUE-LOCAL-01M578VP02HPVBYSMRP32GWZGF quotes 0.9984 for the
 d=128 rows on the pin. That value is `normrow-002`, not `normrow-001`.
@@ -328,5 +360,47 @@ env TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/tt-metalium \
 
 The upstream substrate uses `/tmp/umdtrial-new-install` in both environment
 variables and the binary `/tmp/vllm-newsubstrate/build/tests/test_kolibri1_tt_b2ii`.
-The standalone probe (`/tmp/rms-ttprobe/probe.cpp`, scratch, not committed)
-takes the row file and a mode number and prints the same ratio.
+
+The standalone probe takes the row file and a mode number and prints the same
+ratio. Its source is preserved with this document as
+`probe_rms_norm_config.cpp`, copied byte for byte from the scratch path
+`/tmp/rms-ttprobe/probe.cpp` (sha256
+`97a22b6929b322797a141606ea7d1ae8e373e2c44727f35ed2bf7db276d4cfb6`); its
+header still reads "SCRATCH PROBE (not for commit)", because the probe was
+written before this record was committed.
+
+The probe is device-only, and the reading does not depend on a host compiler:
+it is one translation unit that links against the tt-metal install tree and
+nothing else, it carries no vllm.cpp code, and it holds no host-side RMS
+implementation. The measured operation is the device's `ttnn::rms_norm`
+kernel, and the host evaluates only the double-precision oracle that the
+device output is compared against.
+
+Build it against the pinned install tree:
+
+```sh
+PIN=/tmp/umdtrial-install
+SPD=/tmp/tt-metal-umdtrial/.cpmcache/spdlog/b1c2586bb5c35a7929362e87f62433eb68206873/include
+clang++ -O1 -std=c++20 probe_rms_norm_config.cpp -o /tmp/rms-ttprobe/probe_pin \
+  -isystem $PIN/include -isystem $PIN/libexec/tt-metalium/ttnn \
+  -isystem $PIN/include/tracy -isystem $PIN/libexec/tt-metalium/tt_metal/hostdevcommon/api \
+  -isystem $PIN/libexec/tt-metalium -isystem $PIN/include/metalium-thirdparty -isystem $SPD \
+  -L$PIN/lib64 -Wl,-rpath,$PIN/lib64 \
+  -l:_ttnncpp.so -ltt_metal -ltt_stl -ltt-umd -lfmt -lspdlog
+```
+
+The upstream install tree builds the same way and yields the binary the
+preserved matrix log calls `probe_new`. Run a probe under the file mutex,
+with the row file and the mode number:
+
+```sh
+exec 9>$HOME/gpu.lock
+flock -x 9
+TT_METAL_RUNTIME_ROOT=$PIN/libexec/tt-metalium \
+LD_LIBRARY_PATH=$PIN/lib64:$PIN/libexec/tt-metalium \
+  /tmp/rms-ttprobe/probe_pin /tmp/normdump/normrow-000.bin 0
+```
+
+The captured row files themselves stay outside this tree; section 2.3 records
+their sha256, so a reader who obtains them can check them against the
+record.

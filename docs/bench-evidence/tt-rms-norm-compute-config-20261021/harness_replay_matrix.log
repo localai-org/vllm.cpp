@@ -1,0 +1,48 @@
+===== P-oldheaders | umdtrial-install | normrow-000 =====
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:859: MESSAGE: replay 1 rows=1 d=2560 max|x|=3.54688
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:950: MESSAGE: host2 sum=9.69546 tt/host2=1.0072 cpu/host2=1.01557 tt!=cpu elems=650 tt!=host-bf16 elems=676
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:955: MESSAGE: with_res=0 sum_cpu=9.84639 sum_tt=9.76524 ratio=0.991758 max_abs=0.0625
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:950: MESSAGE: host2 sum=9.69546 tt/host2=1.0072 cpu/host2=1.01557 tt!=cpu elems=650 tt!=host-bf16 elems=676
+exit=0
+===== P-oldheaders | umdtrial-new-install | normrow-000 =====
+exit=1
+===== N-newsubstrate | umdtrial-new-install | normrow-000 =====
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:860: MESSAGE: replay 1 rows=1 d=2560 max|x|=3.54688
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:953: MESSAGE: host2 sum=9.69546 tt/host2=0.980947 cpu/host2=1.01557 tt!=cpu elems=2560 tt!=host-bf16 elems=2560
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:957: MESSAGE: with_res=0 sum_cpu=9.84639 sum_tt=9.51074 ratio=0.965911 max_abs=0.4375
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:953: MESSAGE: host2 sum=9.69546 tt/host2=0.980947 cpu/host2=1.01557 tt!=cpu elems=2560 tt!=host-bf16 elems=2560
+exit=0
+===== N-newsubstrate | umdtrial-install | normrow-000 =====
+exit=1
+===== P-oldheaders | umdtrial-install | normrow-004 =====
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:859: MESSAGE: replay 1 rows=1 d=2560 max|x|=5.5
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:950: MESSAGE: host2 sum=72.029 tt/host2=1.00771 cpu/host2=1.01297 tt!=cpu elems=575 tt!=host-bf16 elems=692
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:955: MESSAGE: with_res=0 sum_cpu=72.963 sum_tt=72.5842 ratio=0.994809 max_abs=0.125
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:950: MESSAGE: host2 sum=72.029 tt/host2=1.00771 cpu/host2=1.01297 tt!=cpu elems=575 tt!=host-bf16 elems=692
+exit=0
+===== P-oldheaders | umdtrial-new-install | normrow-004 =====
+exit=1
+===== N-newsubstrate | umdtrial-new-install | normrow-004 =====
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:860: MESSAGE: replay 1 rows=1 d=2560 max|x|=5.5
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:953: MESSAGE: host2 sum=72.029 tt/host2=1.0033 cpu/host2=1.01297 tt!=cpu elems=2560 tt!=host-bf16 elems=2551
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:957: MESSAGE: with_res=0 sum_cpu=72.963 sum_tt=72.2669 ratio=0.990459 max_abs=0.5
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:953: MESSAGE: host2 sum=72.029 tt/host2=1.0033 cpu/host2=1.01297 tt!=cpu elems=2560 tt!=host-bf16 elems=2551
+exit=0
+===== N-newsubstrate | umdtrial-install | normrow-004 =====
+exit=1
+===== P-oldheaders | umdtrial-install | normrow-001 =====
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:859: MESSAGE: replay 1 rows=48 d=128 max|x|=0.462891
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:950: MESSAGE: host2 sum=8.51498 tt/host2=0.995782 cpu/host2=0.993259 tt!=cpu elems=9 tt!=host-bf16 elems=57
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:955: MESSAGE: with_res=0 sum_cpu=8.45758 sum_tt=8.47906 ratio=1.00254 max_abs=0.015625
+./tests/vllm/models/test_kolibri1_tt_b2ii.cpp:950: MESSAGE: host2 sum=8.51498 tt/host2=0.995782 cpu/host2=0.993259 tt!=cpu elems=9 tt!=host-bf16 elems=57
+exit=0
+===== P-oldheaders | umdtrial-new-install | normrow-001 =====
+exit=1
+===== N-newsubstrate | umdtrial-new-install | normrow-001 =====
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:860: MESSAGE: replay 1 rows=48 d=128 max|x|=0.462891
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:953: MESSAGE: host2 sum=8.51498 tt/host2=0.996982 cpu/host2=0.993259 tt!=cpu elems=47 tt!=host-bf16 elems=46
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:957: MESSAGE: with_res=0 sum_cpu=8.45758 sum_tt=8.48929 ratio=1.00375 max_abs=0.03125
+tests/vllm/models/test_kolibri1_tt_b2ii.cpp:953: MESSAGE: host2 sum=8.51498 tt/host2=0.996982 cpu/host2=0.993259 tt!=cpu elems=47 tt!=host-bf16 elems=46
+exit=0
+===== N-newsubstrate | umdtrial-install | normrow-001 =====
+exit=1
