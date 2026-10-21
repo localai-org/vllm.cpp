@@ -230,22 +230,29 @@ measured facts shape the policy:
   the page cache is full and `MemAvailable` reads 66 GiB instead of the
   host's ~212 GiB idle reading.
 
-So the policy reads the host at PROCESS START, before the load depresses the
-reading, and floors the budget at the knee when the host can afford it:
+So the policy reads the host BEFORE our own load depresses the reading, and
+floors the budget at the measured knee:
 
     honest_bytes = max(start_bytes, plan_bytes)
-    budget_bytes = clamp(honest_bytes / 8, 1 GiB, 32 GiB)
-    if honest_bytes >= 64 GiB: budget_bytes = max(budget_bytes, 16 GiB)
+    honest_bytes == 0              -> budget = 16 GiB   (UNKNOWN)
+    honest_bytes < 16 GiB + 8 GiB  -> budget = 0        (DISABLED)
+    otherwise                      -> budget = clamp(honest_bytes / 8,
+                                                        16 GiB, 32 GiB)
 
 `start_bytes` is the reading taken at process start (before `main`, before
 any model load) and `plan_bytes` the reading at plan time; the maximum is
-the honest one. The 64 GiB HOST THRESHOLD is the scarcity line: a host that
-reports 64 GiB as handable can afford a 16 GiB cache, a quarter of what it
-reports, and below that threshold the divisor result stands with the 1 GiB
-floor and the host's scarcity speaks. The 32 GiB cap bounds the footprint,
-the 1 GiB floor keeps the lever ON everywhere, and an unreadable report uses
-the 4 GiB nominal, deliberately below the knee: a host that does not report
-its memory is not known to afford the knee.
+the honest one. The KNEE (16 GiB) is the FLOOR: a host that can afford the
+knee is never served a budget below it, because a sub-knee cache costs the
+memory and buys nothing. The RESERVE (8 GiB) is the room the host must keep
+free beside the knee: a host that reports less than the knee plus the
+reserve cannot afford the knee at all, so the policy DISABLES the cache
+(budget 0) and the forward runs the uncached path, byte for byte. That is
+the explicit rule: a sub-knee cache is WORSE than useless, so the cache
+either runs at or above the knee or it does not run. The 32 GiB cap bounds
+the footprint, and an unreadable report uses the KNEE: an unknown budget is
+not a reason to refuse, and not a reason to hand out a sub-knee budget (a
+host that cannot hold the knee degrades to the uncached path through the
+allocation fallback).
 
 The budget is a BOUND, not a reservation: entries are allocated one at a time
 and evicted under it. An allocation that cannot be satisfied degrades the
@@ -256,7 +263,7 @@ reading, and both readings it came from.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `VT_KOLIBRI1_DEQUANT_CACHE_MB` | **on** (budget derived: `clamp(max(start, plan) / 8, 1 GiB, 32 GiB)`, floored at the 16 GiB knee when the honest reading is at or above 64 GiB) | The Kolibri-1 CPU dequant cache's residency budget, in MiB. `0` DISABLES the cache and restores the original threaded pool dequant, byte for byte; that is the escape hatch and the A/B off switch. Any other value sets the budget EXACTLY (16 GiB is the shape the 2026-10-20 measurement above was taken in, and the shape to pin when a reproducible residency matters). The variable UNSET is the default: ON, with the derived budget above. A value that is not a plain non-negative number of MiB is not a budget, and it falls back to the default policy rather than switching a default-ON lever off. The cache stores the DECODED weights, so the bytes it serves are the bytes the uncached path produces: the change is a caching change, never an arithmetic one |
+| `VT_KOLIBRI1_DEQUANT_CACHE_MB` | **on** (budget derived: `clamp(max(start, plan) / 8, 16 GiB, 32 GiB)`; a host that cannot afford the 16 GiB knee gets the cache DISABLED, and an unreadable report uses the knee) | The Kolibri-1 CPU dequant cache's residency budget, in MiB. `0` DISABLES the cache and restores the original threaded pool dequant, byte for byte; that is the escape hatch and the A/B off switch. Any other value sets the budget EXACTLY (16 GiB is the shape the 2026-10-20 measurement above was taken in, and the shape to pin when a reproducible residency matters). The variable UNSET is the default: ON, with the derived budget above. A value that is not a plain non-negative number of MiB is not a budget, and it falls back to the default policy rather than switching a default-ON lever off. The cache stores the DECODED weights, so the bytes it serves are the bytes the uncached path produces: the change is a caching change, never an arithmetic one |
 
 ## Rollback and bisect switches
 

@@ -456,19 +456,14 @@ TEST_CASE("kolibri1 dequant cache: VT_KOLIBRI1_DEQUANT_CACHE_MB disables at 0, "
 
 // ── 9. The policy: pure, so a policy change is a deterministic red ─
 TEST_CASE("kolibri1 dequant cache: the default budget policy floors at the "
-          "measured knee and reads the host's memory at process start") {
+          "measured knee, disables a host that cannot afford it, and reads "
+          "the host's memory before the checkpoint load") {
   using namespace vllm::kolibri1_dequant_cache;
-  // An UNKNOWN memory report uses the fixed nominal, not the cap and not a
-  // refusal. The nominal sits BELOW the knee on purpose: a host that does
-  // not report its memory is not known to afford the knee.
-  CHECK_EQ(DefaultBudgetBytesFor(0), kDefaultBudgetNominalBytes);
-  // The FLOOR: a host with less than 8 GiB available still gets 1 GiB.
-  CHECK_EQ(DefaultBudgetBytesFor(1ull << 30), kDefaultBudgetMinBytes);
-  CHECK_EQ(DefaultBudgetBytesFor(4ull << 30), kDefaultBudgetMinBytes);
-  // The DIVISOR: the middle of the range is exactly the available eighth.
-  CHECK_EQ(DefaultBudgetBytesFor(200ull << 30), 25ull << 30);
-  // The CAP: a host with 512 GiB available still gets 32 GiB.
-  CHECK_EQ(DefaultBudgetBytesFor(512ull << 30), kDefaultBudgetMaxBytes);
+  // An UNKNOWN memory report uses the KNEE: not a refusal (the house rule:
+  // an unknown budget must not become a false refusal) and never a sub-knee
+  // budget. A host that cannot hold the knee degrades to the uncached path
+  // through the allocation fallback.
+  CHECK_EQ(DefaultBudgetBytesFor(0), kDefaultBudgetKneeBytes);
   // THE KNEE (2026-07-20, re-measured 2026-10-21; node 3, aarch64, 3.4 GHz,
   // 32 threads, empty-prompt 32-token decode): 16 GiB is where the cache
   // stops thrashing. At 8.25 GiB the measured hit rate was 33% with 16068
@@ -479,12 +474,23 @@ TEST_CASE("kolibri1 dequant cache: the default budget policy floors at the "
   CHECK_EQ(DefaultBudgetBytesFor(66ull << 30), kDefaultBudgetKneeBytes);
   CHECK_EQ(DefaultBudgetBytesFor(64ull << 30), kDefaultBudgetKneeBytes);
   CHECK_EQ(DefaultBudgetBytesFor(128ull << 30), kDefaultBudgetKneeBytes);
-  // A host BELOW the host threshold keeps the divisor result with the 1 GiB
-  // floor: its scarcity speaks, and the policy does not claim a knee it
-  // cannot afford. The default is never "disabled".
-  CHECK_EQ(DefaultBudgetBytesFor(63ull << 30), (63ull << 30) / 8);
-  CHECK(DefaultBudgetBytesFor(63ull << 30) < kDefaultBudgetKneeBytes);
-  CHECK(DefaultBudgetBytesFor(63ull << 30) > 0);
+  // THE DIVISOR: above the knee the budget is the available eighth, until
+  // the cap.
+  CHECK_EQ(DefaultBudgetBytesFor(200ull << 30), 25ull << 30);
+  CHECK_EQ(DefaultBudgetBytesFor(512ull << 30), kDefaultBudgetMaxBytes);
+  // A HOST THAT CANNOT AFFORD THE KNEE DISABLES CLEANLY. A budget of 0 is
+  // the UNCACHED path (the original threaded pool dequant), byte for byte.
+  // A sub-knee cache is WORSE than useless: it costs the memory and buys
+  // nothing, so the policy refuses it instead of serving one.
+  CHECK_EQ(DefaultBudgetBytesFor(1ull << 30), 0);
+  CHECK_EQ(DefaultBudgetBytesFor(8ull << 30), 0);
+  CHECK_EQ(DefaultBudgetBytesFor(kDefaultBudgetKneeBytes +
+                                  kDefaultBudgetHostReserveBytes - 1),
+           0);
+  // ... and the first reading that affords the knee is served the knee.
+  CHECK_EQ(DefaultBudgetBytesFor(kDefaultBudgetKneeBytes +
+                                  kDefaultBudgetHostReserveBytes),
+           kDefaultBudgetKneeBytes);
   // THE HONEST READING: the MAXIMUM of the process-start reading and the
   // reading at plan time. Our own 74 GB checkpoint load depresses
   // MemAvailable (66 GiB) under the host's idle reading (~212 GiB), and the
@@ -506,13 +512,16 @@ TEST_CASE("kolibri1 dequant cache: the default budget policy floors at the "
                HonestAvailableBytes(66ull << 30, 66ull << 30)),
            kDefaultBudgetKneeBytes);
   // The policy never leaves the documented band, for every pair of the two
-  // moments the plan can combine.
+  // moments the plan can combine: a budget is either DISABLED (0) or at or
+  // above the knee, and never above the cap.
   for (uint64_t avail = 0; avail <= (1ull << 40); avail += (4ull << 30)) {
     for (uint64_t start = 0; start <= (1ull << 40); start += (4ull << 30)) {
       const uint64_t b =
           DefaultBudgetBytesFor(HonestAvailableBytes(start, avail));
-      CHECK(b >= kDefaultBudgetMinBytes);
-      CHECK(b <= kDefaultBudgetMaxBytes);
+      const bool in_band =
+          (b == 0) ||
+          (b >= kDefaultBudgetKneeBytes && b <= kDefaultBudgetMaxBytes);
+      CHECK(in_band);
     }
   }
 }
@@ -690,9 +699,9 @@ TEST_CASE("kolibri1 dequant cache: the plan's source reading is the honest "
   CHECK_EQ(source, HonestAvailableBytes(start, plan));
   // And the budget is the policy applied to that reading.
   CHECK_EQ(budget, DefaultBudgetBytesFor(source));
-  // The KNEE: a host that reports at least the threshold is never served a
-  // sub-knee budget, so the default cannot ship the thrashing shape.
-  if (source >= kDefaultBudgetHostThresholdBytes) {
+  // The KNEE: a budget is either DISABLED (the host cannot afford the knee)
+  // or at or above it, so the default cannot ship the thrashing shape.
+  if (budget != 0) {
     CHECK(budget >= kDefaultBudgetKneeBytes);
   }
 #endif

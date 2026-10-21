@@ -101,7 +101,8 @@
 // GiB the measured hit rate was 33% with 16068 evictions, and the decode
 // throughput (3.84 tok/s) was indistinguishable from the cache being off
 // (3.62 tok/s). A budget below the knee buys nothing for the memory it
-// takes.
+// takes, so the knee is the FLOOR and a host that cannot afford it gets the
+// cache DISABLED (the uncached path) rather than a thrashing sub-knee cache.
 //
 // THE SAMPLING MOMENT. The budget was read on FIRST USE of the cache, and
 // the first use happens DURING the 74 GB checkpoint load: the page cache is
@@ -109,13 +110,14 @@
 // is ~212 GiB. The divisor then yields 8.25 GiB, below the knee, and the
 // default ships the slow configuration by accident.
 //
-// So the policy reads the host at PROCESS START, before our own load
-// depresses the reading, and floors the budget at the knee when the host can
-// afford it:
+// So the policy reads the host BEFORE our own load depresses the reading,
+// and floors the budget at the knee:
 //
 //     honest_bytes = max(start_bytes, plan_bytes)
-//     budget_bytes = clamp(honest_bytes / 8, 1 GiB, 32 GiB)
-//     if honest_bytes >= 64 GiB: budget_bytes = max(budget_bytes, 16 GiB)
+//     honest_bytes == 0              -> budget = 16 GiB   (UNKNOWN)
+//     honest_bytes < 16 GiB + 8 GiB  -> budget = 0        (DISABLED)
+//     otherwise                      -> budget = clamp(honest_bytes / 8,
+//                                                         16 GiB, 32 GiB)
 //
 //   * `start_bytes` is MemAvailable read by a NAMESPACE-SCOPE initialiser,
 //     which runs before main and before any model load. `plan_bytes` is the
@@ -129,22 +131,22 @@
 //     memory reader.
 //   * The DIVISOR (8) leaves seven eighths of the available memory for the
 //     checkpoint itself (74 GB of fp8 weights), the KV cache and the OS.
-//   * The KNEE FLOOR applies at or above the HOST THRESHOLD (64 GiB): a host
-//     that reports 64 GiB as handable can afford a 16 GiB cache, which is a
-//     quarter of what it reports. Below the threshold the divisor result
-//     stands with the 1 GiB floor: the host is scarce, and its scarcity
-//     speaks.
-//   * The FLOOR (1 GiB) keeps the lever ON everywhere: a host with less than
-//     8 GiB available still gets a cache, because re-dequantising every
-//     weight on every forward costs far more than a gigabyte of residency.
+//   * The KNEE (16 GiB) is the FLOOR: a host that can afford the knee is
+//     never served a budget below it.
+//   * The RESERVE (8 GiB) is the room the host must keep free beside the
+//     knee. A host that reports less than the knee plus the reserve cannot
+//     afford the knee at all, so the policy DISABLES the cache (budget 0)
+//     and the forward runs the UNCACHED path, byte for byte. That is the
+//     explicit rule: a sub-knee cache is WORSE than useless, so the cache
+//     either runs at or above the knee or it does not run.
 //   * The CAP (32 GiB) bounds the footprint: the measured budget-sensitivity
 //     table had its knee still open at 32 GiB (+5-6% over 16 GiB), so the
 //     cap captures nearly the whole win while keeping the cache a small
 //     fraction of the model it serves.
-//   * An UNKNOWN report (MemAvailable unreadable -> 0) uses the FIXED 4 GiB
-//     nominal: an unknown budget is not a reason to refuse, and not a reason
-//     to hand out the cap. The nominal sits BELOW the knee on purpose: a
-//     host that does not report its memory is not known to afford the knee.
+//   * An UNKNOWN report (MemAvailable unreadable -> 0) uses the KNEE: an
+//     unknown budget is not a reason to refuse, and not a reason to hand
+//     out a sub-knee budget. A host that cannot hold the knee degrades to
+//     the uncached path through the allocation fallback below.
 //
 // The budget is a BOUND, not a reservation: entries are allocated one at a
 // time and evicted under the bound, so the process is never committed to the
@@ -460,20 +462,23 @@ class Cache {
 };
 
 // THE DEFAULT BUDGET POLICY (THE DEFAULT BUDGET above). The constants are
-// exposed so the gate can pin the policy — floor, cap, divisor, knee,
-// threshold — without restating the numbers, and so the documentation and
-// the code cannot drift.
+// exposed so the gate can pin the policy — knee, cap, divisor, reserve —
+// without restating the numbers, and so the documentation and the code
+// cannot drift.
 inline constexpr uint64_t kDefaultBudgetDivisor = 8;
-inline constexpr uint64_t kDefaultBudgetMinBytes = 1ull << 30;   // 1 GiB
 inline constexpr uint64_t kDefaultBudgetMaxBytes = 32ull << 30;  // 32 GiB
-// The nominal used when the host does not report its available memory.
-inline constexpr uint64_t kDefaultBudgetNominalBytes = 4ull << 30;  // 4 GiB
-// The MEASURED KNEE: the budget below which the cache thrashes and the
-// decode throughput is indistinguishable from the cache being off.
+// The MEASURED KNEE (2026-07-20, re-measured 2026-10-21): the budget below
+// which the cache thrashes and the decode throughput is indistinguishable
+// from the cache being off. At 8.25 GiB the measured hit rate was 33% with
+// 16068 evictions and 3.84 tok/s, against 3.62 tok/s with the cache off and
+// 6.38 tok/s at an explicit 16 GiB (node 3, aarch64, 3.4 GHz, 32 threads,
+// empty-prompt 32-token decode). The knee is the FLOOR: a budget under it
+// costs the memory and buys nothing.
 inline constexpr uint64_t kDefaultBudgetKneeBytes = 16ull << 30;  // 16 GiB
-// The HOST THRESHOLD: at or above this honest available reading the host can
-// afford the knee (16 GiB is a quarter of 64 GiB).
-inline constexpr uint64_t kDefaultBudgetHostThresholdBytes = 64ull << 30;  // 64 GiB
+// The room the host must keep free BESIDE the knee: the OS's working set
+// and the decode's own transient allocations. A host that reports less than
+// the knee plus this reserve cannot afford the knee at all.
+inline constexpr uint64_t kDefaultBudgetHostReserveBytes = 8ull << 30;  // 8 GiB
 
 // The HONEST available-memory reading: the MAXIMUM of the PROCESS-START
 // reading and the reading at plan time (THE SAMPLING MOMENT). A reading
@@ -486,19 +491,36 @@ inline uint64_t HonestAvailableBytes(uint64_t start_bytes, uint64_t plan_bytes) 
 
 // The PURE policy: the budget for a given HONEST available-memory reading.
 // Pure on purpose: the gate pins it without reading the host, so a policy
-// change is a deterministic red, not a race against the machine's memory.
+// change is a deterministic red and not a race against the machine's memory.
+//
+//   available == 0 (UNKNOWN)   -> the KNEE. Not a refusal (the house rule:
+//                                  an unknown budget must not become a false
+//                                  refusal) and never a sub-knee budget: the
+//                                  allocation fallback degrades to the
+//                                  uncached path if the host cannot hold it.
+//   available < KNEE + RESERVE -> 0: DISABLED. The host cannot afford the
+//                                  knee, and a sub-knee cache costs the
+//                                  memory and buys nothing, so the clean
+//                                  answer is the UNCACHED path (budget 0),
+//                                  byte for byte.
+//   otherwise                  -> clamp(available / 8, KNEE, CAP)
 inline uint64_t DefaultBudgetBytesFor(uint64_t available_bytes) {
-  if (available_bytes == 0) return kDefaultBudgetNominalBytes;  // UNKNOWN
-  uint64_t derived = available_bytes / kDefaultBudgetDivisor;
-  if (derived < kDefaultBudgetMinBytes) derived = kDefaultBudgetMinBytes;
-  // The KNEE FLOOR: a host that can afford the measured knee must not be
-  // served a budget below it, because a sub-knee budget buys nothing for the
-  // memory it takes. Below the HOST THRESHOLD the divisor result stands: the
-  // host is scarce, and its scarcity speaks.
-  if (available_bytes >= kDefaultBudgetHostThresholdBytes &&
-      derived < kDefaultBudgetKneeBytes) {
-    derived = kDefaultBudgetKneeBytes;
+  if (available_bytes == 0) {
+    // UNKNOWN: the host does not report its memory. Not a refusal, and never
+    // a sub-knee budget: the KNEE itself.
+    return kDefaultBudgetKneeBytes;
   }
+  if (available_bytes <
+      kDefaultBudgetKneeBytes + kDefaultBudgetHostReserveBytes) {
+    // The host cannot afford the knee: DISABLE cleanly. A budget of 0 is the
+    // UNCACHED path (the original threaded pool dequant), byte for byte.
+    return 0;
+  }
+  uint64_t derived = available_bytes / kDefaultBudgetDivisor;
+  // The KNEE is the FLOOR: a host that can afford the knee must not be
+  // served a budget below it, because a sub-knee budget buys nothing for the
+  // memory it takes.
+  if (derived < kDefaultBudgetKneeBytes) derived = kDefaultBudgetKneeBytes;
   if (derived > kDefaultBudgetMaxBytes) derived = kDefaultBudgetMaxBytes;
   return derived;
 }

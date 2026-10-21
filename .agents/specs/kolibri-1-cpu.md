@@ -415,7 +415,8 @@ is worth MORE THAN 2x on CPU decode: 4.02 tok/s with the cache off against
 threads, empty-prompt 32-token decode; prefill p512 43.33 tok/s with the
 cache off). The DEFAULT budget is DERIVED from the host's own memory report,
 read through the house helper `vllm::v1::host_available_memory_bytes()` (the
-same probe the DeepSeek-V4 EXL3 host-residency budget uses).
+same probe the DeepSeek-V4 EXL3 host-residency budget uses) — superseded by
+the correction below, which is where that policy landed.
 `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` still disables the cache (the original
 threaded pool dequant, byte for byte) and an explicit value still sets the
 budget exactly (16 GiB is the shape the measurement above was taken in); an
@@ -458,8 +459,10 @@ serve one to a host that can afford the knee.
 THE CORRECTED POLICY:
 
     honest_bytes = max(start_bytes, plan_bytes)
-    budget_bytes = clamp(honest_bytes / 8, 1 GiB, 32 GiB)
-    if honest_bytes >= 64 GiB: budget_bytes = max(budget_bytes, 16 GiB)
+    honest_bytes == 0              -> budget = 16 GiB   (UNKNOWN)
+    honest_bytes < 16 GiB + 8 GiB  -> budget = 0        (DISABLED)
+    otherwise                      -> budget = clamp(honest_bytes / 8,
+                                                        16 GiB, 32 GiB)
 
   * `start_bytes` is MemAvailable read by a NAMESPACE-SCOPE initialiser
     (a function-local static behind it), which runs before main and before
@@ -467,17 +470,24 @@ THE CORRECTED POLICY:
     behind. `plan_bytes` is the reading at plan time. The MAXIMUM is the
     honest one, and the process-start reading is what the checkpoint load
     would otherwise have hidden.
-  * The HOST THRESHOLD is 64 GiB: a host that reports 64 GiB as handable can
-    afford a 16 GiB cache, which is a quarter of what it reports. BELOW the
-    threshold the divisor result stands with the 1 GiB floor: the host is
-    scarce, and its scarcity speaks. The default is never "disabled" by the
-    policy. The threshold is a stated policy number, not a measured
-    constant, and the gate pins it.
-  * The 1 GiB FLOOR keeps the lever ON everywhere; the 32 GiB CAP bounds the
-    footprint (the measured budget-sensitivity table had its knee still open
-    at 32 GiB, +5-6% over 16 GiB). An UNKNOWN report (MemAvailable
-    unreadable) uses the 4 GiB nominal, deliberately BELOW the knee: a host
-    that does not report its memory is not known to afford the knee.
+  * The KNEE is the FLOOR for every host that can afford it: a budget under
+    the knee is worth little for the memory it takes, so the policy never
+    serves one to a host that can afford the knee.
+  * The RESERVE is 8 GiB: the room the host must keep free BESIDE the knee
+    (the OS's working set and the decode's own transient allocations). A
+    host that reports less than the knee plus the reserve cannot afford the
+    knee at all, so the policy DISABLES the cache (budget 0) and the forward
+    runs the UNCACHED path, byte for byte. This is the explicit rule: a
+    sub-knee cache is WORSE than useless — it costs the memory and buys
+    nothing — so the cache either runs at or above the knee or it does not
+    run. The reserve is a stated policy number, not a measured constant,
+    and the gate pins it.
+  * The 32 GiB CAP bounds the footprint (the measured budget-sensitivity
+    table had its knee still open at 32 GiB, +5-6% over 16 GiB). An UNKNOWN
+    report (MemAvailable unreadable) uses the KNEE: an unknown budget is
+    not a reason to refuse (the house rule) and not a reason to hand out a
+    sub-knee budget; a host that cannot hold the knee degrades to the
+    uncached path through the allocation fallback.
   * The env contract is unchanged: 0 disables, N sets exactly N MiB, and an
     unparseable value falls back to this default policy, never to disabled.
 
