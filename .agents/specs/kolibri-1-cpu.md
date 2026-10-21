@@ -648,6 +648,85 @@ live-gated on the real model dir) into the R7 encode test:
   STOP: that would mean the scanner semantics differ, not just the
   recognition — report as NEEDS_DECISION rather than widening anything.
 
+## Outcome
+
+MEASURED (2026-10-20/21; node 3, aarch64, 128 cores, 255 GB RAM, governor
+`performance` at 3.4 GHz, 32 threads, one NUMA node, the file mutex held,
+the box quiet; the bench and the spec probe rebuilt from the committed
+head). The noise floor was measured before any of it was read: two single
+runs of the same cell (same binary, weights, configuration) differed by
+**~4%** (8.45 against 8.11), so no cell below is quoted more finely than
+that, and two legs that differ by less than 4% are a tie.
+
+| leg | decode tok/s (empty prompt, 32 generated tokens, 3 runs) |
+|---|---|
+| cache OFF — the configuration `main` ships today | 3.55 / 3.62 / 3.79 (median **3.62**) |
+| default, first implementation (8.25 GiB budget, 33% hit rate, 16068 evictions) | 3.84 |
+| **default, repaired** (26.6 GiB budget from a 212 GiB process-start reading; hits 72200, misses 17746, evictions 7967, 80% hit rate) | **7.39 / 7.45 / 7.47** |
+| explicit `VT_KOLIBRI1_DEQUANT_CACHE_MB=16384` | 6.38 / 6.95 / 6.99 |
+
+Prefill p512 with the cache off: t8 12.30, t16 23.89, t32 43.33 tok/s.
+Decode thread scaling with the cache off, empty prompt: t8 1.38, t16 2.59,
+t32 4.02 tok/s (1.89x, then 1.36x). The n-gram spec-decode probe — the
+campaign's serving number — reads, cache OFF, plain 3.90-3.92 and spec
+6.27-6.30; with the **default** (repaired), plain 8.63-9.36 and spec
+**12.74-13.14**; with an explicit 16 GiB budget, plain 8.33-8.73 and spec
+10.42-10.55.
+
+WHAT THE DEFAULT NOW DELIVERS. The configuration that ships with the FP8
+dequant cache ON decodes at **7.45 tok/s** on the empty-prompt 32-token
+shape, **2.06x** the cache-off 3.62, and its n-gram spec-decode leg reads
+**12.74-13.14 tok/s**, so the campaign's **12 tok/s target is MET**. The
+target is not met with the cache off (6.27-6.30): the number belongs to the
+default and to the default's host, not to the model in the abstract. The
+engine-level reading clears it as well: 4.53 -> 13.78 tok/s (3.04x,
+2026-10-12, t32 with a 32 GiB cache, in `## Now` above). The default was
+still **OPEN** (PR #3488) when this was written, so the row's numbers
+describe the configuration `main` ships when it lands; today `main` ships the
+cache-off leg.
+
+REJECTED, each with the measurement that rejected it. The **sub-knee
+budget** (the default's first implementation: 8.25 GiB, 33% hit rate, 16068
+evictions) read 3.84 tok/s, a 1.3% difference from the cache-off median and
+inside the ~4% noise floor. A sub-knee cache costs the memory and buys
+nothing, which is why the policy refuses one outright and why the sampling
+moment is part of the policy rather than an implementation detail of it. The
+**explicit 16 GiB budget** as the recommended setting read 6.38-7.06 tok/s
+across the session's readings of
+that cell in this shape, against 7.39-7.47 for the derived default (and
+7.14-7.23 against 7.36-7.58 in the in-repo production-shape shape, which is
+a different cell set): the difference sits inside the leg's own spread, so
+it is **not** claimed as a win, and pinning 16 GiB by hand takes the host's
+own memory report out of a decision the report makes better. **Spin tuning**
+(`VT_CPU_SPIN_ROUNDS`) moved the same cell from 4.019 to 4.193 tok/s at 32
+threads and from 2.587 to 2.581 at 16, so the paired reading does not
+separate the arms beyond the noise floor and no spin setting is
+recommended. One paired reading on one host is not a settled lever question:
+the session's t32 cache-off readings ranged 3.49-4.02 tok/s across the day.
+
+THE CAVEATS TRAVEL WITH EVERY NUMBER ABOVE. They are **host-specific**: 32
+threads on one NUMA node at 3.4 GHz, governor `performance`, aarch64, node 3
+of a shared box. They are **not** a vLLM comparison and not a parity claim:
+no vLLM or plugin denominator exists for this model, and the author's
+plugin is still unverified as a runnable oracle. They sit on a **~4% noise
+floor**, so the 12.74 against a target of 12 is a ~6% margin over ONE noise
+floor: it clears the target as measured, and the margin is not wide. And
+the **16 GiB leg carries its own trade-off**: it is the shape the PR #3488
+body quotes, and a reader who pins 16 GiB explicitly gets a number inside
+the default's own spread (6.38-7.06 tok/s for that cell in this shape) and
+inside the noise floor. The derived default (26.5-26.6 GiB from a 212 GiB
+process-start reading) is the configuration this row's numbers were taken
+at, and the policy refuses a host that cannot afford the knee.
+
+THE RECORDS. The public page is
+`docs/benchmarks/kolibri1-cpu-dequant-cache-default.md`, with the index row
+in `docs/BENCHMARKS.md` and the dated evidence in
+`docs/bench-evidence/kolibri1-cpu-dequant-cache-default-20261021/report.md`.
+The public recipe still pins the short revision `e52eb462` for the
+checkpoint; the full revision of the artifact these numbers were measured
+on is recorded on the public page, and the bf16 sibling artifact is named
+there as **refused**, not shipped.
+
 ## Git integration
 
 ONE pull request (developer's standing choice for this row).
