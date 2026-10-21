@@ -19,6 +19,8 @@ Repeatability does not establish oracle correctness. After the golden-index
 correction, the recorded gate still fails in both arms, with two identical
 runs per arm. The timings below remain historical measurements, not current
 performance evidence. This correction adds no benchmark run or capture wiring.
+The current P150 numbers are in `## The current P150 numbers` below, and the
+prototype table stays as the superseded vintage.
 
 ## Symptom
 
@@ -168,12 +170,50 @@ compounds with any later capture work:
   non-first-touch) or device-side dequant removes most of it without
   touching numerics-critical paths.
 
-## Historical prototype result
+## The current P150 numbers
+
+The current per-step decode cost and decode rate on the P150 come from a
+clean three-run measurement on 2026-10-21 (`origin/main` `3ce14f35c`,
+Release, `-DVLLM_CPP_TENSTORRENT=ON`, built at `/tmp/build-p150-bench`;
+host `thalia`, P150 Blackhole; `taskset -c 32-63`; governor `schedutil`;
+tt-metal substrate pin `a585e5744a8`; file mutex `$HOME/gpu.lock`; model
+`/mnt/models/Aleph-Alpha/Kolibri-1`):
+
+| run | prefill walk, 128 tokens (s) | decode, 64 steps (s) | ms/step | tok/s |
+|---|---|---|---|---|
+| 1 | 146.968 | 35.0521 | 547.7 | 1.82585 |
+| 2 | 131.111 | 35.2098 | 550.2 | 1.81767 |
+| 3 | 124.892 | 35.1051 | 548.5 | 1.8231 |
+| median | 131.111 | 35.1051 | 548.5 | 1.8231 |
+
+The step time fell by about 2.8x against the 2026-10-18 reading of the
+same bench (about 1556 ms/step, `53c6a4666`), and the tree carries no
+attribution for the fall. The leading hypothesis is the f32-mean reduction
+repair (`4b3a0091c`, 2026-10-19), the only Tenstorrent-path product change
+in that window; the second candidate is the host condition, because the
+2026-10-18 session ran with host load and concurrent builds while these
+three runs are on a quiet host. The attribution is OPEN, and no speedup is
+claimed here.
+
+The harness shape, because the table above is easy to misread: the bench
+prefills a 128-token prompt and then times 64 incremental decode steps, and
+its tok/s figure covers the decode phase alone. So 0.548 s per token is the
+per-step decode cost, and the prefill number is the cost of the 128-token
+prompt. A bare tok/s is not a measurement on this box, which carries a
+single-run noise floor of about 4% (measured: two single runs of one cell
+read 8.45 and 8.11), so every number is a three-run set with its median.
+Evidence and the full condition list:
+`docs/bench-evidence/kolibri1-tt-p150-refresh-20261021.md`; issue
+ISSUE-LOCAL-01M5F68A30HNPG4V95BKTAQS79.
+
+## Historical prototype result (the superseded vintage)
 
 `tests/vllm/models/test_kolibri1_tt_decode_bench.cpp` (cherry-picked
 clean from 4dab09abd on `row/tt-kolibri-decode-bench`) measured on the
 P150, same recipe (tt-smi reset, cache/shm clean,
-`TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/tt-metalium`):
+`TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/tt-metalium`) on
+2026-10-11. These are the superseded vintage and they stay as the history
+of how the numbers moved:
 
 | arm | prefill walk (128 tok) | decode (64 steps) | ms/step | tok/s |
 |---|---|---|---|---|

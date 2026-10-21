@@ -54,3 +54,17 @@ tiny router GEMM tail. Re-ranked levers: (1) expert-fetch readback/
 verify cost per slot miss, (2) device routing via a vt::MoeRouterTopK
 TT port to remove the per-layer full-tail download, (3) cache
 block_size 32 + WarmRacIdx to enable the device RAC/PA arms.
+
+CURRENT P150 NUMBER (2026-10-21, `row/P150-NUMBERS-REFRESH`, records-only):
+the per-step decode cost quoted above (~960 ms/step, ~1 tok/s, and the
+prototype's 1077 / 1254 / 1152 ms/step) is the 2026-10-11 study vintage. The
+current numbers on `origin/main` `3ce14f35c` are 547.7 / 550.2 / 548.5 ms per
+decode step over three runs (median 548.5 ms, which is 0.548 s per token)
+and 1.82585 / 1.81767 / 1.82310 tok/s (median 1.823), measured over the
+bench's 64 incremental decode steps after a 128-token prompt prefill. The
+study's own conclusion, that the bias cache is not a decode lever, is
+unchanged by this refresh, and the gap analysis still stands. The tree
+carries no attribution for the change against the 2026-10-18 reading of
+the same bench (about 1556 ms/step), and the attribution stays OPEN. Evidence:
+`docs/bench-evidence/kolibri1-tt-p150-refresh-20261021.md`; issue
+ISSUE-LOCAL-01M5F68A30HNPG4V95BKTAQS79.

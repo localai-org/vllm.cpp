@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-11
-Updated: 2026-10-12
+Updated: 2026-10-21
 Closed: 2026-10-12
 
 ## Problem
@@ -203,3 +203,77 @@ On the P150 (host thalia, /tmp/umdtrial-install, /tmp/tt-metal-umdtrial), the ko
   coincidence count. The three pre-existing assertion failures remain,
   documented: `:1263` (argmax_matches >= 141), `:1264`
   (hard_flips == 0), `:1419` (instr_hard_flips == 0).
+
+- BAND-GATE RE-MEASURED ON A CLEAN TREE (2026-10-21, `row/P150-NUMBERS-REFRESH`,
+  records-only): the standing verdict above reproduces byte-identically on
+  `origin/main` `3ce14f35c` (Release, `-DVLLM_CPP_TENSTORRENT=ON`, built at
+  `/tmp/build-p150-bench`; host `thalia`, P150 Blackhole; `taskset -c 32-63`;
+  governor `schedutil`; tt-metal substrate pin `a585e5744a8`; file mutex
+  `$HOME/gpu.lock`; model `/mnt/models/Aleph-Alpha/Kolibri-1`). THREE RUNS of
+  `test_kolibri1_tt_b2ii --test-case="*device token gate*"`, each printing the
+  same verdict line and the same per-flip nat gaps:
+    - HOST-FREE ON (the default): BAND GATE 3/8 sequences ON (zero hard
+      flips), worst in-band divergence -1.74672 nats against the 2.5-nat band
+      edge, margin 0.75328 nats. Identical to the 2026-10-19 verdict above
+      to every printed digit.
+    - Each run printed the same 40 hard flips, and their nat gaps match the
+      40 entries of the 2026-10-19 artifact
+      `docs/bench-evidence/kolibri1-readj/ON.json` one for one (der Mond
+      step 0 at 1.746723 nats, Australia step 0 at 10.523823 nats, and so
+      on), so the flip set is byte-identical to the 2026-10-19 set. Each
+      run ends with the same three pre-existing assertion failures (600
+      passed, 3 failed): `:1263`, `:1264`, `:1419`.
+    - The HOST-FREE OFF arm was NOT re-measured in this session. Its
+      standing numbers stay the 2026-10-19 ones (6/8 ON, worst in-band
+      -2.157 nats, margin 0.343 nats). No OFF number is claimed here.
+
+  THE P150 PERFORMANCE NUMBERS, refreshed in the same session (three runs
+  each): decode 1.82585 / 1.81767 / 1.82310 tok/s (median 1.823) over the
+  bench's 64 incremental decode steps after a 128-token prompt prefill;
+  decode phase 35.05 / 35.21 / 35.11 s (median 35.11 s, which is 0.548 s per
+  decode step); 128-token prompt prefill 146.97 / 131.11 / 124.89 s (median
+  131.1 s, and the spread is the prompt forward's load-time variance: the
+  decode phase of the same three runs sits inside a 0.16 s window). The
+  superseding vintage and the harness correction are recorded in
+  `docs/bench-evidence/kolibri1-tt-p150-refresh-20261021.md` and in
+  issue ISSUE-LOCAL-01M5F68A30HNPG4V95BKTAQS79.
+
+  WHAT DID NOT CHANGE, AND WHY: the band-gate verdict did not change, and
+  the reason is that the P150 path under it did not change. The CPU-side
+  work of 2026-10-19 to 2026-10-21 is CPU-PATH: the bf16-dot adoption
+  (`61d333e52`, `src/vt/cpu/cpu_paged_attn.cpp` and the kolibri1 CPU
+  forward) and the CPU dequant-cache default (`d9e669582`, `e451be705`,
+  `3ce14f35c`, `src/vllm/model_executor/models/kolibri1_dequant_cache.h`)
+  cannot move a P150 number, so a reader must not infer that the P150
+  number moved because the CPU work landed. The f32-mean reduction repair
+  (`4b3a0091c`, `src/vt/tenstorrent/tenstorrent_gdn.cpp`) is a
+  TENSTORRENT-PATH change and not a CPU-path change; it landed before the
+  2026-10-19 verdict above was recorded, so the standing verdict and
+  today's run stand on the same TT path, and the verdict is
+  byte-identical. The P150 path still carries the tt-metal rms_norm
+  deviation (about 0.7 % on real in-model rows, an input-dependent
+  kernel-precision deviation and not a call-site config difference, issue
+  ISSUE-LOCAL-01M578VP02HPVBYSMRP32GWZGF; the upstream probe at tt-metal
+  head `2500c1d8f63` found the bias still present and 3x worse on the worst
+  row, issue ISSUE-LOCAL-01M5B60NEFSEHYZXMR6FSS1RAF), and that filing is
+  the open one.
+
+  WHAT DID CHANGE, AND WHAT IS OPEN: the decode speed moved. Today's
+  per-step cost is 548.5 ms (median of three runs), while the same decode
+  bench read about 1556 ms/step on 2026-10-18 (`53c6a4666`: "decode bench:
+  prefill 156.4 s, the same ~1556 ms/step the regression reported"), so
+  the step time fell by about 2.8x in three days. The tree carries no
+  attribution for the fall. The only Tenstorrent-path product change in
+  the window is the f32-mean reduction repair (`4b3a0091c`, 2026-10-19),
+  which replaced the pin's tf32 FPU tile-reduce `ttnn::sum` with the
+  accurate full-fp32 `ttnn::mean` in the GDN decode dots and the grouped
+  keep-quant tails; that is the leading hypothesis, and it is not measured
+  here. The second candidate is the host condition, because the 2026-10-17
+  and 2026-10-18 sessions recorded host load and concurrent builds while
+  today's three runs are on a quiet host; the box's about 4% single-run
+  noise floor does not cover a 65% move. The third candidate is the CPU
+  governor and the host clock state, because the governor on this host is
+  not pinned (it read `schedutil` during the run and `performance` on an
+  inspection between the run and this record). The attribution stays OPEN,
+  and the next traceable step is a same-session A/B of `4b3a0091c`'s
+  parent against `3ce14f35c` under the quiet-host recipe.
