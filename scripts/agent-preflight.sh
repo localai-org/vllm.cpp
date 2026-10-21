@@ -211,7 +211,9 @@ SUITES=(
   # The windows-msvc /WX classes (C4456 local shadow, C4101 unreferenced
   # local of an empty class) on the host compiler. The lane builds with
   # /W4 /WX, so both are a build failure there and a green build on every
-  # POSIX lane.
+  # POSIX lane. The probe compiles the production units in the host shape
+  # and in the non-Linux shape the lane compiles, where the NUMA guard is
+  # the empty class that makes the C4101 class observable.
   test_msvc_wx_diagnostics
   test_prepush_checker_names
   test_ab_arms_differ

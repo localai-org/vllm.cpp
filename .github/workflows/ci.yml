@@ -273,10 +273,13 @@ jobs:
         # how kolibri1_forward.cpp:326 stayed red on `main` for a week after
         # the C4101 and the tt_forward C4456 were fixed.
         #
-        # The probe compiles the PRODUCTION translation units with the host
-        # compiler's -Wshadow, the same diagnostic class at the same file, line
-        # and column, and holds the [[maybe_unused]] that no host compiler can
-        # express. Host compiler only: no artifact, no GPU, no network.
+        # The probe compiles the PRODUCTION translation units twice: in the
+        # host shape with -Wshadow, and in the non-Linux shape the lane
+        # compiles with -Wshadow -Wunused-variable, which is the shape in
+        # which the NUMA guard is an empty class and an unreferenced local of
+        # it is the C4101 class. Both classes are reported at the same file,
+        # line and column the MSVC job log names. Host compiler only: no
+        # artifact, no GPU, no network.
         run: |
           python3 tests/scripts/test_msvc_wx_diagnostics.py
       - name: scripts/ and tools/ resolve their values, refuse, and keep records
