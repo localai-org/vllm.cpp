@@ -27,3 +27,12 @@ The 0.9809 reading is not an upstream regression and the rsqrt rework is not its
 Consequence for an upstream filing: the claim to make is that the fused rms_norm kernel's deviation from a host-f64 oracle depends on its compute configuration and on the input row, and that neither the default configuration nor the f32 reduction removes it. The claim not to make is that upstream's rms path regressed or that the rsqrt rework changed the result.
 
 Finding (1), the SFPI 7.88 rvtt_live ICE, is untouched by this measurement and still blocks a build on the official 7.88.0 tarball. The upstream numbers here carry the SFPI 7.83.0 local-build caveat.
+
+## Update 2026-10-21: SFPI 7.89.0 re-check, no ICE; the ICE belongs to the locally built 7.88.0
+
+The re-check trigger fired. The official sfpi_7.89.0_aarch64_debian.txz (sha256 78b4460a697966393f8a0ccf18b071ee610b768650ffbecadc4a9e066b0fb9a7, digest equal to the GitHub release asset) does NOT hit the rvtt_live/verify_ssa ICE. The tt-metal tree at origin/main 2500c1d8f63 builds clean against 7.89.0 (1437/1437 targets, exit 0, 10 min 42.7 s wall at -j 8), the Blackhole layernorm compute-kernel specialization compiles and LTO-links with 7.89.0, and the device rms micro runs with the same numbers it produces under 7.88.0 (tt/host2 0.980947, 1.0033, 0.996982 on normrow-000, -004, -001).
+
+The measurement corrects the attribution above. The ICE reproduces with the LOCALLY BUILT 7.88.0 toolchain (riscv-tt-elf-g++ tenstorrent/sfpi-DIY:7.88.0) and not with the OFFICIAL 7.88.0 release tarball (tenstorrent/sfpi:7.88.0[1039]). Same tree, same kernel, same flags, same harness, one toolchain swapped: 3 ICE sites in the locally built arm, none in the official arm. The ICE text is unchanged: "during GIMPLE pass: rvtt_live ... verify_ssa failed" at __builtin_rvtt_sfppushc (0) in trisck.cc:65, one site per TRISC. The earlier statement that the official tarball ICEs is not supported by this measurement, so an upstream report must name the locally built toolchain or another 7.88.0 build.
+
+Evidence: docs/bench-evidence/tt-metal-sfpi-789-layernorm-compile-20261021.md. The toolchain blocker on the pin advance is GONE; the rms_norm in-model bias is unchanged by the toolchain (kernel numerics, compiler independent) and this issue stays OPEN for that part.
+
