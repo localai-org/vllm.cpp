@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-18
-Updated: 2026-10-18
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -18,7 +18,16 @@ The tt-metal rms_norm arm (ttnn::rms_norm over f32 tiles, patched fp32_acc=true/
 
 -
 
-
 ## Update 2026-10-19: probed tt-metal upstream head (2500c1d8f63)
 
 The bias is NOT improved upstream and regressed on the largest-magnitude captured row: tt/host replay 1.0072 -> 0.9809 (normrow-000, 1x2560, max|x|=3.55, max_abs 0.4375), 1.0077 -> 1.0033 (normrow-004), 0.9984 -> 0.9970 (normrow-001). Upstream switched rsqrt_tile<LEGACY_RSQRT> to ckl::Rsqrt<Approx::Exact> in a new eltwise_chain — did not fix the input-dependence. Full details: ISSUE-LOCAL-01M5B60NEFSEHYZXMR6FSS1RAF (includes the SFPI 7.88 rvtt_live ICE blocker and the still-needed local patch audit). Re-check trigger: SFPI >= 7.89 or an upstream rms reduce/round rework.
+
+## Update 2026-10-21: the 0.9809 reading is the compute config, not an upstream change
+
+The 2026-10-19 update above attributes the 0.9809 reading to upstream's rsqrt rework. A re-measurement on 2026-10-21 (P150, docs/bench-evidence/tt-rms-norm-compute-config-20261021.md) refutes that attribution and keeps the defect open with a sharper mechanism.
+
+The two recorded replays ran two different tt-metal substrates, and the number follows the substrate's DEFAULT rms_norm compute configuration, not the tt-metal version. A standalone ttnn probe replays the same captured rows with an explicitly chosen configuration and reads 0.980947 with fp32_acc=false and 1.007197 with fp32_acc=true and approx_mode=false, on the pinned substrate and on upstream main alike. Upstream main and the pinned fork give the same number for the same configuration, so the upstream rsqrt rework changed no measured value.
+
+The pinned 1.0072 reading is the patched-substrate regime. The 0.9809 reading is the unpatched regime, which the trial substrate of 2026-10-09 also had before the local precision edit was re-installed on 2026-10-10 17:36. The vllm.cpp rms path is byte-identical across the two sessions and passes no compute configuration, so no caller-side parameter changed.
+
+The claim that the deviation is a property of the tt-metal kernel stands. The claim that upstream regressed does not. The 0.9984 figure quoted above for the d=128 rows is normrow-002, not normrow-001 (normrow-001 reads 0.995782 on the pin). The substrate's local precision edit is not in the recorded pin, which is filed as ISSUE-LOCAL-01M5EM67GWF0D79SSY3NHZRKQA.

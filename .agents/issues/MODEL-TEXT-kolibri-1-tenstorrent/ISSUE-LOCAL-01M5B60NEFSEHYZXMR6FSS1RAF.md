@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-20
-Updated: 2026-10-20
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -17,3 +17,13 @@ Probed tt-metal origin/main 2500c1d8f63 (2026-10-19, 1793 commits past our pin) 
 ## Resolution
 
 -
+
+## Update 2026-10-21: finding (2) is a compute-config difference, not an upstream regression
+
+The 2026-10-21 re-measurement (P150, docs/bench-evidence/tt-rms-norm-compute-config-20261021.md) corrects the attribution of finding (2) and leaves finding (1) unchanged.
+
+The 0.9809 reading is not an upstream regression and the rsqrt rework is not its cause. A standalone ttnn probe replays the same captured rows with an explicitly chosen compute-kernel configuration and reads 0.980947 with fp32_acc=false and 1.007197 with fp32_acc=true and approx_mode=false, on the upstream substrate and on the pinned substrate alike. Upstream main keeps `approx_mode = true` and `fp32_acc = false` in `rmsnorm_default_compute_config`; the pinned fork carries a local edit that flips both, and the vllm.cpp rms path passes no compute configuration, so the substrate default decides. Upstream main reproduces the pinned 1.0072 exactly when the same configuration is requested, so the 1793 upstream commits changed no measured value in the rms path on these rows.
+
+Consequence for an upstream filing: the claim to make is that the fused rms_norm kernel's deviation from a host-f64 oracle depends on its compute configuration and on the input row, and that neither the default configuration nor the f32 reduction removes it. The claim not to make is that upstream's rms path regressed or that the rsqrt rework changed the result.
+
+Finding (1), the SFPI 7.88 rvtt_live ICE, is untouched by this measurement and still blocks a build on the official 7.88.0 tarball. The upstream numbers here carry the SFPI 7.83.0 local-build caveat.
