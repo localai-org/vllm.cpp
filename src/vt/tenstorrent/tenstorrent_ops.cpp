@@ -1286,10 +1286,27 @@ void AttnQkNormRopeGateKernel(Queue&, Tensor& q_out, Tensor& k_out,
                        const ttnn::Tensor& dev_cos,
                        const ttnn::Tensor& dev_sin, int64_t nrows) {
     const uint32_t nr = static_cast<uint32_t>(nrows);
+    // f32-exact row statistic. On the tt-metal stack this backend builds
+    // against (tt_umd 0.9.12 era, /tmp/umdtrial-install), an f32 ttnn::sum
+    // lands on the tf32 FPU tile-reduce: the pin's own headers document the
+    // split (generic_reductions.hpp: mean's default
+    // fast_and_approximate_mode=false is "the accurate SFPU path (full
+    // fp32)", true is "the faster tf32 FPU path", and sum has no SFPU arm;
+    // reduce_helpers_common.hpp:14 "Fast keeps fp32 on the FPU/GMPOOL path
+    // (inputs truncated to tf32 — faster, lossy)"). The row scale therefore
+    // carried a 2^-11 truncation, and THIS row is kept at f32 (the model's
+    // dq3/dk3 are DType::kF32, qwen3_5.cpp:5877-5878), so the truncation was
+    // the op's dominant error: the device case measured 3.5e-4..5.2e-4 abs
+    // against the CPU f32 oracle, 35-52 percent of its 1e-3 floor.
+    // ttnn::mean takes the accurate SFPU path, and the CPU oracle's chain is
+    // rsqrt(mean(x^2)+eps) (cpu_ops.cpp:1707) — the same mean scale this arm
+    // now uses, where the sum arm applied eps at the sum scale. Measured on
+    // the P150: 3.5e-4 -> 4.8e-7 abs (the bf16-out arm becomes the
+    // oracle's exact RNE round, which the op's own doctrine at :1077-1082
+    // claims it should be).
     ttnn::Tensor sq = ttnn::multiply(x, x);
-    ttnn::Tensor s = ttnn::sum(sq, ttsl::SmallVector<int>{1}, true);
-    ttnn::Tensor denom =
-        ttnn::add(ttnn::multiply(s, 1.0f / static_cast<float>(dh)), na.eps);
+    ttnn::Tensor m = ttnn::mean(sq, ttsl::SmallVector<int>{1}, true);
+    ttnn::Tensor denom = ttnn::add(m, na.eps);
     ttnn::Tensor inv = ttnn::rsqrt(denom);
     ttnn::Tensor normed = ttnn::multiply(ttnn::multiply(x, inv), dev_w);
     ttnn::Tensor x1 = ttnn::slice(normed, ttsl::SmallVector<uint32_t>{0, 0},
