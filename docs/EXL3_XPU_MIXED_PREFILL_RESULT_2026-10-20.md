@@ -48,7 +48,8 @@ With the opt-in route, a fresh original MTP0/C2 run completes both requests:
 - Predeclared limit: 180 seconds plus 15 seconds shutdown; at most 100 steps.
 - Actual steps: 64; 32 output tokens per request, finish reason length.
 - Actually computed prompt work: 65,469 tokens per request.
-- Final consumed positions: 65,500 and 65,500.
+- Final completed `seq_lens` / exclusive request ends: 65,500 and 65,500.
+  These are the recorded `last_positions` values, not zero-based last-token indices.
 - Profiler settings remain off; original greedy seed 770000 and original IDs.
 
 This establishes bounded completion for this opt-in case. It does not establish
@@ -64,4 +65,4 @@ Completion harness SHA-256: `afc88ded4106d2a95d1d4dd6df1ab380c89265a45bc7b36f9d7
 Raw build commands, source hashes, RED/GREEN logs, same-input operator controls,
 progress rows and terminal receipts are retained in the supplied local evidence.
 The known strict code-fence failure remains separate. Disposition: retained
-experimental, default disabled pending the combined promotion decision.
+experimental, default disabled and excluded from the promoted Q1 default combination.

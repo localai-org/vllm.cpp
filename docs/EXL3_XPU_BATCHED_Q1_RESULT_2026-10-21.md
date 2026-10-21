@@ -161,10 +161,15 @@ output hashes and MTP trajectories can differ, including between A/A controls.
 Numerical-contract checks and exact ownership/lifetime checks remain separate.
 The already accepted auto/2 baseline costs are not attributed to this patch.
 
-The promoted combination must have a fresh full native/Python matrix before its
-comparison is published. That run uses compiled auto/long2/batched-Q1=1,
-SiLU 1/mixed-prefill 0 with all five policy overrides unset. The earlier completed
-auto/2 matrix remains historical evidence and is not relabelled as this build.
+The promoted combination has completed its [fresh full native/Python comparison](benchmarks/exl3-batched-q1-2026-10-21/README.md):
+20 scenarios / 70 measured waves / 124 requests plus three isolated 64K requests
+per engine, all 254 measured requests with 1,024-token length finishes and zero
+preemptions. Compiled auto/long2/batched-Q1=1, SiLU1/mixed-prefill0 are used with
+all five policy overrides unset. The earlier auto/2 matrix remains historical.
+The report discloses its one offline counter-window boundary correction and
+retains original samples/driver fields; the paired Q1 C4 screen is unchanged.
+Its C1 sentinel uses the declared client-timing metric; one auxiliary counter
+view is unqualified and is not used as performance evidence.
 
 ## Exact identity and raw evidence
 

@@ -256,6 +256,15 @@ original prompt length controls admission under concurrency. Use
 or `off`/`0` to disable the extra split. Natural cache hits remain possible.
 Auto trades some short warm hits for lower cold costs; invalid spellings fail.
 
+The [2026-10-21 batched-Q1 comparison](benchmarks/exl3-batched-q1-2026-10-21/README.md)
+contains the fresh promoted-default native/Python matrix, standalone English
+HTML and PNG/SVG figures, raw numerical tables and work-package dispositions.
+Both engines completed 70 original waves / 124 requests plus three isolated
+64K requests each, with 1,024-token length finishes and zero preemptions.
+A disclosed offline correction removes one leading final-prefill metric sample;
+all original data remain. It does not establish universal task quality or
+fresh default MTP0/C2 liveness. Expanded SiLU and mixed-prefill remain optional.
+
 The [2026-10-20 auto/2 comparison](benchmarks/exl3-auto2-2026-10-20/README.md)
 contains the previous completed baseline matrix, focused qualification, explicit
 short-prefix and 16K/C4 tradeoffs, known strict-format failure and incomplete
