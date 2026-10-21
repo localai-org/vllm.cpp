@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M2N8DKVKM2J03FCVBSKYVHXK
 Title: APEX e2e: keep-quant decode OOM — chunk policy misses the TILE-tiling blowup
 Row: BACKEND-TENSTORRENT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-16
-Updated: 2026-09-16
-Closed: -
+Updated: 2026-10-21
+Closed: 2026-10-21
 
 ## Problem
 
@@ -16,4 +16,18 @@ The APEX 27B e2e decode dies in MatmulBTQuantGroupedKernel -> DecodeKeepQuantWor
 
 ## Resolution
 
--
+2026-10-21: FALSIFIED BY THE TREE. The tiling-aware cap this issue asks
+for landed as `5d891f6d6` ("fix(BACKEND-TENSTORRENT): the keep-quant chunk
+tiling cap, sticky per weight", 2026-09-16), whose body closes this issue
+by name ("Closes ISSUE-LOCAL-01M2N8DKVKM2J03FCVBSKYVHXK") and carries the
+green-after evidence: the full backend suite 77/77 with 524,495 assertions,
+and the APEX 27B e2e probe WITHOUT the `VT_TT_KEEPQUANT_CHUNK_BYTES` knob,
+exit 0 with 64/64 generated tokens. The knob the issue said was required is
+no longer required.
+
+The cap is in this tree at `src/vt/tenstorrent/tenstorrent_keepquant.cpp:1339`
+(`chunk = std::min(chunk, std::max<int64_t>(plane_bytes / (K * 16), 1))`),
+with the divisor named in the comment at `:1313`, and the spec
+`.agents/specs/tenstorrent-apex-keepquant-chunk-tiling.md` records the
+attribution and the gates.
+
