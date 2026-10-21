@@ -215,18 +215,48 @@ empty-prompt 32-token decode; prefill p512 43.33 tok/s with it off), so the
 DEFAULT is the cached path.
 
 The default budget is DERIVED from the host's own memory report, so a small
-machine is not committed to a large allocation:
-`clamp(MemAvailable / 8, 1 GiB, 32 GiB)`. `MemAvailable` is the
+machine is not committed to a large allocation. `MemAvailable` is the
 `/proc/meminfo` figure the kernel reports as handable without swapping, read
-through the same helper the DeepSeek-V4 EXL3 host-residency budget uses. The
-budget is a BOUND, not a reservation: entries are allocated one at a time and
-evicted under it. An allocation that cannot be satisfied degrades the process
-to the uncached path (the original threaded dequant) instead of failing the
-forward, and the degradation is counted in the `VT_KOLIBRI1_PROFILE` report.
+through the same helper the DeepSeek-V4 EXL3 host-residency budget uses. Two
+measured facts shape the policy:
+
+- THE KNEE is 16 GiB. Below it the cache thrashes and buys little: at 8.25
+  GiB the measured hit rate was 33% with 16068 evictions, and the decode
+  throughput (3.84 tok/s) was indistinguishable from the cache being off
+  (3.62 tok/s), against 6.38 tok/s at an explicit 16 GiB (2026-10-21, node 3,
+  aarch64, 3.4 GHz, 32 threads, empty-prompt 32-token decode).
+- THE SAMPLING MOMENT matters. The budget was read on the first use of the
+  cache, and the first use happens during the 74 GB checkpoint load, where
+  the page cache is full and `MemAvailable` reads 66 GiB instead of the
+  host's ~212 GiB idle reading.
+
+So the policy reads the host at PROCESS START, before the load depresses the
+reading, and floors the budget at the knee when the host can afford it:
+
+    honest_bytes = max(start_bytes, plan_bytes)
+    budget_bytes = clamp(honest_bytes / 8, 1 GiB, 32 GiB)
+    if honest_bytes >= 64 GiB: budget_bytes = max(budget_bytes, 16 GiB)
+
+`start_bytes` is the reading taken at process start (before `main`, before
+any model load) and `plan_bytes` the reading at plan time; the maximum is
+the honest one. The 64 GiB HOST THRESHOLD is the scarcity line: a host that
+reports 64 GiB as handable can afford a 16 GiB cache, a quarter of what it
+reports, and below that threshold the divisor result stands with the 1 GiB
+floor and the host's scarcity speaks. The 32 GiB cap bounds the footprint,
+the 1 GiB floor keeps the lever ON everywhere, and an unreadable report uses
+the 4 GiB nominal, deliberately below the knee: a host that does not report
+its memory is not known to afford the knee.
+
+The budget is a BOUND, not a reservation: entries are allocated one at a time
+and evicted under it. An allocation that cannot be satisfied degrades the
+process to the uncached path (the original threaded dequant) instead of
+failing the forward, and the degradation is counted in the
+`VT_KOLIBRI1_PROFILE` report, which also prints the budget, the honest
+reading, and both readings it came from.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `VT_KOLIBRI1_DEQUANT_CACHE_MB` | **on** (budget derived: `clamp(MemAvailable / 8, 1 GiB, 32 GiB)`) | The Kolibri-1 CPU dequant cache's residency budget, in MiB. `0` DISABLES the cache and restores the original threaded pool dequant, byte for byte; that is the escape hatch and the A/B off switch. Any other value sets the budget EXACTLY (16 GiB is the shape the 2026-10-20 measurement above was taken in, and the shape to pin when a reproducible residency matters). The variable UNSET is the default: ON, with the derived budget above. A value that is not a plain non-negative number of MiB is not a budget, and it falls back to the default policy rather than switching a default-ON lever off. The cache stores the DECODED weights, so the bytes it serves are the bytes the uncached path produces: the change is a caching change, never an arithmetic one |
+| `VT_KOLIBRI1_DEQUANT_CACHE_MB` | **on** (budget derived: `clamp(max(start, plan) / 8, 1 GiB, 32 GiB)`, floored at the 16 GiB knee when the honest reading is at or above 64 GiB) | The Kolibri-1 CPU dequant cache's residency budget, in MiB. `0` DISABLES the cache and restores the original threaded pool dequant, byte for byte; that is the escape hatch and the A/B off switch. Any other value sets the budget EXACTLY (16 GiB is the shape the 2026-10-20 measurement above was taken in, and the shape to pin when a reproducible residency matters). The variable UNSET is the default: ON, with the derived budget above. A value that is not a plain non-negative number of MiB is not a budget, and it falls back to the default policy rather than switching a default-ON lever off. The cache stores the DECODED weights, so the bytes it serves are the bytes the uncached path produces: the change is a caching change, never an arithmetic one |
 
 ## Rollback and bisect switches
 

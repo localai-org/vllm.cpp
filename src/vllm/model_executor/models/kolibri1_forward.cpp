@@ -114,7 +114,8 @@ void Report(int64_t calls) {
   std::fprintf(stderr,
                "[kolibri1-profile]   dequant_cache hits=%llu misses=%llu "
                "evictions=%llu decode_calls=%llu alloc_failures=%llu "
-               "budget_mib=%llu budget_source_mib=%llu enabled=%d\n",
+               "budget_mib=%llu budget_source_mib=%llu budget_start_mib=%llu "
+               "budget_plan_mib=%llu enabled=%d\n",
                static_cast<unsigned long long>(c.hits),
                static_cast<unsigned long long>(c.misses),
                static_cast<unsigned long long>(c.evictions),
@@ -123,6 +124,9 @@ void Report(int64_t calls) {
                static_cast<unsigned long long>(cache.budget_bytes() >> 20),
                static_cast<unsigned long long>(cache.budget_source_bytes() >>
                                               20),
+               static_cast<unsigned long long>(cache.budget_start_bytes() >>
+                                              20),
+               static_cast<unsigned long long>(cache.budget_plan_bytes() >> 20),
                cache.enabled() ? 1 : 0);
 }
 

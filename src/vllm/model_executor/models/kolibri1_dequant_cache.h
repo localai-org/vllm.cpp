@@ -89,22 +89,51 @@
 // COUNTERS. hits / misses / evictions / decode_calls / alloc_failures are
 // exported through the VT_KOLIBRI1_PROFILE report (kolibri1_forward.cpp).
 //
-// THE DEFAULT BUDGET (2026-10-20). The cache is worth MORE THAN 2x on CPU
-// decode: 4.02 tok/s with the cache OFF against 9.07 tok/s with a 16 GiB
-// budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32 threads, empty-prompt
-// 32-token decode; prefill p512 43.33 tok/s with the cache off). Shipping it
-// OFF by default shipped the SLOW configuration, so the default is ON and the
-// budget is DERIVED from the host's own memory report:
+// THE DEFAULT BUDGET (2026-10-20, corrected 2026-10-21). The cache is worth
+// MORE THAN 2x on CPU decode: 4.02 tok/s with the cache OFF against 9.07
+// tok/s with a 16 GiB budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32
+// threads, empty-prompt 32-token decode; prefill p512 43.33 tok/s with the
+// cache off). Shipping it OFF by default shipped the SLOW configuration, so
+// the default is ON and the budget is DERIVED from the host's own memory
+// report. Two MEASURED facts shape the policy.
 //
-//     default_bytes = clamp(available_bytes / 8, 1 GiB, 32 GiB)
+// THE KNEE. The budget is worth its memory only at or above 16 GiB. At 8.25
+// GiB the measured hit rate was 33% with 16068 evictions, and the decode
+// throughput (3.84 tok/s) was indistinguishable from the cache being off
+// (3.62 tok/s). A budget below the knee buys nothing for the memory it
+// takes.
 //
-// `available_bytes` is `/proc/meminfo` MemAvailable, read through the house
-// helper `vllm::v1::host_available_memory_bytes()`
-// (include/vllm/v1/core/kv_cache_utils.h) — the SAME probe the DeepSeek-V4
-// EXL3 host-residency budget uses, so the tree keeps ONE memory reader.
+// THE SAMPLING MOMENT. The budget was read on FIRST USE of the cache, and
+// the first use happens DURING the 74 GB checkpoint load: the page cache is
+// full by then, so MemAvailable reads 66 GiB where the host's idle reading
+// is ~212 GiB. The divisor then yields 8.25 GiB, below the knee, and the
+// default ships the slow configuration by accident.
 //
+// So the policy reads the host at PROCESS START, before our own load
+// depresses the reading, and floors the budget at the knee when the host can
+// afford it:
+//
+//     honest_bytes = max(start_bytes, plan_bytes)
+//     budget_bytes = clamp(honest_bytes / 8, 1 GiB, 32 GiB)
+//     if honest_bytes >= 64 GiB: budget_bytes = max(budget_bytes, 16 GiB)
+//
+//   * `start_bytes` is MemAvailable read by a NAMESPACE-SCOPE initialiser,
+//     which runs before main and before any model load. `plan_bytes` is the
+//     reading at plan time. The MAXIMUM is the honest one: a reading lower
+//     than an earlier one says that something took memory in between, and
+//     the policy does not let its own checkpoint load talk the budget down.
+//   * Both readings are `/proc/meminfo` MemAvailable, read through the house
+//     helper `vllm::v1::host_available_memory_bytes()`
+//     (include/vllm/v1/core/kv_cache_utils.h) — the SAME probe the
+//     DeepSeek-V4 EXL3 host-residency budget uses, so the tree keeps ONE
+//     memory reader.
 //   * The DIVISOR (8) leaves seven eighths of the available memory for the
 //     checkpoint itself (74 GB of fp8 weights), the KV cache and the OS.
+//   * The KNEE FLOOR applies at or above the HOST THRESHOLD (64 GiB): a host
+//     that reports 64 GiB as handable can afford a 16 GiB cache, which is a
+//     quarter of what it reports. Below the threshold the divisor result
+//     stands with the 1 GiB floor: the host is scarce, and its scarcity
+//     speaks.
 //   * The FLOOR (1 GiB) keeps the lever ON everywhere: a host with less than
 //     8 GiB available still gets a cache, because re-dequantising every
 //     weight on every forward costs far more than a gigabyte of residency.
@@ -114,7 +143,8 @@
 //     fraction of the model it serves.
 //   * An UNKNOWN report (MemAvailable unreadable -> 0) uses the FIXED 4 GiB
 //     nominal: an unknown budget is not a reason to refuse, and not a reason
-//     to hand out the cap.
+//     to hand out the cap. The nominal sits BELOW the knee on purpose: a
+//     host that does not report its memory is not known to afford the knee.
 //
 // The budget is a BOUND, not a reservation: entries are allocated one at a
 // time and evicted under the bound, so the process is never committed to the
@@ -228,7 +258,24 @@ struct KeyHash {
   }
 };
 
+// The PROCESS-START reading (THE SAMPLING MOMENT). A function-local static,
+// so the reading is taken EXACTLY once, and the namespace-scope initialiser
+// below forces it to be taken at process start instead of on first use.
+inline uint64_t& StartAvailableBytesStorage() {
+  static uint64_t value = [] {
+    const int64_t available = vllm::v1::host_available_memory_bytes();
+    return available > 0 ? static_cast<uint64_t>(available) : 0;
+  }();
+  return value;
+}
+
 }  // namespace detail
+
+// THE PROCESS-START READING. The namespace-scope dynamic initialiser runs
+// before main and before any model load, so the reading is the host's own
+// availability and not what our own 74 GB checkpoint load left behind. The
+// plan uses the MAXIMUM of this reading and the reading at plan time.
+inline const uint64_t kStartAvailableBytes = detail::StartAvailableBytesStorage();
 
 // The ownership lease returned by `GetOrDequant` (maint-bot P1b on PR #3414).
 // A Lease shares ownership of the decoded bytes: they stay alive and unchanged
@@ -255,12 +302,19 @@ class Lease {
 // returned leases name memory this object co-owns.
 class Cache {
  public:
-  // `budget_source_bytes` is the available-memory reading the budget was
-  // derived from (0 when the budget was set explicitly, or when the host
-  // does not report one). It is kept so a reader can check the DERIVATION
-  // without re-reading a number that has moved since.
-  explicit Cache(size_t budget_bytes, uint64_t budget_source_bytes = 0)
-      : budget_(budget_bytes), budget_source_bytes_(budget_source_bytes) {}
+  // `budget_source_bytes` is the HONEST available-memory reading the budget
+  // was derived from (0 when the budget was set explicitly, or when the host
+  // does not report one). `budget_start_bytes` is the PROCESS-START reading
+  // and `budget_plan_bytes` the reading at plan time (THE SAMPLING MOMENT).
+  // They are kept so a reader can check the DERIVATION without re-reading a
+  // number that has moved since.
+  explicit Cache(size_t budget_bytes, uint64_t budget_source_bytes = 0,
+                 uint64_t budget_start_bytes = 0,
+                 uint64_t budget_plan_bytes = 0)
+      : budget_(budget_bytes),
+        budget_source_bytes_(budget_source_bytes),
+        budget_start_bytes_(budget_start_bytes),
+        budget_plan_bytes_(budget_plan_bytes) {}
 
   // Returns the decoded bf16 [n, k] block for `w` as a Lease: cache-owned
   // bytes on a hit, freshly decoded lease-owned bytes on a miss (the entry is
@@ -338,6 +392,8 @@ class Cache {
 
   size_t budget_bytes() const { return budget_; }
   uint64_t budget_source_bytes() const { return budget_source_bytes_; }
+  uint64_t budget_start_bytes() const { return budget_start_bytes_; }
+  uint64_t budget_plan_bytes() const { return budget_plan_bytes_; }
   size_t resident_bytes() const { return resident_; }
   // False when the budget is 0, and after a DEGRADATION (THE FALLBACK):
   // `LinearBT` then keeps the ORIGINAL threaded pool decode (main-line
@@ -394,6 +450,8 @@ class Cache {
 
   const size_t budget_;
   const uint64_t budget_source_bytes_;
+  const uint64_t budget_start_bytes_;
+  const uint64_t budget_plan_bytes_;
   std::atomic<bool> degraded_{false};
   size_t resident_ = 0;
   Lru lru_;  // front == most recently used
@@ -402,30 +460,59 @@ class Cache {
 };
 
 // THE DEFAULT BUDGET POLICY (THE DEFAULT BUDGET above). The constants are
-// exposed so the gate can pin the policy — floor, cap, divisor — without
-// restating the numbers, and so the documentation and the code cannot drift.
+// exposed so the gate can pin the policy — floor, cap, divisor, knee,
+// threshold — without restating the numbers, and so the documentation and
+// the code cannot drift.
 inline constexpr uint64_t kDefaultBudgetDivisor = 8;
 inline constexpr uint64_t kDefaultBudgetMinBytes = 1ull << 30;   // 1 GiB
 inline constexpr uint64_t kDefaultBudgetMaxBytes = 32ull << 30;  // 32 GiB
 // The nominal used when the host does not report its available memory.
 inline constexpr uint64_t kDefaultBudgetNominalBytes = 4ull << 30;  // 4 GiB
+// The MEASURED KNEE: the budget below which the cache thrashes and the
+// decode throughput is indistinguishable from the cache being off.
+inline constexpr uint64_t kDefaultBudgetKneeBytes = 16ull << 30;  // 16 GiB
+// The HOST THRESHOLD: at or above this honest available reading the host can
+// afford the knee (16 GiB is a quarter of 64 GiB).
+inline constexpr uint64_t kDefaultBudgetHostThresholdBytes = 64ull << 30;  // 64 GiB
 
-// The PURE policy: the budget for a given available-memory reading. Pure on
-// purpose: the gate pins it without reading the host, so a policy change is
-// a deterministic red, not a race against the machine's memory.
+// The HONEST available-memory reading: the MAXIMUM of the PROCESS-START
+// reading and the reading at plan time (THE SAMPLING MOMENT). A reading
+// lower than an earlier one says that something took memory in between; the
+// policy does not let its own checkpoint load, or anyone else's, talk the
+// budget down.
+inline uint64_t HonestAvailableBytes(uint64_t start_bytes, uint64_t plan_bytes) {
+  return start_bytes > plan_bytes ? start_bytes : plan_bytes;
+}
+
+// The PURE policy: the budget for a given HONEST available-memory reading.
+// Pure on purpose: the gate pins it without reading the host, so a policy
+// change is a deterministic red, not a race against the machine's memory.
 inline uint64_t DefaultBudgetBytesFor(uint64_t available_bytes) {
   if (available_bytes == 0) return kDefaultBudgetNominalBytes;  // UNKNOWN
-  const uint64_t derived = available_bytes / kDefaultBudgetDivisor;
-  if (derived < kDefaultBudgetMinBytes) return kDefaultBudgetMinBytes;
-  if (derived > kDefaultBudgetMaxBytes) return kDefaultBudgetMaxBytes;
+  uint64_t derived = available_bytes / kDefaultBudgetDivisor;
+  if (derived < kDefaultBudgetMinBytes) derived = kDefaultBudgetMinBytes;
+  // The KNEE FLOOR: a host that can afford the measured knee must not be
+  // served a budget below it, because a sub-knee budget buys nothing for the
+  // memory it takes. Below the HOST THRESHOLD the divisor result stands: the
+  // host is scarce, and its scarcity speaks.
+  if (available_bytes >= kDefaultBudgetHostThresholdBytes &&
+      derived < kDefaultBudgetKneeBytes) {
+    derived = kDefaultBudgetKneeBytes;
+  }
+  if (derived > kDefaultBudgetMaxBytes) derived = kDefaultBudgetMaxBytes;
   return derived;
 }
 
 // How the process-wide cache's budget was decided.
 struct BudgetPlan {
   size_t bytes = 0;           // the budget itself
-  uint64_t source_bytes = 0;  // the available-memory reading it came from
-                              // (0 when the operator set the budget exactly)
+  uint64_t source_bytes = 0;  // the HONEST available-memory reading it came
+                              // from (0 when the operator set the budget
+                              // exactly, or when the host reports none)
+  uint64_t start_bytes = 0;   // the PROCESS-START reading (0 when the
+                              // operator set the budget exactly)
+  uint64_t plan_bytes = 0;    // the reading at plan time (0 when the
+                              // operator set the budget exactly)
 };
 
 // The env knob, parsed. A plain non-negative decimal number of MiB parses;
@@ -468,10 +555,15 @@ inline Cache& ProcessCache() {
     uint64_t mib = 0;
     if (v == nullptr || !ParseBudgetMiB(v, &mib)) {
       // The DEFAULT: ON, with a budget derived from the host's own memory
-      // report (THE DEFAULT BUDGET).
+      // report (THE DEFAULT BUDGET). The reading is the HONEST one: the
+      // MAXIMUM of the PROCESS-START reading (taken before our own
+      // checkpoint load depressed the host's report) and the reading at plan
+      // time.
       const int64_t available = vllm::v1::host_available_memory_bytes();
       BudgetPlan p;
-      p.source_bytes = available > 0 ? static_cast<uint64_t>(available) : 0;
+      p.start_bytes = kStartAvailableBytes;
+      p.plan_bytes = available > 0 ? static_cast<uint64_t>(available) : 0;
+      p.source_bytes = HonestAvailableBytes(p.start_bytes, p.plan_bytes);
       p.bytes = static_cast<size_t>(DefaultBudgetBytesFor(p.source_bytes));
       return p;
     }
@@ -482,7 +574,8 @@ inline Cache& ProcessCache() {
                   : static_cast<size_t>(bytes);
     return p;
   }();
-  static Cache cache(plan.bytes, plan.source_bytes);
+  static Cache cache(plan.bytes, plan.source_bytes, plan.start_bytes,
+                     plan.plan_bytes);
   return cache;
 }
 

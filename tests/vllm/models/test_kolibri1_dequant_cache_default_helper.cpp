@@ -26,6 +26,9 @@
 namespace {
 
 using vllm::kolibri1_dequant_cache::DefaultBudgetBytesFor;
+using vllm::kolibri1_dequant_cache::HonestAvailableBytes;
+using vllm::kolibri1_dequant_cache::kDefaultBudgetHostThresholdBytes;
+using vllm::kolibri1_dequant_cache::kDefaultBudgetKneeBytes;
 using vllm::kolibri1_dequant_cache::kDefaultBudgetMaxBytes;
 using vllm::kolibri1_dequant_cache::kDefaultBudgetMinBytes;
 
@@ -54,18 +57,28 @@ int main(int argc, char** argv) {
   }
   const auto& cache = vllm::kolibri1_dequant_cache::ProcessCache();
   const unsigned long long budget = cache.budget_bytes();
-  std::printf("budget_bytes=%llu budget_source_bytes=%llu enabled=%d\n", budget,
-              static_cast<unsigned long long>(cache.budget_source_bytes()),
-              cache.enabled() ? 1 : 0);
+  const unsigned long long source = cache.budget_source_bytes();
+  const unsigned long long start = cache.budget_start_bytes();
+  const unsigned long long plan = cache.budget_plan_bytes();
+  std::printf("budget_bytes=%llu budget_source_bytes=%llu "
+              "budget_start_bytes=%llu budget_plan_bytes=%llu enabled=%d\n",
+              budget, source, start, plan, cache.enabled() ? 1 : 0);
   std::fflush(stdout);
 
   bool ok = false;
   if (mode == nullptr) {
     // The DEFAULT: ON, and the budget is exactly the policy applied to the
-    // reading the cache derived it from.
+    // HONEST reading the cache derived it from (the maximum of the
+    // process-start reading and the reading at plan time).
     ok = cache.enabled() &&
-         budget == DefaultBudgetBytesFor(cache.budget_source_bytes()) &&
+         source == HonestAvailableBytes(start, plan) &&
+         budget == DefaultBudgetBytesFor(source) &&
          budget >= kDefaultBudgetMinBytes && budget <= kDefaultBudgetMaxBytes;
+    // The KNEE: a host that reports at least the threshold gets at least the
+    // measured knee, so the default never ships the thrashing shape.
+    if (source >= kDefaultBudgetHostThresholdBytes) {
+      ok = ok && budget >= kDefaultBudgetKneeBytes;
+    }
   } else if (std::strcmp(mode, "0") == 0) {
     // The explicit OFF switch.
     ok = !cache.enabled() && budget == 0;
@@ -75,8 +88,7 @@ int main(int argc, char** argv) {
     ok = budget == mib * 1024ull * 1024ull && cache.enabled() == (mib > 0);
   } else {
     // MALFORMED: the DEFAULT policy applies.
-    ok = cache.enabled() &&
-         budget == DefaultBudgetBytesFor(cache.budget_source_bytes());
+    ok = cache.enabled() && budget == DefaultBudgetBytesFor(source);
   }
   return ok ? 0 : 1;
 }

@@ -413,28 +413,94 @@ the slow one. The cache was OFF by default (budget 0), and the configuration
 is worth MORE THAN 2x on CPU decode: 4.02 tok/s with the cache off against
 9.07 tok/s with a 16 GiB budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32
 threads, empty-prompt 32-token decode; prefill p512 43.33 tok/s with the
-cache off). The DEFAULT budget is now DERIVED from the host's own memory
-report, `clamp(MemAvailable / 8, 1 GiB, 32 GiB)`, read through the house
-helper `vllm::v1::host_available_memory_bytes()` (the same probe the
-DeepSeek-V4 EXL3 host-residency budget uses): a fraction of what the host
-reports as handable, so a small machine is not committed to a large
-allocation, a floor that keeps the lever ON everywhere, and a cap that
-bounds the footprint. `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` still disables the
-cache (the original threaded pool dequant, byte for byte) and an explicit
-value still sets the budget exactly (16 GiB is the shape the measurement
-above was taken in); an unparseable value falls back to the default policy
-rather than switching a default-ON lever off. The budget is a BOUND, not a
-reservation, and an allocation that cannot be satisfied degrades the
-process to the uncached path instead of failing the forward: the cache
-drops its entries, reports itself disabled, and counts the degradation.
-NO NUMERICS CHANGE: the cache stores the DECODED weights and serves them
-unchanged, and the gate pins the cached bytes against the PRODUCTION
-uncached dequant (`DequantFp8BlockUncached`) byte for byte, cold and hot.
-The consequence to record: the routed-expert GEMV's warm-bf16 residency
-precondition is now met by default, so the bf16-dot tier (already the
-default on a FEAT_BF16 host since 2026-10-19) also covers the routed
-experts without an environment variable. The decode/prefill benchmark rows
-for the default configuration are PENDING the node-3 window.
+cache off). The DEFAULT budget is DERIVED from the host's own memory report,
+read through the house helper `vllm::v1::host_available_memory_bytes()` (the
+same probe the DeepSeek-V4 EXL3 host-residency budget uses).
+`VT_KOLIBRI1_DEQUANT_CACHE_MB=0` still disables the cache (the original
+threaded pool dequant, byte for byte) and an explicit value still sets the
+budget exactly (16 GiB is the shape the measurement above was taken in); an
+unparseable value falls back to the default policy rather than switching a
+default-ON lever off. The budget is a BOUND, not a reservation, and an
+allocation that cannot be satisfied degrades the process to the uncached path
+instead of failing the forward: the cache drops its entries, reports itself
+disabled, and counts the degradation. NO NUMERICS CHANGE: the cache stores
+the DECODED weights and serves them unchanged, and the gate pins the cached
+bytes against the PRODUCTION uncached dequant (`DequantFp8BlockUncached`) byte
+for byte, cold and hot. The consequence to record: the routed-expert GEMV's
+warm-bf16 residency precondition is now met by default, so the bf16-dot tier
+(already the default on a FEAT_BF16 host since 2026-10-19) also covers the
+routed experts without an environment variable.
+
+DEQUANT CACHE DEFAULT BUDGET, CORRECTED (2026-10-21, branch
+`row/KOLIBRI1-DEQUANT-CACHE-DEFAULT`, issue
+ISSUE-LOCAL-01M5DVY9ZWF1XXAM2HSHH5BDRK): the first form of the default
+budget, `clamp(MemAvailable / 8, 1 GiB, 32 GiB)` read at the plan time, was
+wrong in TWO ways with ONE root cause, and the row's own review measured it.
+The plan is taken on the FIRST USE of the process-wide cache, and the first
+use happens DURING the 74 GB checkpoint load: the page cache is full by then,
+so MemAvailable reads 66 GiB where the host's idle reading is ~212 GiB. The
+divisor then yields 8.25 GiB, and a budget that low buys nothing: on node 3
+(aarch64, 3.4 GHz, 32 threads, empty-prompt 32-token decode, 2026-10-21) the
+default leg measured `budget_mib=8454 budget_source_mib=67638 hits=9097
+misses=18349 evictions=16068` and 3.84 tok/s, against 6.38 tok/s for an
+explicit 16384 MiB budget (`hits=21553 misses=18393 evictions=12940`) and
+3.62 tok/s with the cache off. The hit rate at 8.25 GiB was 33%. So the
+policy could land BELOW the knee, and the sampling moment is part of the
+policy, not an implementation detail of it.
+
+THE KNEE is 16 GiB: the budget above which the cache stops thrashing, from
+the 2026-07-20 budget-sensitivity table (9.07 tok/s at 16 GiB) and the
+2026-10-21 measurement above (6.38 tok/s at an explicit 16 GiB against
+3.84 tok/s at 8.25 GiB and 3.62 tok/s with the cache off). A budget below
+the knee is worth little for the memory it takes, and the default must not
+serve one to a host that can afford the knee.
+
+THE CORRECTED POLICY:
+
+    honest_bytes = max(start_bytes, plan_bytes)
+    budget_bytes = clamp(honest_bytes / 8, 1 GiB, 32 GiB)
+    if honest_bytes >= 64 GiB: budget_bytes = max(budget_bytes, 16 GiB)
+
+  * `start_bytes` is MemAvailable read by a NAMESPACE-SCOPE initialiser
+    (a function-local static behind it), which runs before main and before
+    any model load: the host's own availability, not what our own load left
+    behind. `plan_bytes` is the reading at plan time. The MAXIMUM is the
+    honest one, and the process-start reading is what the checkpoint load
+    would otherwise have hidden.
+  * The HOST THRESHOLD is 64 GiB: a host that reports 64 GiB as handable can
+    afford a 16 GiB cache, which is a quarter of what it reports. BELOW the
+    threshold the divisor result stands with the 1 GiB floor: the host is
+    scarce, and its scarcity speaks. The default is never "disabled" by the
+    policy. The threshold is a stated policy number, not a measured
+    constant, and the gate pins it.
+  * The 1 GiB FLOOR keeps the lever ON everywhere; the 32 GiB CAP bounds the
+    footprint (the measured budget-sensitivity table had its knee still open
+    at 32 GiB, +5-6% over 16 GiB). An UNKNOWN report (MemAvailable
+    unreadable) uses the 4 GiB nominal, deliberately BELOW the knee: a host
+    that does not report its memory is not known to afford the knee.
+  * The env contract is unchanged: 0 disables, N sets exactly N MiB, and an
+    unparseable value falls back to this default policy, never to disabled.
+
+The pure policy stays a function of an input reading
+(`DefaultBudgetBytesFor(available_bytes)` for the honest reading,
+`HonestAvailableBytes(start_bytes, plan_bytes)` for the maximum of the two
+moments), so the gate pins it without reading the host and a policy change is
+a deterministic red. The profile report carries all three numbers
+(`budget_mib`, `budget_source_mib`, `budget_start_mib`, `budget_plan_mib`) so
+a reader can check the derivation after the fact.
+
+MEASURED AFTER THE REPAIR (2026-10-21, node 3, aarch64, 3.4 GHz, 32
+threads, empty-prompt 32-token decode, `VT_KOLIBRI1_PROFILE=1`, the file
+mutex held, the box quiet): the DEFAULT leg planned
+`budget_mib=27157 budget_source_mib=217262 budget_start_mib=217262
+budget_plan_mib=143920 enabled=1` and finished at hits=72190, misses=17756,
+evictions=7993, an 80% hit rate, with 7.44833 tok/s; the second and third
+runs planned 27096 MiB and 27199 MiB and delivered 7.39141 and 7.46827
+tok/s. The explicit 16384 MiB leg, in the same window and the same binary,
+delivered 7.05777, 7.05438 and 6.98659 tok/s, and the cache-off leg
+delivered 3.62428, 3.78799 and 3.54865 tok/s. The plan-time reading
+(143920 MiB) sat 72 GiB under the process-start reading (217262 MiB): that
+gap IS the checkpoint load, and the honest reading closes it.
 
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
