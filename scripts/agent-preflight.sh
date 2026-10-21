@@ -208,6 +208,11 @@ SUITES=(
   test_tokengate_buildreq
   test_check_conflict_markers
   test_check_tree_compiles
+  # The windows-msvc /WX classes (C4456 local shadow, C4101 unreferenced
+  # local of an empty class) on the host compiler. The lane builds with
+  # /W4 /WX, so both are a build failure there and a green build on every
+  # POSIX lane.
+  test_msvc_wx_diagnostics
   test_prepush_checker_names
   test_ab_arms_differ
   # The variadic-load harness's own controls (#2970). It measures two

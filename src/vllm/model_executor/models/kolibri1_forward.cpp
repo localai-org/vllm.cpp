@@ -346,7 +346,11 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // tensor.
   if (t == 1 && kolibri1_bfdot_gemv::Bf16DotActive() &&
       kolibri1_dequant_cache::ProcessCache().enabled()) {
-    prof::Scope prof("linear_gemm");
+    // The arm's own scope, named apart from the function-scope
+    // profiler above: a same-named local here HIDES that local, which is
+    // MSVC C4456 and a build failure under the windows-msvc /WX lane.
+    // Same key, same scope boundaries, same accumulated time.
+    prof::Scope bfdot_prof("linear_gemm");
     DBuf out(d, out_dtype, {1, w.fp8_block.n});
     kolibri1_bfdot_gemv::Gemv(static_cast<const uint16_t*>(r.wt.data),
                               static_cast<const uint16_t*>(x.data),

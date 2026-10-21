@@ -264,6 +264,21 @@ jobs:
         # which this lane has; it does not build this tree.
         run: |
           python3 tests/scripts/test_check_tree_compiles.py
+      - name: The windows-msvc /WX classes stay clean on the host compiler
+        # Registered in TWO places, like the pre-push compile gate above: here
+        # and in the `SUITES` array of `scripts/agent-preflight.sh`. The
+        # windows-msvc lane builds with /W4 /WX, so a local shadow (MSVC
+        # C4456) or an unreferenced local of an empty class (MSVC C4101) is a
+        # BUILD FAILURE there and a green build on every POSIX lane, which is
+        # how kolibri1_forward.cpp:326 stayed red on `main` for a week after
+        # the C4101 and the tt_forward C4456 were fixed.
+        #
+        # The probe compiles the PRODUCTION translation units with the host
+        # compiler's -Wshadow, the same diagnostic class at the same file, line
+        # and column, and holds the [[maybe_unused]] that no host compiler can
+        # express. Host compiler only: no artifact, no GPU, no network.
+        run: |
+          python3 tests/scripts/test_msvc_wx_diagnostics.py
       - name: scripts/ and tools/ resolve their values, refuse, and keep records
         # Registered in TWO places, like the bring-up suite above: here and in
         # the `SUITES` array of `scripts/agent-preflight.sh`. Half of it guards
