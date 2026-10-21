@@ -302,31 +302,35 @@ block-quantized checkpoint. Node 3 of the shared aarch64 box (128 cores,
 the file mutex held, the box quiet. Detail:
 [Kolibri-1 on CPU](benchmarks/kolibri1-cpu-dequant-cache-default.md).
 
-| Leg | Decode tok/s (empty prompt, 32 generated tokens, 3 runs) | Prefill tok/s (p512, cache off) |
+| Leg | Decode tok/s (the in-repo bench: 128 tokens in, 64 greedy out) | Prefill tok/s (p512, cache off) |
 |---|---|---|
-| cache OFF — the configuration `main` ships today | 3.55 / 3.62 / 3.79 (median **3.62**) | 43.33 at 32 threads |
-| default, first implementation (8.25 GiB budget, 33% hit rate) | 3.84 | — |
+| cache OFF — the configuration `main` ships today | 3.55 / 3.62 / 3.79 (median **3.62**) | 43.02-43.33 at 32 threads |
+| default, first implementation (8.25 GiB budget, 33% hit rate) | 3.84 (one run) | — |
 | **default, repaired (26.5 GiB budget, 80% hit rate)** | **7.39 / 7.45 / 7.47 (median 7.45)** | — |
-| explicit 16 GiB budget | 6.38 / 6.95 / 6.99 (median 6.95) | — |
+| explicit 16 GiB budget | 6.99 / 7.05 / 7.06 (median 7.05) | — |
 
 The default is the FP8 dequant cache ON (PR #3488 — open at the time of
 writing, not on `main` at `891c4f27d`). **The ~2x of the default over the
-cache-off configuration is what every reading of the session agrees on; its
-margin over an explicit 16 GiB budget sits inside that leg's own spread and
-is NOT claimed as a win.** A sub-knee budget buys nothing: the default's
-first implementation (8.25 GiB, 33% hit rate) read 3.84 tok/s, a 1.3%
-difference from the cache-off median and inside the ~4% noise floor. The pool's spin budget is not a lever here
-(`VT_CPU_SPIN_ROUNDS=0` moved the same cell +4% at 32 threads and -0.2% at
-16 — a wash). Decode scales 1.38 / 2.59 / 4.02 tok/s at 8 / 16 / 32
-threads, so the knee is inside the 32-thread node.
+cache-off configuration (7.45 against 3.62, 2.06x) is what the published set
+shows; its margin over an explicit 16 GiB budget is 5.7% in the
+published set, a small margin for 10.5 GiB more cache, and is NOT claimed as a
+reason to prefer one over the other.** A sub-knee budget buys nothing: the
+default's first implementation (8.25 GiB, 33% hit rate) read 3.84 tok/s,
+which is +6.1% over the cache-off median and +1.3% over that leg's best run,
+so under the ~4% noise floor rule it is not a tie, and it pays 8.25 GiB of
+memory for a 33% hit rate. The pool's spin budget is not a lever here
+(`VT_CPU_SPIN_ROUNDS=0` moved the same cell +4.3% at 32 threads and -0.2%
+at 16 — the two paired readings do not agree in sign, so the pair does not
+separate the arms). Decode scales 1.38 / 2.59 / 4.02 tok/s at 8 / 16 / 32
+threads, 1.88x and then 1.55x, so the knee is inside the 32-thread node.
 
 **The campaign's 12 tok/s target is MET by the shipped default.** The
 n-gram spec-decode probe reads **12.74-13.14 tok/s** with the default
 (plain 8.63-9.36) against **6.27-6.30** with the cache off, so the number
 needs the dequant cache ON, a 32-thread node-3 host at 3.4 GHz, and it
-clears the target by about one 4% noise floor. The engine-level reading
-clears it too: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12, t32 with a 32 GiB
-cache). No vLLM or plugin denominator exists for this model, and no bf16 arm
+clears the target by 6.2%, about 1.5 times the ~4% noise floor. The
+engine-level reading clears it too: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12,
+t32 with a 32 GiB cache). No vLLM or plugin denominator exists for this model, and no bf16 arm
 can be measured: the loader refuses a bf16 Kolibri-1 artifact by name
 (`src/vllm/model_executor/models/kolibri1_weights.cpp:72`).
 
@@ -403,7 +407,7 @@ in the tree, default-OFF, for reproducibility; detail in the benchmark record.
 | MTP | Qwen3.6-27B NVFP4 | token-identical to vLLM MTP, **~4% faster at c1**; on-par at c2-c8 | `DONE` |
 | DFlash | Qwen3.6-27B NVFP4 | **2.9x over spec-off** (10.16 → 29.32 tok/s), at/above vLLM DFlash-on (**1.003x**, non-overlapping bands) | `DONE` |
 | n-gram | Qwen3.6-27B NVFP4 | draft-free (`SPEC-NGRAM`); 27B 5/5 STRICT our-ngram-ON == vLLM-ngram-ON, 180/180 drafts accepted (correctness only, no speed row yet) | `DONE` |
-| n-gram | Kolibri-1 (CPU) | draft-free (`SPEC-NGRAM`); the campaign's **12 tok/s target is MET** by the shipped default: spec decode **12.74-13.14 tok/s** (plain 8.63-9.36) against **6.27-6.30** with the dequant cache off. Host-specific (node 3, 32 threads, 3.4 GHz), and the margin is about one 4% noise floor ([detail](benchmarks/kolibri1-cpu-dequant-cache-default.md)) | `DONE` |
+| n-gram | Kolibri-1 (CPU) | draft-free (`SPEC-NGRAM`); the campaign's **12 tok/s target is MET** by the shipped default: spec decode **12.74-13.14 tok/s** (plain 8.63-9.36) against **6.27-6.30** with the dequant cache off. Host-specific (node 3, 32 threads, 3.4 GHz), and the margin over the target is 6.2%, about 1.5 times the ~4% noise floor ([detail](benchmarks/kolibri1-cpu-dequant-cache-default.md)) | `DONE` |
 | DSpark | Qwen3.6-35B-A3B NVFP4 + RedHatAI dspark draft, k=8 | Token-identical to spec-off. Warm c1 **1.15x** at **20.8% acceptance vs upstream 7.7%**. nsys: verify runs EAGER (0 graph launches vs 1/step) and the MoE costs 1.7x more GPU per token at T=9 | `ACTIVE` |
 | Breadth (EAGLE1/3, suffix, ngram-gpu, dynamic-k, ...) | n/a | enumerated from vLLM source + `INVENTORIED` 2026-08-06 (`.agents/specs/spec-decode-inventory.md`), unmeasured | `INVENTORIED` |
 
