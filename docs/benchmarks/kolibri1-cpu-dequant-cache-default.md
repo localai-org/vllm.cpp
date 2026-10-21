@@ -1,10 +1,12 @@
 # Kolibri-1 on CPU: the dequant-cache default
 
 The Kolibri-1 CPU decode, prefill and n-gram spec-decode numbers for the
-configuration the tree ships once PR #3488 lands: the **FP8 dequant cache ON
-by default**. Measured 2026-10-20/21 on node 3 (aarch64, 128 cores, 255 GB
-RAM, governor `performance` at 3.4 GHz), 32 threads, one NUMA node, the file
-mutex held, the box quiet.
+configuration the tree now ships: the **FP8 dequant cache ON by default**.
+PR #3488 has landed (`d9e669582` the flip, `e451be705` the sampling-moment
+repair and the knee floor, `3ce14f35c` the knee refusal), so the numbers
+below are the shipped configuration's numbers. Measured 2026-10-20/21 on
+node 3 (aarch64, 128 cores, 255 GB RAM, governor `performance` at 3.4 GHz),
+32 threads, one NUMA node, the file mutex held, the box quiet.
 
 This is a **host-specific** record, not a parity claim: vLLM does not serve
 this model on this path, and the author's plugin is still unverified as a
@@ -28,7 +30,7 @@ except the sub-knee leg, which has one.
 
 | leg | runs (tok/s) | median | vs cache off |
 |---|---|---:|---:|
-| **cache OFF** — what `main` ships today | 3.55 / 3.62 / 3.79 | **3.62** | 1.00x |
+| **cache OFF** — what `main` shipped before the default landed | 3.55 / 3.62 / 3.79 | **3.62** | 1.00x |
 | default, first implementation (8.25 GiB budget, 33% hit rate) | 3.84 | 3.84 | 1.06x |
 | **default, repaired** (26.5 GiB budget, 80% hit rate) | 7.39 / 7.45 / 7.47 | **7.45** | **2.06x** |
 | explicit 16 GiB budget | 6.99 / 7.05 / 7.06 | 7.05 | 1.95x |
@@ -38,10 +40,14 @@ The `vs cache off` column is the ratio to the cache-off median, 3.62:
 
 Every cell in this table is one measurement set: the session's
 `bench_repair.log` (2026-10-21 02:03-02:09, `/tmp/build-dq`), the binary
-rebuilt from the committed head `d47173c51` of PR #3488, one hold, three
-invocations per leg. The sub-knee leg is the single run its own policy commit
-quotes (`prof-default2.log`, 2026-10-21 01:45: `budget_mib=8454`,
-`hits=9097`, `misses=18349`, `evictions=16068`).
+rebuilt from the committed head `d47173c51` of PR #3488 — the head the
+measurement was taken on — one hold, three invocations per leg. That PR has
+since landed on `main` as `d9e669582` (the flip), `e451be705` (the
+sampling-moment repair and the knee floor) and `3ce14f35c` (the knee
+refusal), so the default this table measures is the configuration `main`
+now ships. The sub-knee leg is the single run its own policy commit quotes
+(`prof-default2.log`, 2026-10-21 01:45: `budget_mib=8454`, `hits=9097`,
+`misses=18349`, `evictions=16068`).
 
 ### 2. Prefill and thread scaling, the session driver
 
@@ -182,9 +188,11 @@ probe carries the serving number this page publishes.
 - **The numbers are host-specific**: 32 threads, one NUMA node, 3.4 GHz,
   aarch64, `governor=performance`, on node 3 of a shared box. They are not a
   portable tok/s figure.
-- **The default is not on `main` yet.** PR #3488 was open at the time of
-  writing; on `main` the shipped configuration is the cache-off one, and the
-  same probe reads 6.27-6.30 tok/s.
+- **The default is on `main` now, and the numbers are its measured
+  behaviour.** PR #3488 landed as `d9e669582`, `e451be705` and `3ce14f35c`,
+  so the configuration `main` ships is the cache-ON one this page measures.
+  The cache-off leg is the baseline `main` shipped before the default
+  landed, and the same probe reads 6.27-6.30 tok/s with it off.
 - **A sub-knee budget buys nothing**, and the measurement says so: the
   default's first implementation (8.25 GiB, 33% hit rate, 16068 evictions)
   read 3.84 tok/s. That is +6.1% over the cache-off median (3.84/3.62 =
@@ -214,5 +222,6 @@ derived number — is
 [`docs/bench-evidence/kolibri1-cpu-dequant-cache-default-20261021/report.md`](../bench-evidence/kolibri1-cpu-dequant-cache-default-20261021/report.md).
 The policy the default is measured against is PR #3488
 (`84d98a9e6` the flip, `d47173c51` the sampling-moment repair and the knee
-floor, `e7d7704d3` the knee refusal); the row's own record is
+floor, `e7d7704d3` the knee refusal), which landed on `main` as
+`d9e669582`, `e451be705` and `3ce14f35c`; the row's own record is
 [`.agents/specs/kolibri-1-cpu.md`](../../.agents/specs/kolibri-1-cpu.md).

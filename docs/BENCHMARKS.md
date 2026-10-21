@@ -304,13 +304,14 @@ the file mutex held, the box quiet. Detail:
 
 | Leg | Decode tok/s (the in-repo bench: 128 tokens in, 64 greedy out) | Prefill tok/s (p512, cache off) |
 |---|---|---|
-| cache OFF — the configuration `main` ships today | 3.55 / 3.62 / 3.79 (median **3.62**) | 12.27-12.30 / 23.78-23.89 / **43.02-43.33** tok/s at 8 / 16 / 32 threads |
+| cache OFF — the configuration `main` shipped before the default landed | 3.55 / 3.62 / 3.79 (median **3.62**) | 12.27-12.30 / 23.78-23.89 / **43.02-43.33** tok/s at 8 / 16 / 32 threads |
 | default, first implementation (8.25 GiB budget, 33% hit rate) | 3.84 (one run) | — |
 | **default, repaired (26.5 GiB budget, 80% hit rate)** | **7.39 / 7.45 / 7.47 (median 7.45)** | — |
 | explicit 16 GiB budget | 6.99 / 7.05 / 7.06 (median 7.05) | — |
 
-The default is the FP8 dequant cache ON (PR #3488 — open at the time of
-writing, not on `main` at `891c4f27d`). **The ~2x of the default over the
+The default is the FP8 dequant cache ON (PR #3488 — landed on `main` as
+`d9e669582`, `e451be705` and `3ce14f35c`; at the time of writing it was
+open, and `main` was at `891c4f27d`). **The ~2x of the default over the
 cache-off configuration (7.45 against 3.62, 2.06x) is what the published set
 shows;** the explicit 16 GiB leg is 1.95x the same baseline (7.05 against
 3.62), and the default is 1.97x-2.10x the cache-off leg's own band (7.45

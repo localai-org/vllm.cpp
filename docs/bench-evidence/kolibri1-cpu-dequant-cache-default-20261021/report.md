@@ -4,21 +4,25 @@
 Row: `MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm`
 Issue: `ISSUE-LOCAL-01M5E7ZJW0YXR2QZXQESJEP0MX` (kind gap — the public
 performance record the row did not have).
-Branch: `row/KOLIBRI1-CPU-BENCH-RECORDS` (base `origin/main` `891c4f27d`).
+Branch: `row/KOLIBRI1-CPU-BENCH-RECORDS` (measured on the base `origin/main`
+`891c4f27d`; the record was rebased onto `3ce14f35c`, which carries the
+landed default).
 Date: 2026-10-20/21.
 No product code changed for this record.
 
 ## What this is
 
 The public performance record for the Kolibri-1 CPU path, for the
-configuration the tree is about to ship: the CPU **dequant cache ON by
-default**. That default is PR #3488
+configuration the tree now ships: the CPU **dequant cache ON by default**.
+That default is PR #3488
 (`row/KOLIBRI1-DEQUANT-CACHE-DEFAULT`, head `e7d7704d3`, commits `84d98a9e6`
-→ `d47173c51` → `e7d7704d3`), which was **OPEN at the time of writing** and is
-**not** on `main` at `891c4f27d`. Every "default" number below is that PR's
-configuration measured on the box that runs this row's gates. A reader on
-`main` today gets the **cache-off** configuration, and the first table says
-what that costs.
+→ `d47173c51` → `e7d7704d3`), which was **OPEN at the time of writing** and
+has since **LANDED** on `main` as `d9e669582` (the flip), `e451be705` (the
+sampling-moment repair and the knee floor) and `3ce14f35c` (the knee
+refusal). Every "default" number below is that PR's configuration measured
+on the box that runs this row's gates, and it is the configuration `main`
+ships today. The cache-off leg is the baseline `main` shipped before the
+default landed, and the first table says what that costs.
 
 The record answers three questions the tree could not answer before:
 
@@ -115,7 +119,7 @@ Set S1, three runs per leg, tok/s. The sub-knee leg is S2's single run.
 
 | leg | runs | median | note |
 |---|---|---|---|
-| **cache OFF** (`VT_KOLIBRI1_DEQUANT_CACHE_MB=0`) — the configuration `main` ships today | 3.55 / 3.62 / 3.79 | **3.62** | the baseline every other leg is read against |
+| **cache OFF** (`VT_KOLIBRI1_DEQUANT_CACHE_MB=0`) — the configuration `main` shipped before the default landed | 3.55 / 3.62 / 3.79 | **3.62** | the baseline every other leg is read against |
 | default, **first implementation** (8.25 GiB budget, 33% hit rate, 16068 evictions) | 3.84 | 3.84 | **worthless**: +6.1% over the cache-off median and +1.3% over the cache-off leg's best run, for 8.25 GiB of memory and a 33% hit rate |
 | default, **repaired** (26.5 GiB budget from a 212 GiB process-start reading; hits 72190-72200, misses 17746-17765, evictions 7967-8027, **80% hit rate**) | 7.39 / 7.45 / 7.47 | **7.45** | the shipped default; **2.06x** the cache-off median |
 | **explicit 16 GiB** (`VT_KOLIBRI1_DEQUANT_CACHE_MB=16384`) | 6.99 / 7.05 / 7.06 | 7.05 | 1.95x the cache-off median |
@@ -152,7 +156,8 @@ Set S3, two runs per leg, tok/s.
 
 Prefill is the arm the cache does not help (it is one wide forward, not a
 reused decode), and it is quoted with the cache **OFF** on purpose: that is
-the configuration `main` ships.
+the configuration `main` shipped before the default landed, and it is the
+baseline every cache-on number is read against.
 
 ## 3. Thread scaling, decode, cache OFF, empty prompt
 
@@ -220,8 +225,9 @@ cache, 2026-10-12), and the spec probe's own harness reference at
 **The caveats travel with the number, and they are load-bearing:**
 
 - The 12 tok/s figure **needs the dequant cache ON**, which is the PR #3488
-  default and is **not on `main` at `891c4f27d`**. On `main` the shipped
-  configuration is the cache-off one, and the same probe reads 6.27-6.30.
+  default and is now **on `main`** (`d9e669582`, `e451be705`, `3ce14f35c`).
+  With the cache off — the configuration `main` shipped before the default
+  landed — the same probe reads 6.27-6.30.
 - The figure is **host-specific**: 32 threads, one NUMA node, 3.4 GHz,
   aarch64, `governor=performance`, on node 3 of the shared box. It is not a
   portable tok/s figure and it is not a vLLM comparison — vLLM does not
@@ -315,7 +321,8 @@ reading of the decode table's cells: the same explicit 16 GiB leg reads
 
 - PR #3488 `row/KOLIBRI1-DEQUANT-CACHE-DEFAULT`: `84d98a9e6` (the default
   flip), `d47173c51` (the sampling-moment repair and the knee floor),
-  `e7d7704d3` (the knee refusal) — the policy this record measures.
+  `e7d7704d3` (the knee refusal) — the policy this record measures. It
+  landed on `main` as `d9e669582`, `e451be705` and `3ce14f35c`.
 - `.agents/specs/kolibri-1-cpu.md` — the row's spec, its `## Now` and its
   `## Outcome`.
 - `docs/benchmarks/kolibri1-cpu-dequant-cache-default.md` — the public

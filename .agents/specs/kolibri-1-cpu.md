@@ -661,7 +661,7 @@ than that, and two legs that differ by less than 4% are a tie.
 
 | leg | decode tok/s (the in-repo bench: 128 tokens in, 64 greedy out) |
 |---|---|
-| cache OFF — the configuration `main` ships today | 3.55 / 3.62 / 3.79 (median **3.62**) |
+| cache OFF — the configuration `main` shipped before the default landed | 3.55 / 3.62 / 3.79 (median **3.62**) |
 | default, first implementation (8.25 GiB budget, 33% hit rate, 16068 evictions) | 3.84 (one run) |
 | **default, repaired** (26.5 GiB budget from a 212 GiB process-start reading; hits 72200, misses 17746, evictions 7967, 80% hit rate) | **7.39 / 7.45 / 7.47** |
 | explicit `VT_KOLIBRI1_DEQUANT_CACHE_MB=16384` | 6.99 / 7.05 / 7.06 |
@@ -689,9 +689,10 @@ n-gram spec-decode leg reads **12.74-13.14 tok/s**, so the campaign's
 (12.74 against 6.27): the number belongs to the default and to the default's
 host, not to the model in the abstract. The engine-level reading clears it
 as well: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12, t32 with a 32 GiB cache,
-in `## Now` above). The default was still **OPEN** (PR #3488) when this was
-written, so the row's numbers describe the configuration `main` ships when
-it lands; today `main` ships the cache-off leg.
+in `## Now` above). PR #3488 has **LANDED**: `d9e669582` (the flip),
+`e451be705` (the sampling-moment repair and the knee floor) and `3ce14f35c`
+(the knee refusal) are on `main`, so `main` now ships the **cache-ON**
+default and the row's numbers are the shipped configuration's numbers.
 
 REJECTED, each with the measurement that rejected it. The **sub-knee
 budget** (the default's first implementation: 8.25 GiB, 33% hit rate, 16068
