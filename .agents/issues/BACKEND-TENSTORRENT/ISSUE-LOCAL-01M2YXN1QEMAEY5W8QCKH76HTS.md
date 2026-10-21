@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-20
-Updated: 2026-09-20
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -16,4 +16,18 @@ The f32-exact decode stack on the Tenstorrent P150 reaches ~0.028 tok/s on Qwen3
 
 ## Resolution
 
--
+2026-10-21: STILL TRUE. The native BFP4/BFP8 path is still not implemented.
+`include/vllm/config/tt_weight_residency.h:10` keeps bfp4 in the reserved list
+("RESERVED, not implemented; refused by name at the staging seam"), and
+`src/vt/tenstorrent/tenstorrent_residency.cpp:605` still refuses it by name
+("VT_TT_WEIGHT_RESIDENCY=bfp4: not implemented; staged ...").
+
+The row's spec `.agents/specs/tenstorrent-bfp-weight-residency.md` is ACTIVE:
+wave 1 (BFP8 weight residency) is merged, and its A/B identified per-call
+compute as the bottleneck, but the remaining gap is still FORMAT -- our path
+block-dequants GGUF weights and runs every decode GEMM through the SFPU
+f32-exact path, where the native pipeline runs a tensor-core BFP matmul.
+
+What settles it: the load-time conversion plus a device-resident ttnn matmul,
+with the near-tie correctness gate against the b10451 oracle on the quantized
+model. Not verifiable offline.

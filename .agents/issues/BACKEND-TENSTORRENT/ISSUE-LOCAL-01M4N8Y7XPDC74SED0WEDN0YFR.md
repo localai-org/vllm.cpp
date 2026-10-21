@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-11
-Updated: 2026-10-11
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -16,8 +16,21 @@ kolibri1 P150 decode runs eager (~10 device ops/layer x 50 layers, ~960 ms/step,
 
 ## Resolution
 
--
+2026-10-21: STILL TRUE as a gap; the study this issue asks for has landed.
+`docs/gap-kolibri1-tt-captured-decode.md` is the committed gap analysis and
+records the prototype's verdict: capture is NOT feasible for this model without
+a MoE-arm redesign, because the per-layer router-logits download and the
+host-driven streaming expert fetch with per-miss readback pivot verify sit
+inside any candidate captured region, and a ttnn trace prohibits mid-region host
+reads. The prototype (a router-bias host cache) showed no measurable win --
+1152 ms/step against a 1077/1254 ms/step baseline, inside the run-to-run noise.
 
+The gap itself is unchanged: both device capture arms still decline on kolibri
+geometry through the %32 sdpa_decode TILE validation
+(`src/vt/tenstorrent/tenstorrent_paged.cpp:352` and `:666`), so the decode stays
+eager at about 960 ms/step. The three levers the study re-ranks (the
+expert-fetch readback and verify cost, a device-side `vt::MoeRouterTopK` port,
+and cache block_size 32 with a `WarmRacIdx` entry) are still open.
 
 ## Evidence (2026-10-11, gap-analysis session, branch row/tt-kolibri-capture)
 

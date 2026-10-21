@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-17
-Updated: 2026-10-18
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -42,3 +42,15 @@ The chunked-prefill near-tie adjudication instrument (VT_KOLIBRI1_TT_CHUNK_ADJUD
   layers and the router. Chunked prefill stays opt-in; any future fix is a
   tt-metal prefill-kernel precision change, not a walk change.
 
+2026-10-21: STILL TRUE. The band-class equivalence blocker is unchanged and was
+re-confirmed after this record's own entry: `93e37e703` (PR #3468) re-ran the
+adjudication and found 78 flips (47 near-ties, 31 HARD, worst gap 9.957 nats
+against the 2.5-nat band), hard flips on all 8 gate prompts including decode
+position 0 on 4 of them, with prefill 146 s serial against 71 s chunked (x2.06).
+The chunked-prefill knob stays opt-in.
+
+What settles it: a tt-metal multi-token prefill-kernel precision change, or an
+adopted narrower band. The instrument is already in the tree
+(`VT_KOLIBRI1_TT_CHUNK_ADJUDICATE=1` and `VT_KOLIBRI1_TT_CHUNK_SWEEP=1` in
+`tests/vllm/models/test_kolibri1_tt_b2ii.cpp`), so a re-measurement is one P150
+run.

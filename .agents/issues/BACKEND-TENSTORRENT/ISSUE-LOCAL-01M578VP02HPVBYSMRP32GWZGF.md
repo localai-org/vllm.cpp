@@ -16,7 +16,27 @@ The tt-metal rms_norm arm (ttnn::rms_norm over f32 tiles, patched fp32_acc=true/
 
 ## Resolution
 
--
+2026-10-21: STILL TRUE, and the mechanism is sharper than the 2026-10-19
+update below states. The deviation is a property of the tt-metal rms_norm arm
+on REAL in-model rows. The 0.9809 reading that the 2026-10-19 update
+attributed to upstream's rsqrt rework is in fact the substrate's DEFAULT
+compute configuration (`fp32_acc=false`), and upstream main reads the same
+value for the same configuration, so upstream changed no measured value: see
+the 2026-10-21 update at the end of this record.
+
+What settles it: the re-check trigger this record names -- SFPI >= 7.89, or an
+upstream rms reduce and round rework -- followed by the micro replay on the
+captured in-model rows. The substrate characterisation and the local patch
+audit continue under `ISSUE-LOCAL-01M5B60NEFSEHYZXMR6FSS1RAF` in the
+`MODEL-TEXT-kolibri-1-tenstorrent` row.
+
+This record also absorbs the duplicate that closed on 2026-10-21,
+`ISSUE-LOCAL-01M54CKBVMKZEGP8ZWM3G0CCT6` (the same substrate defect, opened the
+day before). Its unique evidence is preserved in that record's closure -- the
+pre-scale fix is falsified, because scaling probes x0.25/x1/x4 leave the
+tt/host-double sum ratio unchanged (0.995/0.992), so the bias is
+scale-invariant; 74% of the elements match the host-double oracle exactly and
+the differing ~26% are net-low 1-3 ULP artifacts.
 
 ## Update 2026-10-19: probed tt-metal upstream head (2500c1d8f63)
 

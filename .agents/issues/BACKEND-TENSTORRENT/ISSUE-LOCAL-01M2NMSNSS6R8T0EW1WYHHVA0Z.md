@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-16
-Updated: 2026-09-16
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -34,3 +34,20 @@ catch is real; fix owned by ISSUE-LOCAL-01M2NSDATJQ1YNW1PA9ZBMAAM5).
   keep-quant arm produces garbage at the lm_head decode shapes. The 27B
   e2e completions were structurally complete but token content garbage —
   the gate did its job before any bench record.
+
+2026-10-21: STILL TRUE. The gate this issue asks for ran, and its verdict was
+FAIL. The record already carries that execution: identical workload on both
+legs, artifact sha256 `47b627b7de17c2bcfa9cebb7cf2d9d81e68b4b61f8cad16cf85f839604c694cb`,
+the oracle leg on the pinned llama.cpp b10451 `llama-server`, our leg through
+`vllm-bench --output-token-ids`, greedy temp 0, 32 tokens, no chat template --
+and all 64 of our token ids were zero.
+
+The defect the gate caught is closed (`ISSUE-LOCAL-01M2NSDATJQ1YNW1PA9ZBMAAM5`,
+CLOSED 2026-09-18), but that record's own resolution states that token-exact
+parity with the llama.cpp oracle "is NOT yet achieved and stays open under the
+gate spec", and the gate spec `.agents/specs/tenstorrent-apex-greedy-gate.md`
+is still ACTIVE with an open `## Owed` section.
+
+What settles it: a P150 rerun of the same two legs on the current pin, with the
+recorded comparison and the disposition written back here. No offline check can
+establish the token parity, so the record stays open.

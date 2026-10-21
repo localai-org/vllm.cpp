@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-17
-Updated: 2026-10-17
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -16,4 +16,24 @@ ad8d9b45b (memo eviction order + weight-view shadow drops at UnregisterHostBuffe
 
 ## Resolution
 
--
+2026-10-21: STILL TRUE, with the attribution changed. The PRICED FIX this issue
+names landed as `93e37e703` (PR #3468): the memo entry now owns its staged
+device tensors (`SlotDequant::staged`,
+`src/vllm/model_executor/models/kolibri1_tt_forward.h:172-180`, staged at
+`kolibri1_tt_forward.cpp:882-892`), the shadow sweeps are off the decode hot
+path (172,800 owned serves, 142,740 owned stages, 0 sweep events), and the
+pointer-keyed shadow map no longer caches views of the transient buffer. The
+mechanism this issue names -- the shadow drop re-staging evicted expert weights
+-- no longer exists.
+
+The cost, however, persists and is re-attributed: step time is unchanged (1559
+-> 1567 ms/step) because the memo thrashes. The cap of 512 entries against about
+300 distinct experts per forward gives a hit rate near zero, so every touch
+re-uploads 7.86 MB H2D. The pre-#3452 1000 ms/step was fast because the stale
+pointer-keyed cache skipped that upload while serving the previous tenant's
+weights, which is the bug #3452 closed.
+
+What settles it: one of the three levers the landing commit names -- a
+content-keyed expert staging cache, a device-side fp8->bf16 dequant, or raising
+the cap -- followed by a step-time measurement. The residual has no open owner:
+the memo-bound record `ISSUE-LOCAL-01M4MJG2CKSM1FK53PZ44QFN1J` is CLOSED.
