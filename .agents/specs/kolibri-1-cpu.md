@@ -681,13 +681,15 @@ the same cells instead of mixing them into the tables.
 
 WHAT THE DEFAULT NOW DELIVERS. The configuration that ships with the FP8
 dequant cache ON decodes at **7.45 tok/s** on the in-repo production shape
-(128 tokens in, 64 greedy out), **2.06x** the cache-off 3.62, and its
+(128 tokens in, 64 greedy out), **2.06x** the cache-off 3.62 and
+1.97x-2.10x the cache-off leg's own band (7.45 against 3.55-3.79), and its
 n-gram spec-decode leg reads **12.74-13.14 tok/s**, so the campaign's
 **12 tok/s target is MET**. The target is not met with the cache off
-(6.27-6.30): the number belongs to the default and to the default's host,
-not to the model in the abstract. The engine-level reading clears it as
-well: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12, t32 with a 32 GiB cache, in
-`## Now` above). The default was still **OPEN** (PR #3488) when this was
+(6.27-6.30), and the default's spec leg is **2.03x** the cache-off leg's
+(12.74 against 6.27): the number belongs to the default and to the default's
+host, not to the model in the abstract. The engine-level reading clears it
+as well: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12, t32 with a 32 GiB cache,
+in `## Now` above). The default was still **OPEN** (PR #3488) when this was
 written, so the row's numbers describe the configuration `main` ships when
 it lands; today `main` ships the cache-off leg.
 
@@ -703,13 +705,14 @@ the policy rather than an implementation detail of it. The **explicit 16
 GiB budget** as the recommended setting read 6.99-7.06 tok/s in the
 published set against 7.39-7.47 for the derived default, a margin of 5.7%
 (7.45/7.05) that is above the noise floor and small for 10.5 GiB more cache,
-so it is **not** claimed as a reason to prefer one over the other, and
-pinning 16 GiB by hand takes the host's own memory report out of a decision
-the report makes better. **Spin tuning** (`VT_CPU_SPIN_ROUNDS`) moved the
-same cell from 4.019 to 4.193 tok/s at 32 threads (+4.3%) and from 2.587 to
-2.581 at 16 (-0.2%), so the two paired readings do not agree in sign, the
-pair does not separate the arms, and no spin setting is recommended. One
-paired reading on one host is not a settled lever question.
+and 1.95x the cache-off median (7.05 against 3.62), so it is **not** claimed
+as a reason to prefer one over the other, and pinning 16 GiB by hand takes
+the host's own memory report out of a decision the report makes better.
+**Spin tuning** (`VT_CPU_SPIN_ROUNDS`) moved the same cell from 4.019 to
+4.193 tok/s at 32 threads (+4.3%) and from 2.587 to 2.581 at 16 (-0.2%), so
+the two paired readings do not agree in sign, the pair does not separate the
+arms, and no spin setting is recommended. One paired reading on one host is
+not a settled lever question.
 
 THE CAVEATS TRAVEL WITH EVERY NUMBER ABOVE. They are **host-specific**: 32
 threads on one NUMA node at 3.4 GHz, governor `performance`, aarch64, node 3

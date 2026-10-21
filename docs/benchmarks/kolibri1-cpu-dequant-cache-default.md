@@ -84,8 +84,12 @@ runs per leg.
 
 **The campaign's 12 tok/s target is MET** by the shipped default: the spec
 decode leg reads 12.74-13.14 tok/s. It is **not** met with the cache off
-(6.27-6.30). The caveats are in [Limitations](#limitations) and they travel
-with the number.
+(6.27-6.30). The default's spec leg is **2.03x** the cache-off leg's
+(12.74/6.27 = 2.03). A second, independent reading clears the target at the
+engine level rather than the harness level: **4.53 -> 13.78 tok/s**, or
+**3.04x** (2026-10-12, t32 with a 32 GiB cache; the row spec's `## Now`).
+The caveats are in [Limitations](#limitations) and they travel with the
+number.
 
 ## The weights
 
