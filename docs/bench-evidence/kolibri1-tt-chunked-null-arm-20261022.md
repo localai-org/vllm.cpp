@@ -28,7 +28,8 @@ not.
 | device | P150 (Blackhole), one card |
 | base commit of the measurement | `origin/main` 3ce14f35c |
 | build directory | `/tmp/build-tt-taps` |
-| harness | `tests/vllm/models/test_kolibri1_tt_taps.cpp` |
+| harness | `tests/vllm/models/test_kolibri1_tt_taps.cpp`, an uncommitted scratch file (see below) |
+| device reset and kernel-cache clear script | `/tmp/tt-taps-run5.sh`, the `reset_dev` function |
 | prompt | 6 teacher-forced tokens: 5249, 25079, 74493, 15774, 121598, 116026 |
 | model | `/mnt/models/Aleph-Alpha/Kolibri-1` |
 | tt-metal runtime root | `TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/tt-metalium` |
@@ -36,6 +37,14 @@ not.
 | CPU pinning | `taskset -c 32-63` |
 | raw run output | `/tmp/tt-reps/run5.log` |
 | device reset output | `/tmp/tt-reps/smi-reset.log` |
+
+The harness path in that table is NOT in any commit. The measurement ran with
+an uncommitted scratch harness at
+`/tmp/tt-taps/tests/vllm/models/test_kolibri1_tt_taps.cpp`, in the checkout
+`/tmp/tt-taps` at base commit `3ce14f35c`, built in `/tmp/build-tt-taps`. The
+null arm that this pull request commits into
+`tests/vllm/models/test_kolibri1_tt_b2ii.cpp` is the standing form of the
+same measurement, so the next run of it carries the arm in the tree.
 
 The run log records four arms in this order.
 
@@ -64,9 +73,11 @@ KOLIBRI1_TT_TAPS first_token_id=42046 top5=42046(6.747927), 15774(5.883314), 744
 
 The argmax is unchanged and the top-1 logit moves by about 0.3 nats.
 
-### 3.2 Chunked, a second process in a different device state
+### 3.2 Chunked, the `p3-warm` arm, the third chunked process
 
-`p3-warm`, no reset and no kernel-cache clear.
+`p3-warm`, no reset and no kernel-cache clear. It is the THIRD chunked process
+of the run. The second one, `p2-warm`, reproduced `p1-cold` exactly, so the
+difference below is not a device-state difference.
 
 ```text
 KOLIBRI1_TT_TAPS first_token_id=42046 top5=42046(3.597120), 74493(3.498388), 25079(3.216179), 32(3.203287), 46(3.193529) mode=chunked rep=0
@@ -137,12 +148,17 @@ counts only the elements that differ.
 | layer 49, `l_out`, row 5 | chunk run 1 vs run 2 | 3.24 | 3.24 | 21.6 | 2556 of 2560 |
 | layer 49, `l_out`, row 5 | chunk vs serial | 16.41 | 16.41 | 272 | 2559 of 2560 |
 
-The divergence is born at layer 0's LAST query row, `attn_out_pre_norm` row
-5. The maximum difference there, 9.77e-04, is one bf16 ULP at that exponent,
-and about half of the elements differ by 1 to 2 ULP. The query row 0 of
-layer 0 is bit identical at every tap point, so the difference starts at the
-last row and not before it. The dumps carry rows 0 and 5 only, so they carry
-no reading for rows 1 to 4.
+The divergence is first observed at the last dumped query row, layer 0
+`attn_out_pre_norm` row 5, and the birth point inside layer 0 is not
+localised. The dumps carry the query rows 0 and 5 only, so rows 1 to 4 have
+no reading. The query row 0 of layer 0 is bit identical at every tap point.
+
+At that row, 1296 of 2560 elements differ, 822 by 1 to 2 bf16 steps, 474 by 3
+or more; the max element difference 9.766e-04 is two bf16 steps at the element
+that carries it. That element moves from 0.0659179688 to 0.0649414062, and
+the bf16 ULP in that binade is 4.883e-04, so the difference is two steps and
+not one. A step is one step of the bf16 grid, so the counts above are
+distances in bf16 codes.
 
 The divergence grows with depth. The `l_out` rms(d) runs from 1.35e-03 at
 layer 0 to 3.24 at layer 49, with a maximum element difference of 21.6 at
@@ -150,15 +166,17 @@ layer 49.
 
 ## 6. The chunk-vs-serial difference against the path's own spread
 
-The measurement of record puts the chunk-vs-serial difference at 5x to 600x
-the run-to-run spread at every layer, with the two anchors at layer 49
-`l_out` 16.41 against 3.24, a 5.06x ratio, and layer 0 `attn_out_pre_norm`
-2.17e-02 against 6.96e-05, a 312x ratio.
+The measurement of record of 2026-10-21 puts the chunk-vs-serial difference
+at 5x to 600x the run-to-run spread at every layer, with the two anchors at
+layer 49 `l_out` 16.41 against 3.24, a 5.06x ratio, and layer 0
+`attn_out_pre_norm` 2.17e-02 against 6.96e-05, a 312x ratio.
 
 The reproduction check of section 8 recomputes the ratio from the tap
-artifacts of section 4 and bounds the per-layer largest ratio at 5x to 123x.
-The direction of the ratio does not change: the chunk-vs-serial difference
-is far larger than the path's own spread at every layer.
+artifacts of section 4 and bounds the per-layer largest ratio at 5x to 123x
+(reproduced 2026-10-22). The 600x upper bound of the 2026-10-21 measurement
+does not reproduce and is owed to be reconciled. The direction of the ratio
+does not change: the chunk-vs-serial difference is far larger than the path's
+own spread at every layer.
 
 ## 7. The router order flip
 
@@ -192,11 +210,14 @@ What reproduces:
 - the run-to-run values of section 5, including 6.96e-05 and the maximum
   9.77e-04 at layer 0 `attn_out_pre_norm` row 5, and 1.35e-03 at layer 0
   `l_out` row 5 and 3.24 at layer 49 `l_out` row 5.
-- the chunk-vs-serial value 16.41 at layer 49 `l_out` row 5.
+- the chunk-vs-serial value 16.41 at layer 49 `l_out` row 5, and the
+  ratio of that value to the run-to-run value at the same key, 16.4104
+  against 3.23795, a 5.07x ratio.
 - the per-layer largest ratio, at 5x to 123x, taken as the largest ratio
-  of the chunk-vs-serial rms(d) to the run-to-run rms(d) inside the layer,
-  and at 2.9x to 77.5x when both rms(d) values pool every tap of the
-  layer.
+  of the chunk-vs-serial rms(d) over the differing elements to the
+  run-to-run rms(d) over the differing elements inside the layer, and at
+  2.9x to 77.5x when both rms(d) values pool every tap of the layer over
+  all its elements.
 - the router order flip in 36 of 50 layers, and the byte identity of the two
   SERIAL runs.
 

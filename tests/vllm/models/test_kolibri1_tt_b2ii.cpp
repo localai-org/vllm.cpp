@@ -1652,6 +1652,14 @@ TEST_CASE("kolibri1 TT B2b-ii: chunked-prefill near-tie adjudication — "
 // reproducible run to run (a repeated forward moves its top-1 logit by
 // nats), so its flip set cannot carry a precision reading on its own.
 //
+// THE RATIO IS A MIXED MEASURE. The null arm is WARM vs WARM, because its
+// two chunked runs are two runs in one process, and the chunked-vs-serial
+// comparison is WARM-chunk against a COLD-serial reference, because the
+// serial reference is the first forward in the process. The printed ratio
+// therefore divides a warm-cold difference by a warm-warm noise floor. The
+// arm labels stay "chunked run 1" and "chunked run 2", and the caveat rides
+// the ratio line and this comment.
+//
 // Opt-in: VT_KOLIBRI1_TT_CHUNK_SWEEP=1.
 TEST_CASE("SCRATCH dbg chunk sweep") {
   if (!TenstorrentDevicePresent()) {
@@ -1781,6 +1789,9 @@ TEST_CASE("SCRATCH dbg chunk sweep") {
     walk(chunk, rows);
     // The NULL ARM: the SAME chunked walk again, with the KV cache zeroed
     // in between. Its difference is the chunked path's OWN noise floor.
+    // `rows` is chunked run 1 and `null_rows` is chunked run 2, so the
+    // comparison names run 1 as the reference and run 2 as the arm under
+    // test.
     reset_kv();
     std::vector<std::vector<float>> null_rows;
     walk(chunk, null_rows);
@@ -1792,10 +1803,14 @@ TEST_CASE("SCRATCH dbg chunk sweep") {
       const double vs_serial =
           score(ref_rows[d], rows[d], "serial", "chunked");
       const double null_rms =
-          score(null_rows[d], rows[d], "chunked run 1", "chunked run 2");
+          score(rows[d], null_rows[d], "chunked run 1", "chunked run 2");
       if (null_rms > 0.0) {
         MESSAGE("      ratio (chunked-vs-serial rms / null-arm rms) = "
-                << vs_serial / null_rms);
+                << vs_serial / null_rms
+                << " [CAVEAT: the null arm is warm vs warm and the "
+                   "chunked-vs-serial comparison is warm-chunk vs "
+                   "cold-serial, so this ratio mixes a warm-warm noise floor "
+                   "with a warm-cold difference]");
       } else {
         MESSAGE("      null arm byte-identical (rms(d)=0): the "
                    "chunked-vs-serial rms(d)="

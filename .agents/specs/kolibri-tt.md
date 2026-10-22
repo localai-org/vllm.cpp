@@ -588,15 +588,18 @@ issue ISSUE-LOCAL-01M5HHEV4DWX0D4S5E955VE0AN): the chunked-prefill record
 (issue ISSUE-LOCAL-01M54CKCJNWHRDJB7PYRG31Y1D) stated the root cause
 "inherent multi-token prefill kernel precision, NOT chunk logic". That
 statement is corrected, and its 2026-10-18 entry is marked superseded with
-its historical text kept. The chunked-vs-serial divergence is 5x to 600x the
-chunked path's own run-to-run spread, so the divergence is NOT born in the
-walk logic, and that part of the earlier verdict survives. The flip set the
+its historical text kept. The chunked-vs-serial divergence is 5x to 123x the
+chunked path's own run-to-run spread (reproduced 2026-10-22), so the
+divergence is NOT born in the walk logic, and that part of the earlier
+verdict survives. The 600x upper bound of the 2026-10-21 measurement does
+not reproduce and is owed to be reconciled. The flip set the
 chunk sweep measured is contaminated by the path's own nondeterminism, so it
 CANNOT be read as a precision signature, and the verdict "inherent
 multi-token prefill kernel precision" is NOT ESTABLISHED by the evidence the
 record cites. The chunked path is not reproducible run to run: a repeated
-forward moves its top-1 logit by about 0.3 nats within one process and by 3.4
-nats across device states, while the serial walk is byte identical over two
+forward moves its top-1 logit by about 0.3 nats within one process, and the
+`p3-warm` arm, the third chunked process, reads 3.4 nats away from the
+repeats that follow it, while the serial walk is byte identical over two
 repeats. The chunked-prefill knob stays opt-in. Measurement, provenance and
 the labelled tap artifacts:
 `docs/bench-evidence/kolibri1-tt-chunked-null-arm-20261022.md`. The sweep's
@@ -662,7 +665,11 @@ One pull request for wave A (spec + implementation together), branched from
   two values of the 2026-10-21 measurement that the 2026-10-22 reproduction
   check does not reproduce are owed to be reconciled in the same run.
 - The mechanism hunt for the chunked path's divergence: the per-layer taps
-  localise it at layer 0's last query row at one to two bf16 ULP, growing
-  with depth to rms(d) 3.24 at layer 49, with the router's expert order
-  flipping in 36 of 50 layers between two runs of the same path. The
+  localise it at the last dumped query row of layer 0, where 1296 of 2560
+  elements differ, 822 by 1 to 2 bf16 steps and 474 by 3 or more, and the
+  max element difference 9.766e-04 is two bf16 steps at the element that
+  carries it. The birth point inside layer 0 is not localised, because the
+  dumps carry the query rows 0 and 5 only. The divergence grows with depth
+  to rms(d) 3.24 at layer 49, with the router's expert order flipping in 36
+  of 50 layers between two runs of the same path. The
   measurements show the shape of the divergence and not its cause.

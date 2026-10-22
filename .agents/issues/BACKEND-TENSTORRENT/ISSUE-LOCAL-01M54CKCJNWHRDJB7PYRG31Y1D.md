@@ -78,27 +78,33 @@ run.
   116026, model /mnt/models/Aleph-Alpha/Kolibri-1, taskset -c 32-63): the
   CHUNKED prefill path is NOT reproducible run to run, and the SERIAL walk
   is. Three chunked repeats in one process read the same token 42046 with
-  the top-1 logit at 6.930672, then 7.048378, then 6.747927 nats. A second
-  process in a different device state read 42046 at 3.597120, then 6.964228,
-  then 6.917763, a 3.4-nat spread at the first repeat. Two serial repeats
+  the top-1 logit at 6.930672, then 7.048378, then 6.747927 nats. The
+  `p3-warm` arm, the THIRD chunked process, read 42046 at 3.597120, then
+  6.964228, then 6.917763, a 3.4-nat spread at the first repeat. The second
+  chunked process, `p2-warm`, reproduced `p1-cold` exactly, so that spread is
+  not a device-state difference. Two serial repeats
   were byte identical, 74493 at 8.055458 both times. A device reset with
   tt-smi -r 0 plus a kernel-cache clear changed nothing between the cold and
   the warm chunked arm, so this is not a cold or warm artefact. The
-  per-layer taps localise it: the divergence is born at layer 0's LAST query
-  row, attn_out_pre_norm row 5, where rms(d) is 6.96e-05 and max |d| is
-  9.766e-04, one bf16 ULP at that exponent, with 1296 of 2560 elements
-  differing by 1 to 2 ULP, while the query row 0 of layer 0 stays bit
-  identical at every tap point. It grows
+  per-layer taps localise it: the divergence is first observed at the last
+  dumped query row, layer 0 attn_out_pre_norm row 5, where rms(d) is 6.96e-05
+  and max |d| is 9.766e-04, while the query row 0 of layer 0 stays bit
+  identical at every tap point. The dumps carry the query rows 0 and 5 only,
+  so rows 1 to 4 have no reading and the birth point inside layer 0 is not
+  localised. At that row, 1296 of 2560 elements differ, 822 by 1 to 2 bf16
+  steps, 474 by 3 or more; the max element difference 9.766e-04 is two bf16
+  steps at the element that carries it. It grows
   with depth: l_out rms(d) is 1.35e-03 at layer 0 and 3.24 at layer 49, max
   |d| 21.6. The router's expert ORDER flips in 36 of 50 layers between two
   chunked runs. Of those 36 layers, 17 keep the same six experts in a
   different order and 19 change the expert set.
 
-  VERDICT (corrected): the chunked-vs-serial divergence is 5x to 600x the
-  chunked path's own run-to-run spread, so the divergence is NOT born in the
-  walk logic, and that part of the 2026-10-18 verdict survives. The flip set
-  the 2026-10-18 sweep measured is contaminated by the path's own
-  nondeterminism, so it CANNOT be read as a precision signature. The verdict
+  VERDICT (corrected): the chunked-vs-serial divergence is 5x to 123x the
+  chunked path's own run-to-run spread (reproduced 2026-10-22), so the
+  divergence is NOT born in the walk logic, and that part of the 2026-10-18
+  verdict survives. The flip set the 2026-10-18 sweep measured is
+  contaminated by the path's own nondeterminism, so it CANNOT be read as a
+  precision signature. The verdict
   "inherent multi-token prefill kernel precision" is NOT ESTABLISHED by the
   evidence this record cites. The earlier verdict overstated what the
   evidence supported: it read a flip set as a precision signature without a
