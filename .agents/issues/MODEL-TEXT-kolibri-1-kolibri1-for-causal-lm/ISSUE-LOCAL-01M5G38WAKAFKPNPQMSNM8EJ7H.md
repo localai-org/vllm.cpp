@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M5G38WAKAFKPNPQMSNM8EJ7H
 Title: Kolibri-1 CPU path refuses a plain bf16 checkpoint, so the fp8 weight quantization's own error cannot be measured
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-21
-Updated: 2026-10-21
-Closed: -
+Updated: 2026-10-22
+Closed: 2026-10-22
 
 ## Problem
 
@@ -34,7 +34,7 @@ Spec: `.agents/specs/kolibri1-bf16-arm.md`.
 
 ## Resolution
 
-- 2026-10-21: the loader's scheme check is now a dispatch
+- 2026-10-22: the loader's scheme check is now a dispatch
   (`ResolveKolibri1WeightScheme`): the fp8 block [128, 128] dynamic arm is
   unchanged, a config with NO `quantization_config` is the plain bf16 arm,
   and every other scheme is refused by name with a message that names the
