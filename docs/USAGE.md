@@ -919,6 +919,12 @@ any other scheme is refused by name, and the refusal names the arms that
 exist. See the [bf16 arm record](../.agents/specs/kolibri1-bf16-arm.md) and
 its [evidence](../docs/bench-evidence/kolibri1-bf16-arm-20261021.md).
 
+**The gate behind this arm ran on the LOCAL DEQUANTIZED copy, not on the
+upstream artifact.** The measured copy holds the FP8 checkpoint's
+dequantized values (measured, tensor by tensor), so it is a CONTROL of the
+numerics. The upstream artifact's own gate, and the decomposition it would
+produce, are OWED; the evidence note names both.
+
 Use an existing local checkpoint directory containing the index, its shards,
 `config.json`, `tokenizer.json`, and `tokenizer_config.json`. Allow host memory
 for the weights, temporary dequantized projections, activations, and the KV cache.

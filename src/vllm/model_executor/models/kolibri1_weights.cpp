@@ -129,9 +129,24 @@ const char* Kolibri1WeightSchemeName(Kolibri1WeightScheme scheme) {
 //     what is wrong.
 Kolibri1WeightScheme ResolveKolibri1WeightScheme(const nlohmann::json& raw) {
   const auto qit = raw.find("quantization_config");
-  if (qit == raw.end() || !qit->is_object()) {
+  if (qit == raw.end()) {
+    // NO quantization_config at all: the plain bf16 arm. The upstream
+    // `Aleph-Alpha/Kolibri-1-BF16` artifact carries none, and its weights
+    // are the dequantized values.
     return Kolibri1WeightScheme::kBf16;
   }
+  // A quantization_config that is PRESENT but is not an object is refused BY
+  // NAME, and the message says what it found: a config that declares
+  // something is not a config that declares nothing, and the reader must not
+  // be told the latter.
+  VT_CHECK(qit->is_object(),
+           "kolibri1: quantization_config is a JSON " +
+               std::string(qit->type_name()) +
+               ", not an object; the implemented arms are " +
+               Kolibri1WeightSchemeName(Kolibri1WeightScheme::kFp8Block) +
+               " and " +
+               Kolibri1WeightSchemeName(Kolibri1WeightScheme::kBf16) +
+               " (a checkpoint with no quantization_config)");
   const auto& q = *qit;
   const std::string method = q.value("quant_method", std::string());
   VT_CHECK(method == "fp8",

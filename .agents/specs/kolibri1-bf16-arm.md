@@ -1,4 +1,5 @@
-# Spec: the Kolibri-1 bf16 arm — the fp8 weight quantization's own error, measured
+# Spec: the Kolibri-1 bf16 arm — a plain bf16 checkpoint, and the control it
+measures
 
 Row: MODEL-TEXT-kolibri-1-kolibri1-for-causal-lm
 Status: ACTIVE (spec committed before implementation; one PR carries the spec and
@@ -24,9 +25,12 @@ tree cannot separate them:
 2. the rest of the numerics (the accumulation order, the activation dtype, the
    attention dot, the router).
 
-The bf16 arm removes cause 1 by construction: an upstream bf16 Kolibri-1
+The bf16 arm removes cause 1 by construction: the UPSTREAM bf16 Kolibri-1
 checkpoint's weights ARE the dequantized values, so the same forward on the
-same compute class isolates the quantization's own contribution.
+same compute class isolates the quantization's own contribution. The local
+copy this change measured against is NOT that artifact (see §3), so what this
+change measured is a CONTROL of the numerics, and the decomposition against
+the upstream bytes is OWED (see `## Owed`).
 
 Today the arm does not exist. `kolibri1_weights.cpp::ResolveKolibri1WeightScheme`
 (the scheme dispatch that replaced the old `CheckQuantConfig`)
@@ -84,8 +88,11 @@ checkpoint's scheme and refuses every other scheme BY NAME:
 | `kBf16` | NO `quantization_config` at all | the BF16 weights are read as they are; there is no scale sibling and no dequant |
 | anything else | anything else | refused by name, and the message names the missing arm |
 
-The fp8 arm's behaviour and its messages are unchanged: the same three
-`quantization_config` checks, in the same order, with the same text.
+The fp8 arm's behaviour is unchanged: the same three `quantization_config`
+checks, in the same order, and the same DECISIONS. Two of the refusal
+TEXTS changed: the `quant_method` and the `activation_scheme` refusals now
+name the arms that exist, so the reader learns what is missing and not only
+what is wrong. The `weight_block_size` refusals are unchanged.
 
 The accounting is scheme-aware. `EnumerateKolibri1Tensors` and
 `AccountKolibri1Tensors` take the scheme, because the bf16 arm's expected
@@ -113,7 +120,9 @@ The bf16 arm's weights are already bf16, so:
   decode shape, and the shared `vt::MatmulBT` / `vt::MatmulBTBatch` f32
   widen at every other site. There is no second bf16 kernel.
 
-The class selection is ONE rule, and BOTH arms read it:
+The class selection is ONE rule, and BOTH arms read it. The rule is the
+function `SelectKolibri1ComputeClass` in `kolibri1_forward.cpp`, over the
+site's facts:
 
 ```
 bf16-dot class  <=>  the weight is bf16-resident
@@ -122,6 +131,16 @@ bf16-dot class  <=>  the weight is bf16-resident
                  &&  DetectArmBf16() proved FEAT_BF16
                  &&  the dequant cache is enabled
 ```
+
+The rule is a PURE function of those facts, and the forward records what it
+selected per site, so the gate can assert the class SELECTION itself. A
+numeric gate cannot: on a host where the two classes produce the same bits,
+no number moves when the class moves.
+
+The recording is a PRODUCTION instrument, not a test-only seam: the row's own
+profile switch (`VT_KOLIBRI1_PROFILE=1`) turns it on, and the profile report
+prints the class table per site (the calls and the calls that selected the
+bf16-dot class). The gate uses the same reader.
 
 The last conjunct is the fp8 arm's recorded residency precondition: the
 bf16-dot GEMV is the arm that multiplies the WARM bf16 bytes, and the
@@ -134,10 +153,16 @@ conjunct is the ROW's rule, read by both arms, so the two arms can never
 diverge on the same site: the same bytes always ride the same class, in
 every configuration.
 
-The fp8 arm's class selection is otherwise UNCHANGED: the same three
-conjuncts it had before this change, in the same order, with the same
-meaning. The change is that the bf16 arm's weights now reach the SAME
-selection instead of a separate `LinearBTRaw` path.
+The fp8 arm's class selection is otherwise UNCHANGED: the same FOUR
+PRE-EXISTING conjuncts it had before this change — `t == 1`,
+`out_dtype == kBF16`, `Bf16DotActive()` and the dequant cache's enabled
+state — in the same order and with the same meaning, plus the NEW
+`weight_is_bf16` conjunct (the RESOLVED weight is bf16-resident), which the
+fp8 arm already satisfied at every site: its resolved weight is the decoded
+bf16 bytes, in the cached and in the uncached resolve alike. That conjunct
+is therefore a NO-OP for the fp8 arm, and its numerics do not move. The
+change is that the bf16 arm's weights now reach the SAME selection instead
+of a separate `LinearBTRaw` path.
 
 An earlier draft of this spec REMOVED the cache conjunct, on the argument
 that the class is a property of the bytes and the hardware and must not move
@@ -193,7 +218,26 @@ Red first, in this order; the red capture is in the commit body.
    its EXACT bf16 dequantization (the same values, the same shapes) produce
    the same logits, because the same bytes must ride the same compute class.
    The bf16 arm must not be WORSE than the fp8 arm; a worse result is a
-   failure, not a tolerance to widen.
+   failure, not a tolerance to widen. The fixture's weights span twelve E4M3
+   exponents and its embedding is varied, so a row's f32 sum is INEXACT and
+   the arithmetic is no longer trivial.
+5. **The two arms ride the SAME compute class.** The class SELECTION is
+   asserted, not the numbers: the forward records the class it selected per
+   site, and the gate holds both arms to the same recorded class, to the same
+   rule inputs, and to the bf16-dot class itself wherever the tier and the
+   cache are available. A rule that excluded the plain bf16 arm from the
+   class reds this test. The numbers cannot carry this claim: the two
+   classes differ by an f32-ULP rounding of the reduction order, and every
+   site stores its result as bf16, so the difference is rounded away before
+   the logits. That was measured, with the plain bf16 arm excluded from the
+   class: the two arms' worst logit gap stays 0.
+6. **The registry hop reaches the arm.** `ModelRegistry::Load` loads the
+   plain bf16 checkpoint (the production entry point, not the loader
+   function), and the registry's own fp8-block refusal fires before the
+   loader's scheme dispatch on a checkpoint the loader would also refuse.
+7. **A malformed `quantization_config` is refused by name.** A config that
+   declares a `quantization_config` which is not an object is refused, and
+   the message says what it found.
 
 ## Gates
 
@@ -208,44 +252,49 @@ Red first, in this order; the red capture is in the commit body.
   `scripts/kolibri1-threeway-analysis.py`, the shape the fp8 arm's standing
   cross-check uses, `docs/bench-evidence/kolibri1-llamacpp-crosscheck-20261020.md`).
   Reported side by side: the agreement count, the worst gap, the hard flips,
-  and the DECOMPOSITION — the fp8 arm's agreement minus the bf16 arm's
-  agreement, which is the fp8 weight quantization's own contribution. If the
-  bf16 arm is not at least as good as the fp8 arm, that is a FINDING to
-  report, not to hide.
+  and the DIFFERENCE — the fp8 arm's agreement minus the bf16 arm's
+  agreement. That difference is the fp8 weight quantization's own
+  contribution ONLY when the bf16 leg ran on the UPSTREAM artifact; against
+  the local dequantized copy it is a CONTROL of the numerics, and the note
+  says which one was measured. If the bf16 arm is not at least as good as
+  the fp8 arm, that is a FINDING to report, not to hide.
 
 ## Evidence
 
 `docs/bench-evidence/kolibri1-bf16-arm-20261021.md`: the provenance verdict
 with its command and numbers, the two arms' agreement counts, the worst gap
-and the hard flips for each, and the decomposition.
+and the hard flips for each, and the measured difference.
 
 Measured on 2026-10-21 (256 scored positions, the primary oracle's rows as
 the denominator): the fp8 arm and the plain bf16 arm both score 97.7% top-1
 (6 hard flips of 256), a 0.014-nat mean gap, 0.9983 mean cosine — and their
-per-position logit rows are BYTE-IDENTICAL. The decomposition is therefore
-0.0 percentage points, and the note says why: the local bf16 copy holds the
-DEQUANTIZED values (measured), so the two legs are a CONTROL of the numerics,
-not the quantization's decomposition. The upstream artifact's own gate is
-OWED.
+per-position logit rows are BYTE-IDENTICAL. The measured difference is
+therefore 0.0 percentage points, and the note says why: the local bf16 copy
+holds the DEQUANTIZED values (measured), so the two legs are a CONTROL of the
+numerics and NOT the quantization's decomposition. The upstream artifact's own
+gate, and the decomposition it would produce, are OWED.
 
 ## Risks
 
 - **A second numerics path.** The bf16 arm must ride the fp8 arm's compute
-  class. Mitigated by test 4: the same bytes must produce the same logits.
+  class. Mitigated by test 5, which asserts the class SELECTION the forward
+  made at every site, and by test 4, which holds the two arms to the same
+  numbers on the same bytes.
 - **The scheme dispatch accepting a wrong checkpoint.** Mitigated by the
   scheme-aware accounting (the bf16 arm's expected set has no scale
   siblings, so a mixed checkpoint is refused) and by the per-tensor dtype
   check.
 - **The fp8 arm's numerics moving.** They do not: the class selection's
-  three pre-existing conjuncts are unchanged, and the only new term is the
-  `out_dtype == kBF16` one, which the fp8 arm already satisfied at every
-  site the bf16 arm reaches. The decode bench's byte-exact anchor (11622 on
-  the bf16-dot tier) is the proof that the fp8 arm's decode stream did not
-  move.
+  four pre-existing conjuncts are unchanged, and the only new term is the
+  `weight_is_bf16` one, which the fp8 arm already satisfied at every site
+  (its resolved weight is always the decoded bf16 bytes). The decode bench's
+  byte-exact anchor (11622 on the bf16-dot tier) is the proof that the fp8
+  arm's decode stream did not move.
 - **The provenance of the local bf16 copy.** Settled by measurement (the
-  tensor-by-tensor comparison), not by the byte count. If the local copy
-  differs from upstream, the arm is gated against the upstream copy and the
-  local one is refused by name.
+  tensor-by-tensor comparison), not by the byte count: the local copy is the
+  campaign's own fp8-to-bf16 dequantization, so it cannot separate the
+  quantization's error from the numerics. The upstream artifact's own gate
+  is the gate that can, and it is OWED.
 
 ## Stop conditions
 
@@ -263,11 +312,18 @@ OWED.
   unchanged by this change and still owed by the row.
 - The primary oracle's own bf16 rows were generated on the LOCAL bf16 copy
   (`scripts/gen-kolibri1-primary-topk-rows.py`, `MODEL =
-  "/mnt/models/Aleph-Alpha/Kolibri-1-bf16-clean"`). If the provenance verdict
-  is "the local copy differs from upstream", the primary rows are tied to
+  "/mnt/models/Aleph-Alpha/Kolibri-1-bf16-clean"`). The provenance verdict IS
+  "the local copy differs from upstream", so the primary rows are tied to
   that copy and the denominator itself needs a re-emission against the
   upstream bytes. That is a follow-up, and it is recorded here rather than
   silently absorbed.
+- **THE OWED DECOMPOSITION: the fp8 weight quantization's own contribution.**
+  It needs two legs that this change does not have: the upstream artifact
+  (`Aleph-Alpha/Kolibri-1-BF16` @ `cc6d729e6a024c1e59ad48887fdef95ff37b534d`)
+  fetched whole, and the primary oracle's rows re-emitted on the UPSTREAM
+  bytes. The 0.0 percentage points this change measured are a CONTROL of the
+  numerics (both legs ran on the same dequantized values), not that
+  decomposition. The upstream artifact's own gate is OWED with it.
 - The bf16 arm's numerics follow the row's existing host-dependent
   warm-bytes condition (the dequant cache's derived budget), because both
   arms read the SAME class rule. A host that cannot afford the cache's knee

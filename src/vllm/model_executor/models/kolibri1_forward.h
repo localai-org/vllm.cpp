@@ -6,6 +6,8 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf
@@ -13,6 +15,7 @@
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // PagedKvCache, ForwardLogits
+#include "vt/ops.h"  // DType
 
 namespace vllm {
 
@@ -54,5 +57,56 @@ ForwardLogits ForwardKolibri1Forward(
     const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
     const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
     const std::vector<int32_t>& logits_indices);
+
+// ── The compute class (the row's ONE rule) ──────────────────────────────────
+//
+// The class a linear site's bytes ride: the bf16-dot GEMV (bf16 in, f32
+// accumulate, the BFMMLA class) or the f32-widen MatmulBT. The plain bf16 arm
+// and the fp8 arm's DECODED bytes read the SAME rule (spec
+// .agents/specs/kolibri1-bf16-arm.md), so a change that moves one arm's class
+// must move the other's.
+//
+// A numeric gate cannot see that move wherever the two classes produce the
+// same bits, so the SELECTION is exposed here: the rule is a pure function of
+// the site's facts, and the forward records what it selected.
+enum class Kolibri1ComputeClass {
+  kF32Widen = 0,  // the shared f32-widen vt::MatmulBT
+  kBf16Dot = 1,   // the bf16-dot GEMV (vbfdotq_f32)
+};
+
+// The facts the rule reads, one per conjunct.
+struct Kolibri1ClassFacts {
+  bool weight_is_bf16 = false;   // the RESOLVED weight is bf16-resident
+  int64_t t = 0;                 // the site's token count
+  vt::DType out_dtype = vt::DType::kF32;  // the site's output dtype
+  bool bf16dot_available = false;  // DetectArmBf16() proved FEAT_BF16
+  bool cache_enabled = false;      // the dequant cache is enabled
+};
+
+// THE ONE RULE. The bf16-dot class iff every conjunct holds.
+Kolibri1ComputeClass SelectKolibri1ComputeClass(
+    const Kolibri1ClassFacts& facts);
+
+// What the forward selected, per site.
+struct Kolibri1ClassRecord {
+  uint64_t calls = 0;           // the linear calls at this site
+  uint64_t bf16_dot_calls = 0;  // the calls that selected the bf16-dot class
+  Kolibri1ClassFacts facts;     // the facts of the FIRST call at this site
+};
+
+// The recording is OFF by default, and the decode path pays one branch per
+// linear call. `SetKolibri1ComputeClassRecording(true)` turns it on.
+//
+// It is a PRODUCTION instrument, not a test-only driver: the row's own
+// profile switch (`VT_KOLIBRI1_PROFILE=1`) turns the recording on as well,
+// and the profile report then prints the class table through
+// `ReportKolibri1ComputeClasses` below.
+void SetKolibri1ComputeClassRecording(bool on);
+void ResetKolibri1ComputeClassRecords();
+const std::map<std::string, Kolibri1ClassRecord>& Kolibri1ComputeClassRecords();
+
+// The class table, one line per site: the linear calls at that site and the
+// calls that selected the bf16-dot class. The profile report prints it.
+void ReportKolibri1ComputeClasses();
 
 }  // namespace vllm

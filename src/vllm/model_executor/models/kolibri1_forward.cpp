@@ -316,6 +316,29 @@ ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
   return ResolveBTWithCache(d, w, kolibri1_dequant_cache::ProcessCache());
 }
 
+// ── The compute-class recorder ──────────────────────────────────────────────
+//
+// The ONE RULE lives in `SelectKolibri1ComputeClass` below, with the other
+// public entry points of this file. It is a pure function of the site's
+// facts, so the gate can assert the SELECTION directly: on a host where the
+// two classes produce the same bits, no number can see a class change at all.
+namespace {
+
+// The recorder. OFF by default: the decode path pays one branch per linear
+// call. The forward is single-threaded at this level (the pool is used INSIDE
+// the kernels), so the map needs no lock.
+bool g_record_classes = false;
+std::map<std::string, Kolibri1ClassRecord> g_class_records;
+
+// The recording is ON when the caller asked for it. The PRODUCTION switch is
+// the row's own profile instrument (`VT_KOLIBRI1_PROFILE=1`): the forward
+// turns the recording on once per forward when it is on, and the profile
+// report prints the class table. So the recorder is a PRODUCTION instrument
+// and not a driver that only the test turns on.
+bool RecordClasses() { return g_record_classes; }
+
+}  // namespace
+
 // ONE compute class, shared by the fp8 arm and the plain bf16 arm.
 //
 // The class is a property of the WEIGHT'S BYTES and of the HARDWARE: the fp8
@@ -362,6 +385,23 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // The PLAIN BF16 ARM never reaches the cache: there is nothing to decode.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
+  // The site's facts, and the class the ONE rule selects from them. The
+  // resolved weight is bf16 in BOTH arms (the fp8 arm's decoded bytes, the
+  // bf16 arm's on-disk bytes), so the rule reads the bytes and not the arm.
+  const Kolibri1ClassFacts facts{
+      /*weight_is_bf16=*/r.wt.dtype == DType::kBF16,
+      t,
+      out_dtype,
+      kolibri1_bfdot_gemv::Bf16DotActive(),
+      kolibri1_dequant_cache::ProcessCache().enabled()};
+  const Kolibri1ComputeClass compute_class = SelectKolibri1ComputeClass(facts);
+  if (RecordClasses()) {
+    Kolibri1ClassRecord& record = g_class_records[gsite];
+    if (record.calls == 0) record.facts = facts;
+    record.calls++;
+    if (compute_class == Kolibri1ComputeClass::kBf16Dot)
+      record.bf16_dot_calls++;
+  }
   // BFDOT bf16 GEMV arm, DEFAULT on a FEAT_BF16 host (Bf16DotActive:
   // feature-gated; VT_CPU_KOLIBRI_BF16_DOT=0 forces the f32 tier; the
   // legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps refusing by name) and
@@ -377,9 +417,7 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // bf16-native LinearBTRaw projection) keeps its own path — it never was
   // an fp8 warm-cache tensor, and the f32-out form of the same kernel
   // serves it there.
-  if (t == 1 && out_dtype == DType::kBF16 &&
-      kolibri1_bfdot_gemv::Bf16DotActive() &&
-      kolibri1_dequant_cache::ProcessCache().enabled()) {
+  if (compute_class == Kolibri1ComputeClass::kBf16Dot) {
     // The arm's own scope, named apart from the function-scope
     // profiler above: a same-named local here HIDES that local, which is
     // MSVC C4456 and a build failure under the windows-msvc /WX lane.
@@ -968,6 +1006,51 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
 
 }  // namespace
 
+// THE ONE COMPUTE-CLASS RULE (spec .agents/specs/kolibri1-bf16-arm.md §2).
+// The class a site's bytes ride is the bf16-dot class iff EVERY conjunct
+// holds:
+//
+//   * the RESOLVED weight is bf16-resident (the fp8 arm's DECODED bytes and
+//     the plain bf16 arm's on-disk bytes are both bf16),
+//   * the decode shape (t == 1),
+//   * the output is bf16,
+//   * the host proved FEAT_BF16 (the bf16-dot kernel exists), and
+//   * the dequant cache is enabled (the fp8 arm's residency precondition; the
+//     plain bf16 arm has no cache of its own and reads the SAME rule).
+//
+// It is a PURE function of those facts, so the gate can assert the SELECTION
+// directly: on a host where the two classes produce the same bits, no number
+// can see a class change at all.
+Kolibri1ComputeClass SelectKolibri1ComputeClass(
+    const Kolibri1ClassFacts& facts) {
+  if (facts.weight_is_bf16 && facts.t == 1 &&
+      facts.out_dtype == DType::kBF16 && facts.bf16dot_available &&
+      facts.cache_enabled) {
+    return Kolibri1ComputeClass::kBf16Dot;
+  }
+  return Kolibri1ComputeClass::kF32Widen;
+}
+
+void SetKolibri1ComputeClassRecording(bool on) { g_record_classes = on; }
+void ResetKolibri1ComputeClassRecords() { g_class_records.clear(); }
+const std::map<std::string, Kolibri1ClassRecord>&
+Kolibri1ComputeClassRecords() {
+  return g_class_records;
+}
+
+// The class table, printed by the row's profile report (the PRODUCTION
+// consumer of the recorder: `VT_KOLIBRI1_PROFILE=1` turns the recording on
+// and this prints it). One line per site: the linear calls at that site and
+// the calls that selected the bf16-dot class.
+void ReportKolibri1ComputeClasses() {
+  for (const auto& [site, record] : Kolibri1ComputeClassRecords()) {
+    std::fprintf(stderr,
+                 "[kolibri1-class] %-16s %8llu calls %8llu bf16-dot\n",
+                 site.c_str(), static_cast<unsigned long long>(record.calls),
+                 static_cast<unsigned long long>(record.bf16_dot_calls));
+  }
+}
+
 DBuf DequantFp8BlockUncached(Dev d, const Fp8BlockWeight& w) {
   return DequantFp8Block(d, w);
 }
@@ -998,6 +1081,11 @@ ForwardLogits ForwardKolibri1Forward(
   const int64_t vocab = p.vocab_size;
 
   VT_CHECK(t > 0, "kolibri1: empty token batch");
+  // The row's PROFILE instrument turns the class recording on (once per
+  // forward, not per linear call), so the class table the profile report
+  // prints is a production reading of the compute-class rule and not a
+  // test-only seam.
+  if (prof::On()) SetKolibri1ComputeClassRecording(true);
   VT_CHECK(static_cast<int64_t>(positions.size()) == t,
            "kolibri1: positions size mismatch");
   VT_CHECK(static_cast<int64_t>(attn_meta.slot_mapping.size()) == t,
@@ -1210,7 +1298,14 @@ ForwardLogits ForwardKolibri1Forward(
   if (prof::On()) {
     prof::Acc()["total_forward"] += prof::Now() - prof_t0;
     static int64_t calls = 0;
-    if (++calls % 10 == 0) prof::Report(calls);
+    if (++calls % 10 == 0) {
+      // The class table beside the profile's own: which compute class each
+      // linear site selected, per arm. The window is then dropped, so the
+      // table is the last ten forwards' (the gemvprof window's own shape).
+      ReportKolibri1ComputeClasses();
+      ResetKolibri1ComputeClassRecords();
+      prof::Report(calls);
+    }
   }
   return fl;
 }

@@ -15,7 +15,12 @@ This is the checkpoint size, not a bound on runtime memory.
 
 The checkpoint contains FP8 block-quantized weights, F32 scale grids, and BF16 tensors.
 The loader requires `quantization_config` with FP8 blocks of 128 by 128.
-A converted all-BF16 checkpoint and GGUF files are refused.
+A plain BF16 checkpoint, one whose `config.json` carries no
+`quantization_config`, loads through the same CPU path; its weights are read
+as they are, with no dequant and no scale.
+A `quantization_config` that names any other scheme is refused by name, and
+the refusal names the arms that exist.
+GGUF files are refused.
 
 The existing record supplies a short revision and a tensor manifest, but no shard SHA-256 checksums.
 A complete artifact checksum record remains unavailable.

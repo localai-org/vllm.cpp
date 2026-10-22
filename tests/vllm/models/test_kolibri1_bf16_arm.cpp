@@ -3,23 +3,41 @@
 //
 // The fp8 arm is the row's production path; the bf16 arm exists so the fp8
 // weight quantization's OWN contribution to the divergence from the primary
-// oracle becomes measurable. This file holds the four claims:
+// oracle becomes measurable. This file holds the claims:
 //
 //   1. a plain bf16 Kolibri-1 checkpoint (no quantization_config) LOADS and
 //      the CPU forward produces logits;
 //   2. the fp8 arm still loads exactly as before (no regression);
-//   3. a scheme that is neither fp8-block nor bf16 is refused BY NAME, and
-//      the message names the missing arm;
+//   3. a scheme that is neither fp8-block nor bf16 is refused BY NAME, and the
+//      message names the missing arm;
 //   4. the two arms produce the SAME result for the SAME bytes: a synthetic
 //      fp8 checkpoint and its exact bf16 dequantization must agree, because
-//      the same bytes must ride the same compute class.
+//      the same bytes must ride the same compute class;
+//   5. the two arms RIDE THE SAME COMPUTE CLASS, asserted on the class
+//      SELECTION itself (the recorded rule, not the numbers), because a
+//      numeric gate cannot see a class change wherever the two classes
+//      produce the same bits;
+//   6. the REGISTRY hop reaches both: `ModelRegistry::Load` loads the bf16
+//      arm, and the registry's own fp8-block refusal fires before the
+//      loader's scheme dispatch.
 //
 // The fixture is the W1 tiny geometry (2 layers: 1 sliding + 1 full, hidden
-// 64, 4 experts top-2, vocab 32) with a weight pattern chosen so the fp8
-// dequant is EXACT: the byte 0x38 + (i % 8) decodes to 1 + (i % 8) / 8,
-// which needs three mantissa bits and is therefore exactly representable in
-// bf16, and the block scale is 1.0. The bf16 fixture carries the SAME
-// values as bf16, so the two arms hold byte-identical weights.
+// 64, 4 experts top-2, vocab 32). The weight pattern spans TWELVE E4M3
+// exponents, so a row's f32 sum is INEXACT: the pattern this file replaces
+// (1 + (i % 8) / 8) summed exactly in f32 in ANY order, so the arithmetic
+// this file checks was trivial. The fp8 dequant stays EXACT (the block scale
+// is 1.0 and every E4M3 value is exactly representable in bf16), and the
+// bf16 fixture carries the SAME values as bf16, so the two arms hold
+// byte-identical weights. The embedding is NOT constant: the rms_norm of a
+// constant vector is exactly that constant, so a constant embedding would
+// leave every first-layer product exact and the fixture degenerate again.
+//
+// The class itself is asserted on the SELECTION (claim 5), NOT on the
+// numbers: the two classes differ by an f32-ULP rounding of the reduction
+// order, and every site stores its result as bf16, so the difference is
+// rounded away before the logits. That was measured, not assumed: with the
+// plain bf16 arm excluded from the bf16-dot class, the two arms' worst
+// logit gap is still 0.
 
 #include <doctest/doctest.h>
 
@@ -39,6 +57,8 @@
 
 #include "vllm/transformers_utils/hf_config.h"
 #include "vllm/model_executor/model_loader/safetensors_reader.h"
+#include "vllm/model_executor/models/kolibri1_bfdot_gemv.h"
+#include "vllm/model_executor/models/kolibri1_dequant_cache.h"
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/kolibri1_forward.h"
 #include "vllm/model_executor/models/model_registry.h"
@@ -146,19 +166,41 @@ std::vector<uint8_t> Bf16Filled(const std::vector<int64_t>& shape,
                                        pattern));
 }
 
-// The weight VALUE of element i is 1 + (i % 8) / 8, exactly representable in
-// bf16 (three mantissa bits) and in f32.
+// The weight VALUE of element i, as an E4M3 byte.
 //
-// The fp8 byte for that value: 0x38 + (i % 8) is e4m3 with exponent 7 and
-// mantissa (i % 8), so it decodes to 2^0 * (1 + (i % 8) / 8).
+// The pattern spans TWELVE E4M3 exponents (2^-6 .. 2^5, seven mantissas
+// each), so a row's f32 sum is INEXACT: the product of a bf16 weight and a
+// bf16 activation carries sixteen significant bits, and twelve binades of
+// exponent spread put the sum past f32's twenty-four. The pattern this
+// replaces (1 + (i % 8) / 8) summed exactly in f32 in any order, so the
+// arithmetic was trivial.
+//
+// Every byte is a NORMAL E4M3 value: the exponent is never 0 (the subnormal
+// range) and the byte is never the NaN encoding 0x7F.
 uint8_t WeightByte(int64_t i) {
-  return static_cast<uint8_t>(0x38 + (i % 8));
+  static const std::vector<uint8_t> kPattern = [] {
+    std::vector<uint8_t> p;
+    for (int e = 1; e <= 12; ++e)
+      for (int m = 0; m <= 6; ++m)
+        p.push_back(static_cast<uint8_t>((e << 3) | m));
+    return p;
+  }();
+  return kPattern[static_cast<size_t>(i) % kPattern.size()];
 }
 
-// The bf16 bits of that value: 0x3F80 is 1.0, and the mantissa field of
-// 1 + k / 8 is k << 4.
+// The bf16 bits of an E4M3 byte. The value is EXACT in bf16 (E4M3 carries
+// three mantissa bits, bf16 carries seven), so the two arms hold the SAME
+// bytes after the load and the fp8 arm's dequant is exact.
+uint16_t Bf16OfE4M3(uint8_t byte) {
+  const uint16_t exponent = static_cast<uint16_t>((byte >> 3) & 0x0f);
+  const uint16_t mantissa = static_cast<uint16_t>(byte & 0x07);
+  // The bf16 exponent field is the E4M3 one rebased from 7 to 127, and the
+  // three mantissa bits sit at the top of bf16's seven.
+  return static_cast<uint16_t>(((exponent + 120) << 7) | (mantissa << 4));
+}
+
 uint16_t WeightBf16(int64_t i) {
-  return static_cast<uint16_t>(0x3F80 + ((i % 8) << 4));
+  return Bf16OfE4M3(WeightByte(i));
 }
 
 struct TinyShape {
@@ -238,8 +280,17 @@ HfConfig MakeTinyConfig(bool fp8_scheme) {
 // modules_to_not_convert module) and the router bias.
 std::vector<FixtureTensor> SharedTensors(const TinyShape& s) {
   std::vector<FixtureTensor> t;
+  // The embedding is VARIED (1 + (i % 8) / 8, exactly representable in
+  // bf16): the rms_norm of a constant vector is exactly that constant, so a
+  // constant embedding would leave every first-layer product exact and the
+  // fixture numerically degenerate. The other tensors stay at 1.0.
+  const int64_t embed_numel = s.vocab * s.hidden;
+  std::vector<uint16_t> embed(static_cast<size_t>(embed_numel));
+  for (int64_t i = 0; i < embed_numel; ++i)
+    embed[static_cast<size_t>(i)] =
+        static_cast<uint16_t>(0x3F80 + ((i % 8) << 4));
   t.push_back({"model.embed_tokens.weight", "BF16", {s.vocab, s.hidden},
-               Bf16Filled({s.vocab, s.hidden}, 0x3F80)});
+               Bytes16(embed)});
   t.push_back({"lm_head.weight", "BF16", {s.vocab, s.hidden},
                Bf16Filled({s.vocab, s.hidden}, 0x3F80)});
   t.push_back({"model.norm.weight", "BF16", {s.hidden},
@@ -644,4 +695,144 @@ TEST_CASE("kolibri1 bf16 arm: the fp8 and the bf16 arms agree on the same "
       CHECK(Argmax(got_fp8, vocab, r) == Argmax(got_bf16, vocab, r));
     }
   }
+}
+
+TEST_CASE("kolibri1 bf16 arm: the two arms ride the SAME compute class") {
+  // The numbers above cannot hold this claim: a compute-class change moves
+  // the numbers only where the two classes round differently, and the row's
+  // guarantee is about the CLASS. So the class SELECTION is asserted here,
+  // on the production forward's own record of the rule it read.
+  const TempCheckpoint fp8_ckpt(Fp8Fixture());
+  const TempCheckpoint bf16_ckpt(Bf16Fixture());
+  const Kolibri1Weights fp8 = Load(fp8_ckpt, MakeTinyConfig(true));
+  const Kolibri1Weights bf16 = Load(bf16_ckpt, MakeTinyConfig(false));
+
+  // The DECODE shape (t == 1): the shape the rule's decode conjunct rides.
+  vllm::SetKolibri1ComputeClassRecording(true);
+  vllm::ResetKolibri1ComputeClassRecords();
+  RunForward(fp8, {5});
+  const auto fp8_records = vllm::Kolibri1ComputeClassRecords();
+  vllm::ResetKolibri1ComputeClassRecords();
+  RunForward(bf16, {5});
+  const auto bf16_records = vllm::Kolibri1ComputeClassRecords();
+  vllm::SetKolibri1ComputeClassRecording(false);
+
+  // The recorder is live: the forward really ran the linear sites.
+  REQUIRE(!fp8_records.empty());
+  REQUIRE(fp8_records.size() == bf16_records.size());
+
+  for (const auto& [site, fp8_record] : fp8_records) {
+    const auto it = bf16_records.find(site);
+    REQUIRE(it != bf16_records.end());
+    const vllm::Kolibri1ClassRecord& bf16_record = it->second;
+    MESSAGE("site " << site << ": fp8 arm " << fp8_record.bf16_dot_calls << "/"
+                    << fp8_record.calls << " bf16-dot, bf16 arm "
+                    << bf16_record.bf16_dot_calls << "/" << bf16_record.calls);
+    // The same number of calls at the same site, and the SAME class.
+    CHECK(fp8_record.calls == bf16_record.calls);
+    CHECK(fp8_record.bf16_dot_calls == bf16_record.bf16_dot_calls);
+    // The rule's INPUTS are the same at the same site in both arms: the
+    // RESOLVED weight is bf16-resident in both (the fp8 arm's decoded bytes
+    // and the bf16 arm's on-disk bytes are the same kind of bytes), the
+    // shape is the same, and the output dtype is the same.
+    CHECK(fp8_record.facts.weight_is_bf16 == bf16_record.facts.weight_is_bf16);
+    CHECK(fp8_record.facts.t == bf16_record.facts.t);
+    CHECK(fp8_record.facts.out_dtype == bf16_record.facts.out_dtype);
+    // THE CLASS, asserted directly: with the tier available and the cache
+    // enabled (this host's two facts forced on, so the claim does not depend
+    // on the host), the site selects the bf16-dot class in BOTH arms. No
+    // conjunct excludes the plain bf16 arm from the class.
+    for (const vllm::Kolibri1ClassFacts& facts :
+         {fp8_record.facts, bf16_record.facts}) {
+      vllm::Kolibri1ClassFacts forced = facts;
+      forced.bf16dot_available = true;
+      forced.cache_enabled = true;
+      CHECK(vllm::SelectKolibri1ComputeClass(forced) ==
+            vllm::Kolibri1ComputeClass::kBf16Dot);
+    }
+  }
+
+  // The class the production selected is the one THIS host's facts call for:
+  // the bf16-dot class where the tier exists and the cache is enabled, the
+  // f32-widen class everywhere else. The two arms are held to the same bar.
+  const bool tier =
+      vllm::kolibri1_bfdot_gemv::Bf16DotActive() &&
+      vllm::kolibri1_dequant_cache::ProcessCache().enabled();
+  MESSAGE("the bf16-dot tier is "
+          << (tier ? "AVAILABLE" : "not available") << " on this host");
+  for (const auto& [site, record] : fp8_records) {
+    if (tier) {
+      CHECK(record.bf16_dot_calls == record.calls);
+    } else {
+      CHECK(record.bf16_dot_calls == 0);
+    }
+  }
+
+  // The PRODUCTION consumer of the record: the row's profile report prints
+  // the class table through the same reader and then drops the window. The
+  // recording is not a test-only seam — the forward turns it on when the
+  // profile switch is on, and the report reads it.
+  vllm::ReportKolibri1ComputeClasses();
+  vllm::ResetKolibri1ComputeClassRecords();
+  CHECK(vllm::Kolibri1ComputeClassRecords().empty());
+}
+
+TEST_CASE("kolibri1 bf16 arm: the registry hop loads the bf16 arm") {
+  // The REGISTRY is the production entry point: the loader is reached
+  // through `ModelRegistry::Load`, which the model loader calls. The bf16
+  // arm is therefore reachable the way a user's checkpoint reaches it, and
+  // not only through the loader function this file calls directly.
+  const TempCheckpoint bf16_ckpt(Bf16Fixture());
+  std::vector<SafetensorsFile> shards;
+  shards.push_back(SafetensorsFile::Open(bf16_ckpt.path()));
+  const vllm::ModelSource source = vllm::ModelSource::FromSafetensors(shards);
+
+  const HfConfig config = MakeTinyConfig(/*fp8_scheme=*/false);
+  std::unique_ptr<vllm::LoadedModel> model;
+  REQUIRE_NOTHROW(model = vllm::ModelRegistry::Load(config, source));
+  REQUIRE(model != nullptr);
+}
+
+TEST_CASE("kolibri1 bf16 arm: the registry refuses an unsupported fp8 block "
+          "scheme before the loader's own dispatch") {
+  // The registry reads and validates the block-wise (fine-grained) FP8
+  // config BEFORE any weight byte is read, and refuses what this build
+  // cannot execute. The loader's own scheme dispatch refuses the same
+  // checkpoint with a DIFFERENT sentence, so the sentence is what tells the
+  // two paths apart: deleting the registry's call site changes it, and this
+  // gate goes red.
+  const TempCheckpoint fp8_ckpt(Fp8Fixture());
+  std::vector<SafetensorsFile> shards;
+  shards.push_back(SafetensorsFile::Open(fp8_ckpt.path()));
+  const vllm::ModelSource source = vllm::ModelSource::FromSafetensors(shards);
+
+  HfConfig config = MakeTinyConfig(/*fp8_scheme=*/true);
+  config.raw["quantization_config"]["weight_block_size"] =
+      nlohmann::json::array({64, 64});
+  std::string message;
+  try {
+    std::unique_ptr<vllm::LoadedModel> model =
+        vllm::ModelRegistry::Load(config, source);
+    (void)model;
+  } catch (const std::exception& e) {
+    message = e.what();
+  }
+  REQUIRE_FALSE(message.empty());
+  // The registry's own refusal (the block shape this build does not
+  // implement), not the loader's scheme dispatch.
+  CHECK(Names(message, "block shape this build does not implement"));
+}
+
+TEST_CASE("kolibri1 bf16 arm: a quantization_config that is not an object is "
+          "refused by name") {
+  // A config that DECLARES a quantization_config is not a config that
+  // declares none, so the refusal must say what it found.
+  HfConfig config = MakeTinyConfig(/*fp8_scheme=*/false);
+  config.raw["quantization_config"] = "fp8";
+  const TempCheckpoint ckpt(Bf16Fixture());
+  const std::string message = LoadFailure(ckpt, config);
+  REQUIRE_FALSE(message.empty());
+  CHECK(Names(message, "quantization_config"));
+  CHECK(Names(message, "string"));
+  CHECK(Names(message, "not an object"));
 }

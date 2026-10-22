@@ -1,4 +1,4 @@
-# Kolibri-1 bf16 arm: the fp8 weight quantization's own error, measured (2026-10-21)
+# Kolibri-1 bf16 arm: the plain bf16 checkpoint, and the control it measures (2026-10-21)
 
 Row: MODEL-TEXT-kolibri-1 (`kolibri1-for-causal-lm`). Branch
 `row/KOLIBRI1-BF16-ARM` (fresh from `origin/main` `845b3c59d`; spec
@@ -13,7 +13,11 @@ from the primary oracle (the `aleph-alpha-inference` plugin's
 quantization itself, and the rest of the numerics. The plain bf16 arm removes
 the first cause by construction — a bf16 checkpoint's weights ARE the
 dequantized values — so the same forward, on the same compute class, isolates
-the quantization.
+the quantization. What THIS note measured is the CONTROL leg of that: the
+local copy on this box holds the dequantized values (the provenance verdict
+below), so the two legs ran the same values and the measurement is a control
+of the numerics. The upstream artifact's own gate, and the decomposition it
+would produce, are OWED.
 
 ## THE PROVENANCE VERDICT (measured, not assumed)
 
@@ -124,9 +128,11 @@ python3 scripts/kolibri1-threeway-analysis.py \
 Per-prompt mean gap / KL, both legs: `p0 0.03/0.01, p1 -0.04/0.01, p2 -0.01/0.01,
 p3 0.01/0.02, p4 -0.02/0.01, p5 -0.01/0.02, p6 -0.01/0.01, p7 0.16/0.26`.
 
-**THE DECOMPOSITION: fp8 agreement minus bf16 agreement = 97.7% - 97.7% =
-0.0 percentage points. The worst gap is 0.014 nats in both legs; the hard
-flips (top-1 misses) are 6 of 256 in both legs.**
+**THE MEASURED DIFFERENCE: fp8 agreement minus bf16 agreement = 97.7% - 97.7% =
+0.0 percentage points, and it is a CONTROL of the numerics, NOT the fp8
+weight quantization's decomposition (the next section says why). The worst gap
+is 0.014 nats in both legs; the hard flips (top-1 misses) are 6 of 256 in
+both legs.**
 
 The two legs are not merely equal in the aggregate: their 256 per-position
 logit rows are BYTE-IDENTICAL, prompt by prompt.
@@ -142,7 +148,7 @@ prompt6 IDENTICAL 50475e6d3ce11f3cff61121ae7973d43cdfbab8dce49b1c5228c5091ba80aa
 prompt7 IDENTICAL 27b5e7deff26284cbe0a30dbb08519948786cb2291f913d9b0b85be88d737e67
 ```
 
-### What the decomposition of ZERO means
+### What the measured ZERO means
 
 It is a CONTROL, and the provenance verdict says why. The local bf16 copy
 holds the DEQUANTIZED values, byte for byte (measured above), so the two legs
@@ -172,11 +178,17 @@ so the row's red line ("adoption may not move AWAY from the primary") holds.
 
 ## What was NOT measured here
 
-- **The upstream artifact's own gate.** 43 GB of the 152 GB upstream copy
-  landed (shard 1 complete and verified, shards 2-5 complete, the rest
-  partial); the fetch ran at ~12 MB/s with 48 parallel range requests, so the
-  full copy needs ~3.5 h and did not land in this session. The upstream
-  copy's OWN run against the primary rows (the real decomposition) is OWED.
+- **The upstream artifact's own gate.** The upstream copy is STILL FETCHING on
+  this box, and the number moves: re-measured at 2026-10-22 12:21 CEST,
+  shards 1-10 are complete (shard 1 verified against the upstream LFS oid),
+  shard 11 is in flight, and 61.73 GB of the 152 GB are on disk. An earlier
+  revision of this note said "the fetch has NOT moved since 2026-10-22 01:35
+  (the same 43 GB)"; that was WRONG and is corrected here — the fetch moved,
+  and it is still running. It runs at ~12 MB/s with 48 parallel range
+  requests, so the full copy needs ~3.5 h and did not land in this session.
+  The upstream copy's OWN run against the primary rows (the real
+  decomposition) is therefore still OWED, and the number above is a LOWER
+  BOUND on what is on disk when this note is read.
 - **The decomposition against an upstream-computed reference.** It needs the
   primary oracle to re-emit its rows on the upstream bytes (the oracle's
   environment is not on this box), and then the upstream copy's run here.

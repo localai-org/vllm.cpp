@@ -58,3 +58,22 @@ Spec: `.agents/specs/kolibri1-bf16-arm.md`.
   fp8->bf16 dequantization), so the upstream artifact's own gate is OWED.
   Evidence: `docs/bench-evidence/kolibri1-bf16-arm-20261021.md`.
   Spec: `.agents/specs/kolibri1-bf16-arm.md`.
+- 2026-10-22: the review of pull request #3496 returned FAIL, and its MAJOR
+  finding was that the gate could not see a compute-class change (the
+  fixture summed exactly in f32, so excluding the plain bf16 arm from the
+  bf16-dot class left the suite green). The class is now observable: the
+  rule is a pure function of the site's facts
+  (`SelectKolibri1ComputeClass`), the forward records the class it selected
+  per site, and the gate holds both arms to the same recorded class and to
+  the bf16-dot class itself. The mutation is red in a scratch copy of the
+  tree (6 failed assertions, the two arms' recorded classes 2/2 against
+  0/2). The numbers cannot carry the claim and the gate says so: the two
+  classes differ by an f32-ULP rounding of the reduction order, every site
+  stores bf16, and the measured worst logit gap stays 0. The fixture's
+  weights now span twelve E4M3 exponents with a varied embedding, so a
+  row's f32 sum is inexact. The same repair refused a malformed
+  `quantization_config` by name, corrected the public documents that said
+  the bf16 artifact is refused, and put the new gate through
+  `ModelRegistry::Load` so the registry's own refusal is covered. GREEN
+  (after): 9/9 test cases, 12492 assertions, in
+  `tests/vllm/models/test_kolibri1_bf16_arm.cpp`.
