@@ -137,15 +137,20 @@ Kolibri1WeightScheme ResolveKolibri1WeightScheme(const nlohmann::json& raw) {
   VT_CHECK(method == "fp8",
            "kolibri1: quant_method '" + method +
                "' is not an implemented Kolibri-1 weight scheme; the "
-               "implemented arms are fp8 block [128, 128] dynamic and plain "
-               "bf16 (a checkpoint with no quantization_config)");
+               "implemented arms are " +
+               Kolibri1WeightSchemeName(Kolibri1WeightScheme::kFp8Block) +
+               " and " +
+               Kolibri1WeightSchemeName(Kolibri1WeightScheme::kBf16) +
+               " (a checkpoint with no quantization_config)");
   const std::string scheme = q.value("activation_scheme", std::string());
   VT_CHECK(scheme == "dynamic",
            "kolibri1: activation_scheme '" + scheme +
                "' is not the dynamic scheme the Kolibri-1 fp8 checkpoint "
-               "carries; the implemented arms are fp8 block [128, 128] "
-               "dynamic and plain bf16 (a checkpoint with no "
-               "quantization_config)");
+               "carries; the implemented arms are " +
+               Kolibri1WeightSchemeName(Kolibri1WeightScheme::kFp8Block) +
+               " and " +
+               Kolibri1WeightSchemeName(Kolibri1WeightScheme::kBf16) +
+               " (a checkpoint with no quantization_config)");
   const auto bit = q.find("weight_block_size");
   VT_CHECK(bit != q.end() && bit->is_array() && bit->size() == 2,
            "kolibri1: weight_block_size must be a 2-element array, the "
