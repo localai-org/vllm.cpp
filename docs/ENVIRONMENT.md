@@ -204,68 +204,35 @@ collapses to ~2%, because that path is allocation-bound.
 
 ## Kolibri-1 CPU dequant cache
 
-The Kolibri-1 CPU forward keeps the checkpoint's FP8 weights compressed and
-dequantises every used projection on every forward, so a decode step pays for
-~1.4 G elements of FP8-to-bf16 work. The dequant is a pure function of the
-weight bytes, so the decoded weights are kept resident in a bounded LRU cache
-(`src/vllm/model_executor/models/kolibri1_dequant_cache.h`). The cache is
-worth more than 2x on CPU decode: 4.02 tok/s with it off against 9.07 tok/s
-with a 16 GiB budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32 threads,
-empty-prompt 32-token decode; prefill p512 43.33 tok/s with it off), so the
-DEFAULT is the cached path.
+The CPU forward keeps FP8 weights compressed and caches dequantized weights
+in a bounded least-recently-used (LRU) cache. Cached and uncached dequantization
+produce identical bytes. See the [host-specific measurements](benchmarks/kolibri1-cpu-dequant-cache-default.md)
+for workloads, results, and comparison limits.
 
-The default budget is DERIVED from the host's own memory report, so a small
-machine is not committed to a large allocation. `MemAvailable` is the
-`/proc/meminfo` figure the kernel reports as handable without swapping, read
-through the same helper the DeepSeek-V4 EXL3 host-residency budget uses. Two
-measured facts shape the policy:
+The [cache policy](../src/vllm/model_executor/models/kolibri1_dequant_cache.h)
+uses the greater of two available-memory readings: process start, before model
+loading, and cache-plan creation. On Linux, these readings use `MemAvailable`
+from `/proc/meminfo`.
 
-- THE KNEE is 16 GiB. Below it the cache thrashes and buys little: at 8.25
-  GiB the measured hit rate was 33% with 16068 evictions, and the decode
-  throughput (3.84 tok/s) was indistinguishable from the cache being off
-  (3.62 tok/s), against 6.38 tok/s at an explicit 16 GiB (2026-10-21, node 3,
-  aarch64, 3.4 GHz, 32 threads, empty-prompt 32-token decode).
-- THE SAMPLING MOMENT matters. The budget was read on the first use of the
-  cache, and the first use happens during the 74 GB checkpoint load, where
-  the page cache is full and `MemAvailable` reads 66 GiB instead of the
-  host's ~212 GiB idle reading.
+| Available memory (greater reading) | Default cache budget |
+|---|---|
+| Unknown (both readings unavailable) | 16 GiB |
+| Less than 24 GiB | Disabled |
+| At least 24 GiB | One eighth of available memory, clamped to 16–32 GiB |
 
-So the policy reads the host BEFORE our own load depresses the reading, and
-floors the budget at the measured knee:
-
-    honest_bytes = max(start_bytes, plan_bytes)
-    honest_bytes == 0              -> budget = 16 GiB   (UNKNOWN)
-    honest_bytes < 16 GiB + 8 GiB  -> budget = 0        (DISABLED)
-    otherwise                      -> budget = clamp(honest_bytes / 8,
-                                                        16 GiB, 32 GiB)
-
-`start_bytes` is the reading taken at process start (before `main`, before
-any model load) and `plan_bytes` the reading at plan time; the maximum is
-the honest one. The KNEE (16 GiB) is the FLOOR: a host that can afford the
-knee is never served a budget below it, because a sub-knee cache costs the
-memory and buys nothing. The RESERVE (8 GiB) is the room the host must keep
-free beside the knee: a host that reports less than the knee plus the
-reserve cannot afford the knee at all, so the policy DISABLES the cache
-(budget 0) and the forward runs the uncached path, byte for byte. That is
-the explicit rule: a sub-knee cache is WORSE than useless, so the cache
-either runs at or above the knee or it does not run. The 32 GiB cap bounds
-the footprint, and an unreadable report uses the KNEE: an unknown budget is
-not a reason to refuse, and not a reason to hand out a sub-knee budget (a
-host that cannot hold the knee degrades to the uncached path through the
-allocation fallback).
-
-The budget is a BOUND, not a reservation: entries are allocated one at a time
-and evicted under it. An allocation that cannot be satisfied degrades the
-process to the uncached path (the original threaded dequant) instead of
-failing the forward, and the degradation is counted in the
-`VT_KOLIBRI1_PROFILE` report, which also prints the budget, the honest
-reading, and both readings it came from.
+The 24 GiB threshold combines the measured 16 GiB cache floor with an
+8 GiB host reserve. These readings select a budget; they do not reserve memory
+or guarantee that it remains available.
+Entries allocate on demand and the cache evicts them to stay within its budget.
+If allocation fails, the process uses uncached dequantization instead of failing
+the forward. `VT_KOLIBRI1_PROFILE` reports this fallback, the budget, and both memory readings.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `VT_KOLIBRI1_DEQUANT_CACHE_MB` | **on** (budget derived: `clamp(max(start, plan) / 8, 16 GiB, 32 GiB)`; a host that cannot afford the 16 GiB knee gets the cache DISABLED, and an unreadable report uses the knee) | The Kolibri-1 CPU dequant cache's residency budget, in MiB. `0` DISABLES the cache and restores the original threaded pool dequant, byte for byte; that is the escape hatch and the A/B off switch. Any other value sets the budget EXACTLY (16 GiB is the shape the 2026-10-20 measurement above was taken in, and the shape to pin when a reproducible residency matters). The variable UNSET is the default: ON, with the derived budget above. A value that is not a plain non-negative number of MiB is not a budget, and it falls back to the default policy rather than switching a default-ON lever off. The cache stores the DECODED weights, so the bytes it serves are the bytes the uncached path produces: the change is a caching change, never an arithmetic one |
 | `VT_KOLIBRI1_F32_RESIDUAL` | **off** | Measurement lever (the f32-residual A/B, `docs/bench-evidence/kolibri1-cpu-f32-residual-20261022.md`, ISSUE-LOCAL-01M5HHGT86M8D1FDKMA20EX950): set to keep the CPU forward's residual stream in f32 instead of the model dtype bf16, the dtype llama.cpp and the HF reference keep it in. UNSET (or `0`) is the default and is bit-identical to the shipped forward. Any non-empty value other than `0` turns the lever on. NOT a product setting: vLLM resolves one model dtype and every layer inherits it, so taking the f32 residual is a recorded product decision, not an env knob a user should reach for. Doubles the residual buffer's bytes per token per layer when on |
 | `VT_KOLIBRI1_LAYER_DUMP` | **off** (no dump) | Measurement instrument (the same evidence file): set to a writable file path to append, per layer, the four compared quantities (`attn_out_pre_norm`, `attn_post_norm`, `ffn_post_norm`, `l_out`) at positions 0 and 5, as `layer<TAB>quantity<TAB>position<TAB>hidden_index<TAB>value`. UNSET or empty writes nothing and costs nothing. Debug/measurement only; it downloads device buffers synchronously every layer and is far too slow for any serving path |
+
 
 ## Rollback and bisect switches
 

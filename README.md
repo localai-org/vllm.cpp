@@ -37,6 +37,9 @@
 
 ## News
 
+- **2026-10** **Kolibri-1 caches dequantized weights on CPU by default when memory permits.**
+  See the [host-specific measurements](docs/benchmarks/kolibri1-cpu-dequant-cache-default.md)
+  and [memory policy](docs/ENVIRONMENT.md#kolibri-1-cpu-dequant-cache).
 - **2026-10** **Kolibri-1 gains n-gram speculative decoding on CPU.** No draft model is required.
   See the [recipe and validation limits](docs/SPECULATIVE-DECODING.md#kolibri-1-on-cpu).
 - **2026-10** **Benchmarks expose EOS, chat-template, thinking, and KV-cache dtype controls.**

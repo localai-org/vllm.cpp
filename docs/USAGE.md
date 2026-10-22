@@ -962,14 +962,11 @@ it takes precedence over `enable_thinking`. Only the value `"none"` disables thi
 The explicit context limit keeps this example separate from the author's
 unverified million-token serving recipe. It does not limit weight memory.
 
-The loader retains FP8 blocks and BF16 tensors. The CPU forward dequantizes FP8
-projections when needed, and keeps the dequantized weights resident in a
-bounded cache that is on by default: the budget is derived from the host's
-available memory (`clamp(MemAvailable / 8, 1 GiB, 32 GiB)`), so it needs no
-configuration and never commits the process to a large allocation.
-`VT_KOLIBRI1_DEQUANT_CACHE_MB=0` disables the cache and restores the
-per-forward dequantization, and an explicit value sets the budget in MiB
-exactly.
+The loader retains FP8 blocks and BF16 tensors. The CPU forward caches
+dequantized weights by default when the host's memory report permits it.
+See the [cache memory policy](ENVIRONMENT.md#kolibri-1-cpu-dequant-cache)
+for budget limits and explicit overrides.
+Set `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` to disable caching and dequantize on each forward.
 The registry also dispatches to a Tenstorrent forward with streamed experts.
 See the [Tenstorrent measurements and remaining gaps](gap-kolibri1-tt-captured-decode.md).
 GGUF loading and other device forwards, including CUDA, are refused.
@@ -980,8 +977,9 @@ near-ties. Four of eight prompts matched token-for-token through the full
 continuation. This was not a native Transformers generation run.
 See the [CPU comparison](../.agents/specs/kolibri-1-cpu.md#now) and
 [serving validation](bench-evidence/kolibri1-serve-20261008.md).
-Full correctness and speed parity against the
-[author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) remain unverified.
+The [author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) runs on
+CPU with a BF16-converted reference checkpoint, but its outputs differ from the transcription.
+Full correctness and speed parity against the plugin remain unverified.
 
 ## Muse Glimmer 30B from a GGUF k-quant
 

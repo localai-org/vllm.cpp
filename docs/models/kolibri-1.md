@@ -1,8 +1,8 @@
 # Kolibri-1
 
 Kolibri-1 is Aleph Alpha's mixture-of-experts text model with sliding-window
-and full attention. The released FP8 checkpoint runs through the CPU model
-registry and the shared CLI. The engine accepts its tokenizer.
+and full attention. The released FP8 checkpoint has CPU and Tenstorrent forwards
+through the shared model registry. The engine accepts its tokenizer.
 
 ## Checkpoint
 
@@ -43,6 +43,9 @@ build/examples/vllm-cli \
 
 The CLI takes a local path. It does not download the checkpoint.
 The [CLI parser](../../examples/cli/main.cpp) defines these options.
+The CPU forward caches dequantized weights by default when memory permits.
+See the [memory policy and overrides](../ENVIRONMENT.md#kolibri-1-cpu-dequant-cache)
+and [host-specific measurements](../benchmarks/kolibri1-cpu-dequant-cache-default.md).
 
 ## Validation and limits
 
@@ -55,10 +58,13 @@ See the [CPU comparison evidence](../bench-evidence/kolibri1-goldens-20261004.md
 and [tokenizer validation](../../.agents/specs/kolibri-1-cpu.md#r7-resolution--the-tokenizer-engine-accepts-the-kolibri-1-split-regex).
 
 CUDA and other non-Tenstorrent accelerator forwards are refused.
-The Tenstorrent implementation runs a partial forward on resident weights, but lacks routed experts.
-That partial forward does not establish full-model correctness or performance.
-See the [Tenstorrent limits](../../.agents/specs/kolibri-tt.md#now).
+The Tenstorrent forward uses resident dense weights and streams routed experts by default.
+Its recorded correctness gate still fails, and captured decode is not wired.
+See the [current Tenstorrent gate](../../.agents/specs/kolibri-tt.md#now)
+and [captured-decode gaps](../gap-kolibri1-tt-captured-decode.md).
 
-The author's vLLM plugin remains unverified as a runnable oracle in the
-[oracle record](../../.agents/oracles/aleph-alpha-inference.md).
-No throughput comparison against that plugin is available.
+The author's vLLM plugin runs on CPU with a BF16-converted reference checkpoint,
+as recorded in the [oracle record](../../.agents/oracles/aleph-alpha-inference.md).
+That backend cannot run the released FP8 checkpoint directly.
+The recorded transcription comparison does not establish parity with the plugin;
+their reference outputs differ. Full correctness and speed parity remain unverified.
