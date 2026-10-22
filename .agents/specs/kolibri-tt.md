@@ -583,6 +583,29 @@ upstream filing. Evidence:
 `docs/bench-evidence/kolibri1-tt-p150-refresh-20261021.md`; issue
 ISSUE-LOCAL-01M5F68A30HNPG4V95BKTAQS79.
 
+CHUNKED-PREFILL VERDICT CORRECTED (2026-10-22, `row/TT-CHUNKED-NULL-ARM`,
+issue ISSUE-LOCAL-01M5HHEV4DWX0D4S5E955VE0AN): the chunked-prefill record
+(issue ISSUE-LOCAL-01M54CKCJNWHRDJB7PYRG31Y1D) stated the root cause
+"inherent multi-token prefill kernel precision, NOT chunk logic". That
+statement is corrected, and its 2026-10-18 entry is marked superseded with
+its historical text kept. The chunked-vs-serial divergence is 5x to 600x the
+chunked path's own run-to-run spread, so the divergence is NOT born in the
+walk logic, and that part of the earlier verdict survives. The flip set the
+chunk sweep measured is contaminated by the path's own nondeterminism, so it
+CANNOT be read as a precision signature, and the verdict "inherent
+multi-token prefill kernel precision" is NOT ESTABLISHED by the evidence the
+record cites. The chunked path is not reproducible run to run: a repeated
+forward moves its top-1 logit by about 0.3 nats within one process and by 3.4
+nats across device states, while the serial walk is byte identical over two
+repeats. The chunked-prefill knob stays opt-in. Measurement, provenance and
+the labelled tap artifacts:
+`docs/bench-evidence/kolibri1-tt-chunked-null-arm-20261022.md`. The sweep's
+null arm now rides the instrument: the `SCRATCH dbg chunk sweep` case runs
+the same chunked walk twice per chunk size and prints the
+chunked-versus-chunked difference, and its ratio to the chunked-versus-serial
+difference, beside the chunked-versus-serial one.
+
+
 
 ## Git integration
 
@@ -626,3 +649,20 @@ One pull request for wave A (spec + implementation together), branched from
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
 - Single-P150 expert streaming: B1 planner spec + implementation landed;
   the NVMe backing tier is a pluggable leaf behind the RAM tier.
+- The chunked prefill path's reproducibility (the null arm of
+  `docs/bench-evidence/kolibri1-tt-chunked-null-arm-20261022.md`): the
+  chunked path must reproduce run to run, with its own spread far below the
+  chunk-vs-serial difference, before any chunked comparison can carry a
+  reading.
+- A re-run of the chunk-size sweep with the null arm the instrument now
+  carries: the `SCRATCH dbg chunk sweep` case in
+  `tests/vllm/models/test_kolibri1_tt_b2ii.cpp` prints the
+  chunked-versus-chunked difference, and its ratio to the
+  chunked-versus-serial difference, beside the chunked-versus-serial one. The
+  two values of the 2026-10-21 measurement that the 2026-10-22 reproduction
+  check does not reproduce are owed to be reconciled in the same run.
+- The mechanism hunt for the chunked path's divergence: the per-layer taps
+  localise it at layer 0's last query row at one to two bf16 ULP, growing
+  with depth to rms(d) 3.24 at layer 49, with the router's expert order
+  flipping in 36 of 50 layers between two runs of the same path. The
+  measurements show the shape of the divergence and not its cause.

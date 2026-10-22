@@ -1641,8 +1641,18 @@ TEST_CASE("kolibri1 TT B2b-ii: chunked-prefill near-tie adjudication — "
 // one wrong byte is one wrong byte at any chunk size.
 //
 // One gate golden, last-prefill-row (d=0) plus the first 5 teacher-forced
-// decode rows, chunk sizes 2/4/8/16 against the serial reference. Opt-in:
-// VT_KOLIBRI1_TT_CHUNK_SWEEP=1.
+// decode rows, chunk sizes 2/4/8/16 against the serial reference.
+//
+// THE NULL ARM (issue ISSUE-LOCAL-01M5HHEV4DWX0D4S5E955VE0AN): every chunk
+// size runs the SAME chunked walk TWICE, with the KV cache zeroed between
+// the two runs, and prints the chunked-vs-chunked difference beside the
+// chunked-vs-serial one. The chunked-vs-chunked difference IS the chunked
+// path's own noise floor. A chunked-vs-serial difference that is not read
+// against that floor is not a measurement: the chunked prefill path is NOT
+// reproducible run to run (a repeated forward moves its top-1 logit by
+// nats), so its flip set cannot carry a precision reading on its own.
+//
+// Opt-in: VT_KOLIBRI1_TT_CHUNK_SWEEP=1.
 TEST_CASE("SCRATCH dbg chunk sweep") {
   if (!TenstorrentDevicePresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
@@ -1733,8 +1743,12 @@ TEST_CASE("SCRATCH dbg chunk sweep") {
                                        ctx + static_cast<int64_t>(d),
                                        num_blocks));
   };
-  auto score = [&](const std::vector<float>& ref,
-                   const std::vector<float>& got) {
+  // One comparison: the two argmaxes, the gap, and the rms of the
+  // difference. The labels name the two arms, because the null arm compares
+  // two chunked runs and the sweep compares a chunked run with the serial
+  // reference. Returns the rms of the difference.
+  auto score = [&](const std::vector<float>& ref, const std::vector<float>& got,
+                   const char* ref_label, const char* got_label) {
     double mad = 0, sumdsq = 0;
     for (size_t k = 0; k < ref.size() && k < got.size(); ++k) {
       const double dd = static_cast<double>(got[k]) -
@@ -1748,10 +1762,12 @@ TEST_CASE("SCRATCH dbg chunk sweep") {
         std::max_element(got.begin(), got.end()) - got.begin());
     const double gap = static_cast<double>(got[static_cast<size_t>(g_am)]) -
                        static_cast<double>(got[static_cast<size_t>(r_am)]);
-    MESSAGE("    max|d|=" << mad << ", rms(d)=" << std::sqrt(sumdsq /
-                                                               ref.size())
-                          << ", serial argmax " << r_am << ", chunk argmax "
-                          << g_am << ", gap " << gap << " nats");
+    const double rms = std::sqrt(sumdsq / ref.size());
+    MESSAGE("      " << ref_label << " vs " << got_label << ": max|d|=" << mad
+                      << ", rms(d)=" << rms << ", " << ref_label << " argmax "
+                      << r_am << ", " << got_label << " argmax " << g_am
+                      << ", gap " << gap << " nats");
+    return rms;
   };
 
   reset_kv();
@@ -1763,12 +1779,28 @@ TEST_CASE("SCRATCH dbg chunk sweep") {
     reset_kv();
     std::vector<std::vector<float>> rows;
     walk(chunk, rows);
+    // The NULL ARM: the SAME chunked walk again, with the KV cache zeroed
+    // in between. Its difference is the chunked path's OWN noise floor.
+    reset_kv();
+    std::vector<std::vector<float>> null_rows;
+    walk(chunk, null_rows);
     MESSAGE("  chunk=" << chunk << ":");
-    MESSAGE("    d=0 (last prefill row):");
-    score(ref_rows[0], rows[0]);
-    for (size_t d = 1; d <= kDecodes; ++d) {
-      MESSAGE("    d=" << d << " (TF decode over chunked KV):");
-      score(ref_rows[d], rows[d]);
+    for (size_t d = 0; d <= kDecodes; ++d) {
+      MESSAGE("    d=" << d << (d == 0 ? " (last prefill row)"
+                                      : " (TF decode over chunked KV)")
+                      << ":");
+      const double vs_serial =
+          score(ref_rows[d], rows[d], "serial", "chunked");
+      const double null_rms =
+          score(null_rows[d], rows[d], "chunked run 1", "chunked run 2");
+      if (null_rms > 0.0) {
+        MESSAGE("      ratio (chunked-vs-serial rms / null-arm rms) = "
+                << vs_serial / null_rms);
+      } else {
+        MESSAGE("      null arm byte-identical (rms(d)=0): the "
+                   "chunked-vs-serial rms(d)="
+                << vs_serial << " is the whole difference");
+      }
     }
   }
 }
