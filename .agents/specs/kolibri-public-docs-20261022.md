@@ -57,4 +57,23 @@ Stop for missing source evidence or an unrelated change needed to pass a gate.
 
 ## Now
 
-Documentation correction scoped. Implementation and independent review pending.
+The five public documents now describe the shipped cache policy and streamed
+Tenstorrent experts. The oracle record confirms CPU execution with converted
+BF16 weights, so the guides distinguish that reference from the released FP8
+checkpoint. Full model parity remains unverified.
+
+## Outcome
+
+The README announces the default without adding a speed claim. The environment
+guide owns the memory policy. The usage and model guides link to it, and the
+feature table retains the capability and validation limits.
+
+Source review preserved the CLI's local-path requirement. Only the server
+resolves remote model IDs. No runtime default, model lifecycle, or benchmark
+disposition changed. No GPU or model execution was needed.
+
+Focused gates passed: agent record, README structure, environment documentation,
+supported models, benchmark index, and `git diff --check`. The related suites
+passed 19 README, 30 environment, and 6 benchmark tests. Full preflight encounters
+missing PyYAML and build tools on the unchanged baseline. Independent review
+and the fork pull request remain the integration steps.
