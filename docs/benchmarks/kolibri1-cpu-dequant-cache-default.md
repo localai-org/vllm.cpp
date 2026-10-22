@@ -107,7 +107,7 @@ number.
 | Quantization | FP8 block-quantized, `weight_block_size [128, 128]`, dynamic activation scheme (the `mlp.gate` routers are bf16) |
 | Size | 32 safetensors shards, 78,827,029,120 bytes of tensors (74 GiB on disk) |
 | Checksums | **No shard SHA-256 is recorded in this tree.** The manifest carries names, dtypes and shapes only, and the model recipe says so: "A complete artifact checksum record remains unavailable" ([`docs/models/kolibri-1.md`](../models/kolibri-1.md)) |
-| **Refused arm** | [`Aleph-Alpha/Kolibri-1-BF16`](https://huggingface.co/Aleph-Alpha/Kolibri-1-BF16) @ `cc6d729e6a024c1e59ad48887fdef95ff37b534d` (149 GiB) is **not an implemented arm** — the loader refuses a checkpoint without the FP8 `quantization_config`: "a bf16 Kolibri-1 artifact is not an implemented arm" (`src/vllm/model_executor/models/kolibri1_weights.cpp:72`). It is named here as refused; **no bf16 measurement exists** |
+| **Refused arm** | [`Aleph-Alpha/Kolibri-1-BF16`](https://huggingface.co/Aleph-Alpha/Kolibri-1-BF16) @ `cc6d729e6a024c1e59ad48887fdef95ff37b534d` (149 GiB) **was** not an implemented arm when these numbers were taken: the loader refused a checkpoint without the FP8 `quantization_config` ("a bf16 Kolibri-1 artifact is not an implemented arm"). The loader now dispatches on the checkpoint's scheme and the plain bf16 arm is implemented ([`docs/bench-evidence/kolibri1-bf16-arm-20261021.md`](../bench-evidence/kolibri1-bf16-arm-20261021.md), spec `.agents/specs/kolibri1-bf16-arm.md`); the numbers in THIS document remain the fp8 arm's, and the bf16 arm's own measurement is in that note |
 
 The public recipe still records the short revision `e52eb462` for this
 checkpoint ([`docs/models/kolibri-1.md`](../models/kolibri-1.md),

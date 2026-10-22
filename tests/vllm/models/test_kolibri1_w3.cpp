@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <set>
 #include <fstream>
@@ -52,7 +53,16 @@
 
 namespace {
 
-constexpr const char* kRealModelDir = "/mnt/models/Aleph-Alpha/Kolibri-1";
+// The checkpoint the golden gate runs on. The DEFAULT is the released fp8
+// checkpoint; `VT_KOLIBRI1_MODEL_DIR` points the SAME gate at another
+// Kolibri-1 checkpoint — the plain bf16 arm (spec
+// .agents/specs/kolibri1-bf16-arm.md) replays the same goldens on its own
+// arm.
+std::string RealModelDir() {
+  const char* env = std::getenv("VT_KOLIBRI1_MODEL_DIR");
+  if (env != nullptr && env[0] != '\0') return std::string(env);
+  return std::string("/mnt/models/Aleph-Alpha/Kolibri-1");
+}
 // The near-tie band, DERIVED FROM MEASUREMENT on the real model: the
 // teacher-forced final-step top-8 logits of chains that agree token for
 // token differ by up to 2.19 absolute (measured envelope, this file's
@@ -245,20 +255,19 @@ TEST_CASE("kolibri1 W3: the golden file has the declared prompt set") {
 // W3 THE TOKEN GATE. Real fp8 checkpoint -> W1 loader -> W2 CPU forward ->
 // greedy decode -> compare against the transformers golden fingerprints.
 TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
-  if (!std::filesystem::exists(std::string(kRealModelDir) +
-                               "/model.safetensors.index.json")) {
-    MESSAGE("SKIP: " << kRealModelDir << " not mounted");
+  const std::string model_dir = RealModelDir();
+  if (!std::filesystem::exists(model_dir + "/model.safetensors.index.json")) {
+    MESSAGE("SKIP: " << model_dir << " not mounted");
     return;
   }
   const nlohmann::json g = LoadGoldens();
 
   // The REAL config through the REAL parser (not the W1 hand-built copy).
-  const HfConfig config =
-      vllm::LoadHfConfig(std::string(kRealModelDir) + "/config.json");
+  const HfConfig config = vllm::LoadHfConfig(model_dir + "/config.json");
 
   // The real loader over the real 32 shards.
   const auto index = nlohmann::json::parse(
-      std::ifstream(std::string(kRealModelDir) + "/model.safetensors.index.json"));
+      std::ifstream(model_dir + "/model.safetensors.index.json"));
   // ONE open per DISTINCT shard: iterating the weight_map itself would try
   // 116303 opens (one per tensor) and blow the fd limit.
   std::set<std::string> shard_names;
@@ -268,8 +277,8 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
   }
   std::vector<SafetensorsFile> shards;
   for (const std::string& shard : shard_names)
-    shards.push_back(SafetensorsFile::Open(std::string(kRealModelDir) + "/" + shard));
-  MESSAGE("loading the real fp8 checkpoint...");
+    shards.push_back(SafetensorsFile::Open(model_dir + "/" + shard));
+  MESSAGE("loading the real checkpoint: " << model_dir);
   const Kolibri1Weights w = LoadKolibri1Weights(shards, config);
   shards.clear();
   MESSAGE("weights loaded");

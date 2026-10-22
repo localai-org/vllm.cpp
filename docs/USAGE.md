@@ -906,6 +906,19 @@ The existing record identifies revision `e52eb462` but lacks the full revision
 and shard SHA-256 hashes. This is incomplete artifact provenance, not a
 reproducible download pin. See the [checkpoint record](../.agents/specs/kolibri-1-cpu.md#the-checkpoint).
 
+The CPU path also loads a **plain BF16** Kolibri-1 checkpoint — one whose
+`config.json` carries no `quantization_config`. The upstream artifact is
+[`Aleph-Alpha/Kolibri-1-BF16`](https://huggingface.co/Aleph-Alpha/Kolibri-1-BF16)
+@ `cc6d729e6a024c1e59ad48887fdef95ff37b534d`: 32 safetensors shards, and a
+`model.safetensors.index.json` whose `metadata.total_size` is
+156,206,149,120 bytes. Shard 1 (`model-00001-of-00032.safetensors`,
+4,998,628,528 bytes) has SHA-256
+`e626660074fd9ed3e3644f1d62f23be6adad9437e876f5f9b18260d8382d260b`, which is
+the upstream LFS object id. A checkpoint whose `quantization_config` names
+any other scheme is refused by name, and the refusal names the arms that
+exist. See the [bf16 arm record](../.agents/specs/kolibri1-bf16-arm.md) and
+its [evidence](../docs/bench-evidence/kolibri1-bf16-arm-20261021.md).
+
 Use an existing local checkpoint directory containing the index, its shards,
 `config.json`, `tokenizer.json`, and `tokenizer_config.json`. Allow host memory
 for the weights, temporary dequantized projections, activations, and the KV cache.

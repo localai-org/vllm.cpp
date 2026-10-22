@@ -28,7 +28,8 @@ The bf16 arm removes cause 1 by construction: an upstream bf16 Kolibri-1
 checkpoint's weights ARE the dequantized values, so the same forward on the
 same compute class isolates the quantization's own contribution.
 
-Today the arm does not exist. `kolibri1_weights.cpp::CheckQuantConfig`
+Today the arm does not exist. `kolibri1_weights.cpp::ResolveKolibri1WeightScheme`
+(the scheme dispatch that replaced the old `CheckQuantConfig`)
 requires the checkpoint's `quantization_config` to be fp8 block [128, 128]
 dynamic and refuses everything else by name, with the message "a bf16
 Kolibri-1 artifact is not an implemented arm". The upstream bf16 artifact
@@ -217,6 +218,15 @@ Red first, in this order; the red capture is in the commit body.
 `docs/bench-evidence/kolibri1-bf16-arm-20261021.md`: the provenance verdict
 with its command and numbers, the two arms' agreement counts, the worst gap
 and the hard flips for each, and the decomposition.
+
+Measured on 2026-10-21 (256 scored positions, the primary oracle's rows as
+the denominator): the fp8 arm and the plain bf16 arm both score 97.7% top-1
+(6 hard flips of 256), a 0.014-nat mean gap, 0.9983 mean cosine — and their
+per-position logit rows are BYTE-IDENTICAL. The decomposition is therefore
+0.0 percentage points, and the note says why: the local bf16 copy holds the
+DEQUANTIZED values (measured), so the two legs are a CONTROL of the numerics,
+not the quantization's decomposition. The upstream artifact's own gate is
+OWED.
 
 ## Risks
 

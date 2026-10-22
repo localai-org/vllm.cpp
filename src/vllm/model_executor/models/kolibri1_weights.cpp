@@ -2,9 +2,14 @@
 //
 // Loads every tensor from the safetensors shards, performs full accounting
 // (every on-disk name must be classified), then materializes weights into
-// the Kolibri1Weights tree. The checkpoint is FP8 block-quantized
+// the Kolibri1Weights tree. The RELEASED checkpoint is FP8 block-quantized
 // (weight_block_size [128, 128], weight_scale_inv siblings, spec risk R1);
-// the router gate is bf16 (modules_to_not_convert). The MoE name layout —
+// a plain bf16 checkpoint (no quantization_config — the upstream
+// `Aleph-Alpha/Kolibri-1-BF16` artifact) is the second arm and its weights
+// are read as they are, with no scale and no dequant. The scheme is
+// resolved ONCE (ResolveKolibri1WeightScheme) and every later decision
+// reads it, so the two arms cannot be confused with each other. The router
+// gate is bf16 (modules_to_not_convert) in both arms. The MoE name layout —
 // experts at `mlp.experts.N`, the shared expert at `mlp.shared_experts`,
 // the router bias at `moe.router.expert_bias`, the gate at `mlp.gate` — IS
 // the mapper reconciliation (kolibri1.py:258-266).
@@ -59,26 +64,88 @@ struct GetTensor {
   }
 };
 
-// ── Quantization config ─────────────────────────────────────────────────────
+// ── Projection loaders ──────────────────────────────────────────────────────
 
-// The checkpoint's quantization_config must be fp8 block [128, 128] dynamic.
-// Anything else is refused by name: no other arm is implemented for the CPU
-// path and a silent fall-through would load plausible wrong weights.
-void CheckQuantConfig(const nlohmann::json& raw) {
+Kolibri1Projection LoadProjection(const TensorIndex& idx,
+                                  const std::string& proj,
+                                  Kolibri1WeightScheme scheme) {
+  Kolibri1Projection r;
+  GetTensor get{idx};
+  const StTensor& w = get(proj + ".weight");
+  if (w.dtype == "F8_E4M3") {
+    VT_CHECK(scheme == Kolibri1WeightScheme::kFp8Block,
+             "kolibri1: '" + proj + ".weight' ships F8_E4M3, but the "
+             "checkpoint declares no quantization_config (the plain bf16 "
+             "arm); an fp8 weight needs the fp8 block [128, 128] dynamic "
+             "config and its weight_scale_inv siblings");
+    r.fp8_block = LoadFp8BlockRaw(get, proj, kBlockN, kBlockK);
+  } else {
+    VT_CHECK(w.dtype == "BF16",
+             "kolibri1: '" + proj + ".weight' ships dtype " + w.dtype +
+                 "; the implemented arms are F8_E4M3 block-quantized and "
+                 "BF16 (modules_to_not_convert)");
+    VT_CHECK(scheme == Kolibri1WeightScheme::kBf16,
+             "kolibri1: '" + proj + ".weight' ships BF16, but the "
+             "checkpoint declares the fp8 block [128, 128] dynamic scheme; "
+             "in that arm only the router gate (mlp.gate, a "
+             "modules_to_not_convert module) is BF16");
+    r.bf16 = LoadBf16Direct(get, proj + ".weight");
+  }
+  return r;
+}
+
+Kolibri1ExpertWeights LoadExpert(const TensorIndex& idx,
+                                 const std::string& base,
+                                 Kolibri1WeightScheme scheme) {
+  Kolibri1ExpertWeights e;
+  e.gate_proj = LoadProjection(idx, base + ".gate_proj", scheme);
+  e.up_proj = LoadProjection(idx, base + ".up_proj", scheme);
+  e.down_proj = LoadProjection(idx, base + ".down_proj", scheme);
+  return e;
+}
+
+}  // namespace
+
+// ── The weight scheme ───────────────────────────────────────────────────────
+
+const char* Kolibri1WeightSchemeName(Kolibri1WeightScheme scheme) {
+  switch (scheme) {
+    case Kolibri1WeightScheme::kFp8Block:
+      return "fp8 block [128, 128] dynamic";
+    case Kolibri1WeightScheme::kBf16:
+      return "bf16";
+  }
+  return "unknown";
+}
+
+// The checkpoint's weight scheme, resolved ONCE from its config.
+//
+//   * NO quantization_config  -> the plain bf16 arm. The upstream
+//     `Aleph-Alpha/Kolibri-1-BF16` artifact carries none, and its weights
+//     are the dequantized values.
+//   * fp8 block [128, 128] dynamic -> the released checkpoint's arm.
+//   * anything else -> refused BY NAME, with a message that names the arms
+//     that do exist, so the reader learns what is missing rather than only
+//     what is wrong.
+Kolibri1WeightScheme ResolveKolibri1WeightScheme(const nlohmann::json& raw) {
   const auto qit = raw.find("quantization_config");
-  VT_CHECK(qit != raw.end() && qit->is_object(),
-           "kolibri1: the checkpoint carries no quantization_config, but the "
-           "Kolibri-1 checkpoint is FP8 block-quantized (weight_block_size "
-           "[128, 128]); a bf16 Kolibri-1 artifact is not an implemented arm");
+  if (qit == raw.end() || !qit->is_object()) {
+    return Kolibri1WeightScheme::kBf16;
+  }
   const auto& q = *qit;
-  VT_CHECK(q.value("quant_method", std::string()) == "fp8",
-           "kolibri1: quant_method '" +
-               q.value("quant_method", std::string()) +
-               "' is not the fp8 this row implements");
-  VT_CHECK(q.value("activation_scheme", std::string()) == "dynamic",
-           "kolibri1: activation_scheme '" +
-               q.value("activation_scheme", std::string()) +
-               "' is not the dynamic scheme the Kolibri-1 checkpoint carries");
+  const std::string method = q.value("quant_method", std::string());
+  VT_CHECK(method == "fp8",
+           "kolibri1: quant_method '" + method +
+               "' is not an implemented Kolibri-1 weight scheme; the "
+               "implemented arms are fp8 block [128, 128] dynamic and plain "
+               "bf16 (a checkpoint with no quantization_config)");
+  const std::string scheme = q.value("activation_scheme", std::string());
+  VT_CHECK(scheme == "dynamic",
+           "kolibri1: activation_scheme '" + scheme +
+               "' is not the dynamic scheme the Kolibri-1 fp8 checkpoint "
+               "carries; the implemented arms are fp8 block [128, 128] "
+               "dynamic and plain bf16 (a checkpoint with no "
+               "quantization_config)");
   const auto bit = q.find("weight_block_size");
   VT_CHECK(bit != q.end() && bit->is_array() && bit->size() == 2,
            "kolibri1: weight_block_size must be a 2-element array, the "
@@ -90,55 +157,29 @@ void CheckQuantConfig(const nlohmann::json& raw) {
                std::to_string((*bit)[1].get<int64_t>()) +
                "] is not the [128, 128] grid the Kolibri-1 checkpoint "
                "quantizes with");
+  return Kolibri1WeightScheme::kFp8Block;
 }
-
-// ── Projection loaders ──────────────────────────────────────────────────────
-
-Kolibri1Projection LoadProjection(const TensorIndex& idx,
-                                  const std::string& proj) {
-  Kolibri1Projection r;
-  GetTensor get{idx};
-  const StTensor& w = get(proj + ".weight");
-  if (w.dtype == "F8_E4M3") {
-    r.fp8_block = LoadFp8BlockRaw(get, proj, kBlockN, kBlockK);
-  } else {
-    VT_CHECK(w.dtype == "BF16",
-             "kolibri1: '" + proj + ".weight' ships dtype " + w.dtype +
-                 "; the implemented arms are F8_E4M3 block-quantized and "
-                 "BF16 (modules_to_not_convert)");
-    r.bf16 = LoadBf16Direct(get, proj + ".weight");
-  }
-  return r;
-}
-
-Kolibri1ExpertWeights LoadExpert(const TensorIndex& idx,
-                                 const std::string& base) {
-  Kolibri1ExpertWeights e;
-  e.gate_proj = LoadProjection(idx, base + ".gate_proj");
-  e.up_proj = LoadProjection(idx, base + ".up_proj");
-  e.down_proj = LoadProjection(idx, base + ".down_proj");
-  return e;
-}
-
-}  // namespace
 
 // ── Enumeration ─────────────────────────────────────────────────────────────
 
 namespace {
 
 void AppendLinear(std::vector<Kolibri1Tensor>& out, const std::string& proj,
-                  const char* consumer) {
-  // fp8-block arm: the weight AND its scale grid are both expected. A bf16
-  // (modules_to_not_convert) linear ships only the weight; the router gate
-  // is the one such module and is appended directly by its caller.
+                  const char* consumer, Kolibri1WeightScheme scheme) {
+  // fp8-block arm: the weight AND its scale grid are both expected. The
+  // plain bf16 arm: the weight only — a bf16 checkpoint has no scales. A
+  // bf16 (modules_to_not_convert) linear in the fp8 arm ships only the
+  // weight too; the router gate is the one such module and is appended
+  // directly by its caller.
   out.push_back({proj + ".weight", consumer});
-  out.push_back({proj + ".weight_scale_inv", consumer});
+  if (scheme == Kolibri1WeightScheme::kFp8Block)
+    out.push_back({proj + ".weight_scale_inv", consumer});
 }
 
 }  // namespace
 
 std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(
-    const Kolibri1Params& p) {
+    const Kolibri1Params& p, Kolibri1WeightScheme scheme) {
   std::vector<Kolibri1Tensor> out;
   out.reserve(static_cast<size_t>(2 + p.num_hidden_layers * (4 + 2 + 2 +
                                                             2 + 3 +
@@ -159,10 +200,10 @@ std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(
     out.push_back({base + "post_ffn_norm.weight", layer});
     out.push_back({base + "self_attn.q_norm.weight", layer});
     out.push_back({base + "self_attn.k_norm.weight", layer});
-    AppendLinear(out, base + "self_attn.q_proj", layer);
-    AppendLinear(out, base + "self_attn.k_proj", layer);
-    AppendLinear(out, base + "self_attn.v_proj", layer);
-    AppendLinear(out, base + "self_attn.o_proj", layer);
+    AppendLinear(out, base + "self_attn.q_proj", layer, scheme);
+    AppendLinear(out, base + "self_attn.k_proj", layer, scheme);
+    AppendLinear(out, base + "self_attn.v_proj", layer, scheme);
+    AppendLinear(out, base + "self_attn.o_proj", layer, scheme);
     // The router gate is bf16 (modules_to_not_convert): weight only. The
     // router bias lives at layers.N.moe.router.expert_bias — NOTE the REAL
     // checkpoint's layout: the bias sits under `moe.router.`, NOT under
@@ -179,20 +220,21 @@ std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(
       // recorded. Only the router bias lives outside mlp (moe.router.).
       const std::string expert = base + "mlp.experts." +
                                  std::to_string(e);
-      AppendLinear(out, expert + ".gate_proj", layer);
-      AppendLinear(out, expert + ".up_proj", layer);
-      AppendLinear(out, expert + ".down_proj", layer);
+      AppendLinear(out, expert + ".gate_proj", layer, scheme);
+      AppendLinear(out, expert + ".up_proj", layer, scheme);
+      AppendLinear(out, expert + ".down_proj", layer, scheme);
     }
-    AppendLinear(out, base + "mlp.shared_experts.gate_proj", layer);
-    AppendLinear(out, base + "mlp.shared_experts.up_proj", layer);
-    AppendLinear(out, base + "mlp.shared_experts.down_proj", layer);
+    AppendLinear(out, base + "mlp.shared_experts.gate_proj", layer, scheme);
+    AppendLinear(out, base + "mlp.shared_experts.up_proj", layer, scheme);
+    AppendLinear(out, base + "mlp.shared_experts.down_proj", layer, scheme);
   }
   return out;
 }
 
 Kolibri1Accounting AccountKolibri1Tensors(
-    const Kolibri1Params& p, const std::vector<std::string>& present) {
-  const auto expected = EnumerateKolibri1Tensors(p);
+    const Kolibri1Params& p, Kolibri1WeightScheme scheme,
+    const std::vector<std::string>& present) {
+  const auto expected = EnumerateKolibri1Tensors(p, scheme);
   std::unordered_set<std::string> expected_set;
   expected_set.reserve(expected.size());
   for (const auto& t : expected) expected_set.insert(t.name);
@@ -224,7 +266,8 @@ Kolibri1Weights LoadKolibri1Weights(
   // bytes are identical. test_kolibri1_numa pins the policy engagement.
   [[maybe_unused]] const kolibri1_numa::PolicyGuard numa_guard;
   const Kolibri1Params p = ParseKolibri1Params(config);
-  CheckQuantConfig(config.raw);
+  const Kolibri1WeightScheme scheme =
+      ResolveKolibri1WeightScheme(config.raw);
 
   const TensorIndex idx = BuildTensorIndex(shards);
   VT_CHECK(idx.duplicates.empty(),
@@ -232,7 +275,7 @@ Kolibri1Weights LoadKolibri1Weights(
                idx.duplicates.front());
 
   const Kolibri1Accounting acc = AccountKolibri1Tensors(
-      p, [&idx] {
+      p, scheme, [&idx] {
         std::vector<std::string> names;
         names.reserve(idx.by_name.size());
         for (const auto& [name, _] : idx.by_name) names.push_back(name);
@@ -267,10 +310,10 @@ Kolibri1Weights LoadKolibri1Weights(
         LoadBf16Direct(get, base + "post_attention_layernorm.weight");
     layer.post_ffn_norm = LoadBf16Direct(get, base + "post_ffn_norm.weight");
 
-    layer.attn.q_proj = LoadProjection(idx, base + "self_attn.q_proj");
-    layer.attn.k_proj = LoadProjection(idx, base + "self_attn.k_proj");
-    layer.attn.v_proj = LoadProjection(idx, base + "self_attn.v_proj");
-    layer.attn.o_proj = LoadProjection(idx, base + "self_attn.o_proj");
+    layer.attn.q_proj = LoadProjection(idx, base + "self_attn.q_proj", scheme);
+    layer.attn.k_proj = LoadProjection(idx, base + "self_attn.k_proj", scheme);
+    layer.attn.v_proj = LoadProjection(idx, base + "self_attn.v_proj", scheme);
+    layer.attn.o_proj = LoadProjection(idx, base + "self_attn.o_proj", scheme);
     layer.attn.q_norm = LoadBf16Direct(get, base + "self_attn.q_norm.weight");
     layer.attn.k_norm = LoadBf16Direct(get, base + "self_attn.k_norm.weight");
 
@@ -307,10 +350,10 @@ Kolibri1Weights LoadKolibri1Weights(
     layer.moe.experts.resize(static_cast<size_t>(p.num_experts));
     for (int64_t e = 0; e < p.num_experts; ++e) {
       layer.moe.experts[static_cast<size_t>(e)] = LoadExpert(
-          idx, base + "mlp.experts." + std::to_string(e));
+          idx, base + "mlp.experts." + std::to_string(e), scheme);
     }
     layer.moe.shared_experts =
-        LoadExpert(idx, base + "mlp.shared_experts");
+        LoadExpert(idx, base + "mlp.shared_experts", scheme);
   }
   return w;
 }

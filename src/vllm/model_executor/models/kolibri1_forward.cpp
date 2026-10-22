@@ -283,6 +283,11 @@ ResolvedBT ResolveBTWithCache(Dev d, const Kolibri1Projection& w,
                                kolibri1_dequant_cache::Cache& cache) {
   ResolvedBT r;
   if (w.IsBf16()) {
+    // THE PLAIN BF16 ARM: the weight is already bf16 on disk, so there is
+    // nothing to dequant and the dequant cache does NOT engage — no entry,
+    // no lease, no decoded bytes. The resident bytes ride the SAME compute
+    // class as the fp8 arm's decoded bytes (the bf16-dot class, see
+    // LinearBT).
     r.wt = ResidentWeight(d, w.bf16);
     return r;
   }
@@ -311,9 +316,37 @@ ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
   return ResolveBTWithCache(d, w, kolibri1_dequant_cache::ProcessCache());
 }
 
+// ONE compute class, shared by the fp8 arm and the plain bf16 arm.
+//
+// The class is a property of the WEIGHT'S BYTES and of the HARDWARE: the fp8
+// arm's DECODED bytes and the bf16 arm's on-disk bytes are the same kind of
+// bytes (bf16), and the row requires the same class to multiply them (spec
+// .agents/specs/kolibri1-bf16-arm.md). So the rule is ONE rule, and both
+// arms read it:
+//
+//   bf16-dot class  <=>  the weight is bf16-resident
+//                   &&  the decode shape is t == 1
+//                   &&  the output is bf16
+//                   &&  DetectArmBf16() proved FEAT_BF16 (Bf16DotActive)
+//                   &&  the dequant cache is enabled
+//
+// and the f32-widen vt::MatmulBT is the fallback tier (x86, a non-bf16
+// aarch64 host, or the VT_CPU_KOLIBRI_BF16_DOT=0 escape hatch). The arm
+// feeds the bf16 bytes STRAIGHT into vbfdotq_f32 (bf16 in, f32 accumulate),
+// the class the primary oracle uses (BFMMLA).
+//
+// THE LAST CONJUNCT is the fp8 arm's recorded residency precondition: the
+// bf16-dot GEMV is the arm that multiplies the WARM bf16 bytes, and the
+// dequant cache is what makes the fp8 arm's bytes warm (its budget is
+// derived from the host's memory report, so the row's numerics are already
+// host-dependent — docs/ENVIRONMENT.md). The PLAIN BF16 ARM HAS NO CACHE OF
+// ITS OWN: there is nothing to decode, so the cache never holds or serves a
+// single one of its bytes (the resolve returns the resident tensor and no
+// lease). The conjunct is the ROW's rule, read by both arms, so the two
+// arms can never diverge on the same site: the same bytes always ride the
+// same class.
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              int64_t t, DType out_dtype = DType::kBF16,
               const char* gsite = "other") {
-  if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype, gsite);
   // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land, with
   // the 2026-10-08 review repair ISSUE-LOCAL-01M4CVDDHAFD7R1QCK9F493SWZ).
   // The cache is the fp8 decode path when enabled; the decoded block comes
@@ -326,41 +359,42 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // corruption). The cache is ON by DEFAULT (2026-10-20) with a budget
   // derived from the host's available memory; `VT_KOLIBRI1_DEQUANT_CACHE_MB=0`
   // disables it and keeps the original threaded pool decode, byte-for-byte.
+  // The PLAIN BF16 ARM never reaches the cache: there is nothing to decode.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
   // BFDOT bf16 GEMV arm, DEFAULT on a FEAT_BF16 host (Bf16DotActive:
   // feature-gated; VT_CPU_KOLIBRI_BF16_DOT=0 forces the f32 tier; the
   // legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps refusing by name) and
-  // t==1 decode-only: the warm-cache tensor is ALREADY bf16
-  // [n, k] row-major (the dequant cache decode rounds to bf16 on store), so
-  // the arm feeds those bytes straight into vbfdotq_f32 (bf16 in, f32
-  // accumulate). This is a rounding-policy change versus the f32
-  // widen+fma MatmulBT below — the chain WILL move under the knob; measured,
-  // not hidden. Requires DetectArmBf16 (KnobActive refuses by name
-  // otherwise); deliberately dotprod-free. The residency precondition is the
-  // dequant cache itself: the arm exists to re-use the warm bf16 bytes, so
-  // with the cache disabled the knob refuses and the f32-widen path below
-  // runs. Covers every fp8-block projection that resolves here at decode:
-  // attention q/k/v/o and the routed-expert gate/up/down. The router gate
-  // (IsBf16) keeps its production path — it never was an fp8 warm-cache
-  // tensor.
-  if (t == 1 && kolibri1_bfdot_gemv::Bf16DotActive() &&
+  // t==1 decode-only: the resolved tensor is ALREADY bf16 [n, k] row-major
+  // (the dequant cache decode rounds to bf16 on store, and the bf16 arm's
+  // bytes are bf16 on disk), so the arm feeds those bytes straight into
+  // vbfdotq_f32 (bf16 in, f32 accumulate). This is a rounding-policy change
+  // versus the f32 widen+fma MatmulBT below — the chain WILL move under the
+  // knob; measured, not hidden. Requires DetectArmBf16 (KnobActive refuses
+  // by name otherwise); deliberately dotprod-free. It covers EVERY
+  // projection that resolves here at decode: attention q/k/v/o and the
+  // routed-expert gate/up/down, in BOTH arms. The router gate (the one
+  // bf16-native LinearBTRaw projection) keeps its own path — it never was
+  // an fp8 warm-cache tensor, and the f32-out form of the same kernel
+  // serves it there.
+  if (t == 1 && out_dtype == DType::kBF16 &&
+      kolibri1_bfdot_gemv::Bf16DotActive() &&
       kolibri1_dequant_cache::ProcessCache().enabled()) {
     // The arm's own scope, named apart from the function-scope
     // profiler above: a same-named local here HIDES that local, which is
     // MSVC C4456 and a build failure under the windows-msvc /WX lane.
     // Same key, same scope boundaries, same accumulated time.
     prof::Scope bfdot_prof("linear_gemm");
-    DBuf out(d, out_dtype, {1, w.fp8_block.n});
+    DBuf out(d, out_dtype, {1, r.wt.shape[0]});
     kolibri1_bfdot_gemv::Gemv(static_cast<const uint16_t*>(r.wt.data),
                               static_cast<const uint16_t*>(x.data),
                               static_cast<uint16_t*>(out.ptr()),
-                              w.fp8_block.n, w.fp8_block.k);
+                              r.wt.shape[0], r.wt.shape[1]);
     return out;
   }
-  DBuf out(d, out_dtype, {t, w.fp8_block.n});
-  gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * w.fp8_block.n *
-                               w.fp8_block.k);
+  DBuf out(d, out_dtype, {t, r.wt.shape[0]});
+  gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * r.wt.shape[0] *
+                               r.wt.shape[1]);
   vt::MatmulBT(d.q, out.t(), x, r.wt);
   return out;
 }

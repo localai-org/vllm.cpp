@@ -523,7 +523,7 @@ TEST_CASE("kolibri1: KV-cache group layer names follow the 4:1 pattern") {
 
 TEST_CASE("kolibri1: enumeration counts the real checkpoint exactly") {
   const Kolibri1Params p = ParseKolibri1Params(MakeKolibri1Config());
-  const auto tensors = EnumerateKolibri1Tensors(p);
+  const auto tensors = EnumerateKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block);
   // 3 top-level + 50 layers * (6 norms + 8 attn tensors + gate + bias +
   // 384*6 expert tensors + 6 shared-expert tensors) = 3 + 50*2326.
   CHECK(tensors.size() == 116303);
@@ -541,7 +541,7 @@ TEST_CASE("kolibri1: the router bias lives under moe.router, not mlp.moe") {
   // inventory and the mapper's substring suggestion: the bias is
   // layers.N.moe.router.expert_bias, and it is BF16, not F32.
   const Kolibri1Params p = ParseKolibri1Params(MakeKolibri1Config());
-  const auto tensors = EnumerateKolibri1Tensors(p);
+  const auto tensors = EnumerateKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block);
   bool has_mlp_moe_router = false, has_moe_router = false;
   for (const auto& t : tensors) {
     if (Names(t.name, "mlp.moe.router.expert_bias")) has_mlp_moe_router = true;
@@ -554,12 +554,12 @@ TEST_CASE("kolibri1: the router bias lives under moe.router, not mlp.moe") {
 
 TEST_CASE("kolibri1: accounting classifies a complete checkpoint clean") {
   const Kolibri1Params p = ParseKolibri1Params(MakeKolibri1Config());
-  const auto expected = EnumerateKolibri1Tensors(p);
+  const auto expected = EnumerateKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block);
   std::vector<std::string> present;
   present.reserve(expected.size());
   for (const auto& t : expected) present.push_back(t.name);
 
-  const auto acc = AccountKolibri1Tensors(p, present);
+  const auto acc = AccountKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block, present);
   CHECK(acc.missing.empty());
   CHECK(acc.duplicated.empty());
   CHECK(acc.unaccounted.empty());
@@ -567,13 +567,13 @@ TEST_CASE("kolibri1: accounting classifies a complete checkpoint clean") {
 
 TEST_CASE("kolibri1: accounting detects a missing and an extra tensor") {
   const Kolibri1Params p = ParseKolibri1Params(MakeKolibri1Config());
-  const auto expected = EnumerateKolibri1Tensors(p);
+  const auto expected = EnumerateKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block);
   std::vector<std::string> present;
   for (size_t i = 1; i < expected.size(); ++i)
     present.push_back(expected[i].name);
   present.push_back("model.layers.0.self_attn.bogus.weight");
 
-  const auto acc = AccountKolibri1Tensors(p, present);
+  const auto acc = AccountKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block, present);
   REQUIRE(acc.missing.size() == 1);
   CHECK(acc.missing[0] == expected[0].name);
   REQUIRE(acc.unaccounted.size() == 1);
@@ -584,7 +584,7 @@ TEST_CASE("kolibri1: accounting detects a missing and an extra tensor") {
 
 TEST_CASE("kolibri1: the manifest census matches the enumeration") {
   const Kolibri1Params p = ParseKolibri1Params(MakeKolibri1Config());
-  const auto tensors = EnumerateKolibri1Tensors(p);
+  const auto tensors = EnumerateKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block);
 
   CHECK(vllm_test::kKolibri1TensorCount == 116303);
   CHECK(static_cast<int64_t>(tensors.size()) ==
@@ -603,7 +603,7 @@ TEST_CASE("kolibri1: every manifest name is accounted by the enumeration") {
   for (const auto& t : vllm_test::kKolibri1Tensors)
     present.emplace_back(t.name);
 
-  const auto acc = AccountKolibri1Tensors(p, present);
+  const auto acc = AccountKolibri1Tensors(p, vllm::Kolibri1WeightScheme::kFp8Block, present);
   if (!acc.unaccounted.empty())
     MESSAGE("first unaccounted: " << acc.unaccounted[0]);
   CHECK(acc.unaccounted.empty());

@@ -56,7 +56,17 @@ using vllm::SafetensorsFile;
 using vllm::ForwardKolibri1Forward;
 using Logits = std::vector<float>;
 
-constexpr const char* kRealModelDir = "/mnt/models/Aleph-Alpha/Kolibri-1";
+// The checkpoint the capture runs on. The DEFAULT is the released fp8
+// checkpoint; `VT_KOLIBRI1_MODEL_DIR` points the SAME instrument at another
+// Kolibri-1 checkpoint — the plain bf16 arm (spec
+// .agents/specs/kolibri1-bf16-arm.md) measures its own arm with this same
+// capture, so the two arms' numbers come from one instrument and one
+// fixture.
+std::string RealModelDir() {
+  const char* env = std::getenv("VT_KOLIBRI1_MODEL_DIR");
+  if (env != nullptr && env[0] != '\0') return std::string(env);
+  return std::string("/mnt/models/Aleph-Alpha/Kolibri-1");
+}
 constexpr int64_t kBlockSize = 16;
 constexpr int64_t kNumBlocks = 32;  // identity table, 512 slots: prompt + 32 gen
 
@@ -195,10 +205,11 @@ TEST_CASE("kolibri1 three-way capture: teacher-forced per-position logits dump")
       std::ifstream(KOLIBRI1_PRIMARY_TOPK_ROWS));
   REQUIRE(fixture.contains("prompts"));
 
+  const std::string model_dir = RealModelDir();
   const HfConfig config =
-      vllm::LoadHfConfig(std::string(kRealModelDir) + "/config.json");
+      vllm::LoadHfConfig(model_dir + "/config.json");
   const auto index = nlohmann::json::parse(std::ifstream(
-      std::string(kRealModelDir) + "/model.safetensors.index.json"));
+      model_dir + "/model.safetensors.index.json"));
   std::set<std::string> shard_names;
   for (const auto& [name, shard] : index.at("weight_map").items()) {
     (void)name;
@@ -207,7 +218,7 @@ TEST_CASE("kolibri1 three-way capture: teacher-forced per-position logits dump")
   std::vector<SafetensorsFile> shards;
   for (const std::string& shard : shard_names)
     shards.push_back(
-        SafetensorsFile::Open(std::string(kRealModelDir) + "/" + shard));
+        SafetensorsFile::Open(model_dir + "/" + shard));
   MESSAGE("loading the real fp8 checkpoint...");
   const Kolibri1Weights w = LoadKolibri1Weights(shards, config);
   shards.clear();
@@ -215,7 +226,7 @@ TEST_CASE("kolibri1 three-way capture: teacher-forced per-position logits dump")
   Topology topo(w);
 
   nlohmann::json manifest;
-  manifest["model_dir"] = kRealModelDir;
+  manifest["model_dir"] = model_dir;
   manifest["fixture"] = KOLIBRI1_PRIMARY_TOPK_ROWS;
   manifest["vocab"] = 128000;
   manifest["prompts"] = nlohmann::json::array();
