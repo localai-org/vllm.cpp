@@ -203,6 +203,9 @@ vllm_cpp_add_test(test_kolibri1_threeway_capture vllm/models/test_kolibri1_three
 target_include_directories(test_kolibri1_threeway_capture PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_threeway_capture PRIVATE
   KOLIBRI1_PRIMARY_TOPK_ROWS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_primary_topk_rows.json")
+# SCRATCH MEASUREMENT HARNESS (the f32-residual A/B; NOT for main).
+vllm_cpp_add_test(test_kolibri1_layerdump vllm/models/test_kolibri1_layerdump.cpp)
+target_include_directories(test_kolibri1_layerdump PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Kolibri-1 n-gram SPEC-DECODE engine gate (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6,
 # branch row/kolibri-spec-engine): pins the FIXED KV seam at unit level (an
 # ngram spec config keeps kolibri's own KV groups — no MambaSpec, no fa_draft —

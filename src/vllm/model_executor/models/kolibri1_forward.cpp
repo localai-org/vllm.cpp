@@ -1003,6 +1003,75 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
   g_kolibri1_dbg_route_layer = layer;
 }
 
+// SCRATCH MEASUREMENT INSTRUMENT (the f32-residual A/B; NOT for main).
+// VT_KOLIBRI1_LAYER_DUMP=<file>: per-layer TSV of the four quantities the
+// mistral.rs collaboration compares elementwise:
+//   attn_out_pre_norm (the attention output, before the post-norm),
+//   attn_post_norm, ffn_post_norm, and l_out (the residual stream at the end
+//   of the block = res + moe_n), for positions {0, 5}, as
+//   layer<TAB>quantity<TAB>position<TAB>hidden_index<TAB>value.
+static void LayerDumpAll(Dev d, int64_t layer, DBuf& attn, DBuf& attn_n,
+                         DBuf& moe_n, DBuf& res, int64_t t, int64_t h) {
+  const char* path = std::getenv("VT_KOLIBRI1_LAYER_DUMP");
+  if (path == nullptr || path[0] == '\0') return;
+  const size_t n = static_cast<size_t>(t) * static_cast<size_t>(h);
+  auto widen = [](uint16_t bits) {
+    uint32_t u = static_cast<uint32_t>(bits) << 16;
+    float f;
+    std::memcpy(&f, &u, 4);
+    return f;
+  };
+  auto read = [&](DBuf& buf, std::vector<float>& out) {
+    const DType dt = buf.t().dtype;
+    std::vector<uint8_t> tmp(n * vt::SizeOf(dt));
+    buf.Download(d, tmp.data());
+    out.resize(n);
+    if (dt == DType::kBF16) {
+      const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+      for (size_t i = 0; i < n; ++i) out[i] = widen(bf[i]);
+    } else {
+      const auto* fp = reinterpret_cast<const float*>(tmp.data());
+      for (size_t i = 0; i < n; ++i) out[i] = fp[i];
+    }
+  };
+  std::vector<float> a, an, mn, r;
+  read(attn, a);
+  read(attn_n, an);
+  read(moe_n, mn);
+  read(res, r);
+  static FILE* out = nullptr;
+  static std::string open_path;
+  if (out == nullptr || open_path != path) {
+    if (out != nullptr) std::fclose(out);
+    open_path = path;
+    out = std::fopen(path, "w");
+    VT_CHECK(out != nullptr,
+             std::string("VT_KOLIBRI1_LAYER_DUMP: cannot open ") + path);
+  }
+  const int64_t ps[2] = {0, 5};
+  for (int pi = 0; pi < 2; ++pi) {
+    const int64_t pos = ps[pi];
+    if (pos >= t) continue;
+    const size_t off = static_cast<size_t>(pos) * static_cast<size_t>(h);
+    for (int64_t i = 0; i < h; ++i) {
+      const size_t k = off + static_cast<size_t>(i);
+      std::fprintf(out, "%lld\tattn_out_pre_norm\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)a[k]);
+      std::fprintf(out, "%lld\tattn_post_norm\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)an[k]);
+      std::fprintf(out, "%lld\tffn_post_norm\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)mn[k]);
+      std::fprintf(out, "%lld\tl_out\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)(r[k] + mn[k]));
+    }
+  }
+  std::fflush(out);
+}
+
 
 }  // namespace
 
@@ -1101,7 +1170,14 @@ ForwardLogits ForwardKolibri1Forward(
   }
   StageDump("emb", -2, hidden_buf, d);
   Tensor hidden = hidden_buf.t();
-  DBuf res(d, DType::kBF16, {t, h});
+  // SCRATCH MEASUREMENT ARM (the f32-residual A/B; NOT for main):
+  // VT_KOLIBRI1_F32_RESIDUAL=1 keeps the residual stream in f32 (the dtype
+  // llama.cpp and the HF reference keep it in) instead of the model dtype.
+  const bool f32_residual = [] {
+    const char* v = std::getenv("VT_KOLIBRI1_F32_RESIDUAL");
+    return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
+  }();
+  DBuf res(d, f32_residual ? DType::kF32 : DType::kBF16, {t, h});
   res.Zero(d);
 
   const float eps = static_cast<float>(p.rms_norm_eps);
@@ -1212,6 +1288,8 @@ ForwardLogits ForwardKolibri1Forward(
       vt::RmsNorm(d.q, moe_n.t(), moe.t(), w_pf, vt::RmsNormArgs{eps, false});
     }
     StageDump("moe_n", l, moe_n, d);
+    // SCRATCH MEASUREMENT INSTRUMENT (the f32-residual A/B; NOT for main).
+    LayerDumpAll(d, l, attn, attn_n, moe_n, res, t, h);
 
     auto* held = new DBuf(std::move(moe_n));
     hidden = held->t();

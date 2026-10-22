@@ -512,6 +512,37 @@ delivered 3.62428, 3.78799 and 3.54865 tok/s. The plan-time reading
 (143920 MiB) sat 72 GiB under the process-start reading (217262 MiB): that
 gap IS the checkpoint load, and the honest reading closes it.
 
+F32 RESIDUAL STREAM, MEASURED (2026-10-22, branch `row/KOLIBRI1-F32-RESIDUAL`,
+issue ISSUE-LOCAL-01M5HHGT86M8D1FDKMA20EX950, base `845b3c59d`): the residual
+stream's dtype is a MEASURED lever on our distance to the CPU references. In
+the ATTENTION quantities the layer-0 effect is invisible — but in the
+residual stream itself it is not. One teacher-forced 6-token prefill (the
+primary oracle's prompt-0 ids),
+the residual buffer's dtype the only difference between the arms, scored with
+the collaboration's metric (relative rms of the difference over the
+reference's rms) against llama.cpp's layer dump and the peer CPU path's:
+layer 0 `attn_out_pre_norm` is BIT-IDENTICAL between the arms (the layer-0
+residual IS the embedding, and bf16 values are exact in f32), but the
+residual add itself rounds differently, so layer 0 `l_out` MOVES — against
+llama.cpp, 2.0016e-03 → 1.5006e-03 (25 % of the distance closed) at position
+0 and 1.4344e-03 → 1.0981e-03 at position 5. From layer 1 the f32
+residual moves us toward llama.cpp (layer 1: 3.1794e-03 → 2.6284e-03), and
+from layer 11 the gap opens in the bf16 arm and not in the f32 one (layer 12:
+3.4822e-02 → 5.4126e-03); over layers 12-49 the mean rel rms against
+llama.cpp falls 1.3566e-01 → 1.9704e-02 (median 1.3229e-01 → 1.6361e-02) and
+the residual stream's own `l_out` falls 1.5981e-01 → 4.2759e-02. The lever
+is ONE line (`DBuf res(d, DType::kBF16, …)` → `kF32`): `vt::RmsNorm` already
+supports an f32 residual and keeps the full precision across layers. The
+baseline arm reproduces the row's recorded vllm.cpp dump BYTE FOR BYTE
+(sha256 `7e572ef4…`), and the peer CPU path's own recorded numbers for the
+same quantity come out of the same comparison to the digit (llama.cpp vs the
+peer CPU path at layer 0: `attn_out_pre_norm` 1.66e-03, `l_out` 2.00e-03).
+NO PRODUCT CODE LANDS WITH THE MEASUREMENT: the f32 residual DIVERGES from
+vLLM's one-model-dtype polarity (the primary oracle keeps the residual in the
+model dtype), so taking it is a product decision with a token-gate wave
+behind it, not a consequence of this number. Evidence:
+docs/bench-evidence/kolibri1-cpu-f32-residual-20261022.md.
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file
@@ -757,6 +788,17 @@ ONE pull request (developer's standing choice for this row).
   "cache off" must now pass `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` explicitly:
   an UNSET variable is the default-ON configuration, not the off switch.
 - GGUF arms (k-quants), CUDA arm, Tenstorrent arm — later rows.
+- The f32 RESIDUAL STREAM: the measured lever, and the decision it opens
+  (docs/bench-evidence/kolibri1-cpu-f32-residual-20261022.md, 2026-10-22).
+  The lever is one line in the CPU forward, the measurement says it is large
+  from layer 11 on, and NO PRODUCT CODE LANDS WITH THE MEASUREMENT. Taking
+  it is a PRODUCT decision, not a mirror decision: vLLM resolves one model
+  dtype and every layer inherits it, and the primary oracle keeps the
+  residual in the model dtype, so the f32 residual moves us toward
+  llama.cpp and away from the primary oracle's width. It also needs the
+  token-gate wave (W3's fingerprints, the decode-bench anchor, the spec-probe
+  anchor) before it can land, and the throughput cost of a doubled residual
+  buffer is not measured.
 - Reasoning parser / tool parser serving integration (plugin registers
   `kolibri1` reasoning + Hermes tool parsers).
 - The CPU forward wave also owns the R1 disposition record: packed
