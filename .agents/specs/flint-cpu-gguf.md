@@ -72,3 +72,13 @@ reach tens"); q/k RMSNorm over the head dim.
 - The imatrix question: any container we quantize differs from the published
   Hob-forge files (whose imatrix was never published) — a quantizer
   difference, recorded as such, never a quant-type difference.
+- The REAL-WEIGHTS token gate: RecursiveSI/flint's safetensors are on no box
+  here and the download grant does not cover Flint, so the gate ran on the
+  synthetic config only. Owed by this row's next wave.
+- The flint GGUF arm: the loader row gates the published Hob-forge
+  containers, and the token gate's floor for them is owed (llama.cpp aborts
+  on their `expert_gating_func = 5` and mistral.rs's `build_kolibri1`
+  requires a `kolibri1.feed_forward_length` KV they do not carry) — the
+  candidate floor is a metadata-patched derived copy plus mistral.rs parity.
+- The paged/engine path: the first wave is the reference HostLogits forward
+  only; the paged engine and device routing are the later wave's.
