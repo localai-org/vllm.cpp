@@ -812,6 +812,8 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/qwen3_moe_registry.cpp
   src/vllm/model_executor/models/qwen3_moe_weights.cpp
   src/vllm/model_executor/models/qwen3_moe.cpp
+  src/vllm/model_executor/models/flint.cpp
+  src/vllm/model_executor/models/flint_weights.cpp
   src/vllm/model_executor/models/qwen4_exp_hc.cpp
   src/vllm/model_executor/models/deepseek_v2_registry.cpp
   src/vllm/model_executor/models/deepseek_v2_weights.cpp
