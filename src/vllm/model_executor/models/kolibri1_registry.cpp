@@ -13,6 +13,7 @@
 #include "vllm/model_executor/models/kolibri1.h"
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"  // BumpModelGeneration
 #include "vllm/model_executor/models/kolibri1_forward.h"
+#include "vllm/model_executor/models/kolibri1_gguf_weights.h"  // the GGUF arm
 #include "vllm/model_executor/models/kolibri1_tt_forward.h"  // the B2b-i device arm
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
@@ -287,11 +288,16 @@ std::unique_ptr<LoadedModel> LoadKolibri1ForCausalLM(
     const ModelRegistration& registration, const HfConfig& config,
     const ModelSource& source) {
   if (source.kind == ModelSource::Kind::kGguf) {
-    throw std::runtime_error(
-        "Kolibri1ForCausalLM: GGUF is not supported for this architecture. "
-        "Row MODEL-TEXT-kolibri-1, spec .agents/specs/kolibri-1-cpu.md; the "
-        "checkpoint is the FP8 block-quantized safetensors index and the "
-        "GGUF arm is a separate owed row.");
+    // The kolibri1 GGUF arm (.agents/specs/kolibri1-gguf-arch.md, ROUTE A in
+    // commit 39dadc637): the published Hob-forge container loads into the same
+    // bf16-owned Kolibri1Weights, forward unchanged.
+    if (source.gguf == nullptr) {
+      throw std::runtime_error(
+          "Kolibri1ForCausalLM: the model source says GGUF but carries no "
+          "file. See .agents/specs/kolibri1-gguf-arch.md");
+    }
+    return std::make_unique<Kolibri1LoadedModel>(
+        registration, LoadKolibri1FromGguf(*source.gguf, config));
   }
   if (source.safetensors == nullptr) {
     throw std::runtime_error("safetensors model source is empty");

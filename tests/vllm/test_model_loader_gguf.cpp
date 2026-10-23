@@ -204,6 +204,30 @@ TEST_CASE("a glm-dsa GGUF reaches ITS OWN builder through the dispatch") {
   CHECK(message.find("qwen3_5 gguf:") == std::string::npos);
 }
 
+TEST_CASE("a kolibri1 GGUF reaches ITS OWN builder through the dispatch") {
+  // MODEL-TEXT-kolibri-1, the GGUF arm (.agents/specs/kolibri1-gguf-arch.md,
+  // ROUTE A in commit 39dadc637): the published Hob-forge containers carry
+  // `general.architecture = kolibri1`, and until this row existed every one
+  // of them was refused as merely unrecognized — a capability the published
+  // files name and no production entry point reached.
+  //
+  // Proven by the MESSAGE, exactly as the qwen4exp and glm5next cases above
+  // are: a file carrying the architecture key and no geometry fails on the
+  // FIRST MISSING KEY, and only this family's builder reports that key with
+  // that prefix. `LoadedEngine::FromModelDir` is the real path a `.gguf`
+  // argument takes.
+  const std::string message = RefusalFor(GgufWithArchitecture("kolibri1"));
+  REQUIRE_FALSE(message.empty());
+  CHECK(message.find("kolibri1 gguf: missing metadata key") !=
+        std::string::npos);
+  CHECK(message.find("kolibri1.embedding_length") != std::string::npos);
+  // Not the unsupported-architecture refusal any more...
+  CHECK(message.find("is not supported by this build") == std::string::npos);
+  // ...and not qwen3_5's, which is the #809 defect this dispatch table exists
+  // to prevent.
+  CHECK(message.find("qwen3_5 gguf:") == std::string::npos);
+}
+
 TEST_CASE("a laguna GGUF reaches ITS OWN builder through the dispatch") {
   // MODEL-TEXT-laguna-laguna-for-causal-lm, #2841: the registry's Laguna GGUF
   // arm was unreachable from FromModelDir, which refused `laguna` as an

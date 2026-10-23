@@ -189,6 +189,13 @@ vllm_cpp_add_test(test_kolibri1_w3 vllm/models/test_kolibri1_w3.cpp)
 target_include_directories(test_kolibri1_w3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# kolibri1 GGUF arm (.agents/specs/kolibri1-gguf-arch.md): the published
+# Hob-forge Q2_K container loads through the same Kolibri1Weights and its
+# greedy chain replays the same goldens within the W3 band.
+vllm_cpp_add_test(test_kolibri1_gguf vllm/models/test_kolibri1_gguf.cpp)
+target_include_directories(test_kolibri1_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_gguf PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Kolibri-1 three-way numerics capture (row/kolibri-three-way): inert without

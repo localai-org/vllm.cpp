@@ -867,6 +867,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/kolibri1_tt_stream.cpp
   src/vllm/model_executor/models/kolibri1_registry.cpp
   src/vllm/model_executor/models/kolibri1_weights.cpp
+  src/vllm/model_executor/models/kolibri1_gguf_weights.cpp
   src/vllm/model_executor/models/kolibri1_forward.cpp
   # vdotq_s32 GEMV needs the dotprod ISA enabled, so this ONE TU is built
 

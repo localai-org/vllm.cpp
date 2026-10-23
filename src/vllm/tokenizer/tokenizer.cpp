@@ -983,6 +983,19 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
     tok.pattern_ = SplitPattern::kQwen2;
   } else if (pre == "qwen2") {
     tok.pattern_ = SplitPattern::kQwen2Classic;
+  } else if (pre == "kolibri1") {
+    // Aleph-Alpha Kolibri-1 GGUFs (the published Hob-forge containers carry
+    // `tokenizer.ggml.pre = kolibri1`, a pre name NO llama.cpp defines — its
+    // Kolibri-1 support maps the tokenizer to qwen2 by sha256, PR #30673).
+    // The pre-type's regex is mistral.rs's KOLIBRI1_REGEX
+    // (mistralrs-core/src/gguf/gguf_tokenizer.rs:34, the working reference
+    // implementation for this container), which is BYTE-IDENTICAL to this
+    // tree's kClassicQwen2N1Regex (tokenizer.cpp:37) — the recognition the
+    // HF path already maps onto kQwen2Classic at the kClassicQwen2N1Regex
+    // branch. So kQwen2Classic is the EXACT splitting rule, the same verdict
+    // ROUTE A (commit 39dadc637) records for the container's other qwen2
+    // anchoring.
+    tok.pattern_ = SplitPattern::kQwen2Classic;
   } else if (pre == "llama-bpe") {
     tok.pattern_ = SplitPattern::kLlama3;
   } else if (pre == "gpt-4o" || pre == "llama4" || pre == "kanana2" ||
