@@ -1,228 +1,135 @@
 # Qwen3.8 27B
 
-Qwen3.8 27B is a 27B dense model. It runs through the shared paths, so
-[the quickstart](../QUICKSTART.md) and [the usage guide](../USAGE.md) cover
-starting a server and sending a request.
-
-This page carries what is specific to its quantized checkpoints. Two of them
-need it: a third-party mixed-precision set whose FP8 half is refused, and the
-first-party block-wise FP8 set, which runs on CPU and on an sm_120a or sm_121a
-GPU.
+Qwen3.8 27B is a 27B dense model. Use [the quickstart](../QUICKSTART.md)
+to start a server and [the usage guide](../USAGE.md) for CLI options.
+This page explains which quantized checkpoints load and which have recorded
+correctness results. Loading a checkpoint does not establish token parity.
 
 ## Which arm to use on a GPU today
 
-| Arm | State |
+| Checkpoint or format | What the evidence establishes |
 |---|---|
-| BF16 | Runs |
-| Per-tensor FP8 | Runs |
-| NVFP4 | Runs |
-| GGUF k-quants | Runs |
-| Block-wise FP8 | **Runs**, on CPU and on sm_120a/sm_121a. Token-gated against vLLM on GB10 |
-| The FP8 group of `unsloth/Qwen3.8-27B-NVFP4` | **Refused by name at load** |
+| BF16 | Recorded correctness gate in [the model's quantization spec](../../.agents/specs/qwen38-27b-quant-arms.md) |
+| `Qwen/Qwen3.8-27B-FP8`, block-wise FP8 | CPU reference and CUDA on `sm_120a` and `sm_121a`. [GB10 text gate passed with one near-tie](#the-token-gate-against-vllm) |
+| `unsloth/Qwen3.8-27B-NVFP4`, mixed FP8 and NVFP4 | NVFP4 modules load. The FP8 group and quantized KV-cache configuration are refused |
+| `r0b0tlab/Qwen3.8-27B-NVFP4-MTP-sm121` | Per-tensor static FP8 and NVFP4 W4A16 load. [The artifact's token gate remains owed](../../.agents/specs/qwen38-27b-quant-arms.md#now) |
+| `RadixArk/Qwen3.8-27B-NVFP4` | Loads as W4A16 with a warning that the artifact declares W4A4. [The token gate remains owed](../../.agents/specs/qwen38-27b-quant-arms.md#now) |
+| `unsloth/Qwen3.8-27B-GGUF`, Q4_K_M | Generates on CPU. [The recorded token gate failed on 5 of 6 prompts](../bench-evidence/qwen38-27b-q4km-token-gate-20260823.md) |
+| EXL3 | CUDA generation and its measured limits are recorded in [the EXL3 benchmark](../benchmarks/qwen38-27b-exl3-gb10.md) |
 
-To run this model on a GPU with a recorded correctness result today, use any
-arm in that table except the refused FP8 group. Block-wise FP8 was the last to
-get one, on 2026-08-23, and the section below records it. This page carries no
-speed number for any arm.
+Generic FP8 or NVFP4 kernel coverage does not establish correctness for every
+checkpoint of this model. The [quantization spec](../../.agents/specs/qwen38-27b-quant-arms.md)
+records artifact revisions, hashes, and remaining gates.
 
 ## The Unsloth mixed FP8 and NVFP4 checkpoint
 
-`unsloth/Qwen3.8-27B-NVFP4` is a third-party mixed-precision checkpoint. Its
-repository name says NVFP4, while `quantization_config.format` says
-`mixed-precision`. Use revision `7d6f8d4d72f56b92b3cdbf22f156b90e1bab0108`.
+`unsloth/Qwen3.8-27B-NVFP4` is a mixed-precision checkpoint despite its name.
+The inspected revision is `7d6f8d4d72f56b92b3cdbf22f156b90e1bab0108`.
+Its backbone is 22,568,192,096 bytes. The BF16 MTP drafter is 849,400,392 bytes.
+The [artifact inventory](../../.agents/specs/qwen38-27b-quant-arms.md#what-i-inspected-and-what-i-took-on-trust)
+records the tensor accounting and provenance.
 
-The set contains a 22,568,192,096-byte `model.safetensors` backbone and an
-849,400,392-byte BF16 `model_mtp.safetensors` drafter. The complete set is
-23,417,592,488 bytes. The checkpoint registry records the locally computed
-SHA-256 for the quantized backbone.
+The 168 NVFP4 modules load. The engine refuses the 233-module FP8 group,
+which needs per-output-channel weight scales and dynamic per-token activation
+quantization. This loader does not implement those requirements. It also
+refuses `kv_cache_scheme`, because it does not consume this checkpoint's K and
+V scales. These are artifact-specific limits, not a refusal of all FP8 weights.
 
-The backbone index contains 1,968 names:
-
-| Scheme | Modules | Tensors | Covers |
-|---|---:|---:|---|
-| `group_1`, NVFP4 W4A4 with group size 16 | 168 | 672 | MLP projections on layers 0 through 55 |
-| `group_0`, FP8 W8A8 | 233 | 466 | Attention, GDN, `lm_head`, and MLP projections on layers 56 through 63 |
-| Configuration ignore list | 317 | 475 | GDN low-rank projections, norms, vision blocks, merger, and MTP head |
-| No quantization target | 267 | 323 | Norms, `conv1d`, embeddings, and position data |
-| `kv_cache_scheme` scales | 16 | 32 | `k_scale` and `v_scale` on full-attention layers |
-
-**The NVFP4 modules load. The engine refuses the FP8 group before it reads a
-weight.** That group requires per-output-channel weight scales and dynamic
-per-token activation quantization, and this build implements neither. The engine
-also refuses `kv_cache_scheme`, because it does not consume the checkpoint's K
-and V scales.
-
-Run the real-checkpoint manifest gate with:
+Run the real-checkpoint manifest check with:
 
 ```sh
 VLLM_CPP_QWEN38_27B_NVFP4_DIR=/path/to/qwen3.8-27b-nvfp4 \
   ./build/tests/test_qwen38_27b_nvfp4_arm
 ```
 
-The FP8 tower, the quantized KV cache, the resident-byte assertion, and the
-token gates are still owed under
-[#821](https://github.com/mudler/vllm.cpp/issues/821).
+This checks the manifest and named refusals. It does not run a generation gate.
+The [quantization spec](../../.agents/specs/qwen38-27b-quant-arms.md#now)
+tracks the missing FP8 path, KV-scale handling, and token gates.
 
 ## Block-wise FP8
 
-Block-wise FP8, also called fine-grained FP8, keeps one scale for each 128x128
-block of a weight rather than one scale for the whole weight. A block-wise
-checkpoint declares `quantization_config.weight_block_size` in its `config.json`
-and stores its scales under `weight_scale_inv` rather than under `weight_scale`.
+Block-wise FP8, also called fine-grained FP8, stores one scale per 128x128
+weight block. Per-tensor FP8 stores one scale for the whole weight.
+The block-wise format declares `quantization_config.weight_block_size` and
+stores `weight_scale_inv` tensors instead of `weight_scale` tensors.
 
-`Qwen/Qwen3.8-27B-FP8` is such a checkpoint. At revision
-`017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` it declares `weight_block_size`
-`[128, 128]` with `activation_scheme` `dynamic`, and it stores
-`self_attn.q_proj.weight` as `F8_E4M3` `[12288, 5120]` beside
-`self_attn.q_proj.weight_scale_inv` as `BF16` `[96, 40]`.
+`Qwen/Qwen3.8-27B-FP8` at revision
+`017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` uses `[128, 128]` blocks and
+`activation_scheme: dynamic`. Its FP8 projections satisfy the CUDA shape
+requirements described below.
 
 ### What runs on CPU
 
-That checkpoint runs on a CPU queue. Ten projections of the Qwen3.5 dense model
-quantize their activation per token per 128-wide group, then run a block-scaled
-GEMM whose scales apply in the mainloop, once per K-block, into an F32
-accumulator. The ten are `q_proj`, `k_proj`, `v_proj`, `o_proj`, the Gated
-DeltaNet `in_proj_qkv`, `in_proj_z`, and `out_proj`, and the MLP's `gate_proj`,
-`up_proj`, and `down_proj`. Each emits BF16, which is the model dtype and what
-vLLM emits at the same sites.
+The CPU path is a correctness reference with no speed claim. It quantizes
+activations per token in groups of 128, then applies the block scales during
+matrix multiplication. The accumulator is F32. Each projection emits BF16.
 
-Those ten projections are seven GEMMs, because `gate_proj` and `up_proj` run as
-one and `q_proj`, `k_proj`, and `v_proj` run as one. They are the same two merged
-linears vLLM builds. A block scale belongs to a 128-row band, so the shards'
-scale grids concatenate exactly and the merged GEMM is byte-identical to the
-separate ones.
-
-The `gate_proj` and `up_proj` merge always runs. The Q, K, and V merge runs only
-when the fused attention preamble is available to read its row-strided output
-views, which is the default. `VT_FUSE_ATTN_PREAMBLE=0` turns that consumer off,
-and then those three run as three separate block GEMMs and the ten projections
-are nine GEMMs. The result is the same either way.
-
-The merge needs each projection in a group except the last to be a multiple of
-128 rows wide, which is what vLLM requires of the same checkpoints. A checkpoint
-that breaks the rule is refused by name, and the message says which projection
-and how wide it is, rather than quietly running different arithmetic:
-
-```text
-block-wise FP8 merged 'qkv_proj': shard 'k_proj' has out_features 64, which is
-not a multiple of the quantization block's n 128. Only the LAST shard of a
-merged block-quant linear may be ragged
-```
-
-What exists on CPU is a correctness reference. It makes no speed claim. The
-token-exact comparison against vLLM was run on a GPU, and the section below
-records it.
+The shared dense forward merges gate and up projections. It also merges Q, K,
+and V when the fused attention preamble is enabled, as it is by default.
+`VT_FUSE_ATTN_PREAMBLE=0` uses separate Q, K, and V multiplications.
+Every shard except the last in a merged projection must have a row count
+divisible by 128. The loader names a nonconforming shard in its refusal.
 
 ### The token gate against vLLM
 
-On 2026-08-23 `Qwen/Qwen3.8-27B-FP8` was decoded on an NVIDIA GB10 beside vLLM
-at the pinned revision `5559679229bc961848b121ccdeaa8fa5d79bec98`, on the same
-checkpoint bytes, and the tokens were compared.
+On 23 August 2026, the first-party block-wise FP8 checkpoint passed its text
+correctness gate on NVIDIA GB10. The historical oracle was vLLM revision
+`5559679229bc961848b121ccdeaa8fa5d79bec98`.
 
-Seven prompts, 16 tokens each, greedy, batch 1, concurrency 1. Both sides were
-fed the same prompt token ids, taken from the checkpoint's own tokenizer, so no
-tokenizer sits inside the comparison. vLLM ran in its production configuration,
-not `enforce_eager`.
+Both engines used the same checkpoint bytes and prompt token IDs: seven
+prompts, 16 generated tokens each, greedy sampling, batch 1, and concurrency 1.
+vLLM used its production configuration. Six prompts matched at all 16
+positions. The seventh passed the previously ratified near-tie test at its
+first divergence. This is not a seven-prompt token-exact result.
 
-Six of the seven prompts are identical at all 16 positions. The seventh first
-differs at position 6, and it is a near-tie rather than a disagreement: forcing
-vLLM onto our prefix, vLLM's own most likely next token IS our token, ranked
-first, with a log-probability difference of exactly zero, while vLLM's own top
-two candidates sit 125 millinats apart. That is the rounding difference the two
-implementations are expected to have, and it is inside the 500-millinat band
-this project ratified for it in advance.
+The run recorded zero portable-host fallbacks. All 2,736 block-scaled GEMMs
+used the `sm_121a` CUTLASS kernel. Across 400 resident FP8 tensors, weights
+occupied one byte per element. These checks exclude silent dequantization to
+a wider weight format on the measured path.
 
-Three things were measured beside the tokens, because tokens alone cannot see
-them. No tensor fell back to the portable host kernel. The CUTLASS kernel was
-read out of the compiled artifact rather than off a build log, as an `sm_121a`
-cubin. And every one of the 2,736 block-scaled GEMMs the model asked for was
-served by that kernel, with the weights resident at exactly one byte per
-element across 400 tensors, which is what rules out a load that quietly
-dequantized to a wider type.
-
-**This is a correctness result and not a speed result.** No throughput, latency
-or memory number was produced by that run and none may be quoted from it.
+The [gate record](../../.agents/specs/gate-qwen38-27b-fp8-block.md#evidence)
+contains the commands, raw evidence references, and near-tie adjudication.
+**The run establishes correctness only. It supplies no throughput, latency,
+or memory benchmark.**
 
 ### On a device with no block-scaled GEMM
 
-The model refuses while it is being prepared, before the first forward and
-before any CUDA graph is captured:
-
-```text
-block-wise (fine-grained) 128x128 FP8 weights LOADED for
-model.layers.0.self_attn.q_proj and there is no block-wise FP8 GEMM on device
-'cuda'. The linear method and the dense forward wiring are implemented and the
-CPU reference GEMM executes them, so this checkpoint runs on CPU today
-```
+If the build has no block-scaled GEMM for the selected device, model preparation
+refuses the checkpoint before the first forward or CUDA graph capture.
+The error identifies the projection and device. Use the CPU reference or a
+CUDA build targeting `sm_120a` or `sm_121a` with the CUTLASS kernel enabled.
 
 ### The CUDA kernel, and the shapes it refuses
 
-A CUDA kernel exists for the sm_120a and sm_121a architectures. It is the
-block-scaled CUTLASS GEMM vLLM dispatches on those devices, with scales applied
-in the mainloop. Continuous integration compiles it for both architectures, and
-a build for either one registers the kernel. It is shape-restricted, and it
-matches the CPU reference on the seven GB10 shapes that have been run.
+The CUDA path uses a block-scaled CUTLASS GEMM on `sm_120a` and `sm_121a`.
+The recorded component test matched the CPU reference on seven GB10 shapes.
+That component result does not establish model correctness on `sm_120a`.
 
-The first GB10 run exposed the shape boundary. vLLM's ported M=32, N=576,
-K=7168 case was refused by CUTLASS at `can_implement` before launch.
+The current kernel requires both N and K to be multiples of 128. Shapes that
+violate the FP8 operand alignment of 16 receive an alignment refusal first.
+The engine rejects unsupported shapes before allocating or launching the GEMM,
+with a message that names the dimension and required granularity.
 
-That is a **shape restriction, not a defect in this tree**. On sm120 the CUTLASS
-block-wise collective serves only an N and a K that are whole multiples of 128.
-It requires complete scale blocks and full tiles in K where its sm90 counterpart
-requires neither, and 576 is `4*128 + 64`. A coarser floor sits under that one
-and is asked first where it applies: `K % 16` and `N % 16`, the FP8 operand
-alignment, which is the line vLLM draws before rerouting such a shape to a
-Triton kernel this build does not have. Four shape classes are refused in all,
-two of them at 16 by vLLM's authority and two at 128 by the sm120 collective's.
+For example, N=576 leaves 64 rows beyond a complete 128-row scale block.
+DeepSeek-V3's `kv_a_proj_with_mqa` has that width and cannot use this CUDA path.
+The missing fallback is an open implementation gap. The CPU reference accepts
+these shapes. `Qwen/Qwen3.8-27B-FP8` does not need them.
 
-This arm refuses every one of the four **by name**, before it allocates
-anything:
-
-```text
-matmul_fp8_block_scaled: no CUDA kernel for this shape. N is 576, which leaves a
-remainder of 64 modulo 128, and the sm120 blockwise collective wants COMPLETE
-SCALE BLOCKS [...] so N must be a multiple of 128
-```
-
-The message names the dimension, its value, the granularity, the CUTLASS line it
-comes from, and that the sm90 collective has no such limit. It replaces
-`cutlass Invalid status`, which named none of those.
-
-**One real capability gap follows, and it is not repairable here.**
-DeepSeek-V3's `kv_a_proj_with_mqa` is exactly N=576, which is why vLLM chose
-that shape for its own test, so on an sm120 device this arm cannot serve it at
-all. Any block-wise FP8 checkpoint whose projections are not all a multiple of
-128 wide is affected the same way. The CPU reference arm runs every one of these
-shapes. `Qwen/Qwen3.8-27B-FP8` is not affected, because its ten projections are
-all round.
-
-Seven distinct shapes match the CPU reference. Six cover M from 1 to 512 across
-all three tile configurations, and one runs vLLM's fixture at N=512, the nearest
-supported width to 576. The run reported 5 cases and 136 assertions with no
-failures and no portable-fallback line. Unsupported shapes returned their named
-refusal.
-
-This component run validates the seven tested shapes against the CPU reference.
-It recorded neither controlled clocks nor contention, so it establishes no speed result.
-The separate [model token gate](#the-token-gate-against-vllm) ran on 23 August 2026,
-with six token-identical prompts and one adjudicated near-tie.
-[#1437](https://github.com/mudler/vllm.cpp/issues/1437) records both runs,
-milestone M5 of [#1189](https://github.com/mudler/vllm.cpp/issues/1189) owns the
-kernel, and [#1166](https://github.com/mudler/vllm.cpp/issues/1166) is the
-original report.
+The [CUDA component spec](../../.agents/specs/vt-matmul-fp8-block-cuda.md)
+records the tested shapes, dispatch constraints, and upstream sources.
 
 ### Two configurations refused at load
 
-No build here implements either, and both messages name the key and the value
-your `config.json` declares:
+The loader refuses:
 
-- an `activation_scheme` other than `dynamic`
-- a `weight_block_size` other than `[128, 128]`
+- An `activation_scheme` other than `dynamic`.
+- A `weight_block_size` other than `[128, 128]`.
+
+Each error names the configuration key and value.
 
 ### One lever that is incompatible
 
-`VT_KV_CACHE_F32=1` selects an F32 paged KV cache while `v_proj` keeps emitting
-BF16. The KV write requires both to share one dtype, so it refuses. That affects
-every BF16 arm rather than this one, and it is tracked as
-[#1249](https://github.com/mudler/vllm.cpp/issues/1249). Leave the lever unset,
-which is the default.
+Leave `VT_KV_CACHE_F32` unset. Setting it to `1` selects an F32 paged KV cache,
+but `v_proj` emits BF16. The KV write requires matching dtypes and refuses
+this combination. [Issue #1249](https://github.com/mudler/vllm.cpp/issues/1249)
+tracks the gap.
