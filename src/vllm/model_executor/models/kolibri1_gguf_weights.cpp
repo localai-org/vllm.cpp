@@ -63,18 +63,20 @@ OwnedTensor OwnBf16(const GgufFile& g, const std::string& name,
   return o;
 }
 
-// `rows` rows of `cols` elements starting at row `row_offset` of a stacked
-// 3-D tensor — how one expert is cut out of ffn_{gate,up,down}_exps.
-OwnedTensor OwnBf16RowSlice(const GgufTensorInfo& t,
+// `rows` rows of `cols` elements starting at row `row_offset` of an ALREADY
+// DEQUANTIZED stacked 3-D tensor — how one expert is cut out of
+// ffn_{gate,up,down}_exps. The tower is dequantized ONCE per layer (below);
+// slicing per expert out of a fresh dequant would re-run the whole-tower
+// decode 384 times per layer, which is the shape of defect that turns a
+// two-minute load into a two-hour one.
+OwnedTensor OwnBf16RowSlice(const std::vector<uint16_t>& dq,
+                            const GgufTensorInfo& t,
                             int64_t rows, int64_t cols, int64_t row_offset) {
   const int64_t total_rows = t.shape[0] * t.shape[1];  // [E, out] flattened
   VT_CHECK(t.shape.size() == 3 && t.shape[2] == cols,
            "kolibri1 gguf: " + t.name + " is not the stacked expert tower");
   VT_CHECK(row_offset >= 0 && row_offset + rows <= total_rows,
            "kolibri1 gguf: row slice out of range for " + t.name);
-  const int64_t numel = t.shape[0] * t.shape[1] * t.shape[2];
-  std::vector<uint16_t> dq =
-      DequantGgufRowToBf16(t.ggml_type, t.data, numel, 1.0F);
   OwnedTensor o = MakeOwned(vt::DType::kBF16, {rows, cols});
   std::memcpy(o.bytes.data(),
               dq.data() + static_cast<size_t>(row_offset) *
@@ -117,14 +119,17 @@ Kolibri1Projection OwnProjectionBf16(const GgufFile& g, const std::string& name,
   return p;
 }
 
-Kolibri1ExpertWeights OwnExpert(const GgufTensorInfo& gate,
+Kolibri1ExpertWeights OwnExpert(const std::vector<uint16_t>& gate_dq,
+                                const std::vector<uint16_t>& up_dq,
+                                const std::vector<uint16_t>& down_dq,
+                                const GgufTensorInfo& gate,
                                 const GgufTensorInfo& up,
                                 const GgufTensorInfo& down, int64_t e,
                                 int64_t inter, int64_t hidden) {
   Kolibri1ExpertWeights x;
-  x.gate_proj.bf16 = OwnBf16RowSlice(gate, inter, hidden, e * inter);
-  x.up_proj.bf16 = OwnBf16RowSlice(up, inter, hidden, e * inter);
-  x.down_proj.bf16 = OwnBf16RowSlice(down, hidden, inter, e * hidden);
+  x.gate_proj.bf16 = OwnBf16RowSlice(gate_dq, gate, inter, hidden, e * inter);
+  x.up_proj.bf16 = OwnBf16RowSlice(up_dq, up, inter, hidden, e * inter);
+  x.down_proj.bf16 = OwnBf16RowSlice(down_dq, down, hidden, inter, e * hidden);
   return x;
 }
 
@@ -358,13 +363,23 @@ Kolibri1Weights LoadKolibri1FromGguf(const GgufFile& gguf,
                   static_cast<size_t>(p.num_experts) * sizeof(float));
     }
 
+    // Dequantize each stacked tower ONCE for the layer, then cut the 384
+    // experts out of the resident decode (see OwnBf16RowSlice).
     const GgufTensorInfo& gate = gguf.Get(Blk(l, "ffn_gate_exps.weight"));
     const GgufTensorInfo& up = gguf.Get(Blk(l, "ffn_up_exps.weight"));
     const GgufTensorInfo& down = gguf.Get(Blk(l, "ffn_down_exps.weight"));
+    std::vector<uint16_t> gate_dq = DequantGgufRowToBf16(
+        gate.ggml_type, gate.data,
+        gate.shape[0] * gate.shape[1] * gate.shape[2], 1.0F);
+    std::vector<uint16_t> up_dq = DequantGgufRowToBf16(
+        up.ggml_type, up.data, up.shape[0] * up.shape[1] * up.shape[2], 1.0F);
+    std::vector<uint16_t> down_dq = DequantGgufRowToBf16(
+        down.ggml_type, down.data,
+        down.shape[0] * down.shape[1] * down.shape[2], 1.0F);
     lw.moe.experts.resize(static_cast<size_t>(p.num_experts));
     for (int64_t e = 0; e < p.num_experts; ++e) {
       lw.moe.experts[static_cast<size_t>(e)] =
-          OwnExpert(gate, up, down, e, inter, h);
+          OwnExpert(gate_dq, up_dq, down_dq, gate, up, down, e, inter, h);
     }
     lw.moe.shared_experts.gate_proj =
         OwnProjectionBf16(gguf, Blk(l, "ffn_gate_shexp.weight"), inter, h);

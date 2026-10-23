@@ -162,3 +162,44 @@ ONE row, ONE weights TU, ONE pre-type mapping.
   expert_weights_norm false, expert_gating_func 5 (unread), pre `kolibri1`.
 - Goldens: tests/vllm/models/kolibri1_goldens.json (8 prompts, greedy, 32
   tokens, torch-f32 transcription; band 2.5, test_kolibri1_w3.cpp).
+
+## Outcome (2026-10-23, first implementation wave)
+
+Landed: the dispatch row, the weights TU, the dequant branch, the pre-type
+mapping, and the tests. RED FIRST captured: with the dispatch row reverted,
+`test_model_loader_gguf`'s "a kolibri1 GGUF reaches ITS OWN builder" fails —
+the file is refused as "is not supported by this build"; with the row, the
+suite passes 15/15 (66 assertions). The real-file config gate passes
+(63 assertions: geometry, the 4:1 sliding pattern off the file's own
+sliding_window_pattern, norm_topk_prob=false off expert_weights_norm).
+
+THE TOKEN GATE AGAINST THE BF16 GOLDENS **FAILS, AND IS REPORTED AS A
+FAILURE, NOT WAIVED**: ARGMAX CHAIN 4/12 match, 4 flips near-tie, **4 hard
+flips**; worst teacher-forced topk diff 4.96 against the 2.5-nat band. The
+band was measured for bf16 rounding (2.19 envelope, test_kolibri1_w3.cpp);
+a 2.56-bpw container's dequant error is a different, much larger envelope,
+and no band extension was applied. The fluency probe (VT_KOLIBRI1_GGUF_GEN=1)
+shows fluent, prompt-appropriate, degenerate-looping text of exactly the
+shape the bf16 goldens themselves show in this greedy short-prompt regime
+(the bf16 golden for "Ein gutes Buch liest man am besten" loops the same
+phrase), so the load is structurally right and the divergence is the
+quantization.
+
+ADJUDICATOR STATUS — the gate has no runnable floor for this file:
+- llama.cpp at b11765 aborts on expert_gating_func=5 (the ROUTE A premise).
+- mistral.rs at the peer's tree REFUSES the file: build_kolibri1
+  (mistralrs-core/src/gguf/normal_config.rs:1654) goes through
+  StandardFields::read (normal_config.rs:931), which requires
+  `kolibri1.feed_forward_length`, absent from BOTH published containers.
+  The recorded "mistral.rs loads and runs it" (issue correction, 2026-10-23)
+  is not reproducible on the published Q2_K/Q4_K_M via the standalone GGUF
+  path; the recorded 8.0 tok/s benchmark was a UD-Q4_K_XL container this box
+  does not have.
+NEEDS_DECISION for the gate's adjudicator: (a) a derived copy of the
+published file with `feed_forward_length` added (a NEW container, published
+bytes untouched) so mistral.rs runs it and the parity gate is our-chain vs
+mistral.rs-chain on identical weights; (b) a MEASURED quantization envelope
+band (re-run the fingerprint methodology against a bf16-dequantized
+reference of the SAME container) replacing the bf16 band for this arm; or
+(c) Route B — the handoff's llama.cpp-conformant container, where the
+existing band applies unchanged.

@@ -30,6 +30,7 @@
 
 #include "vllm/transformers_utils/hf_config.h"
 #include "vllm/model_executor/model_loader/gguf_reader.h"
+#include "vllm/tokenizer/tokenizer.h"
 #include "vllm/model_executor/models/kolibri1_gguf_weights.h"
 #include "vllm/model_executor/models/kolibri1_weights.h"
 #include "vllm/model_executor/models/model_registry.h"
@@ -224,6 +225,39 @@ TEST_CASE("kolibri1 gguf: the config builder maps the file's own metadata") {
   // safetensors config.json it was converted from.
   for (int64_t l = 0; l < 50; ++l) {
     CHECK(p.IsSlidingLayer(l) == (l % 5 != 4));
+  }
+}
+
+// THE FLUENCY PROBE (VT_KOLIBRI1_GGUF_GEN=1): greedy generation on probe
+// prompts, decoded through the GGUF tokenizer this row maps. A mis-mapped
+// tensor (a wrong expert slice, a swapped norm) does not produce fluent
+// text; this is the eyeball check behind the numeric gate above, and the
+// diagnostic the gate failure review starts from.
+TEST_CASE("kolibri1 gguf: greedy generation on probe prompts is fluent") {
+  if (std::getenv("VT_KOLIBRI1_GGUF_GEN") == nullptr) {
+    MESSAGE("SKIP: set VT_KOLIBRI1_GGUF_GEN=1");
+    return;
+  }
+  if (!std::filesystem::exists(kPublishedGguf)) {
+    MESSAGE("SKIP: " << kPublishedGguf << " not mounted");
+    return;
+  }
+  vllm::GgufFile gguf = vllm::GgufFile::Open(kPublishedGguf);
+  vllm::tok::Tokenizer tok = vllm::tok::Tokenizer::FromGguf(gguf);
+  const HfConfig config = vllm::Kolibri1HfConfigFromGguf(gguf);
+  const Kolibri1Weights w = vllm::LoadKolibri1FromGguf(gguf, config);
+  for (const char* prompt_text : {"The capital of France is",
+                                  "Ein gutes Buch liest man am besten"}) {
+    std::vector<int32_t> ids = tok.Encode(prompt_text);
+    for (int i = 0; i < 24; ++i) {
+      const Logits row = PrefillLastRow(w, ids);
+      ids.push_back(static_cast<int32_t>(
+          std::max_element(row.begin(), row.end()) - row.begin()));
+    }
+    const std::string text = tok.Decode(ids);
+    const std::string shown = std::string("'") + prompt_text + "' -> '" +
+                               text + "'";
+    MESSAGE(shown);
   }
 }
 
