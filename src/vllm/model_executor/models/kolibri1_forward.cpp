@@ -92,6 +92,43 @@ double Now() {
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
 }
+// ── THE SPEC-VERIFY CLASS PIN (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) ──────
+// Greedy spec decode is EXACTNESS-PRESERVING only when the verify forward
+// computes every draft position in the SAME compute class plain greedy decode
+// uses at that position. Decode is t == 1, where the bf16-dot arms below
+// engage; a verify step forwards its 1+k query rows in ONE t > 1 call, and a
+// t-gated arm verified every position in the f32-widen class instead — the
+// verify then accepted drafts plain greedy would have rejected and the spec-ON
+// chain diverged from the spec-OFF chain. The runner declares a uniform
+// verify step (`uniform_query_len == 1 + k`) and the registry passes it down
+// here; for the duration of that ONE forward the class gates below treat
+// every row the way the t == 1 decode call is treated. Prefill and plain
+// decode keep their recorded numerics byte-for-byte: this flag moves NO
+// recorded chain, it only removes the decode-vs-verify class split.
+namespace {
+
+// See the comment above.
+thread_local bool g_verify_rows = false;
+
+}  // namespace
+
+bool VerifyRowsActive() { return g_verify_rows; }
+
+// RAII guard for the verify-step scope. The forward is synchronous host code
+// on the engine's queue, so the guard brackets exactly one call.
+class VerifyRowsScope {
+ public:
+  explicit VerifyRowsScope(bool on) : prev_(g_verify_rows) {
+    g_verify_rows = on;
+  }
+  ~VerifyRowsScope() { g_verify_rows = prev_; }
+  VerifyRowsScope(const VerifyRowsScope&) = delete;
+  VerifyRowsScope& operator=(const VerifyRowsScope&) = delete;
+
+ private:
+  bool prev_;
+};
+
 bool On() {
   static const bool on = std::getenv("VT_KOLIBRI1_PROFILE") != nullptr;
   return on;
@@ -253,16 +290,21 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
   Tensor wt = ResidentWeight(d, wt_raw);
   DBuf out(d, out_dtype, {t, wt.shape[0]});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * wt.shape[0] * wt.shape[1]);
-  // BFDOT f32-out arm (same knob, same t==1 decode-only gate as the fp8-block
-  // arm below): covers the ROUTER GATE, the one bf16-native LinearBTRaw
-  // projection the t==1 LinearBT hook cannot reach. Rounding-policy change,
-  // identical to the arm's documented envelope; measured, not hidden.
-  if (t == 1 && out_dtype == DType::kF32 &&
-   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::Bf16DotActive()) {
- kolibri1_bfdot_gemv::GemvF32Out(
+  // BFDOT f32-out arm (same knob as the fp8-block arm below): covers the
+  // ROUTER GATE, the one bf16-native LinearBTRaw projection the t==1 LinearBT
+  // hook cannot reach. Rounding-policy change, identical to the arm's
+  // documented envelope; measured, not hidden. EVERY t (not decode-only): the
+  // spec-verify step forwards its 1+k rows in one call, and a class that
+  // depends on the batch shape breaks greedy spec decode's exactness
+  // preservation (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) — `GemvF32OutRows`
+  // keeps every row on the identical per-row instruction sequence.
+  if ((t == 1 || prof::VerifyRowsActive()) && out_dtype == DType::kF32 &&
+   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::Bf16DotActive() &&
+   x.stride[0] == wt.shape[1]) {
+ kolibri1_bfdot_gemv::GemvF32OutRows(
      static_cast<const uint16_t*>(wt.data),
      static_cast<const uint16_t*>(x.data),
-     static_cast<float*>(out.ptr()), wt.shape[0], wt.shape[1]);
+     static_cast<float*>(out.ptr()), t, wt.shape[0], wt.shape[1]);
  return out;
   }
   vt::MatmulBT(d.q, out.t(), x, wt);
@@ -393,7 +435,8 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
       t,
       out_dtype,
       kolibri1_bfdot_gemv::Bf16DotActive(),
-      kolibri1_dequant_cache::ProcessCache().enabled()};
+      kolibri1_dequant_cache::ProcessCache().enabled(),
+      /*verify_rows=*/prof::VerifyRowsActive()};
   const Kolibri1ComputeClass compute_class = SelectKolibri1ComputeClass(facts);
   if (RecordClasses()) {
     Kolibri1ClassRecord& record = g_class_records[gsite];
@@ -404,30 +447,41 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   }
   // BFDOT bf16 GEMV arm, DEFAULT on a FEAT_BF16 host (Bf16DotActive:
   // feature-gated; VT_CPU_KOLIBRI_BF16_DOT=0 forces the f32 tier; the
-  // legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps refusing by name) and
-  // t==1 decode-only: the resolved tensor is ALREADY bf16 [n, k] row-major
-  // (the dequant cache decode rounds to bf16 on store, and the bf16 arm's
-  // bytes are bf16 on disk), so the arm feeds those bytes straight into
-  // vbfdotq_f32 (bf16 in, f32 accumulate). This is a rounding-policy change
-  // versus the f32 widen+fma MatmulBT below — the chain WILL move under the
-  // knob; measured, not hidden. Requires DetectArmBf16 (KnobActive refuses
-  // by name otherwise); deliberately dotprod-free. It covers EVERY
-  // projection that resolves here at decode: attention q/k/v/o and the
-  // routed-expert gate/up/down, in BOTH arms. The router gate (the one
-  // bf16-native LinearBTRaw projection) keeps its own path — it never was
-  // an fp8 warm-cache tensor, and the f32-out form of the same kernel
-  // serves it there.
-  if (compute_class == Kolibri1ComputeClass::kBf16Dot) {
+  // legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps refusing by name).
+  // The resolved tensor is ALREADY bf16 [n, k] row-major in BOTH arms (the
+  // dequant cache decode rounds to bf16 on store, and the bf16 arm's bytes
+  // are bf16 on disk), so the arm feeds those bytes straight into
+  // vbfdotq_f32 (bf16 in, f32 accumulate) through `GemvRows`. This is a
+  // rounding-policy change versus the f32 widen+fma MatmulBT below — the
+  // chain WILL move under the knob; measured, not hidden. The class and the
+  // row-count tier both come from THE ONE RULE above (the selector reads
+  // `verify_rows` beside `t`): THE ROW-COUNT TIER IS THE EXACTNESS CONTRACT
+  // (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) — the ngram spec-verify step
+  // forwards its 1+k query rows in ONE t>1 call, and a t==1-only arm
+  // verified every draft position in the f32-widen class while plain greedy
+  // decode sampled the same position in the bf16-dot class — so the verify
+  // accepted drafts plain greedy would have rejected and greedy spec decode
+  // stopped being exactness-preserving. `GemvRows` keeps every row on the
+  // IDENTICAL per-row instruction sequence the t==1 call runs, so row i of
+  // a t-row call is bit-identical to the t==1 call on row i. Covers every
+  // projection that resolves here in BOTH arms: attention q/k/v/o and the
+  // routed-expert gate/up/down. The router gate (the bf16-native
+  // LinearBTRaw projection) and the lm_head keep their own f32-out arms
+  // below — they were never fp8 warm-cache tensors.
+  if (compute_class == Kolibri1ComputeClass::kBf16Dot &&
+      // GemvRows reads a contiguous [t, k] activation row block; a
+      // row-strided activation keeps the f32-widen MatmulBT below.
+      x.stride[0] == r.wt.shape[1]) {
     // The arm's own scope, named apart from the function-scope
     // profiler above: a same-named local here HIDES that local, which is
     // MSVC C4456 and a build failure under the windows-msvc /WX lane.
     // Same key, same scope boundaries, same accumulated time.
     prof::Scope bfdot_prof("linear_gemm");
-    DBuf out(d, out_dtype, {1, r.wt.shape[0]});
-    kolibri1_bfdot_gemv::Gemv(static_cast<const uint16_t*>(r.wt.data),
-                              static_cast<const uint16_t*>(x.data),
-                              static_cast<uint16_t*>(out.ptr()),
-                              r.wt.shape[0], r.wt.shape[1]);
+    DBuf out(d, out_dtype, {t, r.wt.shape[0]});
+    kolibri1_bfdot_gemv::GemvRows(
+        static_cast<const uint16_t*>(r.wt.data),
+        static_cast<const uint16_t*>(x.data),
+        static_cast<uint16_t*>(out.ptr()), t, r.wt.shape[0], r.wt.shape[1]);
     return out;
   }
   DBuf out(d, out_dtype, {t, r.wt.shape[0]});
@@ -1092,9 +1146,9 @@ static void LayerDumpAll(Dev d, int64_t layer, DBuf& attn, DBuf& attn_n,
 // can see a class change at all.
 Kolibri1ComputeClass SelectKolibri1ComputeClass(
     const Kolibri1ClassFacts& facts) {
-  if (facts.weight_is_bf16 && facts.t == 1 &&
-      facts.out_dtype == DType::kBF16 && facts.bf16dot_available &&
-      facts.cache_enabled) {
+  if (facts.weight_is_bf16 && facts.out_dtype == DType::kBF16 &&
+      facts.bf16dot_available && facts.cache_enabled &&
+      (facts.t == 1 || facts.verify_rows)) {
     return Kolibri1ComputeClass::kBf16Dot;
   }
   return Kolibri1ComputeClass::kF32Widen;
@@ -1141,8 +1195,11 @@ ForwardLogits ForwardKolibri1Forward(
     const v1::CommonAttentionMetadata& attn_meta,
     const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
     const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
-    const std::vector<int32_t>& logits_indices) {
+    const std::vector<int32_t>& logits_indices, bool spec_verify_rows) {
   VT_CHECK(queue.device.type == vt::DeviceType::kCPU, kGpuRefusal);
+  // THE SPEC-VERIFY CLASS PIN (see VerifyRowsActive above): one uniform
+  // verify step, every row in the decode class.
+  const prof::VerifyRowsScope verify_scope{spec_verify_rows};
   const Kolibri1Params& p = weights.params;
   Dev d{vt::GetBackend(queue.device.type), queue};
   const int64_t t = static_cast<int64_t>(token_ids.size());
@@ -1335,18 +1392,23 @@ ForwardLogits ForwardKolibri1Forward(
   {
     prof::Scope prof("lm_head");
     gemvprof::Call gc("lm_head", static_cast<uint64_t>(n_out) * vocab * h);
-    vt::MatmulBT(d.q, logits.t(), src, lm);
- // BFDOT f32-out arm, same knob and t==1 decode-only gate as the
- // LinearBT/LinearBTRaw arms: the lm_head weight is bf16 [vocab, H]
- // row-major (the untied head, never an fp8 warm-cache tensor), the one
- // remaining decode linear outside the LinearBT hook's coverage. Same
- // rounding-policy envelope; measured, not hidden.
- if (n_out == 1 && lm.dtype == DType::kBF16 &&
-     kolibri1_bfdot_gemv::Bf16DotActive()) {
-   kolibri1_bfdot_gemv::GemvF32Out(
+ // BFDOT f32-out arm, same knob as the LinearBT/LinearBTRaw arms: the
+ // lm_head weight is bf16 [vocab, H] row-major (the untied head, never an
+ // fp8 warm-cache tensor), the one remaining linear outside the LinearBT
+ // hook's coverage. Same rounding-policy envelope; measured, not hidden.
+ // EVERY row count, not n_out == 1 only: the exactness contract
+ // (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) — the spec-verify step gathers
+ // its 1+k logits rows into ONE lm_head call, and a row-count-gated class
+ // verified every draft position in the f32-widen class while plain greedy
+ // decode sampled it in the bf16-dot class. `GemvF32OutRows` keeps every
+ // row on the t == 1 call's identical per-row instruction sequence.
+ if ((n_out == 1 || prof::VerifyRowsActive()) && lm.dtype == DType::kBF16 &&
+     kolibri1_bfdot_gemv::Bf16DotActive() &&
+     src.stride[0] == h) {
+   kolibri1_bfdot_gemv::GemvF32OutRows(
        static_cast<const uint16_t*>(lm.data),
        static_cast<const uint16_t*>(src.data),
-       static_cast<float*>(logits.ptr()), vocab, h);
+       static_cast<float*>(logits.ptr()), n_out, vocab, h);
  } else {
    vt::MatmulBT(d.q, logits.t(), src, lm);
  }

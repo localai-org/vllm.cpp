@@ -329,10 +329,15 @@ ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
     case vt::DeviceType::kCPU:
       // W2: the CPU hybrid forward (RNoPE, qk-norm, sandwich norms,
       // sigmoid-logit-add MoE) lives in kolibri1_forward.cpp.
+      // THE SPEC-VERIFY CLASS PIN (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M):
+      // `uniform_query_len > 1` is a uniform speculative VERIFY step (see the
+      // field's contract above); the forward pins its rows to the decode
+      // compute class so greedy spec decode stays exactness-preserving.
       return ForwardKolibri1Forward(input.token_ids, input.positions,
                                     input.attn_meta, input.attn_kv, m.weights(),
                                     input.multi_kv, input.queue,
-                                    input.logits_indices);
+                                    input.logits_indices,
+                                    input.uniform_query_len > 1);
     case vt::DeviceType::kTENSTORRENT:
       // B2b-i/ii: the dense-resident device forward with the streaming
       // MoE routed path (B2b-ii; spec addendum, slice ii). A null

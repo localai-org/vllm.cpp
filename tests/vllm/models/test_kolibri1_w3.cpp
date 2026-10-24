@@ -25,6 +25,16 @@
 // ids, with near-tie adjudication — a flipped position is reported and
 // tolerated only when the golden top-1/top-2 gap is under the band (the two
 // candidates are numerically indistinguishable at bf16 noise).
+//
+// THE BAND IS TIER-SCOPED (SPEC kolibri1-bf16-dot-cpu). The kolibri1 CPU
+// forward runs in one of two COMPUTE CLASSES — the f32-widen class and the
+// bf16-dot class (bf16 in / f32 accumulate, the primary oracle's class) — and
+// the class changes what our logits are. The torch f32 transcription's band
+// (kLogitBand) is therefore the f32 CLASS's band. The bf16-dot class is
+// adjudicated against the SAME transcription with the band the MEASURED class
+// difference licenses (kLogitBand + kClassDeltaMax), and this gate MEASURES
+// that class difference on every run — both classes, same teacher-forced ids,
+// one process — and holds it to the recorded envelope.
 
 #include <doctest/doctest.h>
 
@@ -73,6 +83,29 @@ std::string RealModelDir() {
 // naive W2 extrapolation); the 2026-10-04 run measured the envelope and
 // this band follows it.
 constexpr double kLogitBand = 2.5;
+
+// THE CLASS-DIFFERENCE ENVELOPE (SPEC kolibri1-bf16-dot-cpu). The kolibri1
+// CPU forward runs in one of two COMPUTE CLASSES: the f32-widen class and the
+// bf16-dot class (bf16 in / f32 accumulate, the primary oracle's class). The
+// class changes what our logits are, so the torch-f32 transcription's band
+// (kLogitBand) is the f32 CLASS's band and NOT the bf16-dot class's.
+//
+// This constant is the MEASURED class difference: the largest gap the
+// bf16-dot class opens against the f32 class on the SAME teacher-forced id.
+// Measured on this host (2026-10-22; one binary, both classes in one
+// process, the 8 golden prompts x 8 topk ids of the final-step fingerprint;
+// the per-case numbers are in
+// docs/bench-evidence/kolibri1-bf16dot-gate-20261022/report.md).
+//
+// The bf16-dot tier's band is the transcription band PLUS this envelope (the
+// triangle inequality: |bf16 - golden| <= |f32 - golden| + |bf16 - f32|), so
+// the production class is adjudicated against a MEASURED class difference and
+// not against whatever the run produced. The gate also measures the class
+// difference on every run and holds it to this envelope, so a class selection
+// that moves further than the recorded envelope goes red here instead of
+// silently widening the band.
+constexpr double kClassDeltaMax = 2.71;
+constexpr double kLogitBandBf16Dot = kLogitBand + kClassDeltaMax;
 
 using vllm::HfConfig;
 using vllm::Kolibri1Weights;
@@ -205,6 +238,75 @@ Logits PrefillLastRow(const Kolibri1Weights& w, const HfConfig& config,
   return row;
 }
 
+// ── THE COMPUTE CLASS ───────────────────────────────────────────────────────
+// The class is chosen PER CALL: every class-selecting arm reads the escape
+// hatch at call time (kolibri1_bfdot_gemv.cpp:60 — the routed-expert, the
+// router gate and the lm_head GEMV; cpu_paged_attn_bfdot_arm.cpp:50 — the
+// paged-attention K dot). The SAME tree can therefore be measured in both
+// classes inside ONE process, which is what makes the class difference a
+// MEASURED quantity in this gate rather than a constant copied out of
+// another run.
+//
+// The tier in effect: the escape hatch VT_CPU_KOLIBRI_BF16_DOT=0 (or a host
+// without FEAT_BF16) pins the f32 tier; otherwise the bf16-dot default.
+bool F32Tier() {
+#if defined(__aarch64__)
+  const char* hatch = std::getenv("VT_CPU_KOLIBRI_BF16_DOT");
+  return (hatch != nullptr && hatch[0] == '0') ||
+         (vt::cpu::DetectArmBf16() == false);
+#else
+  return true;
+#endif
+}
+
+// A host that HAS both classes (aarch64 with FEAT_BF16). Everywhere else
+// there is one class, the two legs below are the same stream, and the class
+// difference is exactly zero.
+bool TwoClasses() {
+#if defined(__aarch64__)
+  return vt::cpu::DetectArmBf16();
+#else
+  return false;
+#endif
+}
+
+// One forward's LAST position logits under a GIVEN class. The hatch is
+// flipped around the forward and the arms read it per call, so this selects
+// the class for THIS call only; the ambient tier is restored afterwards.
+Logits FingerprintRow(const Kolibri1Weights& w, const HfConfig& config,
+                      const std::vector<int32_t>& tokens, bool f32_class) {
+#if defined(__aarch64__)
+  const char* prev = std::getenv("VT_CPU_KOLIBRI_BF16_DOT");
+  const bool had_prev = prev != nullptr;
+  const std::string prev_value = had_prev ? std::string(prev) : std::string();
+  if (f32_class) {
+    setenv("VT_CPU_KOLIBRI_BF16_DOT", "0", 1);
+  } else {
+    unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+  }
+  Logits row;
+  try {
+    row = PrefillLastRow(w, config, tokens);
+  } catch (...) {
+    if (had_prev) {
+      setenv("VT_CPU_KOLIBRI_BF16_DOT", prev_value.c_str(), 1);
+    } else {
+      unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+    }
+    throw;
+  }
+  if (had_prev) {
+    setenv("VT_CPU_KOLIBRI_BF16_DOT", prev_value.c_str(), 1);
+  } else {
+    unsetenv("VT_CPU_KOLIBRI_BF16_DOT");
+  }
+  return row;
+#else
+  (void)f32_class;
+  return PrefillLastRow(w, config, tokens);
+#endif
+}
+
 struct GoldenPrompt {
   std::string prompt;
   std::vector<int32_t> input_ids;
@@ -283,6 +385,10 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
   shards.clear();
   MESSAGE("weights loaded");
 
+  // The tier in effect for the whole gate: the escape hatch pins the f32
+  // tier, otherwise the bf16-dot DEFAULT. Read ONCE, before the loop, so
+  // every arm of the gate agrees on which class it is judging.
+  const bool f32_tier = F32Tier();
   int64_t argmax_matches = 0;
   int64_t argmax_total = 0;
   int64_t near_ties = 0;
@@ -290,6 +396,11 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
   int64_t hard_flips = 0;
   double worst_topk = 0.0;
   double worst_sum_gap = 0.0;
+  // The MEASURED class difference and the two classes' own distances from
+  // the torch transcription. Reported per prompt and in the verdict.
+  double worst_class_delta = 0.0;
+  double worst_f32_topk = 0.0;
+  double worst_bf16_topk = 0.0;
 
   for (const auto& p : g.at("prompts")) {
     GoldenPrompt gp;
@@ -363,7 +474,18 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
     std::vector<int32_t> golden_chain = gp.input_ids;
     golden_chain.insert(golden_chain.end(), gp.generated_ids.begin(),
                         gp.generated_ids.end() - 1);
-    const Logits row = PrefillLastRow(w, config, golden_chain);
+    // The fingerprint under BOTH classes: the f32-widen class and the
+    // bf16-dot class, on the SAME teacher-forced ids. The gap between the
+    // two legs is the CLASS DIFFERENCE — what the compute class alone costs
+    // — and it is what licenses the production class's band below.
+    const Logits f32_row =
+        FingerprintRow(w, config, golden_chain, /*f32_class=*/true);
+    const Logits bf16_row =
+        TwoClasses()
+            ? FingerprintRow(w, config, golden_chain, /*f32_class=*/false)
+            : f32_row;
+    // The production leg: the ambient tier's class.
+    const Logits& row = f32_tier ? f32_row : bf16_row;
     double sum = 0.0, abs_sum = 0.0;
     for (float v : row) {
       sum += v;
@@ -374,32 +496,63 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
     // The golden top-8 ids, order-insensitive set, each within the band of
     // the corresponding golden logit value.
     for (size_t k = 0; k < gp.topk_ids.size(); ++k) {
-      const float got = row[static_cast<size_t>(gp.topk_ids[k])];
-      const double diff = std::fabs(static_cast<double>(got) - gp.topk_logits[k]);
+      const size_t id = static_cast<size_t>(gp.topk_ids[k]);
+      const double golden = gp.topk_logits[k];
+      const double f32_diff =
+          std::fabs(static_cast<double>(f32_row[id]) - golden);
+      const double bf16_diff =
+          std::fabs(static_cast<double>(bf16_row[id]) - golden);
+      // THE CLASS DIFFERENCE, measured on this case: the same id, the same
+      // ids, the other compute class.
+      const double class_delta = std::fabs(static_cast<double>(bf16_row[id]) -
+                                           static_cast<double>(f32_row[id]));
+      worst_class_delta = std::max(worst_class_delta, class_delta);
+      worst_f32_topk = std::max(worst_f32_topk, f32_diff);
+      worst_bf16_topk = std::max(worst_bf16_topk, bf16_diff);
+      // (1) THE CLASS DIFFERENCE IS BOUNDED. The recorded envelope is the
+      //     license for the bf16-dot tier's band; a class selection that
+      //     moves further than the envelope goes red here.
+      CHECK_MESSAGE(class_delta <= kClassDeltaMax,
+                    "class difference on topk logit " << k << " of '"
+                                                      << gp.prompt << "' is "
+                                                      << class_delta
+                                                      << " (envelope "
+                                                      << kClassDeltaMax << ")");
+      // (2) THE f32 CLASS REPRODUCES THE TRANSCRIPTION inside ITS band.
+      //     This holds on every host and in every tier, so the production
+      //     class's excess over the band is the class and not a broken
+      //     forward.
+      CHECK_MESSAGE(f32_diff <= kLogitBand,
+                    "f32-class topk logit " << k << " of '" << gp.prompt
+                                            << "' off by " << f32_diff);
+      // (3) THE PRODUCTION CLASS holds the band its tier licenses: the
+      //     transcription band on the f32 tier, the transcription band plus
+      //     the measured class difference on the bf16-dot tier.
+      const double diff = f32_tier ? f32_diff : bf16_diff;
       worst_topk = std::max(worst_topk, diff);
-      CHECK_MESSAGE(diff <= kLogitBand,
+      const double band = f32_tier ? kLogitBand : kLogitBandBf16Dot;
+      CHECK_MESSAGE(diff <= band,
                     "topk logit " << k << " of '" << gp.prompt << "' off by "
-                                  << diff);
+                                  << diff << " (band " << band << ")");
     }
-    MESSAGE("'" << gp.prompt << "': worst topk diff so far " << worst_topk);
+    MESSAGE("'" << gp.prompt << "': worst topk diff so far " << worst_topk
+                 << " (f32 class " << worst_f32_topk << ", bf16-dot class "
+                 << worst_bf16_topk << ", class difference "
+                 << worst_class_delta << ")");
   }
 
-  // SPEC kolibri1-bf16-dot-cpu: the gate's DENOMINATOR is tier-dependent.
-  // The kolibri1_goldens.json fingerprints are the torch f32 transcription,
-  // so the 2.5-nat topk band holds only for the f32 tier (escape hatch
-  // VT_CPU_KOLIBRI_BF16_DOT=0, or a host without FEAT_BF16). Under the
-  // DEFAULT bf16-dot tier the fingerprints are re-adjudicated against the
-  // PRIMARY oracle artifacts (kolibri1_primary_topk_rows.json via
-  // test_kolibri1_threeway_capture + scripts/kolibri1-threeway-analysis.py):
-  // here only the CHAIN gate (no hard flips, band-adjudicated) applies.
-  bool f32_tier = true;
-#if defined(__aarch64__)
-  {
-    const char* hatch = std::getenv("VT_CPU_KOLIBRI_BF16_DOT");
-    f32_tier = (hatch != nullptr && hatch[0] == '0') ||
-               (vt::cpu::DetectArmBf16() == false);
-  }
-#endif
+  // WHAT THE FINGERPRINT WAS COMPARED AGAINST, in words: the production
+  // class against the torch f32 transcription, under the band that class
+  // licenses, with the measured class difference in the open.
+  MESSAGE("COMPUTE CLASS: "
+          << (f32_tier ? "f32 tier" : "bf16-dot DEFAULT tier")
+          << "; measured class difference (bf16-dot vs f32 class, same "
+             "teacher-forced ids) "
+          << worst_class_delta << " (recorded envelope " << kClassDeltaMax
+          << "); f32 class vs the transcription " << worst_f32_topk
+          << " (band " << kLogitBand << "), bf16-dot class vs the "
+             "transcription "
+          << worst_bf16_topk << " (band " << kLogitBandBf16Dot << ")");
 
   // THE GATE VERDICT, quoted in full.
   MESSAGE("ARGMAX CHAIN: " << argmax_matches << "/" << argmax_total
@@ -411,14 +564,8 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
           "topk logit diff " << worst_topk << ", worst sum diff "
                              << worst_sum_gap);
   // THE GATE: no hard flip (every divergence sits inside the measured
-  // bf16-noise envelope) and the fixed-ids fingerprints hold the envelope.
+  // bf16-noise envelope) and the fixed-ids fingerprints hold the band their
+  // compute class licenses.
   CHECK(hard_flips == 0);
-  if (f32_tier) {
-    CHECK(worst_topk <= kLogitBand);
-  } else {
-    MESSAGE("bf16-dot DEFAULT tier: the torch-f32 topk fingerprint band "
-            "does not bind (worst topk diff " << worst_topk
-            << "); this tier is adjudicated against the primary oracle "
-               "artifacts, not the torch transcription");
-  }
+  CHECK(worst_topk <= (f32_tier ? kLogitBand : kLogitBandBf16Dot));
 }
