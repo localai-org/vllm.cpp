@@ -1,0 +1,91 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+===============================================================================
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:244:
+TEST CASE:  kolibri1 ngram spec-decode e2e gate: spec-ON == spec-OFF through the engine
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF bench: wall 5222.45 s, decode 796.383 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[0] "alpha beta gamma delta epsilon zeta": wall 164.903 s, decode 125.025 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[1] "der Mond scheint hell über den Bergen": wall 173.713 s, decode 131.488 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[2] "The capital of Australia is": wall 248.271 s, decode 202.832 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[3] "Wissen ist Macht, aber Zeit ist Geld": wall 280.749 s, decode 219.103 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[4] "x1 = 3, x2 = 7, x3 = 11, x4 =": wall 398.352 s, decode 258.443 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[5] "Translation to German: the weather is beautiful today": wall 300.216 s, decode 216.849 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[6] "Ein gutes Buch liest man am besten": wall 325.616 s, decode 254.88 s, drafts accepted 0/0
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-OFF golden[7] "counting: one two three four five six seven": wall 227.694 s, decode 160.656 s, drafts accepted 0/0
+
+engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  bench: wall 833.238 s, decode 295.396 s, drafts accepted 54/54
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[0] "alpha beta gamma delta epsilon zeta": wall 142.29 s, decode 89.7363 s, drafts accepted 24/24
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[1] "der Mond scheint hell über den Bergen": wall 151.77 s, decode 116.038 s, drafts accepted 24/24
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[2] "The capital of Australia is": wall 584.888 s, decode 509.52 s, drafts accepted 14/36
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[3] "Wissen ist Macht, aber Zeit ist Geld": wall 335.135 s, decode 214.006 s, drafts accepted 24/29
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[4] "x1 = 3, x2 = 7, x3 = 11, x4 =": wall 834.276 s, decode 699.747 s, drafts accepted 10/84
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[5] "Translation to German: the weather is beautiful today": wall 364.917 s, decode 231.705 s, drafts accepted 19/35
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[6] "Ein gutes Buch liest man am besten": wall 303.553 s, decode 202.634 s, drafts accepted 25/25
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:349: MESSAGE: spec-ON  golden[7] "counting: one two three four five six seven": wall 165.625 s, decode 96.4553 s, drafts accepted 24/24
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:384: ERROR: CHECK( off.chains[0].back() == kAnchorLastToken ) is NOT correct!
+  values: CHECK( 11622 == 109726 )
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:393: ERROR: CHECK( on.proposed[0] == 53 ) is NOT correct!
+  values: CHECK( 54 == 53 )
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:394: ERROR: CHECK( on.accepted[0] == 53 ) is NOT correct!
+  values: CHECK( 54 == 53 )
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:404: MESSAGE: goldens aggregate: accepted 164/281 (probe harness: 146/270; simulation on torch chains: 150/297)
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:407: ERROR: CHECK( g_acc <= 152 ) is NOT correct!
+  values: CHECK( 164 <= 152 )
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:409: ERROR: CHECK( g_prop <= 276 ) is NOT correct!
+  values: CHECK( 281 <= 276 )
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[0] "alpha beta gamma delta epsilon zeta": engine chain shares 0/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[1] "der Mond scheint hell über den Bergen": engine chain shares 0/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[2] "The capital of Australia is": engine chain shares 32/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[3] "Wissen ist Macht, aber Zeit ist Geld": engine chain shares 1/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[4] "x1 = 3, x2 = 7, x3 = 11, x4 =": engine chain shares 32/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[5] "Translation to German: the weather is beautiful today": engine chain shares 5/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[6] "Ein gutes Buch liest man am besten": engine chain shares 32/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:427: MESSAGE: W3 golden[7] "counting: one two three four five six seven": engine chain shares 32/32 tokens with the torch golden (spec-ON identical to spec-OFF by gate (i))
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:431: MESSAGE: W3 relationship: 4/8 prompts token-identical to the torch golden end to end (probe: 4/8)
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:447: MESSAGE: ENGINE bench prompt: spec-OFF wall 0.0122548 tok/s, decode 0.0791077 tok/s | spec-ON wall 0.0768088 tok/s, decode 0.213273 tok/s (probe harness reference: 4.92 plain / 14.51 spec decode tok/s)
+
+./tests/vllm/models/test_kolibri1_ngram_spec.cpp:464: MESSAGE: ENGINE goldens aggregate: spec-OFF wall 0.120782 tok/s, decode 0.158035 tok/s | spec-ON wall 0.0888133 tok/s, decode 0.114823 tok/s (probe harness reference: 6.84 plain / 8.99 spec)
+
+===============================================================================
+[doctest] test cases:   2 |  1 passed | 1 failed | 0 skipped
+[doctest] assertions: 104 | 99 passed | 5 failed |
+[doctest] Status: FAILURE!

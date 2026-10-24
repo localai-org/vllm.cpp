@@ -73,6 +73,23 @@ void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
 void GemvF32Out(const uint16_t* w_bf16, const uint16_t* x_bf16, float* out_f32,
                 int64_t n, int64_t k);
 
+// out[t, n] (bf16) = x[t, k] (bf16) @ w[n, k]^T — the MULTI-ROW form. THE
+// EXACTNESS CONTRACT (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M): every output
+// element runs the IDENTICAL per-row instruction sequence `Gemv` runs at
+// t == 1 — same bf16-pair dots, same 4-lane f32 accumulator, same K order —
+// so row i of the result is bit-identical to a t == 1 call on x row i. The
+// spec-decode verify step forwards its 1+k query rows in ONE call; a t-gated
+// class there would verify every position in the f32-widen class while plain
+// greedy decode sampled it in the bf16-dot class, and greedy spec decode
+// stops being exactness-preserving on every near-tie. The class must not
+// depend on the batch shape.
+void GemvRows(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
+              int64_t t, int64_t n, int64_t k);
+
+// The f32-out multi-row form (same contract as `GemvRows` / `GemvF32Out`).
+void GemvF32OutRows(const uint16_t* w_bf16, const uint16_t* x_bf16,
+                    float* out_f32, int64_t t, int64_t n, int64_t k);
+
 }  // namespace kolibri1_bfdot_gemv
 }  // namespace vllm
 

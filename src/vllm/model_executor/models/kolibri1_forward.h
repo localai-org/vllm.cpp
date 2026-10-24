@@ -56,7 +56,8 @@ ForwardLogits ForwardKolibri1Forward(
     const v1::CommonAttentionMetadata& attn_meta,
     const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
     const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
-    const std::vector<int32_t>& logits_indices);
+    const std::vector<int32_t>& logits_indices,
+    bool spec_verify_rows = false);
 
 // ── The compute class (the row's ONE rule) ──────────────────────────────────
 //
@@ -81,6 +82,12 @@ struct Kolibri1ClassFacts {
   vt::DType out_dtype = vt::DType::kF32;  // the site's output dtype
   bool bf16dot_available = false;  // DetectArmBf16() proved FEAT_BF16
   bool cache_enabled = false;      // the dequant cache is enabled
+  bool verify_rows = false;        // the spec-verify class pin is engaged
+  // `verify_rows` rides beside `t`: the spec-verify step forwards its 1+k
+  // rows in ONE t>1 call, and the exactness contract
+  // (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) requires that step to compute
+  // every row in the SAME class plain greedy decode uses. The rule reads it
+  // as the row-count tier, not as a separate class.
 };
 
 // THE ONE RULE. The bf16-dot class iff every conjunct holds.

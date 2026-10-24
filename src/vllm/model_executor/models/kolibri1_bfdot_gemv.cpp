@@ -70,20 +70,27 @@ inline void StoreOut(void* out_ptr, int64_t row, float acc) {
 }
 
 template <bool kF32Out>
-void GemvBody(const uint16_t* w_bf16, const uint16_t* x_bf16, void* out_ptr,
-              int64_t n, int64_t k) {
-  // Threaded over OUTPUT rows only: every output element is one worker's
-  // same-order instruction sequence (the host_parallel contract), so the
-  // threaded result is bit-identical to the serial loop by construction.
-  host_parallel::ForOutputRows(n, k, [&](int64_t n0, int64_t n1) {
+void GemvBodyRows(const uint16_t* w_bf16, const uint16_t* x_bf16, void* out_ptr,
+                  int64_t t, int64_t n, int64_t k) {
+  // Threaded over OUTPUT elements only (t*n of them): every output element is
+  // one worker's same-order instruction sequence (the host_parallel
+  // contract), so the threaded result is bit-identical to the serial loop by
+  // construction — AND to the t == 1 call of the same row, because the
+  // per-element body below does not read t at all. The split may differ from
+  // the t == 1 run's split; the host_parallel contract makes that a
+  // scheduling difference, not a numerics one.
+  host_parallel::ForOutputRows(t * n, k, [&](int64_t e0, int64_t e1) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_BF16)
-    for (int64_t row = n0; row < n1; ++row) {
+    for (int64_t idx = e0; idx < e1; ++idx) {
+      const int64_t i = idx / n;
+      const int64_t row = idx % n;
       const uint16_t* w = w_bf16 + row * k;
+      const uint16_t* x = x_bf16 + i * k;
       float32x4_t vacc = vdupq_n_f32(0.0f);
       int64_t e = 0;
       for (; e + 8 <= k; e += 8) {
         const uint16x8_t wv = vld1q_u16(w + e);
-        const uint16x8_t xv = vld1q_u16(x_bf16 + e);
+        const uint16x8_t xv = vld1q_u16(x + e);
         vacc = vbfdotq_f32(vacc, vreinterpretq_bf16_u16(wv),
                            vreinterpretq_bf16_u16(xv));
       }
@@ -92,21 +99,24 @@ void GemvBody(const uint16_t* w_bf16, const uint16_t* x_bf16, void* out_ptr,
       // accumulate, so the tail never silently truncates. Kolibri's linear
       // K values (2560, 512, 6144) never hit it.
       for (; e < k; ++e) {
-        acc = acc + vt::BF16ToF32(w[e]) * vt::BF16ToF32(x_bf16[e]);
+        acc = acc + vt::BF16ToF32(w[e]) * vt::BF16ToF32(x[e]);
       }
-      StoreOut<kF32Out>(out_ptr, row, acc);
+      StoreOut<kF32Out>(out_ptr, idx, acc);
     }
 #else
     // Portable fallback: never selected at runtime (KnobActive refuses
     // without FEAT_BF16), kept so the TU links and the selection logic is
     // exercisable on any host.
-    for (int64_t row = n0; row < n1; ++row) {
+    for (int64_t idx = e0; idx < e1; ++idx) {
+      const int64_t i = idx / n;
+      const int64_t row = idx % n;
       const uint16_t* w = w_bf16 + row * k;
+      const uint16_t* x = x_bf16 + i * k;
       float acc = 0.0f;
       for (int64_t e = 0; e < k; ++e) {
-        acc = acc + vt::BF16ToF32(w[e]) * vt::BF16ToF32(x_bf16[e]);
+        acc = acc + vt::BF16ToF32(w[e]) * vt::BF16ToF32(x[e]);
       }
-      StoreOut<kF32Out>(out_ptr, row, acc);
+      StoreOut<kF32Out>(out_ptr, idx, acc);
     }
 #endif
   });
@@ -114,12 +124,22 @@ void GemvBody(const uint16_t* w_bf16, const uint16_t* x_bf16, void* out_ptr,
 
 void Gemv(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
           int64_t n, int64_t k) {
-  GemvBody<false>(w_bf16, x_bf16, out_bf16, n, k);
+  GemvBodyRows<false>(w_bf16, x_bf16, out_bf16, 1, n, k);
 }
 
 void GemvF32Out(const uint16_t* w_bf16, const uint16_t* x_bf16, float* out_f32,
                 int64_t n, int64_t k) {
-  GemvBody<true>(w_bf16, x_bf16, out_f32, n, k);
+  GemvBodyRows<true>(w_bf16, x_bf16, out_f32, 1, n, k);
+}
+
+void GemvRows(const uint16_t* w_bf16, const uint16_t* x_bf16, uint16_t* out_bf16,
+              int64_t t, int64_t n, int64_t k) {
+  GemvBodyRows<false>(w_bf16, x_bf16, out_bf16, t, n, k);
+}
+
+void GemvF32OutRows(const uint16_t* w_bf16, const uint16_t* x_bf16,
+                    float* out_f32, int64_t t, int64_t n, int64_t k) {
+  GemvBodyRows<true>(w_bf16, x_bf16, out_f32, t, n, k);
 }
 
 }  // namespace kolibri1_bfdot_gemv
