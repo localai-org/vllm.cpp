@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M5QBGBM3Z7NT3D9TA0K1HT7T
 Title: FlintModel::Forward memcpys bf16 embedding bits into an f32 buffer
 Row: MODEL-TEXT-FLINT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-24
 Updated: 2026-10-24
-Closed: -
+Closed: 2026-10-24
 
 ## Problem
 
@@ -16,4 +16,4 @@ The W1 CPU reference forward (commit ea5c3dade) loads the embedding row with std
 
 ## Resolution
 
--
+Fixed 2026-10-24 in commit 299592c36: the embedding lookup converts bf16 to f32 element-wise; adjudicated against the pinned oracle and a transformers FlintForCausalLM reference, both top-1 12834 (' Paris').

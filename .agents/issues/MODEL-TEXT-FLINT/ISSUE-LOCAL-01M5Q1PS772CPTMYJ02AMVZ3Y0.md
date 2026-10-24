@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M5Q1PS772CPTMYJ02AMVZ3Y0
 Title: FlintModel::Forward overflows attn_out when hq*head_dim > hidden_size
 Row: MODEL-TEXT-FLINT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-24
 Updated: 2026-10-24
-Closed: -
+Closed: 2026-10-24
 
 ## Problem
 
@@ -16,4 +16,4 @@ The W1 CPU reference forward (commit ea5c3dade) sizes the attention output buffe
 
 ## Resolution
 
--
+Fixed 2026-10-24 in commit 299592c36: attn_out sized t*hq*head_dim; the real-weights token gate is the regression that holds the fix (8 hard flips drop to 0).

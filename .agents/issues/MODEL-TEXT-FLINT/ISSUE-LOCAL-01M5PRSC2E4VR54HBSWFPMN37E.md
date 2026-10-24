@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M5PRSC2E4VR54HBSWFPMN37E
 Title: The flint GGUF arm: the published containers load and their greedy chains replay
 Row: MODEL-TEXT-FLINT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-24
 Updated: 2026-10-24
-Closed: -
+Closed: 2026-10-24
 
 ## Problem
 
@@ -16,4 +16,4 @@ MODEL-TEXT-FLINT W1 (commit ea5c3dade, spec .agents/specs/flint-cpu-gguf.md) shi
 
 ## Resolution
 
--
+Landed 2026-10-24 on row/MODEL-TEXT-FLINT-GGUF (commits 2f86b7341 spec + 299592c36 implementation): the flint GGUF arm loads the published containers through the production registry and the real-weights token gate replays the pinned llama-cpp-flint oracle's greedy chains at 46/53 exact, 0 hard flips, worst gap 0.7348 nats against the 2.5-nat band. Evidence: docs/bench-evidence/flint-gguf-arm-20261024/.

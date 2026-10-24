@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M5PSMQF5F4HNV86QZNPGHFMK
 Title: The unsupported-architecture message test pins a stale literal without FlintForCausalLM
 Row: MODEL-TEXT-FLINT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-24
 Updated: 2026-10-24
-Closed: -
+Closed: 2026-10-24
 
 ## Problem
 
@@ -16,4 +16,4 @@ tests/vllm/test_model_loader_gguf.cpp's "FromModelDir rejects an unknown dense a
 
 ## Resolution
 
--
+Fixed 2026-10-24 in commit 299592c36: FlintForCausalLM added to the expected literal; test_model_loader_gguf 16/16.
