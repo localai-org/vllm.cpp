@@ -777,6 +777,50 @@ TEST_CASE("kolibri1 bf16 arm: the two arms ride the SAME compute class") {
   CHECK(vllm::Kolibri1ComputeClassRecords().empty());
 }
 
+TEST_CASE("kolibri1 bf16 arm: the spec-verify tier rides the ONE rule") {
+  // The row-count tier is a conjunct of the production selector, not a
+  // parallel gate (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M): a verify step
+  // forwards its 1+k rows in ONE t>1 call, and the exactness contract needs
+  // that call in the SAME class plain greedy decode uses. The fast tier
+  // asserts the SELECTOR directly — the end-to-end detection lives in the
+  // ngram gate (spec-ON vs spec-OFF chain identity), which is far too slow
+  // to run per mutation.
+  const auto base = [](int64_t t, bool verify) {
+    vllm::Kolibri1ClassFacts f;
+    f.weight_is_bf16 = true;
+    f.t = t;
+    f.out_dtype = vt::DType::kBF16;
+    f.bf16dot_available = true;
+    f.cache_enabled = true;
+    f.verify_rows = verify;
+    return f;
+  };
+  // The decode shape selects the bf16-dot class, verify pin or not.
+  CHECK(vllm::SelectKolibri1ComputeClass(base(1, false)) ==
+        vllm::Kolibri1ComputeClass::kBf16Dot);
+  CHECK(vllm::SelectKolibri1ComputeClass(base(1, true)) ==
+        vllm::Kolibri1ComputeClass::kBf16Dot);
+  // THE TIER ITSELF: t > 1 only enters the class under the verify pin.
+  CHECK(vllm::SelectKolibri1ComputeClass(base(4, true)) ==
+        vllm::Kolibri1ComputeClass::kBf16Dot);
+  CHECK(vllm::SelectKolibri1ComputeClass(base(4, false)) ==
+        vllm::Kolibri1ComputeClass::kF32Widen);
+  // The verify pin does not override a failing conjunct: the class still
+  // needs the cache and the bf16 out dtype.
+  {
+    auto f = base(4, true);
+    f.cache_enabled = false;
+    CHECK(vllm::SelectKolibri1ComputeClass(f) ==
+          vllm::Kolibri1ComputeClass::kF32Widen);
+  }
+  {
+    auto f = base(4, true);
+    f.out_dtype = vt::DType::kF32;
+    CHECK(vllm::SelectKolibri1ComputeClass(f) ==
+          vllm::Kolibri1ComputeClass::kF32Widen);
+  }
+}
+
 TEST_CASE("kolibri1 bf16 arm: the registry hop loads the bf16 arm") {
   // The REGISTRY is the production entry point: the loader is reached
   // through `ModelRegistry::Load`, which the model loader calls. The bf16

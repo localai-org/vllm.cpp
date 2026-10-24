@@ -137,3 +137,34 @@ niced on CPUs 0-15 — **16/16 passed, 0 failed** (total real 17305 s;
 `test_kolibri1_ngram_spec` 3395.52 s with the five re-recorded pins,
 `test_kolibri1_w3` 9035.45 s PASSING with the W3 tier-scoped band).
 
+
+## ADDENDUM 2026-10-24: the rebase onto the ONE-rule selector
+
+Main landed the compute-class machinery (09f720d49, PR #3496) after this
+branch's base, so the branch rebased with a semantic conflict resolution: the
+verify tier is now a FACT (`verify_rows`) of `Kolibri1ClassFacts` beside `t`,
+and THE ONE RULE reads the tier as `(t == 1 || verify_rows)`; the multi-row
+dispatch goes through `GemvRows` on the resolved weights (`r.wt` dims, not
+`w.fp8_block`), so both arms and the verify call ride the identical per-row
+sequence. The registry hop feeds `input.uniform_query_len > 1` down.
+
+REBASE GATE (2026-10-24, same build dir, same host): `ctest -R kolibri1` —
+18/19 passed (7442 s total; w2 279 s, w3 1728 s, ngram 1171 s all PASSING).
+The one failure is `test_kolibri1_gguf`, and it is PRE-EXISTING ADJUDICATED
+RED: main's 0350841b7 (2026-10-23) already recorded that the Q2_K token gate
+fails against the bf16-transcribed goldens (worst topk 4.96 against the 2.5
+band) and deliberately kept the red rather than widen the band, because the
+band was measured for bf16 rounding and does not bind a 2.56-bpw container.
+The rebased head's failure (hard flips at gaps 4.17-7.23) is the same
+adjudicated verdict, and a forced-f32 control on the rebased head STILL
+exceeds the band (2.59, 3.95), which falsifies "the branch's class move broke
+the golden replay" — the replay was already red on main for the recorded
+reason.
+
+REVIEW: a fresh scoped reviewer verified the resolution with red-proven
+mutations (the out_dtype conjunct flip and the GemvRows dims swap are both
+caught by `test_kolibri1_bf16_arm`); its coverage-gap minor — the verify-tier
+conjunct is only caught end-to-end by the slow ngram gate — is closed by a
+new fast selector unit case in `test_kolibri1_bf16_arm` (the tier enters the
+class only under the verify pin; a failing cache or out-dtype conjunct still
+refuses). 10 cases, 12498 assertions, green.
