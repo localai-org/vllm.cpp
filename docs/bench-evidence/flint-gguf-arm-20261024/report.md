@@ -26,7 +26,10 @@ Date: 2026-10-24
 - RED (`red.txt`): the dispatch case in `tests/vllm/test_model_loader_gguf.cpp`
   fails — a file with `general.architecture = flint` got the
   "is not supported by this build" refusal; `test_flint_gguf.cpp` does not
-  compile (no `flint_gguf_weights.h`).
+  compile (no `flint_gguf_weights.h`). The log also carries a SECOND red,
+  `FromModelDir rejects an unknown dense architecture`: expected collateral,
+  red only because the supported-arch list gained `FlintForCausalLM` — the
+  same case is green in the implementation commit.
 - GREEN after implementation, FIRST RUN of the token gate: 0/8 chains, all
   hard flips (gaps up to 17 nats) — NOT adjudicated green. Two latent W1
   defects surfaced, both filed and fixed in this change:

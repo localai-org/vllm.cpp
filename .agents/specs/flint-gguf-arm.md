@@ -113,8 +113,14 @@ own missing-case error.
   `scripts/gen-flint-goldens.py` into `tests/vllm/models/flint_goldens_q4_k_m.json`,
   replayed through the production registry on the same container. Band: a
   divergent step is adjudicated by OUR second-best logit gap (the kolibri1
-  contract verbatim); the Q4_K_M band is 2.5 nats, the same measured envelope
-  W1's synthetic gate and the kolibri1 W3 gate use, NOT re-derived.
+  contract verbatim); the Q4_K_M band is 2.5 nats. The band is the same
+  measured envelope W1's synthetic gate and the kolibri1 W3 gate use, with
+  the transfer justified in ONE line: that envelope was measured for bf16
+  rounding, and the repo's own kolibri1 record (0350841b7) shows it does NOT
+  bind a 2.56-bpw container — but Q4_K_M is ~4.6 bpw, HIGHER fidelity than
+  the envelope's bf16 premise, and the observed worst gap is 0.735 nats,
+  3.4x inside the band. If a lower-bpw flint container is gated later, the
+  band is re-measured for that container first (the kolibri1 lesson).
 - **Config mapping** asserted against the file's own numbers (49 layers,
   hidden 2048, 32/4 heads, head_dim 128, ff 6144, 256/6 experts + shared
   1024, dense 0-1, window 513, FFSSSF).
