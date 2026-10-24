@@ -85,6 +85,17 @@ enum class SplitPattern {
                 // onto kLlama3 because both group digits `\p{N}{1,3}`,
                 // mis-tokenizes silently (#1924). Pipeline and provenance in
                 // src/vllm/tokenizer/pretokenizer.cpp.
+  kFlint,  // RecursiveSI Flint (the published flint containers tag
+           // `tokenizer.ggml.pre = "flint"`; llama.cpp's
+           // LLAMA_VOCAB_PRE_TYPE_FLINT, PR #30928 head 1b44e30,
+           // src/llama-vocab.cpp:284-289 — an oracle-mapped pre name, NOT an
+           // approximation). A three-regex Sequence pipeline like kDeepSeekV3:
+           // `\p{N}{1,3}`, the SAME CJK class, then a word/punct/ws
+           // alternation whose camel-split word rules match kGpt4o's but whose
+           // punctuation class is explicit `[\p{P}\p{S}]` with a mark-EXCLUDED
+           // run and NO `/` tail — both real boundary differences, so it is
+           // its own pattern. Provenance in
+           // src/vllm/tokenizer/pretokenizer.cpp.
 };
 
 // Splits `text` into pretoken byte spans [first, second), exactly as HF

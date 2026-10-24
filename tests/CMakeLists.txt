@@ -1013,6 +1013,13 @@ vllm_cpp_add_test(test_qwen3_moe_forward vllm/models/test_qwen3_moe_forward.cpp)
 target_include_directories(test_qwen3_moe_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_flint_forward vllm/models/test_flint_forward.cpp)
 target_include_directories(test_flint_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# flint GGUF arm (.agents/specs/flint-gguf-arm.md): the published Q4_K_M
+# container loads through the production registry and its greedy chain
+# replays the pinned llama-cpp-flint oracle's goldens within the house band.
+vllm_cpp_add_test(test_flint_gguf vllm/models/test_flint_gguf.cpp)
+target_include_directories(test_flint_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_flint_gguf PRIVATE
+  FLINT_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/flint_goldens_q4_k_m.json")
 vllm_cpp_add_test(test_deepseek_v2_load vllm/models/test_deepseek_v2_load.cpp)
 vllm_cpp_add_test(test_deepseek_v2_forward vllm/models/test_deepseek_v2_forward.cpp)
 target_include_directories(test_deepseek_v2_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)

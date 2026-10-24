@@ -29,6 +29,7 @@
 // f32 wideness is the architecture's own, named in the spec.
 
 #include "vllm/model_executor/models/flint.h"
+#include "vllm/model_executor/models/flint_gguf_weights.h"  // the GGUF arm
 
 #include <algorithm>
 #include <cmath>
@@ -347,8 +348,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
     for (int64_t i = 0; i < t; ++i) {
       const int64_t tok = token_ids[static_cast<size_t>(i)];
       FLINT_CHECK(tok >= 0 && tok < p.vocab_size, "forward: token id out of range");
-      std::memcpy(&x[static_cast<size_t>(i) * h], emb + tok * h,
-                  static_cast<size_t>(h) * sizeof(uint16_t));
+      // CONVERT, do not memcpy: the source is bf16 bits and the destination
+      // is f32. A raw copy drops each bf16 into the low half of a zero-high
+      // float — a ~1e-42 denormal (ISSUE-LOCAL-01M5QBGBM3Z7NT3D9TA0K1HT7T).
+      for (int64_t d = 0; d < h; ++d)
+        x[static_cast<size_t>(i) * h + d] = Bf16(emb[tok * h + d]);
     }
   }
 
@@ -397,7 +401,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
 
     // Sinks attention, scores in f32, the per-head sink folded into the
     // softmax denominator. Output rounded to bf16.
-    std::vector<float> attn_out(static_cast<size_t>(t) * h);
+    // The buffer is the HEAD layout [t, hq, dh] — what o_proj ([q, h])
+    // consumes. Sizing it t*h overflows whenever hq*head_dim > hidden_size
+    // (ISSUE-LOCAL-01M5Q1PS772CPTMYJ02AMVZ3Y0; the W1 synthetic config had
+    // hq*dh < h and masked the defect).
+    std::vector<float> attn_out(static_cast<size_t>(t) * hq * dh);
     {
       const uint16_t* sinks = Bf16Data(lw.attn.sinks);
       const int64_t gqa = hq / hkv;
@@ -583,12 +591,22 @@ class FlintLoadedModel final : public LoadedModel {
 std::unique_ptr<LoadedModel> LoadFlintForCausalLM(
     const ModelRegistration& registration, const HfConfig& config,
     const ModelSource& source) {
-  // The GGUF arm is a separate wave of the row (the `GgufArchArm` entry, the
-  // PR #30928 tensor names, and the `flint` pre-type regex) — refused BY NAME.
+  // The flint GGUF arm (.agents/specs/flint-gguf-arm.md, issue
+  // ISSUE-LOCAL-01M5PRSC2E4VR54HBSWFPMN37E): the published containers load
+  // into the same bf16-owned FlintWeights, forward unchanged.
+  if (source.kind == ModelSource::Kind::kGguf) {
+    if (source.gguf == nullptr) {
+      throw std::runtime_error(
+          "FlintForCausalLM: the model source says GGUF but carries no "
+          "file. See .agents/specs/flint-gguf-arm.md");
+    }
+    return std::make_unique<FlintLoadedModel>(
+        registration, LoadFlintFromGguf(*source.gguf, config));
+  }
   if (source.kind != ModelSource::Kind::kSafetensors) {
     throw std::runtime_error(
-        "Model architecture FlintForCausalLM does not support GGUF weights "
-        "yet — the GGUF arm is a later wave of MODEL-TEXT-FLINT");
+        "FlintForCausalLM: unsupported model source kind (the landed arms "
+        "are safetensors and GGUF)");
   }
   if (source.safetensors == nullptr) {
     throw std::runtime_error("safetensors model source is empty");

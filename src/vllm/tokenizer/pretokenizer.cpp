@@ -1018,15 +1018,67 @@ std::vector<Span> PretokenizeDeepSeekV3(std::string_view text) {
   return pieces;
 }
 
+// ─── RecursiveSI Flint ───────────────────────────────────────────────────────
+// llama.cpp's LLAMA_VOCAB_PRE_TYPE_FLINT (the pinned llama-cpp-flint oracle,
+// PR #30928 head 1b44e30775dcb2f93952116b05f89e5bd797fb00,
+// src/llama-vocab.cpp:284-289) — the pre name every published flint container
+// carries (`tokenizer.ggml.pre = "flint"`). A three-regex Sequence pipeline
+// exactly like kDeepSeekV3's: stage 1 `\p{N}{1,3}`, stage 2
+// `[一-龥぀-ゟ゠-ヿ]+` (BYTE-IDENTICAL to kDsV3CjkRanges — U+4E00-U+9FA5 plus
+// the two contiguous kana blocks U+3040-U+30FF; see its comment above), stage
+// 3 one six-alternative word/punct/ws regex. Stage 3 is NOT kGpt4o: its word
+// alternatives are the same two case-aware camel-split rules, but its
+// punctuation class is the EXPLICIT `[\p{P}\p{S}]` (marks EXCLUDED — a mark
+// after a punct starts its own piece, where kGpt4o's `[^\s\p{L}\p{N}]` run
+// absorbs it) and its punct tail is `[\r\n]*` with NO `/` (kGpt4o keeps
+// `[\r\n/]*`). Both differences move real pretoken boundaries, so kFlint runs
+// its own stage 3 over kGpt4o's word matchers with different flags.
+
+// Stage 3's ordered alternation (onig leftmost-first, first success wins).
+size_t MatchFlintAlternation(std::string_view t, size_t pos) {
+  size_t end = MatchGpt4oWordLower(t, pos);
+  if (end == 0) end = MatchGpt4oWordUpper(t, pos);
+  if (end == 0)
+    end = MatchPunctRun(t, pos, /*marks_excluded=*/true,
+                        /*slash_in_tail=*/false);
+  if (end == 0) end = MatchWsNewlines(t, pos);
+  if (end == 0) end = MatchWsNotBeforeNonSpace(t, pos);
+  if (end == 0) end = MatchWs(t, pos);
+  return end;
+}
+
+std::vector<Span> PretokenizeFlint(std::string_view text) {
+  std::vector<Span> pieces;
+  if (text.empty()) return pieces;
+  pieces.emplace_back(0, text.size());
+  ApplySplitIsolated(text, pieces, [](std::string_view t, size_t p, size_t) {
+    return MatchNumbers(t, p, /*max_digits=*/3);
+  });
+  ApplySplitIsolated(text, pieces, [](std::string_view t, size_t p, size_t e) {
+    return MatchDsClassRun(t, p, e, kDsV3CjkRanges);
+  });
+  // Stage 3 over each surviving piece. The alternation matchers are unbounded
+  // matchers over a whole string, so hand each one the piece AS the string;
+  // `(?!\S)` and the `$`-style behaviours then evaluate against the piece
+  // boundary, which is exactly what HF Split(Isolated) means.
+  ApplySplitIsolated(text, pieces, [](std::string_view t, size_t p, size_t e) {
+    if (p >= e) return static_cast<size_t>(0);
+    const size_t end = MatchFlintAlternation(t.substr(p, e - p), 0);
+    return end == 0 ? static_cast<size_t>(0) : p + end;
+  });
+  return pieces;
+}
+
 }  // namespace
 
 std::vector<std::pair<size_t, size_t>> Pretokenize(std::string_view text,
                                                    SplitPattern pattern) {
-  // The two DeepSeek families are Sequence PIPELINES, not alternations (see
-  // above). They are separate switch arms because they share no stage: V2 has
-  // seven, V3 has four, and neither one's classes appear in the other.
+  // The three Sequence-PIPELINE families are not alternations (see above).
+  // They are separate switch arms because they share no stage: V2 has seven,
+  // V3 has four, Flint three, and no stage's classes appear in another.
   if (pattern == SplitPattern::kDeepSeek) return PretokenizeDeepSeek(text);
   if (pattern == SplitPattern::kDeepSeekV3) return PretokenizeDeepSeekV3(text);
+  if (pattern == SplitPattern::kFlint) return PretokenizeFlint(text);
   // GPT-2's alternation differs in four of six rules, so it runs its own
   // scanner rather than threading more flags through the Qwen/Llama-3 one.
   if (pattern == SplitPattern::kGpt2) return PretokenizeGpt2(text);

@@ -1,0 +1,25 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/test_model_loader_gguf.cpp:231:
+TEST CASE:  a flint GGUF reaches ITS OWN builder through the dispatch
+
+./tests/vllm/test_model_loader_gguf.cpp:241: ERROR: CHECK( message.find("flint gguf: missing metadata key") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+./tests/vllm/test_model_loader_gguf.cpp:242: ERROR: CHECK( message.find("flint.embedding_length") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+./tests/vllm/test_model_loader_gguf.cpp:244: ERROR: CHECK( message.find("is not supported by this build") == std::string::npos ) is NOT correct!
+  values: CHECK( 26 == 18446744073709551615 )
+
+===============================================================================
+./tests/vllm/test_model_loader_gguf.cpp:264:
+TEST CASE:  FromModelDir rejects an unknown dense architecture before loading
+
+./tests/vllm/test_model_loader_gguf.cpp:282: ERROR: CHECK_THROWS_WITH_AS( LoadedEngine::FromModelDir(dir.path().string(), EngineParams{}), "Model architectures ['Gemma4ForCausalLM'] are not supported for now. Supported architectures: dict_keys(['BoundaryExtractor', 'ClmModel', 'Cohere2MoeForCausalLM', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', 'DeepseekV41ForCausalLM', 'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', 'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', 'Glm4ForCausalLM', 'Glm4MoeLiteForCausalLM', 'Glm5NextForConditionalGeneration', 'GlmMoeDsaForCausalLM', 'GraniteForCausalLM', 'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', 'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', 'Kolibri1ForCausalLM', 'LagunaForCausalLM', 'LayaModel', 'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', 'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', 'NemotronHForCausalLM', 'NemotronH_Nano_Omni_Reasoning_V3', 'NemotronH_Nano_VL_V2', 'NimbleModel', 'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', 'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', 'Phi3ForCausalLM', 'PhiForCausalLM', 'Qwen3ForCausalLM', 'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', 'Qwen3_5ForCausalLM', 'Qwen3_5ForConditionalGeneration', 'Qwen3_5MoeForCausalLM', 'Qwen3_5MoeForConditionalGeneration', 'Qwen4ExpForConditionalGeneration', 'SpanExtractor', 'StableLmForCausalLM', 'Tev1Model', 'XorModel'])", std::runtime_error ) threw a DIFFERENT exception! (contents: "Model architectures ['Gemma4ForCausalLM'] are not supported for now. Supported architectures: dict_keys(['BoundaryExtractor', 'ClmModel', 'Cohere2MoeForCausalLM', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', 'DeepseekV41ForCausalLM', 'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'FlintForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', 'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', 'Glm4ForCausalLM', 'Glm4MoeLiteForCausalLM', 'Glm5NextForConditionalGeneration', 'GlmMoeDsaForCausalLM', 'GraniteForCausalLM', 'InternLM2ForCausalLM', 'InternLM3ForCausalLM', 'KevModel', 'KimiK3ForConditionalGeneration', 'KimiLinearForCausalLM', 'Kolibri1ForCausalLM', 'LagunaForCausalLM', 'LayaModel', 'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', 'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', 'NemotronHForCausalLM', 'NemotronH_Nano_Omni_Reasoning_V3', 'NemotronH_Nano_VL_V2', 'NimbleModel', 'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', 'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', 'Phi3ForCausalLM', 'PhiForCausalLM', 'Qwen3ForCausalLM', 'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', 'Qwen3_5ForCausalLM', 'Qwen3_5ForConditionalGeneration', 'Qwen3_5MoeForCausalLM', 'Qwen3_5MoeForConditionalGeneration', 'Qwen4ExpForConditionalGeneration', 'SpanExtractor', 'StableLmForCausalLM', 'Tev1Model', 'XorModel'])")
+
+===============================================================================
+[doctest] test cases: 16 | 14 passed | 2 failed | 0 skipped
+[doctest] assertions: 71 | 67 passed | 4 failed |
+[doctest] Status: FAILURE!
