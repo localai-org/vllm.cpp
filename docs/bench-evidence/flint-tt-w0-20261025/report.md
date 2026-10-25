@@ -105,3 +105,8 @@ oracle-tight number W0 cannot reach.
 `green.txt`: 2/2 test cases, SUCCESS. The focused CPU-legal flint gates also
 pass in the same build: `test_flint_forward` and `test_flint_gguf`
 (785 s total, 2/2 passed).
+
+
+## PROVENANCE NOTE 2026-10-25 (reviewer minor)
+
+`red.txt` was captured on an uncommitted intermediate of the implementation: its `EXERCISED (counter 0 -> 1)` line and its refusal wording ('the W0 device forward is pending') match no committed code. The COMMITTED red is the refusal + `FlintTTForwardCalls() == 0` assertion pair, and the reviewer's own mutation run reproduces the true red (counter 0 -> 0, cases 1/2 failed). red.txt is retained as captured; this note is the correction.

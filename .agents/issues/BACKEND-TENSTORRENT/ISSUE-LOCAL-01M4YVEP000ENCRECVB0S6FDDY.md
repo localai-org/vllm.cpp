@@ -57,3 +57,14 @@ input-dependence is not improved upstream
 
 What settles it: a host-free ON/OFF re-measurement after the tt-metal rms_norm
 substrate is fixed, which is a P150 measurement.
+
+## Addendum 2026-10-25: the upstream filing is tt-metal#62339
+
+The rms_norm compute-config finding has an OPEN upstream filing:
+https://github.com/tenstorrent/tt-metal/issues/62339 (filed 2026-10-22 —
+the selection site documents no accuracy contract; default 0.9809 vs host
+1.0 on the captured rows). The Flint TT W0 device-vs-CPU baseline
+(rel_rms 2.58e-01, docs/bench-evidence/flint-tt-w0-20261025/) attributes
+its divergence to this same ~1% systematic bias compounding over 49
+layers, with the matmul arms clean at 1.9e-3 — the filing now carries a
+second independent model witness. No response upstream yet.
