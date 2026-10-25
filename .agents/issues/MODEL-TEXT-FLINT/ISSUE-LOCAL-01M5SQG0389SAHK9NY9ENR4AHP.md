@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M5SQG0389SAHK9NY9ENR4AHP
 Title: the Flint synthetic gate cannot detect a mis-sized attention output or an embedding dtype corruption
 Row: MODEL-TEXT-FLINT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-25
 Updated: 2026-10-25
-Closed: -
+Closed: 2026-10-25
 
 ## Problem
 
@@ -16,4 +16,4 @@ The wave-1 synthetic forward test used a config where hq*head_dim < hidden_size,
 
 ## Resolution
 
--
+Closed 2026-10-25: the two detector cases land in commit 58a7704d1 on row/FLINT-GATE-HARDEN, each proven red against its own fix-site mutation (docs/bench-evidence/flint-gate-harden-20261025/: mutation A SIGABRT, mutation B 16/16 isolated mismatches) and green on main.
