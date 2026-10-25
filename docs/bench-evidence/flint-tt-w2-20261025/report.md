@@ -14,13 +14,13 @@ operand dtypes as committed:
 | Site (flint_tt.cpp) | per layer | activation operand | weight | out |
 |---|---|---|---|---|
 | q/k/v proj (:465-467) | 3 | bf16 (`normed_dev`) | bf16 | bf16 |
-| o proj (:502) | 1 | bf16 (`ao_dev`) | bf16 | bf16 |
-| dense gate/up (:527-528) | 2 (dense layers 0-1) | bf16 | bf16 | bf16 |
-| dense down (:532) | 1 (dense layers) | bf16 | bf16 | bf16 |
-| router (:537) | 1 (47 MoE layers) | bf16 (`normed2_dev`) | bf16 | f32 |
-| expert gate/up/down (:581-586) | 3 x top-k (streamed) | bf16 | bf16 | bf16 |
-| shared gate/up/down (:595-600) | 3 | bf16 | bf16 | bf16 |
-| lm_head (:630) | 1 | bf16 (`fnorm_dev`) | bf16 | f32 |
+| o proj (:528) | 1 | bf16 (`ao_dev`) | bf16 | bf16 |
+| dense gate/up (:565-566) | 2 (dense layers 0-1) | bf16 | bf16 | bf16 |
+| dense down (:591) | 1 (dense layers) | bf16 | bf16 | bf16 |
+| router (:608) | 1 (47 MoE layers) | bf16 (`normed2_dev`) | bf16 | f32 |
+| expert gate/up/down (:652-657) | 3 x top-k (streamed) | bf16 | bf16 | bf16 |
+| shared gate/up/down (:666-671) | 3 | bf16 | bf16 | bf16 |
+| lm_head (:701) | 1 | bf16 (`fnorm_dev`) | bf16 | f32 |
 
 **There is NO f32-operand matmul in the model path.** The f32-OUT arms
 (router, lm_head) set `fp32_dest_acc_en` (tenstorrent_ops.cpp:60-92); their
