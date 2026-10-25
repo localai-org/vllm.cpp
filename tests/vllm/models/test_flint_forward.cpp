@@ -480,3 +480,138 @@ TEST_CASE("flint: the sigmoid router renormalises the top-k weights") {
   // renormalised top-2 output EQUAL to the top-1 output.
   CHECK(top2 == top1);
 }
+
+TEST_CASE("flint: attn_out is sized for the head layout, not the hidden "
+          "stream") {
+  // Regression for ISSUE-LOCAL-01M5Q1PS772CPTMYJ02AMVZ3Y0. The wave-1
+  // synthetic config had hq*dh < h, so sizing attn_out t*h went unnoticed.
+  // Here hq*dh = 16 > h = 4: every token writes 16 head values, and a t*h
+  // buffer (8 floats for t=2) cannot hold them — token 0's heads 1..3 land
+  // past their slots and the o_proj read consumes heap garbage.
+  //
+  // The invariant probed: the forward is causal and every per-row stage
+  // (RMSNorm, the projections, per-head attention over the causal prefix)
+  // is row-local, so row i of a t-token forward must be BITWISE equal to
+  // the forward of the first i+1 tokens alone. A mis-sized attn_out breaks
+  // row 0 itself: its head-tail values are written to slots that belong to
+  // the next row's block, so o_proj multiplies misplaced values.
+  FlintParams p = TinyParams();
+  p.hidden_size = 4;
+  p.num_attention_heads = 4;  // hq * dh = 16 > hidden = 4
+  p.num_key_value_heads = 2;
+  p.num_hidden_layers = 1;
+  p.layer_types = {"full_attention"};
+  p.no_rope_layer_indices = {0};
+  p.mlp_only_layers = {0};
+  REQUIRE(p.num_attention_heads * p.head_dim > p.hidden_size);
+
+  FlintWeights w = TinyWeights(p);
+  w.params = p;
+  const HfConfig c = TinyConfig();
+
+  const std::vector<float> two =
+      vllm::FlintModel::Forward({3, 5}, {0, 1}, w, c);
+  const std::vector<float> three =
+      vllm::FlintModel::Forward({3, 5, 7}, {0, 1, 2}, w, c);
+  for (float v : two) CHECK(std::isfinite(v));
+
+  // Row 0: token 3 alone vs token 3 first in the 2-token forward.
+  const std::vector<float> solo0 =
+      vllm::FlintModel::Forward({3}, {0}, w, c);
+  CHECK(std::vector<float>(two.begin(), two.begin() + p.vocab_size) == solo0);
+
+  // Row 1: the 2-token forward vs the 3-token forward — identical prefix.
+  CHECK(std::vector<float>(three.begin(), three.begin() + 2 * p.vocab_size) ==
+        two);
+}
+
+TEST_CASE("flint: the embedding lookup widens bf16 bits, it does not memcpy "
+          "them") {
+  // Regression for ISSUE-LOCAL-01M5QBGBM3Z7NT3D9TA0K1HT7T. The embedding
+  // row is bf16 bits; reading them as raw u16 into the f32 stream drops
+  // each value into the LOW half of the word (~1e-41 denormals). The
+  // epsilon-dominated RMSNorm then rescales the wrong pattern instead of
+  // the true values, so the logits diverge.
+  //
+  // The probe model is pure: one layer whose attention (q = v = 0) and
+  // dense MLP (all zero) contribute exactly zero, so the logits are a
+  // function of the embedding stream alone. The reference is recomputed
+  // here from the same tensors — bf16 widen, RMSNorm, bf16 matmul —
+  // without touching the production forward.
+  FlintParams p = TinyParams();
+  p.hidden_size = 4;
+  p.num_hidden_layers = 1;
+  p.layer_types = {"full_attention"};
+  p.no_rope_layer_indices = {0};
+  p.mlp_only_layers = {0};
+
+  FlintWeights w;
+  w.params = p;
+  // Token 1's row: bf16-exact values whose bit patterns are unmistakable.
+  const float row[4] = {1.0f, 0.5f, 0.25f, 0.125f};
+  uint16_t row_bits[4];
+  for (int i = 0; i < 4; ++i) {
+    uint32_t u;
+    std::memcpy(&u, &row[i], 4);
+    u += 0x7fff + ((u >> 16) & 1);
+    row_bits[i] = static_cast<uint16_t>(u >> 16);
+  }
+  w.embed_tokens = Zeros({p.vocab_size, p.hidden_size});
+  {
+    auto* d = reinterpret_cast<uint16_t*>(w.embed_tokens.bytes.data());
+    for (int64_t i = 0; i < p.hidden_size; ++i)
+      d[p.hidden_size + i] = row_bits[i];
+  }
+  w.final_norm = MakeBf16Const({p.hidden_size}, 1.0f);
+  w.lm_head = MakeBf16({p.hidden_size, p.vocab_size}, 2, 0.3f);
+  vllm::FlintLayerWeights l;
+  l.input_layernorm = MakeBf16Const({p.hidden_size}, 1.0f);
+  l.post_attention_layernorm = MakeBf16Const({p.hidden_size}, 1.0f);
+  l.attn.q_proj.w = Zeros({p.hidden_size, p.num_attention_heads * p.head_dim});
+  l.attn.k_proj.w = Zeros({p.hidden_size, p.num_key_value_heads * p.head_dim});
+  l.attn.v_proj.w = Zeros({p.hidden_size, p.num_key_value_heads * p.head_dim});
+  l.attn.o_proj = MakeLinear({p.num_attention_heads * p.head_dim, p.hidden_size}, 7);
+  l.attn.q_norm = MakeBf16Const({p.head_dim}, 1.0f);
+  l.attn.k_norm = MakeBf16Const({p.head_dim}, 1.0f);
+  l.attn.sinks = MakeBf16Const({p.num_attention_heads}, 1.0f);
+  l.dense_mlp.gate_proj.w = Zeros({p.hidden_size, 4});
+  l.dense_mlp.up_proj.w = Zeros({p.hidden_size, 4});
+  l.dense_mlp.down_proj.w = Zeros({4, p.hidden_size});
+  w.layers.push_back(std::move(l));
+
+  const HfConfig c = TinyConfig();
+  const std::vector<float> got = vllm::FlintModel::Forward({1}, {0}, w, c);
+
+  // Independent reference: widen -> RMSNorm (eps 1e-6, norm weight 1) ->
+  // f32 accumulate against lm_head, exactly the semantics the logits carry.
+  auto widen = [](uint16_t b) {
+    const uint32_t u = static_cast<uint32_t>(b) << 16;
+    float f;
+    std::memcpy(&f, &u, 4);
+    return f;
+  };
+  double ss = 0.0;
+  for (int64_t d = 0; d < p.hidden_size; ++d) {
+    const double xv = widen(row_bits[d]);
+    ss += xv * xv;
+  }
+  const float inv = static_cast<float>(1.0 / std::sqrt(ss / double(p.hidden_size) + p.rms_norm_eps));
+  float normed[4];
+  // The norm weight is the bf16 constant 1.0, which widens to exactly 1.0f.
+  for (int64_t d = 0; d < p.hidden_size; ++d) normed[d] = widen(row_bits[d]) * inv * 1.0f;
+  // bf16 round each normed value (round-to-nearest-even), as the layer does.
+  for (int64_t d = 0; d < p.hidden_size; ++d) {
+    uint32_t u;
+    std::memcpy(&u, &normed[d], 4);
+    u += 0x7fff + ((u >> 16) & 1);
+    normed[d] = widen(static_cast<uint16_t>(u >> 16));
+  }
+  const uint16_t* lm =
+      reinterpret_cast<const uint16_t*>(w.lm_head.bytes.data());
+  for (int64_t n = 0; n < p.vocab_size; ++n) {
+    float expect = 0.0f;
+    for (int64_t k = 0; k < p.hidden_size; ++k)
+      expect += normed[k] * widen(lm[k * p.vocab_size + n]);
+    CHECK(got[static_cast<size_t>(n)] == expect);
+  }
+}
