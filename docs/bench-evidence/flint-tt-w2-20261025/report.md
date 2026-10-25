@@ -1,0 +1,148 @@
+# Flint on Tenstorrent — W2: the ttnn::matmul f32-to-tf32 audit
+# (hypothesis KILLED; the layer-0 bisection is the deliverable)
+
+Row BACKEND-TENSTORRENT, spec `.agents/specs/flint-tt-w2.md`, issue
+`ISSUE-LOCAL-01M5T8070WQ8RJYXZXD5ZWN5KZ`. Branch `row/FLINT-TT-W2`, base
+`3090f069bda47a09e6ef809a86b0c8b61a4f21c6` (origin/main, fetched 2026-10-25).
+Date 2026-10-25.
+
+## 1. The audit (static, no code changes)
+
+Every `vt::Matmul` in `src/vllm/model_executor/models/flint_tt.cpp`, with
+operand dtypes as committed:
+
+| Site (flint_tt.cpp) | per layer | activation operand | weight | out |
+|---|---|---|---|---|
+| q/k/v proj (:465-467) | 3 | bf16 (`normed_dev`) | bf16 | bf16 |
+| o proj (:502) | 1 | bf16 (`ao_dev`) | bf16 | bf16 |
+| dense gate/up (:527-528) | 2 (dense layers 0-1) | bf16 | bf16 | bf16 |
+| dense down (:532) | 1 (dense layers) | bf16 | bf16 | bf16 |
+| router (:537) | 1 (47 MoE layers) | bf16 (`normed2_dev`) | bf16 | f32 |
+| expert gate/up/down (:581-586) | 3 x top-k (streamed) | bf16 | bf16 | bf16 |
+| shared gate/up/down (:595-600) | 3 | bf16 | bf16 | bf16 |
+| lm_head (:630) | 1 | bf16 (`fnorm_dev`) | bf16 | f32 |
+
+**There is NO f32-operand matmul in the model path.** The f32-OUT arms
+(router, lm_head) set `fp32_dest_acc_en` (tenstorrent_ops.cpp:60-92); their
+INPUTS are still bf16. The tf32 operand-truncation bound (~2^-11 on a
+truncated operand) therefore has ZERO in-model sites. Compounding count: 0.
+
+## 2. The measurement (micro-probe, committed)
+
+`tests/test_flint_tt_w2_micro` (scratch TU, the W1 micro pattern), identical
+bf16-rounded operand VALUES staged kF32 (arm F) vs kBF16 (arm B), vs a
+host-double reference. P150, 2026-10-25, log `micro-all.log`:
+
+- Arms F and B are BIT-IDENTICAL at every shape tested (M in {1,5,8} x
+  K=N in {64,512,2560}, plus 2048x512 / 512x2048): rel_rms 2.565e-2 to
+  2.635e-2, max_abs 3.1e-3 to 2.9e-2. A bf16-valued f32 operand truncates
+  to tf32 EXACTLY, so no operand truncation is measurable — the loss is
+  operand-dtype-INDEPENDENT.
+- The deviation is K- and M-INDEPENDENT (K=64 equals K=2560): not an
+  accumulating-reduction signature.
+- Decomposition probes: multiply-only (x = e_k) puts rel_rms 2.39e-2 on a
+  SINGLE product of two exact bf16 values; accumulate-only 2.53e-2; small
+  INTEGERS are bit-exact (probe C, max_abs=0).
+- Probes D (MatmulBT) and E (kMatmul bf16-OUT) returned UNCORRELATED output
+  (rel_rms ~1.2) on the same inputs where the f32-out arm is clean-ish —
+  recorded as an unresolved micro-vs-model anomaly; the in-model bf16-out
+  projections are demonstrably NOT garbage (layer-0 post-attn drift is
+  +7.1%, and q/k/v stream energies match CPU within 0.3%), so this is a
+  micro-side effect (suspect: the config-less ttnn path) flagged for the
+  substrate row, not a model finding.
+
+The measured ~2.5e-2 per-op vs host double is ~23x the tf32 operand bound
+and applies to the bf16 path the model actually runs. The substrate record's
+"ttnn::matmul truncates f32 operands to tf32" is NOT the mechanism that
+prices the flint gap.
+
+## 3. The bisection (the deliverable)
+
+Instrument: env-gated layer-0 stage dumps (sum, sumsq) in BOTH arms behind
+the existing FLINT_TT_W0_DUMP / FLINT_CPU_DUMP flags (committed; commit
+36b1c6868). Prompt "The capital of France is" (5 tokens), the W0 prompt:
+
+| stage | TT sum | CPU sum | sum dev | sumsq dev |
+|---|---|---|---|---|
+| embed | 3.409978 | 3.409978 | IDENTICAL | — |
+| q | 167.4218 | 161.4769 | +3.7% | -0.10% |
+| k | -51.0555 | -51.9903 | -1.8% | -0.28% |
+| v | 45.8391 | 42.2895 | +8.4% | -0.20% |
+| attn_out | 207.3478 | 201.4785 | +2.9% | -0.09% |
+| ao | 10.0571 | 9.1589 | +9.8% | -0.01% |
+| post-attn x | 13.4828 | 12.5849 | +7.1% | — |
+| g (dense gate_proj) | **-14168.0** | **+15.3** | ~1000x | **20.3x** |
+| u | 113.72 | 89.42 | +27% | -0.5% |
+| a (silu*u) | 12.71 | 15.26 | -17% | -0.8% |
+| ff | -11.7153 | -11.7593 | -0.4% | -0.6% |
+| post-mlp x | 1.7699 | 0.8273 | +114% | — |
+| logits tok0 | -1942146.60 | -1956081.93 | -0.7% | — |
+
+Reading:
+
+1. **The divergence enters at the FIRST post-norm op** (the q/k/v
+   projections). The streams' ENERGIES match CPU within 0.3% — the per-op
+   numerics noise is ~0.1-0.3%-of-rms class — but the stage SUMS (tiny,
+   cancellation-dominated) move 2-8%. Both upstream suspects live exactly
+   here: the RmsNorm row scale (the W1 record: 0.9899-1.0077
+   input-dependent on the pinned arm) and the matmul per-op noise of §2.
+2. **The dense gate_proj is an outlier generator on device**: 20x the
+   CPU stream energy, with extreme NEGATIVE outliers that silu mostly
+   suppresses (a lands within 17%; ff RE-CONVERGES to -0.4%). This is a
+   real, localised device defect the micro's ~2.5e-2 per-op noise does not
+   explain at its face value — it is the next site to chase, with the W1
+   methodology, ON THE gate/up STAGING of the dense MLP.
+3. **The post-mlp divergence (+114% on a small residual) is entirely
+   inherited from post-attn (+7.1%)**, not generated by the MLP: ff matches
+   to 0.4%. The logits rel_rms 2.579e-1 accumulates the post-attn bias
+   through 49 layers.
+
+## 4. Fix decision
+
+Option (c) of the spec — the pre-audit hypothesis died; no forced fix:
+
+- No f32-exact matmul composition exists on this pin (the substrate record:
+  ttnn::sum is the tf32 tile-reduce; no SFPU matmul arm), so option (b)'s
+  "route router/lm_head through an f32-exact composition" has no lever.
+- Option (a) (round to bf16 where the CPU reference rounds) is already the
+  committed state: every matmul operand IS bf16.
+- The measured truncation is recorded as the open substrate defect with its
+  bound: **ttnn::matmul on this pin carries an operand-dtype-independent
+  ~2.5e-2 rel_rms per op vs host double (~2^-5.3, ~23x the tf32 operand
+  bound), multiply-path dominated, integers exact.** Fixing it is substrate
+  work (a full-precision matmul arm), outside this wave.
+
+## 5. Before/after (honest)
+
+- W0 gate (`tests/test_flint_tt_w0`, FLINT_TT_W0_MODEL=
+  /mnt/models/flint-GGUF/flint-Q4_K_M.gguf, dumps on): first-token logits
+  **max_abs=3.200e+01 rms=5.930e+00 rel_rms=2.579e-01** (n=750720) —
+  byte-for-byte the W0 baseline. No fix landed, so the number is unchanged
+  and the W0 band is NOT re-tightened. Full log `w0-after.log`.
+- Kolibri device token gate: NOT run — it is owed only on a fix leg; no fix
+  landed.
+
+## 6. Recipe and environment
+
+- Worktree /tmp/flint-tt-w2, build /tmp/flint-tt-w2-bld (`-G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DVLLM_CPP_TENSTORRENT=ON` — AUTO silently
+  omits the device tests; `taskset -c 0-31 ninja -j 32`).
+- Device: the LOCAL P150, every run under `exec 9>$HOME/gpu.lock;
+  flock -x 9`, `nice -n 5`; luwen reset + 15 s before the first run; pinned
+  substrate: TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/
+  tt-metalium, TT_METAL_HOME=~/Sources/tt/tt-metal-pin,
+  LD_LIBRARY_PATH=/tmp/umdtrial-install/lib64:/tmp/umdtrial-install/
+  libexec/tt-metalium (env-tt-common.sh sourced for completeness, its
+  LD_LIBRARY_PATH overridden — see kolibri1-tt-b2bi-fwd-20261008.md §1).
+- Shared box; no other GPU work taken during the runs.
+
+## 7. Deviations
+
+- W1 (mine/row/TT-RMSNORM-W1, 7305b695e) is NOT in origin/main at this
+  base despite the wave's briefing saying it landed; this wave measured on
+  the clean W0 base and says so.
+- The bisection instrument (stage dumps in both forwards) is committed
+  rather than scratch: it is env-gated and is the reusable layer-0
+  instrument the next site chase needs.
+- The micro's D/E anomaly (uncorrelated output on the config-less ttnn
+  arms) is unresolved and recorded in §2.
