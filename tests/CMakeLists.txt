@@ -267,6 +267,11 @@ if(VLLM_CPP_TENSTORRENT)
   # docs/bench-evidence/flint-tt-w0-20261025/).
   vllm_cpp_add_test(test_flint_tt_w0 vllm/models/test_flint_tt_w0.cpp)
   target_include_directories(test_flint_tt_w0 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH W2 diagnostic (operator-run under the gpu.lock mutex, evidence in
+  # docs/bench-evidence/flint-tt-w2-20261025/): the ttnn::matmul f32-to-tf32
+  # operand micro-probe.
+  vllm_cpp_add_test(test_flint_tt_w2_micro vllm/models/test_flint_tt_w2_micro.cpp)
+  target_include_directories(test_flint_tt_w2_micro PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # B2b-i first slice (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b
   # addendum): the resident staging plan's host-side gates (run under ctest
   # with NO card) plus the device bring-up leg (card + VT_KOLIBRI1_TT_B2I_

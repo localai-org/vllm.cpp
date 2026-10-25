@@ -382,6 +382,20 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
     MatmulBf16(normed.data(), lw.attn.q_proj.w, t, q.data());
     MatmulBf16(normed.data(), lw.attn.k_proj.w, t, k.data());
     MatmulBf16(normed.data(), lw.attn.v_proj.w, t, v.data());
+    if (cpu_dump && layer == 0) {
+      auto stage = [](const char* tag, const std::vector<float>& z) {
+        double s = 0.0, sq = 0.0;
+        for (float w2 : z) {
+          s += w2;
+          sq += static_cast<double>(w2) * w2;
+        }
+        std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                     tag, s, sq);
+      };
+      stage("q", q);
+      stage("k", k);
+      stage("v", v);
+    }
 
     // Per-head q/k RMSNorm over the head dim, BEFORE RoPE. Kept f32 past the
     // norm (the head stream; the score path is the architecture's own f32).
@@ -452,10 +466,34 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
         }
       }
       for (float& val : attn_out) val = Bf16(ToBf16(val));
+      if (cpu_dump && layer == 0) {
+        auto stage = [](const char* tag, const std::vector<float>& z) {
+          double s = 0.0, sq = 0.0;
+          for (float w2 : z) {
+            s += w2;
+            sq += static_cast<double>(w2) * w2;
+          }
+          std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                       tag, s, sq);
+        };
+        stage("attn_out", attn_out);
+      }
     }
 
     std::vector<float> ao(static_cast<size_t>(t) * h);
     MatmulBf16(attn_out.data(), lw.attn.o_proj.w, t, ao.data());
+    if (cpu_dump && layer == 0) {
+      auto stage = [](const char* tag, const std::vector<float>& z) {
+        double s = 0.0, sq = 0.0;
+        for (float w2 : z) {
+          s += w2;
+          sq += static_cast<double>(w2) * w2;
+        }
+        std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                     tag, s, sq);
+      };
+      stage("ao", ao);
+    }
     for (int64_t i = 0; i < t * h; ++i)
       x[static_cast<size_t>(i)] =
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ao[static_cast<size_t>(i)]));
@@ -482,7 +520,33 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
             u[static_cast<size_t>(i)];
       std::vector<float> gi(g);
       for (float& gv : gi) gv = Bf16(ToBf16(gv));
+      if (cpu_dump && layer == 0) {
+        auto stage = [](const char* tag, const std::vector<float>& z) {
+          double s = 0.0, sq = 0.0;
+          for (float w2 : z) {
+            s += w2;
+            sq += static_cast<double>(w2) * w2;
+          }
+          std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                       tag, s, sq);
+        };
+        stage("g", g);
+        stage("u", u);
+        stage("a", g);  // the CPU arm fuses silu*u in place into g
+      }
       MatmulBf16(gi.data(), lw.dense_mlp.down_proj.w, t, ff.data());
+      if (cpu_dump && layer == 0) {
+        auto stage = [](const char* tag, const std::vector<float>& z) {
+          double s = 0.0, sq = 0.0;
+          for (float w2 : z) {
+            s += w2;
+            sq += static_cast<double>(w2) * w2;
+          }
+          std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                       tag, s, sq);
+        };
+        stage("ff", ff);
+      }
     } else {
       const int64_t e = p.num_experts;
       const int64_t inter = p.moe_intermediate_size;

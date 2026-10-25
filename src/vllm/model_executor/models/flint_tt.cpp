@@ -468,6 +468,20 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     q = DownloadBf16AsF32(d, q_dev);
     k = DownloadBf16AsF32(d, k_dev);
     v = DownloadBf16AsF32(d, v_dev);
+    if (DumpOn() && layer == 0) {
+      auto stage = [](const char* tag, const std::vector<float>& z) {
+        double s = 0.0, sq = 0.0;
+        for (float w2 : z) {
+          s += w2;
+          sq += static_cast<double>(w2) * w2;
+        }
+        std::fprintf(stderr, "[FLINT-TT] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                     tag, s, sq);
+      };
+      stage("q", q);
+      stage("k", k);
+      stage("v", v);
+    }
 
     // Host leg: per-head q/k RMSNorm BEFORE RoPE (the CPU reference's own
     // head_norm body, flint.cpp:381-392).
@@ -492,6 +506,18 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
                    dh, tl.is_sliding, p.sliding_window, scale,
                    attn_out.data());
 
+    if (DumpOn() && layer == 0) {
+      auto stage = [](const char* tag, const std::vector<float>& z) {
+        double s = 0.0, sq = 0.0;
+        for (float w2 : z) {
+          s += w2;
+          sq += static_cast<double>(w2) * w2;
+        }
+        std::fprintf(stderr, "[FLINT-TT] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                     tag, s, sq);
+      };
+      stage("attn_out", attn_out);
+    }
     // o_proj on device: attn_out is bf16 (the CPU reference rounds it too),
     // output f32.
     std::vector<uint16_t> ao_bits(static_cast<size_t>(t) * hq * dh);
@@ -501,6 +527,18 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     DBuf aoout_dev(d, vt::DType::kBF16, {t, h});
     vt::Matmul(d.q, aoout_dev.t(), ao_dev.t(), tl.ow.t());
     ao = DownloadBf16AsF32(d, aoout_dev);
+    if (DumpOn() && layer == 0) {
+      auto stage = [](const char* tag, const std::vector<float>& z) {
+        double s = 0.0, sq = 0.0;
+        for (float w2 : z) {
+          s += w2;
+          sq += static_cast<double>(w2) * w2;
+        }
+        std::fprintf(stderr, "[FLINT-TT] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                     tag, s, sq);
+      };
+      stage("ao", ao);
+    }
     for (int64_t i = 0; i < t * h; ++i)
       x[static_cast<size_t>(i)] =
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ao[static_cast<size_t>(i)]));
@@ -528,9 +566,42 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       vt::Matmul(d.q, u.t(), normed2_dev.t(), tl.up.t());
       DBuf a(d, vt::DType::kBF16, {t, tl.dense_inter});
       vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
+      if (DumpOn() && layer == 0) {
+        auto dload = [&d](DBuf& b) {
+          std::vector<uint16_t> bits(b.bytes() / 2);
+          b.Download(d, bits.data());
+          std::vector<float> z(bits.size());
+          for (size_t i = 0; i < bits.size(); ++i) z[i] = Bf16(bits[i]);
+          return z;
+        };
+        auto stage2 = [](const char* tag, const std::vector<float>& z) {
+          double s = 0.0, sq = 0.0;
+          for (float w2 : z) {
+            s += w2;
+            sq += static_cast<double>(w2) * w2;
+          }
+          std::fprintf(stderr, "[FLINT-TT] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                       tag, s, sq);
+        };
+        stage2("g", dload(g));
+        stage2("u", dload(u));
+        stage2("a", dload(a));
+      }
       DBuf ff_dev(d, vt::DType::kBF16, {t, h});
       vt::Matmul(d.q, ff_dev.t(), a.t(), tl.down.t());
       ff = DownloadBf16AsF32(d, ff_dev);
+      if (DumpOn() && layer == 0) {
+        auto stage = [](const char* tag, const std::vector<float>& z) {
+          double s = 0.0, sq = 0.0;
+          for (float w2 : z) {
+            s += w2;
+            sq += static_cast<double>(w2) * w2;
+          }
+          std::fprintf(stderr, "[FLINT-TT] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+                       tag, s, sq);
+        };
+        stage("ff", ff);
+      }
     } else {
       // Router on device, f32 out (the score path's wideness).
       DBuf rt_dev(d, vt::DType::kF32, {t, p.num_experts});
