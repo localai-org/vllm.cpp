@@ -955,6 +955,20 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
     MESSAGE("with_res=" << with_res << " sum_cpu=" << sc << " sum_tt=" << st
                         << " ratio=" << (sc != 0 ? st / sc : 0.0)
                         << " max_abs=" << mad);
+    // THE EXACTNESS GATE (W1 review minor): the micro previously printed
+    // MESSAGEs only, so the exactness claim rested on observed output, not
+    // a gate. The DEFAULT composed arm must be BIT-EXACT against the CPU
+    // arm here; the pinned ttnn::rms_norm arm (VT_TT_RMSNORM_TTNN=1) is the
+    // recorded red (ratio 0.99, hundreds of differing elements). Run under
+    // the default so the gate binds the shipped arm.
+    if (std::getenv("VT_TT_RMSNORM_TTNN") == nullptr) {
+      CHECK_MESSAGE(mad == 0.0,
+                    "device rms_norm is not bit-exact vs the CPU arm: max_abs="
+                        << mad);
+      CHECK_MESSAGE(ndiff == 0,
+                    "device rms_norm differs from CPU on " << ndiff
+                                                           << " elements");
+    }
     if (micro_in != nullptr && micro_in[0] != '\0') {
       std::vector<float> outv(static_cast<size_t>(d));
       for (int64_t i = 0; i < d; ++i)

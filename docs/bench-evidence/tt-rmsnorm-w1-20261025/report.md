@@ -67,3 +67,19 @@ the arms, the in-model reachability proof, and the flint A/B; the
 coordinator completed the kolibri A/B, committed the implementation
 verbatim (7305b695e), and wrote this report from the logs. The fresh
 review is still owed on the whole unit.
+
+## REVIEW ADDENDUM (2026-10-25, reviewer minors discharged)
+
+- BAND DEFERRAL STATED: the W0 gate band (test_flint_tt_w0.cpp:280-281,
+  max_abs<64 / rel_rms<0.5) is deliberately NOT tightened by this change —
+  the honest baseline is unchanged, so tightening now would only dress the
+  number; the band tightens when W2 (the matmul tf32 suspect) closes and
+  the model-level distance actually drops.
+- RAW LOGS PRESERVED: w1-kolibri-after.log, w1-kolibri-ttnn.log and the
+  Flint A/B green.txt are committed beside this report; /tmp paths do not
+  survive a reboot.
+- BUILD RECIPE PINNED: configure with VLLM_CPP_TENSTORRENT=ON — the AUTO
+  setting silently omits the device model tests.
+- ISSUE RECORDS: the A/B falsification is recorded in the owning issues
+  (see the records commit); ISSUE-LOCAL-01M4YVEP000ENCRECVB0S6FDDY carries
+  the dated entry.

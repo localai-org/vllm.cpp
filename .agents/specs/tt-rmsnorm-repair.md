@@ -103,3 +103,12 @@ provenance if route B.
 
 One pull request (repository default; no recorded developer preference for
 this row).
+
+## Owed
+
+- The W0 gate band (max_abs<64 / rel_rms<0.5) stays untightened until W2
+  (the matmul f32->tf32 operand suspect) closes; tightening now would dress
+  an unchanged number.
+- W2: audit the device forward's matmul operand dtypes against the tf32
+  truncation; the W1 A/B falsified the rms_norm attribution, so the model
+  gap's driver is still open.

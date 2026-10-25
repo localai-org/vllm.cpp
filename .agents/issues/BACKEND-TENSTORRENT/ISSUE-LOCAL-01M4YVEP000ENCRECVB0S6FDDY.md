@@ -68,3 +68,15 @@ the selection site documents no accuracy contract; default 0.9809 vs host
 its divergence to this same ~1% systematic bias compounding over 49
 layers, with the matmul arms clean at 1.9e-3 — the filing now carries a
 second independent model witness. No response upstream yet.
+
+## Addendum 2026-10-25: the W1 A/B falsifies the rms_norm attribution
+
+The W1 repair (row/TT-RMSNORM-W1, commits 7305b695e + cf9af0791) makes the
+device rms_norm bit-exact per-op (3D-broadcast delivery of the composed f32
+chain; every captured in-model row ratio=1, max_abs=0) — and the
+MODEL-LEVEL numbers do not move: Flint W0 rel_rms 2.579e-1 -> 2.568e-1,
+kolibri device token gate 3/141 both arms (5/40 vs 6/42 hard/instr flips).
+The bias was real and is now fixed; it was NOT the driver of the model
+divergence. The named next suspect is the ttnn::matmul f32->tf32 operand
+truncation (the gdn record, b67b30fd). This issue stays open for the
+substrate norm record; the model-gap hunt moves to W2.

@@ -1,0 +1,175 @@
+2026-10-25 09:28:56.027 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-25 09:28:56.027 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-25 09:28:56.028 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-25 09:28:56.028 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-25 09:28:56.031 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-25 09:28:56.031 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-25 09:28:56.069 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-25 09:28:56.069 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-25 09:28:56.069 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-25 09:28:56.069 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-25 09:28:56.070 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-25 09:28:56.072 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[flint-tt-w0] resident=3871748096 B (3.606 GiB) expert_tier=75698798592 B (70.500 GiB) streamed/layer=37748736 B dense=2 moe=47 sliding=35 tensors=485
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-25 09:41:57.140 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-25 09:41:57.140 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-25 09:41:57.140 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-25 09:41:57.140 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-25 09:41:57.140 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-25 09:41:57.814 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+[FLINT-TT] embed sum=3.409978
+2026-10-25 09:41:59.007 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.007 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.007 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.007 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.019 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.019 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.019 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.019 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.034 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.034 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.034 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:41:59.034 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=13.482791
+[FLINT-TT] layer 0 post-mlp x sum=1.769863
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[flint-tt-w0] dispatch: the kTENSTORRENT case was EXERCISED (counter 0 -> 1)
+[FLINT-CPU] embed sum=3.409978
+[FLINT-CPU] layer 0 post-attn x sum=12.584867
+[FLINT-CPU] layer 0 post-mlp x sum=0.827251
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[flint-tt-w0] first-token logits: max_abs=3.200e+01 rms=5.930e+00 rel_rms=2.579e-01 (n=750720)
+[FLINT-TT] embed sum=3.409978
+[FLINT-TT] layer 0 post-attn x sum=13.482791
+[FLINT-TT] layer 0 post-mlp x sum=1.769863
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=3.409978
+[FLINT-CPU] layer 0 post-attn x sum=12.584867
+[FLINT-CPU] layer 0 post-mlp x sum=0.827251
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=7.688625
+2026-10-25 09:42:15.276 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.276 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.276 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.276 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.281 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.281 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.281 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:15.281 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=16.984839
+[FLINT-TT] layer 0 post-mlp x sum=2.628510
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=-5.511683
+[FLINT-CPU] layer 0 post-attn x sum=7.642770
+[FLINT-CPU] layer 0 post-mlp x sum=-0.023287
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=11.967273
+2026-10-25 09:42:23.961 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.961 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.961 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.961 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.967 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.967 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.967 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:23.967 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=19.915570
+[FLINT-TT] layer 0 post-mlp x sum=3.302174
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=-7.286459
+[FLINT-CPU] layer 0 post-attn x sum=9.592820
+[FLINT-CPU] layer 0 post-mlp x sum=0.157196
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=16.245920
+2026-10-25 09:42:34.042 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.042 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.042 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.042 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.047 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.047 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.047 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:34.047 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=22.526013
+[FLINT-TT] layer 0 post-mlp x sum=3.828192
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=-3.007812
+[FLINT-CPU] layer 0 post-attn x sum=12.963433
+[FLINT-CPU] layer 0 post-mlp x sum=0.906047
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=20.524568
+2026-10-25 09:42:45.571 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.571 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.571 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.571 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.576 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.576 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.576 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:45.576 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=24.986268
+[FLINT-TT] layer 0 post-mlp x sum=4.295452
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=1.879558
+[FLINT-CPU] layer 0 post-attn x sum=15.758683
+[FLINT-CPU] layer 0 post-mlp x sum=2.046695
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=24.803215
+2026-10-25 09:42:58.531 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.531 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.531 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.531 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.537 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.537 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.537 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:42:58.537 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=45.608292
+[FLINT-TT] layer 0 post-mlp x sum=-14.880823
+[FLINT-TT] logits tok0 sum=-4759220.416180
+[FLINT-CPU] embed sum=6.243152
+[FLINT-CPU] layer 0 post-attn x sum=17.974587
+[FLINT-CPU] layer 0 post-mlp x sum=2.324341
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=31.613708
+2026-10-25 09:43:13.006 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.006 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.006 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.006 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.011 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.011 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.011 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:13.011 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=32.934541
+[FLINT-TT] layer 0 post-mlp x sum=7.182328
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=11.491019
+[FLINT-CPU] layer 0 post-attn x sum=22.009459
+[FLINT-CPU] layer 0 post-mlp x sum=3.170821
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=35.892356
+2026-10-25 09:43:28.628 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.628 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.628 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.628 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.633 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.633 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.633 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 09:43:28.633 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] layer 0 post-attn x sum=35.414521
+[FLINT-TT] layer 0 post-mlp x sum=7.650210
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=16.059411
+[FLINT-CPU] layer 0 post-attn x sum=23.866607
+[FLINT-CPU] layer 0 post-mlp x sum=3.987708
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[flint-tt-w0] greedy chain match=1/8 dev=[ 269 269 269 269 269 140759 269 269 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+===============================================================================
+[doctest] test cases:  2 |  2 passed | 0 failed | 0 skipped
+[doctest] assertions: 18 | 18 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-25 09:43:46.290 | info     |    BuildKernels | JIT cache stats: 112/112 hits (100.0%) [112 cached, 297 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-25 09:43:46.290 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-25 09:43:46.300 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-25 09:43:46.300 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-25 09:43:46.376 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-25 09:43:46.376 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-25 09:43:46.376 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)
