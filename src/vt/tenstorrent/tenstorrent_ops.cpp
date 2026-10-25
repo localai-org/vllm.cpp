@@ -681,31 +681,74 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
     }
   }
 
-  // The composed f32 arm is the micro-test-clean one but its row broadcast
-  // does not survive the model's tensor geometry on this stack (binary_ng
-  // refuses the subtile), so the pinned ttnn::rms_norm stays the device
-  // default; VT_TT_RMSNORM_COMPOSED=1 selects the composed arm for A/B.
-  static const bool rms_composed = [] {
+  // W1 REPAIR (row BACKEND-TENSTORRENT): the device default is the composed
+  // f32 chain (x^2 -> mean -> +eps -> rsqrt -> scale -> gamma) with the row
+  // scale delivered as a 3D-broadcast multiply — inv reshaped [rows,1,1]
+  // against norm [rows,1,d], the tenstorrent_gdn.cpp delta-rule pattern. It
+  // is BIT-EXACT against the CPU arm on every captured in-model row
+  // (normrow-000..007 plus the random row: sum ratio 1, max_abs 0, 0
+  // differing elements), where the pinned ttnn::rms_norm reads 0.9899-1.0077
+  // input-dependently. The refused plain 2D multiply leaked the padded-tile
+  // garbage of the [rows,1] operand into every column; the 3D reshape hits a
+  // broadcast path that does not. VT_TT_RMSNORM_COMPOSED selects the row-
+  // scale delivery for A/B (default 2):
+  //   1 repeat+same-shape multiply  (refused in-model: binary_ng "Invalid
+  //     subtile broadcast type" — kept only to prove reachability)
+  //   2 3D-broadcast multiply       (the default)
+  //   3 ROW_MAJOR inv multiply      (no tile padding to leak; also exact)
+  //   4 matmul outer product        (diagnostic: the gdn record shows matmul
+  //     MACs truncate f32 to tf32 on this pin, so this arm is ~2^-11-bounded)
+  // The pinned ttnn::rms_norm arm stays behind VT_TT_RMSNORM_TTNN=1.
+  static const int rms_composed = [] {
+    if (std::getenv("VT_TT_RMSNORM_TTNN") != nullptr &&
+        std::getenv("VT_TT_RMSNORM_TTNN")[0] == '1')
+      return 0;
     const char* e = std::getenv("VT_TT_RMSNORM_COMPOSED");
-    return e != nullptr && e[0] == '1';
+    return e != nullptr && *e ? std::atoi(e) : 2;
   }();
-  if (!rms_composed) {
+  if (rms_composed == 0) {
     dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
   } else {
+    // Exact f32 reduce: ttnn::mean over the H dim is the accurate SFPU full
+    // fp32 path; ttnn::sum lands on the tf32 FPU tile-reduce on this pin
+    // (the tenstorrent_gdn.cpp record, commit b67b30fd).
     ttnn::Tensor sq = ttnn::multiply(norm_f32, norm_f32);
-    ttnn::Tensor ssq = ttnn::sum(sq, ttsl::SmallVector<int>{1}, true);
-    ttnn::Tensor ms = ttnn::multiply(
-        ssq, 1.0f / static_cast<float>(d));
+    ttnn::Tensor ms = ttnn::mean(sq, ttsl::SmallVector<int>{1},
+                                 /*keep_dim=*/true);
     ttnn::Tensor inv = ttnn::rsqrt(ttnn::add(ms, args.eps));
-    // The plain multiply of [rows,cols] by [rows,1] and the bcast kernel
-    // both mis-broadcast on this stack (the micro-test measured ratio 1.019
-    // through BcastOpDim::W, and the gate recorded sporadic 1e37 garbage
-    // logits through the plain multiply). Materialize the row scale with an
-    // exact data-movement replication instead: repeat([rows,1] -> [rows,cols])
-    // and a same-shape f32 multiply.
-    dev_y = ttnn::multiply(
-        norm_f32,
-        ttnn::repeat(inv, ttnn::Shape({rows, d})));
+    switch (rms_composed) {
+      case 1:
+        dev_y = ttnn::multiply(
+            norm_f32,
+            ttnn::repeat(inv, ttnn::Shape({rows, d})));
+        break;
+      case 2:
+        dev_y = ttnn::reshape(ttnn::multiply(
+                                  ttnn::reshape(norm_f32,
+                                                ttnn::Shape({rows, 1, d})),
+                                  ttnn::reshape(inv,
+                                                ttnn::Shape({rows, 1, 1}))),
+                              ttnn::Shape({rows, d}));
+        break;
+      case 3:
+        dev_y = ttnn::multiply(
+            norm_f32,
+            ttnn::to_layout(inv, ttnn::Layout::ROW_MAJOR));
+        break;
+      default: {
+        // NOTE the gdn record: matmul MACs truncate f32 to tf32 on this pin,
+        // so this arm is bounded ~2^-11 — kept as a diagnostic, not a
+        // candidate default (both operands must be TILE for the matmul).
+        ttnn::Tensor inv_t =
+            ttnn::to_layout(inv, ttnn::Layout::TILE);
+        ttnn::Tensor ones_t = ttnn::ones(
+            ttnn::Shape({1, d}), /*dtype=*/std::nullopt,
+            /*layout=*/ttnn::Layout::TILE, /*device=*/device,
+            /*memory_config=*/std::nullopt);
+        dev_y = ttnn::multiply(norm_f32, ttnn::matmul(inv_t, ones_t));
+        break;
+      }
+    }
     dev_y = ttnn::multiply(dev_y, wf32);
   }
   static const bool out_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
