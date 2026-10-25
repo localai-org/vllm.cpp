@@ -29,6 +29,7 @@
 // f32 wideness is the architecture's own, named in the spec.
 
 #include "vllm/model_executor/models/flint.h"
+#include "vllm/model_executor/models/flint_tt.h"
 #include "vllm/model_executor/models/flint_gguf_weights.h"  // the GGUF arm
 
 #include <algorithm>
@@ -340,6 +341,10 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
   const int64_t hkv = p.num_key_value_heads;
   const int64_t dh = p.head_dim;
   const float scale = 1.0f / std::sqrt(static_cast<float>(dh));
+  // The W0 device-vs-CPU dump (spec .agents/specs/flint-tenstorrent.md): the
+  // same three stage sums the TT forward prints behind FLINT_TT_W0_DUMP,
+  // tagged [FLINT-CPU], so the like-for-like distance is readable per stage.
+  const bool cpu_dump = std::getenv("FLINT_CPU_DUMP") != nullptr;
 
   std::vector<float> x(static_cast<size_t>(t) * h);  // hidden stream
   {
@@ -354,6 +359,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
       for (int64_t d = 0; d < h; ++d)
         x[static_cast<size_t>(i) * h + d] = Bf16(emb[tok * h + d]);
     }
+  }
+  if (cpu_dump) {
+    double s = 0.0;
+    for (float v : x) s += v;
+    std::fprintf(stderr, "[FLINT-CPU] embed sum=%.6f\n", s);
   }
 
   std::vector<float> normed(static_cast<size_t>(t) * h);
@@ -449,6 +459,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
     for (int64_t i = 0; i < t * h; ++i)
       x[static_cast<size_t>(i)] =
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ao[static_cast<size_t>(i)]));
+    if (cpu_dump && layer == 0) {
+      double s = 0.0;
+      for (float v : x) s += v;
+      std::fprintf(stderr, "[FLINT-CPU] layer 0 post-attn x sum=%.6f\n", s);
+    }
 
     // ---- MLP / MoE: out = mlp(ln2(h)) + h ----
     RmsNormBf16(x.data(), lw.post_attention_layernorm, t, h, p.rms_norm_eps,
@@ -543,6 +558,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
     for (int64_t i = 0; i < t * h; ++i)
       x[static_cast<size_t>(i)] =
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ff[static_cast<size_t>(i)]));
+    if (cpu_dump && layer == 0) {
+      double s = 0.0;
+      for (float v : x) s += v;
+      std::fprintf(stderr, "[FLINT-CPU] layer 0 post-mlp x sum=%.6f\n", s);
+    }
   }
 
   // Final norm + untied lm_head. Logits accumulate f32 and STAY f32 (the
@@ -560,6 +580,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           logits[static_cast<size_t>(i) * vocab + n] += xv * Bf16(lrow[n]);
       }
     }
+  }
+  if (cpu_dump) {
+    double s = 0.0;
+    for (int64_t n = 0; n < vocab; ++n) s += logits[static_cast<size_t>(n)];
+    std::fprintf(stderr, "[FLINT-CPU] logits tok0 sum=%.6f\n", s);
   }
   return logits;
 }
@@ -584,8 +609,21 @@ class FlintLoadedModel final : public LoadedModel {
 
   const FlintWeights& weights() const { return weights_; }
 
+  // The W0 Tenstorrent device context (spec .agents/specs/flint-tenstorrent.md):
+  // built once at prepare on the Tenstorrent queue, lazily otherwise. The
+  // context borrows the queue it was built on; the engine keeps that queue
+  // alive for the model's lifetime.
+  FlintTTDeviceContext& tt_context(vt::Queue& queue) {
+    if (!tt_ctx_) {
+      vt::Backend& be = vt::GetBackend(queue.device.type);
+      tt_ctx_ = BuildFlintTTDeviceContext(be, queue, weights_);
+    }
+    return *tt_ctx_;
+  }
+
  private:
   FlintWeights weights_;
+  std::unique_ptr<FlintTTDeviceContext> tt_ctx_;
 };
 
 std::unique_ptr<LoadedModel> LoadFlintForCausalLM(
@@ -618,23 +656,53 @@ std::unique_ptr<LoadedModel> LoadFlintForCausalLM(
 
 void PrepareFlintForCausalLM(LoadedModel& model, const HfConfig& config,
                              vt::Queue& queue) {
-  (void)model;
+  // The W0 Tenstorrent arm materializes the device context eagerly at
+  // prepare — the resident slice uploads once, off the first forward (the
+  // kolibri1_registry.cpp:316 seam).
+  if (queue.device.type != vt::DeviceType::kTENSTORRENT) return;
   (void)config;
-  (void)queue;
+  auto& m = ModelAs<FlintLoadedModel>(model, "FlintForCausalLM");
+  (void)m.tt_context(queue);
 }
 
 ForwardLogits ForwardFlintForCausalLM(LoadedModel& model,
                                       const ModelForwardInput& input) {
   auto& flint = ModelAs<FlintLoadedModel>(model, "FlintForCausalLM");
+  // The device dispatch (the kolibri1_registry.cpp:328 seam): the CPU row
+  // owns the CPU reference arm (unchanged); the Tenstorrent W0 arm owns the
+  // device forward; every other device is refused by name here, before any
+  // model code runs.
+  switch (input.queue.device.type) {
+    case vt::DeviceType::kCPU:
+      break;
+    case vt::DeviceType::kTENSTORRENT:
+      break;
+    default:
+      throw std::runtime_error(
+          std::string("FlintForCausalLM: the ") +
+          vt::DeviceTypeName(input.queue.device.type) +
+          " forward arm is not implemented. The landed arms are the CPU "
+          "reference row (MODEL-TEXT-FLINT, spec "
+          ".agents/specs/flint-cpu-gguf.md) and the Tenstorrent W0 device "
+          "arm (spec .agents/specs/flint-tenstorrent.md); the " +
+          vt::DeviceTypeName(input.queue.device.type) +
+          " arm is a separate owed row.");
+  }
   if (input.attn_meta.num_reqs != 1) {
     throw std::runtime_error(
-        "FlintForCausalLM: the CPU reference forward serves exactly ONE "
+        "FlintForCausalLM: the W0 forward arms serve exactly ONE "
         "sequence per step (got " +
         std::to_string(input.attn_meta.num_reqs) +
         "); the paged engine arm is a later wave of MODEL-TEXT-FLINT");
   }
-  std::vector<float> logits = FlintModel::Forward(
-      input.token_ids, input.positions, flint.weights(), input.config);
+  std::vector<float> logits;
+  if (input.queue.device.type == vt::DeviceType::kTENSTORRENT) {
+    logits = ForwardFlintTT(input.token_ids, input.positions,
+                            flint.weights(), flint.tt_context(input.queue));
+  } else {
+    logits = FlintModel::Forward(input.token_ids, input.positions,
+                                 flint.weights(), input.config);
+  }
   return HostLogits(std::move(logits), input.config.vocab_size);
 }
 
@@ -652,5 +720,12 @@ const ModelFactory kFlintFactory{
 }  // namespace
 
 REGISTER_VLLM_MODEL(flint, "FlintForCausalLM", kFlintFactory, kFlintInfo)
+
+// The checked accessor over the registry's loaded model (the TT W0 test and
+// the device waves read the weights back out of the LoadedModel they are
+// handed — the kolibri1_registry.cpp:386 seam).
+const FlintWeights& FlintLoadedModelWeights(LoadedModel& model) {
+  return ModelAs<FlintLoadedModel>(model, "FlintForCausalLM").weights();
+}
 
 }  // namespace vllm

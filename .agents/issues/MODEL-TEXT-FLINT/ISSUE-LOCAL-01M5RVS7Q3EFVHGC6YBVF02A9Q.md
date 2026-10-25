@@ -16,4 +16,14 @@ The Flint architecture (MODEL-TEXT-FLINT, rows MODEL-TEXT-FLINT / flint-cpu-gguf
 
 ## Resolution
 
--
+- 2026-10-25 (wave 0, branch `row/FLINT-TT-W0`, this change): the W0 device
+  arm landed — the `kTENSTORRENT` dispatch case, the bf16-resident device
+  forward (`flint_tt.cpp`; experts streamed at 37,748,736 B/layer against the
+  70.5 GiB tier), the named per-device refusals, and the honest device-vs-CPU
+  baseline on the local P150: first-token logits max_abs=3.20e+01,
+  rel_rms=2.58e-01 (n=750720), greedy chain 1/8, dominated by the pinned
+  substrate's ~1% systematic device rms_norm bias (op probe: matmul 1.9e-3,
+  rmsnorm 7.8e-3) — the kolibri-row defect class, owed as the next wave's
+  lever. Evidence: `docs/bench-evidence/flint-tt-w0-20261025/` (red.txt,
+  green.txt, report.md). The dispatch was proven EXERCISED
+  (`FlintTTForwardCalls` 0 -> 1 on the card). Closes when this branch lands.

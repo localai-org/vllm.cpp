@@ -813,6 +813,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/qwen3_moe_weights.cpp
   src/vllm/model_executor/models/qwen3_moe.cpp
   src/vllm/model_executor/models/flint.cpp
+  src/vllm/model_executor/models/flint_tt.cpp
   src/vllm/model_executor/models/flint_weights.cpp
   src/vllm/model_executor/models/flint_gguf_weights.cpp
   src/vllm/model_executor/models/qwen4_exp_hc.cpp

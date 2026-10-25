@@ -259,6 +259,14 @@ target_include_directories(test_kolibri1_moe_glue PRIVATE ${CMAKE_SOURCE_DIR}/sr
 if(VLLM_CPP_TENSTORRENT)
   vllm_cpp_add_test(test_kolibri1_tt vllm/models/test_kolibri1_tt.cpp)
   target_include_directories(test_kolibri1_tt PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # Flint W0 on Tenstorrent (spec .agents/specs/flint-tenstorrent.md, issue
+  # ISSUE-LOCAL-01M5RVS7Q3EFVHGC6YBVF02A9Q): the staging-plan host gates (NO
+  # card) plus the W0 dispatch + device-vs-CPU correctness leg (card +
+  # FLINT_TT_W0_MODEL pointing at the published flint GGUF container;
+  # operator-run under the gpu.lock mutex, evidence in
+  # docs/bench-evidence/flint-tt-w0-20261025/).
+  vllm_cpp_add_test(test_flint_tt_w0 vllm/models/test_flint_tt_w0.cpp)
+  target_include_directories(test_flint_tt_w0 PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # B2b-i first slice (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b
   # addendum): the resident staging plan's host-side gates (run under ctest
   # with NO card) plus the device bring-up leg (card + VT_KOLIBRI1_TT_B2I_

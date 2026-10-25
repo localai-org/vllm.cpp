@@ -22,7 +22,7 @@ parity.
   loader's `LoadFlintFromGguf` already dequants to bf16; the safetensors arm
   lands bf16 too). Device legs: embedding, per-layer input/post-attention
   RMSNorm, every linear projection (q/k/v/o, dense MLP gate/up/down, router,
-  shared expert, routed experts, lm_head) through `vt::MatmulBT` on
+  shared expert, routed experts, lm_head) through `vt::Matmul` on ([K,N] weights — the loader transposes at load, so the arm uses kMatmul, not MatmulBT) —
   device-resident bf16 weights, SwiGLU product via `vt::MoeSiluMul`, residual
   adds via `vt::Add`. Host legs at W0 (each named, each owed): per-head q/k
   RMSNorm, the partial-RoPE pattern, the sinks softmax with the sliding
