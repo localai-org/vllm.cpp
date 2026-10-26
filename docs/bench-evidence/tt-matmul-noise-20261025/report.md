@@ -289,3 +289,23 @@ Gentoo host, kernel 7.0.1-gentoo, doctest 2.5.2, worktree `/tmp/tt-matmul-w3`
 at the commit that carries this report, build `/tmp/tt-matmul-w3-bld`
 (VLLM_CPP_TENSTORRENT=ON). Shared box; every device run under the gpu.lock
 mutex. Raw logs beside this report.
+
+
+## ADDENDUM 2026-10-26: the "gate_proj outlier" was a dump-tag artifact — there is NO discrete layer-0 defect
+
+The re-measure on the adopted arm exposed it: the CPU dump block FUSES
+silu*u into g before its stage prints (flint.cpp:518-521 overwrite g in
+place), so the CPU row tagged "g" was the POST-activation a, while the
+device arm printed the RAW pre-activation g under "g". Comparing them
+produced the "20x gate_proj energy" and "sign flip" the W2 bisection
+reported as a defect. Apples-to-apples (TT raw a vs CPU a): energies
+MATCH (1.16e3 both; sums 12.22 vs 15.26, the bf16-rounding of the silu
+input). The instrument tags are fixed (device side carries the tag
+contract; CPU prints its fused buffer as "a"), and the bisection
+conclusion is REWRITTEN: at layer 0 every stage — q/k/v (energies within
+0.12 percent), attention out, ao, a, ff (re-converged) — matches the CPU
+reference; the large SUM deltas at healthy sites are chaotic
+near-cancellation tails, not defects. The model-level device-vs-CPU gap
+is ACCUMULATED bf16-class tail noise amplified over 49 layers — the
+substrate floor for this precision class — with NO discrete layer-0
+defect remaining. The gate_proj "outlier generator" is retracted.

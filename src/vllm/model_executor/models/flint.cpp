@@ -530,7 +530,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
                        tag, s, sq);
         };
-        stage("g", g);
+        stage("a", g);  // the loop above FUSED silu*u into g: this IS the post-activation a (the device arm prints raw pre-silu g under "g")
         stage("u", u);
         stage("a", g);  // the CPU arm fuses silu*u in place into g
       }

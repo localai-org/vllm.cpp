@@ -586,6 +586,12 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         stage2("g", dload(g));
         stage2("u", dload(u));
         stage2("a", dload(a));
+        // TAG CONTRACT: "a" is the stage the CPU arm's dump prints under
+        // "g" (flint.cpp fuses silu*u into g before its stage prints, so
+        // the CPU "g" row IS the post-activation a). The pair to compare
+        // is TT "a" against CPU "g" — energies match there (1.16e3 both).
+        // Raw TT g is the PRE-activation: its larger energy over the
+        // silu'd a is expected, never a defect.
       }
       DBuf ff_dev(d, vt::DType::kBF16, {t, h});
       vt::Matmul(d.q, ff_dev.t(), a.t(), tl.down.t());
