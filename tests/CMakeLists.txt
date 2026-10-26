@@ -272,6 +272,22 @@ if(VLLM_CPP_TENSTORRENT)
   # operand micro-probe.
   vllm_cpp_add_test(test_flint_tt_w2_micro vllm/models/test_flint_tt_w2_micro.cpp)
   target_include_directories(test_flint_tt_w2_micro PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH W3 diagnostic (operator-run under the gpu.lock mutex, evidence
+  # in docs/bench-evidence/tt-matmul-noise-20261025/): the substrate
+  # matmul-noise map (spec .agents/specs/tt-matmul-noise.md).
+  vllm_cpp_add_test(test_flint_tt_w3_noise vllm/models/test_flint_tt_w3_noise.cpp)
+  target_include_directories(test_flint_tt_w3_noise PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH W3 plain-ttnn leg: the raw tt-metal matmul repro (route (c)
+  # evidence — noise outside our staging), same evidence dir.
+  vllm_cpp_add_test(test_flint_tt_w3_plain vllm/models/test_flint_tt_w3_plain.cpp)
+  target_include_directories(test_flint_tt_w3_plain PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # The pinned tt-metal headers carry their own nlohmann/json version; the
+  # repo-wide third_party include dir must NOT shadow it in this TU (the two
+  # versions collide on json_pointer). tt-metal's dirs get BEFORE priority.
+  target_include_directories(test_flint_tt_w3_plain SYSTEM BEFORE PRIVATE
+    /tmp/umdtrial-install/libexec/tt-metalium/ttnn/cpp
+    /tmp/umdtrial-install/libexec/tt-metalium
+    /tmp/umdtrial-install/include)
   # B2b-i first slice (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b
   # addendum): the resident staging plan's host-side gates (run under ctest
   # with NO card) plus the device bring-up leg (card + VT_KOLIBRI1_TT_B2I_

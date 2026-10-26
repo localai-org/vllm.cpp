@@ -58,7 +58,34 @@ namespace {
 // the selection-flip class that drove the L1-moe 3% divergence
 // (ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN, this branch's record).
 std::optional<ttnn::DeviceComputeKernelConfig> F32AccKernelConfig() {
+  // W3 noise map (spec .agents/specs/tt-matmul-noise.md,
+  // ISSUE-LOCAL-01M5TB3983MW41T4NPBZ5ZYF0E): the substrate noise is ttnn's
+  // DEFAULT math fidelity, LoFi — product truncation, ~2.3e-2 rel_rms on
+  // the micro (K/M/N- and layout-independent, perproduct probe), and it
+  // reproduces on a PLAIN ttnn matmul with no vt staging
+  // (test_flint_tt_w3_plain). The exactness arm (HiFi4 + approx off +
+  // fp32_dest_acc_en) measures rel_rms 3.3e-4, frac_bad=0 — a ~70x micro
+  // improvement — BUT it does NOT move the W0 model number: first-token
+  // rel_rms 2.045e-1 (pre-W3 arm) vs 2.181e-1 (HiFi4 arm), chain 1/8 on
+  // both (docs/bench-evidence/tt-matmul-noise-20261025/). Per the W1/W2
+  // discipline the shipped arm is NOT flipped. VT_TT_MATMUL_MATH_FIDELITY
+  // =lofi pins the shipped behavior explicitly; =hifi4 selects the
+  // experimental exact arm (scratch-micro and A/B use only).
   ttnn::DeviceComputeKernelConfig cfg{};
+  static const int mode = [] {
+    const char* e = std::getenv("VT_TT_MATMUL_MATH_FIDELITY");
+    if (e == nullptr) return 0;
+    const std::string v(e);
+    return v == "lofi" ? 0 : (v == "hifi4" ? 1 : 0);
+  }();
+  if (mode != 1) {
+    // The shipped arm: the pinned default fidelity (LoFi, approx mode on)
+    // with fp32 destination accumulation.
+    cfg.fp32_dest_acc_en = true;
+    return cfg;
+  }
+  cfg.math_fidelity = tt::tt_metal::MathFidelity::HiFi4;
+  cfg.math_approx_mode = false;
   cfg.fp32_dest_acc_en = true;
   return cfg;
 }
