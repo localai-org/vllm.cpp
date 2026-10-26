@@ -299,14 +299,18 @@ TEST_CASE("flint TT W0: the registry dispatch reaches the device forward and "
   // 2. THE DISTANCE BAND TIGHTENS to the measured adopted-arm numbers with
   //    modest headroom, justified from the 3 legs (bit-identical
   //    rel_rms 2.212e-1 and max_abs 3.275e+1 on every leg): rel_rms
-  //    0.5 -> 0.30 (1.36x the measurement) and max_abs 64 -> 40 (1.22x).
-  //    The old arm's measured numbers (2.579e-1 / 3.200e+1) also sit
-  //    inside this band, so the fence is a hard-regression fence against
-  //    distance growth, not an arm selector — the chain-consistency leg is
-  //    what pins WHICH arm ran. W0 records the baseline and does not paper
-  //    over it: the numbers are EVIDENCE (report.md).
+  //    0.5 -> 0.25 (1.13x the measurement) and max_abs 64 -> 40 (1.22x).
+  //    The band sits BETWEEN the two arms' measurements (old arm 2.579e-1),
+  //    so on the per-config-deterministic harness it is BOTH a
+  //    hard-regression fence against distance growth AND the arm selector:
+  //    reverting the shipped arm to the LoFi class is RED here, which the
+  //    pre-adoption `=lofi` legs demonstrate (2.579e-1 > 0.25). The
+  //    chain-consistency leg pins WHICH arm ran independent of distance.
+  //    The developer approved the adoption and the fence re-specification
+  //    (the throughput table and the invalid 2.045e-1 lineage are in
+  //    report.md; W0 records the evidence, it does not paper over it).
   CHECK(max_abs < 40.0);
-  CHECK(rel_rms < 0.30);
+  CHECK(rel_rms < 0.25);
   {
     static const int32_t kShippedChain[kGreedySteps] = {
         269, 6963, 332, 269, 332, 116253, 12, 332};

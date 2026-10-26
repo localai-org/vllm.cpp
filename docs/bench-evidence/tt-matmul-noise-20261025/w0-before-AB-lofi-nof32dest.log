@@ -1,0 +1,164 @@
+2026-10-26 01:44:57.484 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-26 01:44:57.484 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-26 01:44:57.484 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-26 01:44:57.484 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-26 01:44:57.488 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-26 01:44:57.488 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-26 01:44:57.522 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-26 01:44:57.522 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-26 01:44:57.522 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-26 01:44:57.522 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-26 01:44:57.523 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-26 01:44:57.526 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[flint-tt-w0] resident=3871748096 B (3.606 GiB) expert_tier=75698798592 B (70.500 GiB) streamed/layer=37748736 B dense=2 moe=47 sliding=35 tensors=485
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_tt_w0.cpp:113:
+TEST CASE:  flint TT W0: the staging plan accounts the resident slice and refuses a starved budget
+
+./tests/vllm/models/test_flint_tt_w0.cpp:141: SUCCESS: CHECK( plan.dense_layers == 2 ) is correct!
+  values: CHECK( 2 == 2 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:142: SUCCESS: CHECK( plan.moe_layers == w.params.num_hidden_layers - 2 ) is correct!
+  values: CHECK( 47 == 47 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:143: SUCCESS: CHECK( plan.sliding_layers + (plan.sliding_layers == 0 ? 1 : 0) >= 0 ) is correct!
+  values: CHECK( 35 >= 0 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:144: SUCCESS: CHECK( plan.expert_tier_bytes > int64_t(40) << 30 ) is correct!
+  values: CHECK( 75698798592 >  42949672960 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:145: SUCCESS: CHECK( plan.streamed_bytes_per_layer > 0 ) is correct!
+  values: CHECK( 37748736 >  0 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:147: SUCCESS: CHECK( plan.resident_bytes <= int64_t(32) << 30 ) is correct!
+  values: CHECK( 3871748096 <= 34359738368 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:157: SUCCESS: CHECK( what.find("deficit") != std::string::npos ) is correct!
+  values: CHECK( 103 != 18446744073709551615 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:158: SUCCESS: CHECK( what.find("STREAMS") != std::string::npos ) is correct!
+  values: CHECK( 275 != 18446744073709551615 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:160: SUCCESS: CHECK( refused ) is correct!
+  values: CHECK( true )
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w0.cpp:165:
+TEST CASE:  flint TT W0: the registry dispatch reaches the device forward and the device-vs-CPU baseline is recorded
+
+./tests/vllm/models/test_flint_tt_w0.cpp:175: SUCCESS: REQUIRE( reg.architecture == "FlintForCausalLM" ) is correct!
+  values: REQUIRE( FlintForCausalLM == FlintForCausalLM )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:181: SUCCESS: REQUIRE( model != nullptr ) is correct!
+  values: REQUIRE( 0xaaaedcd2f4b0 != nullptr )
+
+2026-10-26 01:57:50.630 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-26 01:57:50.630 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-26 01:57:50.630 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-26 01:57:50.631 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-26 01:57:50.631 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-26 01:57:51.310 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+./tests/vllm/models/test_flint_tt_w0.cpp:192: SUCCESS: REQUIRE( !prompt_ids.empty() ) is correct!
+  values: REQUIRE( true )
+
+2026-10-26 01:57:52.219 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.219 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.219 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.219 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.233 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.233 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.233 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.233 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.252 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.252 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.252 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:57:52.252 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[flint-tt-w0] dispatch: the kTENSTORRENT case was EXERCISED (counter 0 -> 1)
+[flint-tt-w0] first-token logits: max_abs=3.036e+01 rms=6.054e+00 rel_rms=2.634e-01 (n=750720)
+./tests/vllm/models/test_flint_tt_w0.cpp:200: SUCCESS: CHECK_NOTHROW( dev_first = vllm::ModelRegistry::Forward(*model, dev_step.input) ) didn't throw!
+
+./tests/vllm/models/test_flint_tt_w0.cpp:203: SUCCESS: CHECK( vllm::FlintTTForwardCalls() == calls_before + 1 ) is correct!
+  values: CHECK( 1 == 1 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:216: SUCCESS: REQUIRE( dev_first.host.size() == cpu_first.host.size() ) is correct!
+  values: REQUIRE( 750720 == 750720 )
+
+2026-10-26 01:58:11.720 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.720 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.720 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.720 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.724 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.724 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.724 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:11.724 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.396 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.396 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.396 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.396 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.401 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.401 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.401 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:21.401 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.751 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.751 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.751 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.751 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.757 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.757 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.757 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:31.757 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.149 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.149 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.149 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.149 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.155 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.155 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.155 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:43.155 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.896 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.896 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.896 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.896 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.903 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.903 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.903 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:58:55.903 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.060 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.060 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.060 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.060 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.066 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.066 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.066 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:10.066 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.390 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.390 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.390 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.390 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.397 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.397 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.397 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-26 01:59:25.397 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[flint-tt-w0] greedy chain match=0/8 dev=[ 269 6963 332 269 6963 87017 269 6963 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+./tests/vllm/models/test_flint_tt_w0.cpp:280: SUCCESS: CHECK( max_abs < 64.0 ) is correct!
+  values: CHECK( 30.363 <  64 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:281: SUCCESS: CHECK( rel_rms < 0.5 ) is correct!
+  values: CHECK( 0.263362 <  0.5 )
+
+./tests/vllm/models/test_flint_tt_w0.cpp:282: ERROR: CHECK( chain_match >= 1 ) is NOT correct!
+  values: CHECK( 0 >= 1 )
+
+===============================================================================
+[doctest] test cases:  2 |  1 passed | 1 failed | 0 skipped
+[doctest] assertions: 18 | 17 passed | 1 failed |
+[doctest] Status: FAILURE!
+2026-10-26 01:59:42.978 | info     |    BuildKernels | JIT cache stats: 100/112 hits (89.3%) [100 cached, 297 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-26 01:59:42.978 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-26 01:59:42.990 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-26 01:59:42.990 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-26 01:59:43.012 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-26 01:59:43.012 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-26 01:59:43.012 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

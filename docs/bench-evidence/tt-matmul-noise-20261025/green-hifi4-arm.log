@@ -1,0 +1,117 @@
+2026-10-26 03:08:03.160 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-26 03:08:03.160 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-26 03:08:03.161 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-26 03:08:03.161 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-26 03:08:03.164 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-26 03:08:03.164 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-26 03:08:03.196 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-26 03:08:03.196 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-26 03:08:03.196 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-26 03:08:03.196 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-26 03:08:03.197 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-26 03:08:03.225 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-26 03:08:03.298 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-26 03:08:03.298 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-26 03:08:03.298 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-26 03:08:03.298 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-26 03:08:03.298 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-26 03:08:03.993 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:301:
+TEST CASE:  SCRATCH dbg W3 exactness check (dest-acc arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.000125592 rel_rms=0.000313316 frac_bad=0.00078125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[944] row=1 col=432 got=5.41657e-05 ref=1.26497e-05
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[1687] row=3 col=151 got=3.35649e-06 ref=-2.2875e-06
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:341: SUCCESS: CHECK( s.rel_rms < 1e-3 ) is correct!
+  values: CHECK( 0.000313316 <  0.001 )
+  logged: f32-out matmul vs host double rel_rms 0.000313316
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:343: SUCCESS: CHECK( s.max_abs < 1e-3 ) is correct!
+  values: CHECK( 0.000125592 <  0.001 )
+  logged: f32-out matmul max_abs 0.000125592
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=0.000272156 rel_rms=0.000316888 frac_bad=0.000488281
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[6] row=0 col=6 got=-0.000103052 ref=-0.000264771
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[848] row=0 col=848 got=-0.000256058 ref=-0.000165015
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[1502] row=0 col=1502 got=-1.58437e-05 ref=0.000152983
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[5326] row=2 col=1230 got=-2.23918e-05 ref=-9.70581e-05
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[9301] row=4 col=1109 got=-6.52485e-06 ref=3.3544e-05
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:341: SUCCESS: CHECK( s.rel_rms < 1e-3 ) is correct!
+  values: CHECK( 0.000316888 <  0.001 )
+  logged: f32-out matmul vs host double rel_rms 0.000316888
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:343: SUCCESS: CHECK( s.max_abs < 1e-3 ) is correct!
+  values: CHECK( 0.000272156 <  0.001 )
+  logged: f32-out matmul max_abs 0.000272156
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=6144 arm=1 max_abs=0.000305554 rel_rms=0.000311452 frac_bad=0.000325521
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[138] row=0 col=138 got=2.35708e-05 ref=-0.000175426
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:335: MESSAGE: bad[4107] row=0 col=4107 got=-6.06906e-05 ref=1.31809e-05
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:341: SUCCESS: CHECK( s.rel_rms < 1e-3 ) is correct!
+  values: CHECK( 0.000311452 <  0.001 )
+  logged: f32-out matmul vs host double rel_rms 0.000311452
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:343: SUCCESS: CHECK( s.max_abs < 1e-3 ) is correct!
+  values: CHECK( 0.000305554 <  0.001 )
+  logged: f32-out matmul max_abs 0.000305554
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:374:
+TEST CASE:  SCRATCH dbg W3 exactness check (MatmulBT arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.000107663 rel_rms=0.000339319 frac_bad=0
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:396: SUCCESS: CHECK( s.rel_rms < 1e-3 ) is correct!
+  values: CHECK( 0.000339319 <  0.001 )
+  logged: MatmulBT f32-out rel_rms 0.000339319
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:397: SUCCESS: CHECK( s.max_abs < 1e-3 ) is correct!
+  values: CHECK( 0.000107663 <  0.001 )
+  logged: MatmulBT f32-out max_abs 0.000107663
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=0.000300003 rel_rms=0.000309752 frac_bad=0.000488281
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:396: SUCCESS: CHECK( s.rel_rms < 1e-3 ) is correct!
+  values: CHECK( 0.000309752 <  0.001 )
+  logged: MatmulBT f32-out rel_rms 0.000309752
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:397: SUCCESS: CHECK( s.max_abs < 1e-3 ) is correct!
+  values: CHECK( 0.000300003 <  0.001 )
+  logged: MatmulBT f32-out max_abs 0.000300003
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=2048 arm=1 max_abs=0.000137542 rel_rms=0.000311486 frac_bad=6.10352e-05
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:396: SUCCESS: CHECK( s.rel_rms < 1e-3 ) is correct!
+  values: CHECK( 0.000311486 <  0.001 )
+  logged: MatmulBT f32-out rel_rms 0.000311486
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:397: SUCCESS: CHECK( s.max_abs < 1e-3 ) is correct!
+  values: CHECK( 0.000137542 <  0.001 )
+  logged: MatmulBT f32-out max_abs 0.000137542
+
+===============================================================================
+[doctest] test cases:  2 |  2 passed | 0 failed | 7 skipped
+[doctest] assertions: 12 | 12 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-26 03:08:04.735 | info     |    BuildKernels | JIT cache stats: 35/35 hits (100.0%) [35 cached, 7 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-26 03:08:04.735 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-26 03:08:04.738 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-26 03:08:04.738 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-26 03:08:04.839 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-26 03:08:04.839 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-26 03:08:04.839 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

@@ -1,0 +1,169 @@
+2026-10-26 01:44:49.871 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-26 01:44:49.871 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-26 01:44:49.872 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-26 01:44:49.872 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-26 01:44:49.876 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-26 01:44:49.876 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-26 01:44:49.909 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-26 01:44:49.909 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-26 01:44:49.909 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-26 01:44:49.909 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-26 01:44:49.910 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-26 01:44:49.924 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-26 01:44:49.987 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-26 01:44:49.987 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-26 01:44:49.988 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-26 01:44:49.988 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-26 01:44:49.988 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-26 01:44:50.677 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:298:
+TEST CASE:  SCRATCH dbg W3 exactness check (dest-acc arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.0115157 rel_rms=0.0231147 frac_bad=0.0222656
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[121] row=0 col=121 got=0.000152588 ref=0.00246451
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[140] row=0 col=140 got=0.000335693 ref=-0.000756496
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[185] row=0 col=185 got=-0.000350952 ref=-0.00155666
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[230] row=0 col=230 got=-0.013916 ref=-0.0086855
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[240] row=0 col=240 got=-0.00115204 ref=0.00165598
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[281] row=0 col=281 got=-0.0132446 ref=-0.00665913
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[317] row=0 col=317 got=-0.00418091 ref=-0.00169078
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[325] row=0 col=325 got=-0.00192261 ref=-0.000314186
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:331: ERROR: CHECK( s.rel_rms < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0231147 <  0.001 )
+  logged: f32-out matmul vs host double rel_rms 0.0231147
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:333: ERROR: CHECK( s.max_abs < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0115157 <  0.001 )
+  logged: f32-out matmul max_abs 0.0115157
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=0.028008 rel_rms=0.0238873 frac_bad=0.0239258
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[6] row=0 col=6 got=0.00692749 ref=-0.000264771
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[12] row=0 col=12 got=0.0120239 ref=0.00265282
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[72] row=0 col=72 got=-0.0045166 ref=-0.00948172
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[89] row=0 col=89 got=0.0155029 ref=0.010068
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[157] row=0 col=157 got=0.0145874 ref=0.00719316
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[197] row=0 col=197 got=-0.000839233 ref=0.000939793
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[209] row=0 col=209 got=-0.000587463 ref=-0.00623476
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[441] row=0 col=441 got=-0.0194092 ref=-0.0128782
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:331: ERROR: CHECK( s.rel_rms < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0238873 <  0.001 )
+  logged: f32-out matmul vs host double rel_rms 0.0238873
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:333: ERROR: CHECK( s.max_abs < 1e-3 ) is NOT correct!
+  values: CHECK( 0.028008 <  0.001 )
+  logged: f32-out matmul max_abs 0.028008
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=6144 arm=1 max_abs=0.0258167 rel_rms=0.0231888 frac_bad=0.0250651
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[74] row=0 col=74 got=-0.0090332 ref=-0.000818429
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[119] row=0 col=119 got=0.0179443 ref=0.0107291
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[138] row=0 col=138 got=0.00415039 ref=-0.000175426
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[159] row=0 col=159 got=0.0134277 ref=0.00671906
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[162] row=0 col=162 got=0.00598145 ref=0.00146301
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[238] row=0 col=238 got=-0.00100708 ref=0.00173653
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[266] row=0 col=266 got=-0.0184326 ref=-0.00463732
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:325: MESSAGE: bad[276] row=0 col=276 got=0.0110474 ref=0.00547383
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:331: ERROR: CHECK( s.rel_rms < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0231888 <  0.001 )
+  logged: f32-out matmul vs host double rel_rms 0.0231888
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:333: ERROR: CHECK( s.max_abs < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0258167 <  0.001 )
+  logged: f32-out matmul max_abs 0.0258167
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:339:
+TEST CASE:  SCRATCH dbg W3 exactness check (default arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.541227 rel_rms=1.20941 frac_bad=0.913672
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:357: ERROR: CHECK( s.rel_rms < 2e-2 ) is NOT correct!
+  values: CHECK( 1.20941 <  0.02 )
+  logged: bf16-out arm rel_rms 1.20941
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=1.24873 rel_rms=1.23061 frac_bad=0.920508
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:357: ERROR: CHECK( s.rel_rms < 2e-2 ) is NOT correct!
+  values: CHECK( 1.23061 <  0.02 )
+  logged: bf16-out arm rel_rms 1.23061
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=6144 arm=1 max_abs=0.0280585 rel_rms=0.023169 frac_bad=0.0242513
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:357: ERROR: CHECK( s.rel_rms < 2e-2 ) is NOT correct!
+  values: CHECK( 0.023169 <  0.02 )
+  logged: bf16-out arm rel_rms 0.023169
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:363:
+TEST CASE:  SCRATCH dbg W3 exactness check (MatmulBT arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.00840611 rel_rms=0.0223971 frac_bad=0.0136719
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:380: ERROR: CHECK( s.rel_rms < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0223971 <  0.001 )
+  logged: MatmulBT f32-out rel_rms 0.0223971
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:381: ERROR: CHECK( s.max_abs < 1e-3 ) is NOT correct!
+  values: CHECK( 0.00840611 <  0.001 )
+  logged: MatmulBT f32-out max_abs 0.00840611
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=0.0252128 rel_rms=0.0236716 frac_bad=0.0246094
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:380: ERROR: CHECK( s.rel_rms < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0236716 <  0.001 )
+  logged: MatmulBT f32-out rel_rms 0.0236716
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:381: ERROR: CHECK( s.max_abs < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0252128 <  0.001 )
+  logged: MatmulBT f32-out max_abs 0.0252128
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=2048 arm=1 max_abs=0.0121734 rel_rms=0.0229436 frac_bad=0.0181274
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:380: ERROR: CHECK( s.rel_rms < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0229436 <  0.001 )
+  logged: MatmulBT f32-out rel_rms 0.0229436
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:381: ERROR: CHECK( s.max_abs < 1e-3 ) is NOT correct!
+  values: CHECK( 0.0121734 <  0.001 )
+  logged: MatmulBT f32-out max_abs 0.0121734
+
+===============================================================================
+[doctest] test cases:  3 | 0 passed |  3 failed | 6 skipped
+[doctest] assertions: 15 | 0 passed | 15 failed |
+[doctest] Status: FAILURE!
+2026-10-26 01:44:57.406 | info     |    BuildKernels | JIT cache stats: 28/52 hits (53.8%) [28 cached, 8 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-26 01:44:57.406 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-26 01:44:57.410 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-26 01:44:57.410 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-26 01:44:57.446 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-26 01:44:57.446 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-26 01:44:57.446 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)
