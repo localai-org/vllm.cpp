@@ -1,9 +1,11 @@
 # W3 — the substrate matmul-noise characterization and the exactness-attempt verdict
 
-Date: 2026-10-26. Branch `row/TT-MATMUL-W3`, spec commit `15fdfd5ce` (spec
-`.agents/specs/tt-matmul-noise.md`), base `a1b94d9ba` (head of
+Date: 2026-10-26. Branch `row/TT-MATMUL-W3`, spec commit `c746ea51f` (spec
+`.agents/specs/tt-matmul-noise.md`), base `041615b8c` (head of
 `row/FLINT-TT-W2`, which is PR #3511 — open, not merged; the stack is
-deliberate and recorded in the spec). Issue
+deliberate and recorded in the spec; unit head `c746ea51f` at measurement —
+later commits do not touch the measured path; `a1b94d9ba` in earlier prose
+is a pre-rewrite SHA of the same stack). Issue
 `ISSUE-LOCAL-01M5TB3983MW41T4NPBZ5ZYF0E`.
 
 ## Verdict (the spec's route decision)
@@ -19,12 +21,14 @@ is fixable by a compute-kernel-config selection (route (a)):
 | shipped (LoFi + approx, f32-dest on the f32-out arm) | 2.3e-2 … 2.6e-2 | ~2e-2 |
 | **HiFi4 + approx off + fp32_dest_acc_en** | **3.3e-4** | **0** |
 
-The exactness arm is a **~70x micro improvement and was NOT adopted**: it
-does not move the W0 model number (below — it measures slightly WORSE), so
-per the W1/W2 discipline the shipped arm is unchanged. `F32AccKernelConfig()`
-carries the map's conclusions in-source; `VT_TT_MATMUL_MATH_FIDELITY=hifi4`
-selects the experimental arm (scratch-micro and A/B only), `=lofi` pins the
-shipped behavior explicitly.
+The exactness arm is a **~70x micro improvement and, on the committed-head
+model evidence (below), is now ADOPTED as the shipped default** (developer
+approval 2026-10-26; the first no-flip call was taken on an invalid
+pre-rewrite number — see the correction and the adoption sections).
+`F32AccKernelConfig()`
+carries the map's conclusions in-source; `VT_TT_MATMUL_MATH_FIDELITY=lofi`
+restores the pre-adoption arm for same-binary A/B; unset or `=hifi4` is the
+shipped behavior.
 
 This is NOT an upstream-filing case: the behavior is the documented meaning
 of `math_fidelity` at the pin (`compute_kernel_config.hpp` defaults
@@ -90,45 +94,149 @@ the fix are both substrate-level, and vt staging adds nothing on either side.
 ## Red-first (spec requirement)
 
 The exactness CHECKs in `test_flint_tt_w3_noise` (rel_rms<1e-3,
-max_abs<1e-3, plus the MatmulBT case) are **red** against the shipped arm
-(`-tc="*exactness*"`: rel_rms 2.62e-2, all CHECKs fail, Status: FAILURE) and
-**green** under `VT_TT_MATMUL_MATH_FIDELITY=hifi4` (all assertions pass).
-They skip with a pointer to this report when the experimental arm is not
-selected, because the shipped arm is intentionally left on LoFi; the red
-behavior of the bound itself is on record (`red-first-shipped-arm-checks-
-firing.log`: rel_rms 2.62e-2, all CHECKs fail). Run the pair with
-`-tc="*dest-acc arm*,*MatmulBT arm*"`. Logs:
-`red-first-shipped-arm-checks-firing.log`, `green-hifi4-arm.log`.
+max_abs<1e-3, plus the MatmulBT case) were **red** against the pre-adoption
+arm and **green** under the exactness arm. On record:
+`red-first-shipped-arm-checks-firing.log` (rel_rms 2.62e-2, all CHECKs
+fail) and `green-hifi4-arm.log` (all assertions pass). Since the adoption
+the direction inverts: the CHECKs run on the default configuration (green —
+the shipped arm IS the exactness arm) and skip only under
+`VT_TT_MATMUL_MATH_FIDELITY=lofi`, where they are red by the map
+(`red-run-skip-note.log` records the old skip-note form). Run the pair with
+`-tc="*dest-acc arm*,*MatmulBT arm*"`.
 
-## W0 model verdict (the no-flip decision, honest)
+## W0 model verdict (the no-flip decision — CORRECTED 2026-10-26)
+
+**Correction.** The original "before" number below (2.045e-1) came from an
+UNCOMMITTED binary: its log cites a W0 band of 0.25 at test lines 286/287,
+which exist in no commit (the committed test carries 0.5 at lines 281/282).
+The 2.045e-1 lineage is INVALID and is retained here only as a record of the
+review finding. A committed-head rerun (reviewer, 2026-10-26, byte-identical
+harness at `14007466e`) reproduces the shipped arm at **2.579e-1** — which
+matches the W0 baseline the spec already records.
 
 `FLINT_TT_W0_MODEL=/mnt/models/flint-GGUF/flint-Q4_K_M.gguf`,
 `test_flint_tt_w0`, first-token logits vs the CPU row:
 
 | arm | rel_rms | max_abs | greedy chain | gate |
 |---|---|---|---|---|
-| before (shipped arm, unchanged; the W2 base state) | **2.045e-1** | 30.2 | 1/8 | PASS |
+| shipped arm (committed head, reviewer rerun 2026-10-26) | **2.579e-1** | 3.200e+1 | 1/8 | PASS |
 | HiFi4 experimental | 2.181e-1 | 32.6 | 1/8 | PASS |
 | LoFi + NO f32-dest (an arm this tree never shipped; early A/B) | 2.634e-1 | 30.4 | 0/8 | FAIL (chain_match) |
+| ~~2.045e-1 / 30.2 (INVALID — uncommitted binary, band-0.25 lines)~~ | — | — | — | void |
 
-The exactness arm improves the micro 70x and does NOT improve the model —
-first-token rel_rms moves 2.045e-1 -> 2.181e-1 (slightly worse), chain
-1/8 on both. **No flip.** The W0 band stays at 0.5. The model's residual is
-dominated by the recorded prompt-dependent hard-divergence bias class
-(tenorrent_ops.cpp root-cause record; kolibri TT carries the same class),
-not by matmul multiply noise — the map kills "multiply noise" as the
-first-order model-level term.
+CORRECTED reading: on the true committed-head numbers the exactness arm is
+~15% BETTER on first-token rel_rms (2.579e-1 -> 2.181e-1 as measured on the
+pre-rewrite binary; 2.212e-1 on the clean-HEAD rerun), chain 1/8 -> 0/8 —
+NOT "1/8 both" as first recorded. The original no-flip call was taken on
+the invalid 2.045e-1 basis and is re-taken below.
+
+## The re-taken decision (throughput + committed-head accuracy, 2026-10-26)
+
+Same clean-HEAD binary (`14007466e`), `VT_TT_MATMUL_MATH_FIDELITY=hifi4` vs
+unset, 3 alternating legs each, per-config deterministic (bit-identical
+rel_rms and chains across legs), P150 under `gpu.lock`, nice + taskset.
+Full-wall `test_flint_tt_w0` run (prefill + 8 greedy steps + the paired CPU
+row, constant across arms):
+
+| leg | shipped arm (s) | HiFi4 arm (s) |
+|---|---|---|
+| 1 | 882.7 | 857.9 |
+| 2 | 859.4 | 856.0 |
+| 3 | 853.4 | 846.1 |
+| median | 859.4 | 856.0 |
+| mean | 865.2 | 853.3 |
+
+Log: `throughput-w0-legs.log`. Committed-head accuracy (same binary):
+
+| arm | rel_rms | max_abs | greedy chain |
+|---|---|---|---|
+| shipped | 2.579e-1 | 3.200e+1 | 1/8 |
+| HiFi4 | 2.212e-1 | 3.275e+1 | 0/8 |
+
+The throughput premise for adoption HOLDS: HiFi4 is a near-tie — ~1.4%
+faster on the leg mean, ~0.4% on the median, inside run-to-run noise and
+far inside any 5% bar. **No speedup is claimed; the honest statement is
+that the exactness arm costs no throughput.** The accuracy premise as
+first recorded does NOT hold: the claim "chain 1/8 both" is falsified on
+committed head — the exact arm reads 0/8. But the chain is not a
+correctness signal either way: the first token flips 12834->269 in BOTH
+arms, so both chains are adjudicated-divergent (the recorded
+hard-divergence bias class, not multiply noise), and the distance legs —
+the legs a gate can actually fence — IMPROVE ~14%. On that basis the
+decision was escalated to the developer with the throughput table and the
+committed-head accuracy, and the developer APPROVED the adoption
+(2026-10-26). It is implemented in the next section.
+
+## The adoption (the flip) and the W0 band re-specification (2026-10-26)
+
+Developer-approved on the evidence above. Three changes land together:
+
+1. **The shipped default matmul arm is the exactness arm** (HiFi4 + approx
+   off + fp32_dest_acc_en, `F32AccKernelConfig()` in
+   `src/vt/tenstorrent/tenstorrent_ops.cpp`).
+2. **The knob inverts.** `VT_TT_MATMUL_MATH_FIDELITY=lofi` restores the
+   pre-adoption arm (LoFi + approx + f32-dest) for same-binary A/B; unset
+   (or `hifi4`) is the shipped arm. `docs/ENVIRONMENT.md` carries the row.
+3. **The W0 gate is re-specified** (`test_flint_tt_w0`): the chain leg is
+   adjudicated-divergent-CONSISTENT per config — the device chain must
+   equal the recorded chain of the active arm, both recorded from 3
+   bit-identical legs each (shipped `[269 6963 332 269 332 116253 12 332]`,
+   `=lofi` `[269 269 269 269 269 140759 269 269]`) — replacing
+   `CHECK(chain_match >= 1)`; the distance legs carry the regression
+   power, tightened to `rel_rms < 0.30` (was 0.5) and `max_abs < 40.0`
+   (was 64.0).
+
+**Red-first.** The OLD gate form is RED on the adopted arm: the three
+HiFi4 legs in `throughput-w0-legs.log` each report
+`assertions: 18 | 17 passed | 1 failed`, and the one failing assertion is
+the old `CHECK(chain_match >= 1)` against chain 0/8 — while the same old
+form passed on the old arm at 1/8. The old form therefore measured which
+arm diverges harder on an adjudicated-divergent signal, not correctness.
+The NEW gate form is GREEN on the adopted arm (below) and keeps the old
+arm pinned per config under `=lofi`.
+
+**Band honesty.** At the requested fence (rel_rms < 0.30, max_abs < 40)
+the old arm's measured distance numbers (2.579e-1, 3.200e+1) remain
+INSIDE the band — 2.579e-1 = 0.2579 < 0.30 — so the fence is a
+hard-regression fence against distance growth (1.36x / 1.22x the adopted
+arm's measured numbers), not an arm selector; the chain-consistency leg is
+what distinguishes the arms. For contrast, the invalid binary's 0.25 band
+WOULD go red on the true old-arm number (0.2579 > 0.25) — which is exactly
+the mismatch that exposed the invalid lineage.
+
+**The new shipped W0 numbers** (this repair's binary, default
+configuration, P150, reset + `gpu.lock` + nice + taskset, log
+`w0-adoption-default-arm.log`): rel_rms **2.212e-1**, max_abs **3.275e+1**,
+greedy chain `[269 6963 332 269 332 116253 12 332]` = the recorded shipped
+chain, `assertions: 18 | 18 passed | 0 failed` — green under the
+re-specified band, and bit-identical to the three pre-adoption HiFi4 legs.
+The `=lofi` A/B leg (`w0-adoption-lofi-arm.log`): rel_rms **2.579e-1**,
+max_abs **3.200e+1**, greedy chain
+`[269 269 269 269 269 140759 269 269]` = the recorded old-arm chain,
+`assertions: 18 | 18 passed | 0 failed` — the knob restores the
+pre-adoption arm bit-identically and the per-config chain gate holds on
+that config too.
 
 ## No-regress leg
 
-Kolibri1 TT B2b-ii device token gate (`VT_KOLIBRI1_TT_B2II_MODEL=/mnt/models/Aleph-Alpha/Kolibri-1`,
-`-tc="*device token gate*"`): **fails identically on the shipped arm and the
-experimental arm** (argmax_matches 3 vs the >=141 bound; hard_flips 5;
-instr_hard_flips 40 — bit-identical numbers across arms,
-`kolibri-token-gate.log`, `kolibri-token-gate-lofi-arm.log`). The failure is
-pre-existing at the W3 base `a1b94d9ba` and is not attributable to W3 (W3
-changes no executed default behavior). Flagged for the kolibri/TT row owner;
-W3 does not repair it.
+Post-adoption rerun (this repair's binary, default configuration,
+`kolibri-token-gate-after-adoption.log`): Kolibri1 TT B2b-ii device token
+gate (`VT_KOLIBRI1_TT_B2II_MODEL=/mnt/models/Aleph-Alpha/Kolibri-1`,
+`-tc="*device token gate*"`) — the GATED counters are UNCHANGED at the
+collapsed state: argmax chain 3/11 compared positions match the golden
+greedy decode (vs the >=141 bound), flips 8 (near-ties 3, hard 5) —
+bit-identical to both pre-adoption arms (`kolibri-token-gate.log`,
+`kolibri-token-gate-lofi-arm.log`), and the same three CHECKs fail
+(`argmax_matches >= 141`, `hard_flips == 0`, `instr_hard_flips == 0`).
+The free-running NEAR-TIE INSTRUMENT counters moved with the arm — 170
+free-running divergences / 69 teacher-forced flips (29 near-ties, 40 HARD,
+worst gap 10.617 nats) pre-adoption vs 158 / 68 (26 near-ties, 42 HARD,
+worst gap 12.6465 nats) post-adoption — expected, since the executed
+default matmul arm changed and those trajectories were already in the
+diverged class. The failure remains pre-existing (present at the W3 base
+`041615b8c`) and is not attributable to the matmul arm: both pre-adoption
+arms read the identical collapsed gate. Flagged for the kolibri/TT row
+owner; W3 does not repair it.
 
 ## Open defects named by the map (not fixed here)
 
@@ -150,6 +258,11 @@ W3 does not repair it.
    ISSUE-LOCAL-01M5TWFY79FWJN2BDPKYQZ3VXS.
 
 ## Recipe
+
+(Recorded pre-adoption — these are the invocations that produced this
+report's logs. Since the flip the exactness pair runs WITHOUT the env
+(green on the shipped default) and the red side is
+`VT_TT_MATMUL_MATH_FIDELITY=lofi`; see the adoption section.)
 
 ```sh
 exec 9>$HOME/gpu.lock; flock -x 9

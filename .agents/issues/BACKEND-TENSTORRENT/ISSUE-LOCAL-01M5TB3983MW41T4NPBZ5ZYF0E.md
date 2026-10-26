@@ -22,11 +22,23 @@ multiply truncation — K/M/N- and layout-independent (~2.3e-2 rel_rms flat on
 the micro), per-product probe bit-exact, reproducing on a PLAIN ttnn matmul
 with no vt staging (test_flint_tt_w3_plain). The exactness arm (HiFi4 +
 approx off + fp32_dest_acc_en) measures rel_rms 3.3e-4, frac_bad 0 (~70x),
-but does NOT move the W0 model number (first-token rel_rms 2.045e-1 shipped
-vs 2.181e-1 HiFi4, chain 1/8 both), so the shipped arm is NOT flipped
-(W1/W2 discipline); the arm stays selectable via
-VT_TT_MATMUL_MATH_FIDELITY=hifi4. No upstream filing: the behavior is
-documented math_fidelity semantics, not a defect. The W2 MatmulBT/bf16-out
+but the W0 model comparison as first recorded used an INVALID number.
+CORRECTION 2026-10-26 (the review repair): the original "shipped 2.045e-1"
+came from an UNCOMMITTED binary (its log cites W0 band 0.25 at test lines
+286/287, which exist in no commit); the committed-head rerun measures the
+shipped arm at 2.579e-1 — the TRUE comparison is 2.579e-1 shipped vs
+2.181e-1 HiFi4, chain 1/8 both, i.e. the exact arm is ~15% BETTER on
+first-token rel_rms. The original no-flip call is re-taken on the measured
+decode-throughput tradeoff (report.md, throughput-w0-legs.log). The
+2.045e-1 lineage is invalid. ADOPTION 2026-10-26: the developer approved
+the flip on the committed-head evidence (throughput near-tie, ~1.4% faster
+on the leg mean, not claimed as a speedup; first-token rel_rms 2.579e-1 ->
+2.212e-1), so the shipped default is now the exact arm (HiFi4 + approx off
++ fp32_dest_acc_en) and VT_TT_MATMUL_MATH_FIDELITY=lofi restores the old
+arm for A/B. The W0 gate is re-specified to the adjudicated-divergent form
+(chain consistency per config; distance band tightened to 0.30 / 40). No
+upstream filing:
+the behavior is documented math_fidelity semantics, not a defect. The W2 MatmulBT/bf16-out
 "anomaly" is corrected as a test-side staging bug (correct-staging map rerun
 agrees across all four arms). Two new precisely-named staging defects filed
 as ISSUE-LOCAL-01M5TWFY79FWJN2BDPKYQZ3VXS (bf16-out readback at M=1;

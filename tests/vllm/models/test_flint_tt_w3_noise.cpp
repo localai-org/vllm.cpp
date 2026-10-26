@@ -294,16 +294,18 @@ TEST_CASE("SCRATCH dbg W3 noise map: per-product") {
 // 7: the exactness CHECK. The host-double reference for exact-bf16 operands
 // is f32-accumulation-exact to ~sqrt(K)*2^-24, so the bound is tight: an arm
 // that carries the 2.5e-2 per-product multiply noise FAILS this (red on the
-// shipped arm), the HiFi4 experimental arm PASSES (select it with
-// VT_TT_MATMUL_MATH_FIDELITY=hifi4). The shipped arm is NOT flipped — the
-// exactness win does not move the W0 model number (see the evidence report)
-// — so the CHECK runs only under the explicit opt-in.
+// old LoFi arm), the HiFi4 arm PASSES. Since the W3 adoption (developer-
+// approved 2026-10-26; docs/bench-evidence/tt-matmul-noise-20261025/
+// report.md) the HiFi4 + approx-off + f32-dest arm IS the shipped default,
+// so this CHECK runs on the default configuration; it is skipped only under
+// VT_TT_MATMUL_MATH_FIDELITY=lofi (the pre-adoption A/B arm, red here by
+// the map).
 TEST_CASE("SCRATCH dbg W3 exactness check (dest-acc arm)") {
   const char* fid = std::getenv("VT_TT_MATMUL_MATH_FIDELITY");
-  if (fid == nullptr || std::string(fid) != "hifi4") {
-    MESSAGE("skipped: requires VT_TT_MATMUL_MATH_FIDELITY=hifi4 (the "
-            "experimental exact arm; the shipped arm is red here BY the map, "
-            "see docs/bench-evidence/tt-matmul-noise-20261025/)");
+  if (fid != nullptr && std::string(fid) == "lofi") {
+    MESSAGE("skipped: VT_TT_MATMUL_MATH_FIDELITY=lofi selects the "
+            "pre-adoption arm, which is red here BY the map (see "
+            "docs/bench-evidence/tt-matmul-noise-20261025/)");
     return;
   }
   vt::Backend* tb = vt::TryGetBackend(vt::DeviceType::kTENSTORRENT);
@@ -370,11 +372,13 @@ TEST_CASE("SCRATCH dbg W3 exactness check (default arm)") {
 
 // 9: the exact MatmulBT arm (weight transposed on host, staged [N,K]) on
 // the model's shapes — adjudicates the W2 D anomaly with correct data.
-// Same opt-in as case 7: the bound holds only on the HiFi4 arm.
+// Same gating as case 7: the bound holds on the shipped (HiFi4) arm since
+// the adoption; skipped under VT_TT_MATMUL_MATH_FIDELITY=lofi.
 TEST_CASE("SCRATCH dbg W3 exactness check (MatmulBT arm)") {
   const char* fid = std::getenv("VT_TT_MATMUL_MATH_FIDELITY");
-  if (fid == nullptr || std::string(fid) != "hifi4") {
-    MESSAGE("skipped: requires VT_TT_MATMUL_MATH_FIDELITY=hifi4");
+  if (fid != nullptr && std::string(fid) == "lofi") {
+    MESSAGE("skipped: VT_TT_MATMUL_MATH_FIDELITY=lofi selects the "
+            "pre-adoption arm, which is red here BY the map");
     return;
   }
   vt::Backend* tb = vt::TryGetBackend(vt::DeviceType::kTENSTORRENT);

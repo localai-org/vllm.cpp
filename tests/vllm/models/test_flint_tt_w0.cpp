@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -272,12 +273,55 @@ TEST_CASE("flint TT W0: the registry dispatch reaches the device forward and "
   // op probe at 7.8e-3 max on unit-scale rows (~4 bf16 ulp). Normed once per
   // site across 49 layers the bias compounds multiplicatively (~e^0.25) and
   // shows up as the rel_rms below; the greedy chain flips early. This is the
-  // SAME defect class the kolibri TT row carries. W0 records the baseline
-  // and does not paper over it: the numbers are EVIDENCE (report.md), the
-  // CHECKs only fence a hard regression (chain collapse, order-of-magnitude
-  // distance growth). Killing the bias (a norm-arm repair on the substrate)
-  // is the next wave's lever, not this gate's business.
-  CHECK(max_abs < 64.0);
-  CHECK(rel_rms < 0.5);
-  CHECK(chain_match >= 1);
+  // SAME defect class the kolibri TT row carries. Killing the bias (a
+  // norm-arm repair on the substrate) is the next wave's lever, not this
+  // gate's business.
+  //
+  // Re-specified 2026-10-26 (the W3 matmul-arm adoption; the developer
+  // approved the flip on the recorded evidence —
+  // docs/bench-evidence/tt-matmul-noise-20261025/report.md, the throughput
+  // table and throughput-w0-legs.log). Two changes, each with its reason:
+  //
+  // 1. THE CHAIN LEG IS ADJUDICATED-DIVERGENT, not "match >= 1". Under BOTH
+  //    arms the first token flips 12834->269 against the CPU row — the
+  //    hard-divergence bias class above, not matmul multiply noise — so a
+  //    chain_match floor measures which arm diverges harder, not
+  //    correctness. Red-first: the old CHECK(chain_match >= 1) is RED on
+  //    the adopted arm (0/8; the three throughput legs each failed exactly
+  //    that one assertion), and its 1/8 on the old arm was one coincidental
+  //    position. The gate now asserts the chain is DIVERGENT-CONSISTENT:
+  //    the device tokens equal the recorded adjudicated-divergent chain of
+  //    the ACTIVE arm (per config — the shipped arm and the
+  //    VT_TT_MATMUL_MATH_FIDELITY=lofi A/B arm each carry their own chain,
+  //    bit-identical across the 3 legs of each arm on this pinned
+  //    environment; report.md carries it). The distance legs carry the
+  //    regression power.
+  // 2. THE DISTANCE BAND TIGHTENS to the measured adopted-arm numbers with
+  //    modest headroom, justified from the 3 legs (bit-identical
+  //    rel_rms 2.212e-1 and max_abs 3.275e+1 on every leg): rel_rms
+  //    0.5 -> 0.30 (1.36x the measurement) and max_abs 64 -> 40 (1.22x).
+  //    The old arm's measured numbers (2.579e-1 / 3.200e+1) also sit
+  //    inside this band, so the fence is a hard-regression fence against
+  //    distance growth, not an arm selector — the chain-consistency leg is
+  //    what pins WHICH arm ran. W0 records the baseline and does not paper
+  //    over it: the numbers are EVIDENCE (report.md).
+  CHECK(max_abs < 40.0);
+  CHECK(rel_rms < 0.30);
+  {
+    static const int32_t kShippedChain[kGreedySteps] = {
+        269, 6963, 332, 269, 332, 116253, 12, 332};
+    static const int32_t kLofiChain[kGreedySteps] = {
+        269, 269, 269, 269, 269, 140759, 269, 269};
+    const char* fid = std::getenv("VT_TT_MATMUL_MATH_FIDELITY");
+    const bool lofi_arm = fid != nullptr && std::string(fid) == "lofi";
+    const int32_t* expected = lofi_arm ? kLofiChain : kShippedChain;
+    bool chain_consistent = true;
+    for (int step = 0; step < kGreedySteps; ++step) {
+      if (dev_chain[static_cast<size_t>(step)] != expected[step])
+        chain_consistent = false;
+    }
+    CHECK_MESSAGE(chain_consistent,
+                  "the greedy chain is not the recorded "
+                  "adjudicated-divergent chain of the active arm");
+  }
 }

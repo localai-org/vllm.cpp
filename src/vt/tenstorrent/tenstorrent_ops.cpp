@@ -65,25 +65,33 @@ std::optional<ttnn::DeviceComputeKernelConfig> F32AccKernelConfig() {
   // reproduces on a PLAIN ttnn matmul with no vt staging
   // (test_flint_tt_w3_plain). The exactness arm (HiFi4 + approx off +
   // fp32_dest_acc_en) measures rel_rms 3.3e-4, frac_bad=0 — a ~70x micro
-  // improvement — BUT it does NOT move the W0 model number: first-token
-  // rel_rms 2.045e-1 (pre-W3 arm) vs 2.181e-1 (HiFi4 arm), chain 1/8 on
-  // both (docs/bench-evidence/tt-matmul-noise-20261025/). Per the W1/W2
-  // discipline the shipped arm is NOT flipped. VT_TT_MATMUL_MATH_FIDELITY
-  // =lofi pins the shipped behavior explicitly; =hifi4 selects the
-  // experimental exact arm (scratch-micro and A/B use only).
+  // improvement — and on the W0 model it IMPROVES first-token rel_rms
+  // 2.579e-1 -> 2.212e-1 (~14%) at no throughput cost: 3 alternating
+  // full-wall legs each (docs/bench-evidence/tt-matmul-noise-20261025/
+  // throughput-w0-legs.log), walls 853.4-882.7s shipped vs 846.1-857.9s
+  // HiFi4, ~1.4% faster on the leg mean — a tie, not a claimed speedup.
+  // The first W0 comparison ("shipped 2.045e-1") came from an uncommitted
+  // binary and is invalid (report.md correction); the flip was re-taken on
+  // the committed-head numbers and APPROVED by the developer 2026-10-26,
+  // so the exactness arm IS the shipped default. The greedy chain is
+  // adjudicated-divergent on BOTH arms (the first token flips 12834->269
+  // either way — the recorded hard-divergence bias class, not multiply
+  // noise), so the adoption trades nothing the old band could see.
+  // VT_TT_MATMUL_MATH_FIDELITY=lofi restores the pre-adoption arm for
+  // same-binary A/B; unset or any other value is the shipped arm.
   ttnn::DeviceComputeKernelConfig cfg{};
   static const int mode = [] {
     const char* e = std::getenv("VT_TT_MATMUL_MATH_FIDELITY");
-    if (e == nullptr) return 0;
-    const std::string v(e);
-    return v == "lofi" ? 0 : (v == "hifi4" ? 1 : 0);
+    if (e == nullptr) return 1;
+    return std::string(e) == "lofi" ? 0 : 1;
   }();
   if (mode != 1) {
-    // The shipped arm: the pinned default fidelity (LoFi, approx mode on)
-    // with fp32 destination accumulation.
+    // The A/B arm: the pinned default fidelity (LoFi, approx mode on)
+    // with fp32 destination accumulation — the pre-adoption shipped arm.
     cfg.fp32_dest_acc_en = true;
     return cfg;
   }
+  // The shipped arm: HiFi4, approx mode off, fp32 destination accumulation.
   cfg.math_fidelity = tt::tt_metal::MathFidelity::HiFi4;
   cfg.math_approx_mode = false;
   cfg.fp32_dest_acc_en = true;

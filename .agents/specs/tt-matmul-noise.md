@@ -8,7 +8,9 @@ unchanged), W2 (flint-tt-w2.md — the tf32 hypothesis killed; the measured
 per-op noise is operand-dtype-INDEPENDENT ~2.5e-2 rel_rms vs host double,
 multiply-path dominated, integers exact).
 
-Branch `row/TT-MATMUL-W3`. Base `a1b94d9ba` (head of `row/FLINT-TT-W2`,
+Branch `row/TT-MATMUL-W3`. Base `041615b8c` (head of `row/FLINT-TT-W2`;
+`a1b94d9ba` in the original prose is a pre-rewrite SHA of that stack — the
+history was rewritten to `b4b743d4a` + `041615b8c`, unit head `c746ea51f`),
 which contains origin/main `3090f069bda47a09e6ef809a86b0c8b61a4f21c6` plus
 the four unmerged W2 commits). The W2 work is the W3 substrate — the micro
 test and the bisection instrument live there — so W3 bases on it rather
@@ -83,3 +85,34 @@ environment, patch provenance if route (b).
 - Stop: the map shows the noise is silicon-real and the composed-exact
   route is proven impossible on this pin; the record then carries the
   floor, the filing draft, and the unchanged-W0 explanation.
+
+## Outcome (2026-10-26)
+
+Measured: the noise is the pinned ttnn DEFAULT math fidelity (LoFi)
+multiply truncation — flat ~2.3e-2 rel_rms on the micro across every
+K/M/N/layout axis, per-product probe bit-exact, reproducing on a plain
+ttnn matmul with no vt staging. The exactness arm (HiFi4 + approx off +
+fp32_dest_acc_en) measures 3.3e-4 rel_rms, frac_bad 0 — ~70x on the micro
+— and on the W0 model it improves first-token rel_rms 2.579e-1 -> 2.212e-1
+(~14%) at no decode-throughput cost (3 alternating full-wall legs each,
+`throughput-w0-legs.log`: walls 853.4-882.7s vs 846.1-857.9s, ~1.4% faster
+on the leg mean — a tie, not claimed as a speedup).
+
+Rejected: the ORIGINAL no-flip record. Its "shipped 2.045e-1" came from an
+uncommitted binary (log cites a W0 band of 0.25 at test lines that exist in
+no commit); the committed-head rerun invalidates it, and with the true
+numbers the accuracy premise of the no-flip call inverts. The greedy chain
+is adjudicated-divergent on BOTH arms (the first token flips 12834->269
+either way — the recorded hard-divergence bias class), so the flip costs
+nothing the old band could see.
+
+Why each default has its value: the developer APPROVED the adoption on the
+committed-head evidence, so the shipped matmul default is the exactness
+arm and `VT_TT_MATMUL_MATH_FIDELITY=lofi` restores the pre-adoption arm
+for same-binary A/B (the knob inverted). The W0 gate is re-specified to
+the adjudicated-divergent form — chain consistency per config (each arm's
+recorded chain, bit-identical across its 3 legs) plus a tightened distance
+fence, rel_rms 0.5 -> 0.30 (1.36x the measured 2.212e-1) and max_abs
+64 -> 40 (1.22x the measured 3.275e+1); the old arm's distance numbers
+(2.579e-1 / 3.200e+1) stay inside that fence, so it is a regression fence,
+not an arm selector.
