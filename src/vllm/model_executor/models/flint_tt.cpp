@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "vllm/model_executor/models/dense_device_glue.h"
+#include "vt/dtype.h"
 #include "vt/ops.h"
 #include "vt/tenstorrent/tenstorrent_device.h"
 
@@ -177,6 +178,27 @@ std::vector<float> Widen(const OwnedTensor& t) {
   return out;
 }
 
+// A weight's RAW resident bytes: the OwnedTensor's own byte length, which is
+// numel * 2 for bf16 and rows * RowSizeBytes(dt, K) for a block-quant arm
+// (the keep-quant accounting — flint-keepquant.md). Identical numbers on the
+// bf16 arm, so the plan is a pure generalization.
+int64_t WeightBytes(const OwnedTensor& t) {
+  return static_cast<int64_t>(t.bytes.size());
+}
+
+// True when the model carries keep-quant block weights (the loader arm's
+// output); the plan's budget and the build's staging both branch on it.
+bool CarriesBlockWeights(const FlintWeights& w) {
+  if (vt::IsBlockQuant(w.lm_head.dtype)) return true;
+  for (const FlintLayerWeights& lw : w.layers) {
+    if (vt::IsBlockQuant(lw.attn.q_proj.w.dtype)) return true;
+    if (!lw.moe.experts.empty() &&
+        vt::IsBlockQuant(lw.moe.experts.front().gate_proj.w.dtype))
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 // ---- the staging plan (device-free) -----------------------------------------
@@ -190,34 +212,33 @@ FlintTTStagingPlan PlanFlintTTStaging(const FlintWeights& w,
 
   FlintTTStagingPlan plan;
   int64_t resident = 0;
-  resident += Bf16Numel(w.embed_tokens) * 2;
-  resident += Bf16Numel(w.lm_head) * 2;
-  resident += Bf16Numel(w.final_norm) * 2;
+  resident += WeightBytes(w.embed_tokens);
+  resident += WeightBytes(w.lm_head);
+  resident += WeightBytes(w.final_norm);
   int64_t expert_tier = 0;
   for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
     const FlintLayerWeights& lw = w.layers[static_cast<size_t>(l)];
     if (p.IsSlidingLayer(l)) ++plan.sliding_layers;
-    resident += Bf16Numel(lw.input_layernorm) * 2;
-    resident += Bf16Numel(lw.post_attention_layernorm) * 2;
-    resident += Bf16Numel(lw.attn.q_proj.w) * 2;
-    resident += Bf16Numel(lw.attn.k_proj.w) * 2;
-    resident += Bf16Numel(lw.attn.v_proj.w) * 2;
-    resident += Bf16Numel(lw.attn.o_proj.w) * 2;
+    resident += WeightBytes(lw.input_layernorm);
+    resident += WeightBytes(lw.post_attention_layernorm);
+    resident += WeightBytes(lw.attn.q_proj.w);
+    resident += WeightBytes(lw.attn.k_proj.w);
+    resident += WeightBytes(lw.attn.v_proj.w);
+    resident += WeightBytes(lw.attn.o_proj.w);
     if (p.IsDenseLayer(l)) {
       ++plan.dense_layers;
-      resident += Bf16Numel(lw.dense_mlp.gate_proj.w) * 2;
-      resident += Bf16Numel(lw.dense_mlp.up_proj.w) * 2;
-      resident += Bf16Numel(lw.dense_mlp.down_proj.w) * 2;
+      resident += WeightBytes(lw.dense_mlp.gate_proj.w);
+      resident += WeightBytes(lw.dense_mlp.up_proj.w);
+      resident += WeightBytes(lw.dense_mlp.down_proj.w);
     } else {
       ++plan.moe_layers;
-      resident += Bf16Numel(lw.moe.router_gate) * 2;
-      resident += Bf16Numel(lw.moe.shared_expert.gate_proj.w) * 2;
-      resident += Bf16Numel(lw.moe.shared_expert.up_proj.w) * 2;
-      resident += Bf16Numel(lw.moe.shared_expert.down_proj.w) * 2;
+      resident += WeightBytes(lw.moe.router_gate);
+      resident += WeightBytes(lw.moe.shared_expert.gate_proj.w);
+      resident += WeightBytes(lw.moe.shared_expert.up_proj.w);
+      resident += WeightBytes(lw.moe.shared_expert.down_proj.w);
       for (const FlintExpertWeights& ex : lw.moe.experts)
-        expert_tier += (Bf16Numel(ex.gate_proj.w) + Bf16Numel(ex.up_proj.w) +
-                        Bf16Numel(ex.down_proj.w)) *
-                       2;
+        expert_tier += WeightBytes(ex.gate_proj.w) + WeightBytes(ex.up_proj.w) +
+                       WeightBytes(ex.down_proj.w);
     }
   }
   plan.resident_bytes = resident;
@@ -229,6 +250,28 @@ FlintTTStagingPlan PlanFlintTTStaging(const FlintWeights& w,
   plan.tensor_count =
       3 + static_cast<int64_t>(p.num_hidden_layers) * 6 +
       plan.moe_layers * 4;  // +router, +3 shared-expert projections
+  if (CarriesBlockWeights(w)) {
+    // The keep-quant arm: the tier counts RAW block bytes and RESIDES with
+    // the rest — the row's reason to exist. Nothing streams, so the
+    // per-layer stream figure is reported as zero and the refusal covers
+    // the whole model.
+    plan.streamed_bytes_per_layer = 0;
+    if (resident + expert_tier > options.device_budget_bytes) {
+      throw std::runtime_error(
+          "flint TT staging: the keep-quant resident total (" +
+          std::to_string(resident + expert_tier) +
+          " B = resident " + std::to_string(resident) + " + expert tier " +
+          std::to_string(expert_tier) +
+          " raw block bytes) exceeds the device budget (" +
+          std::to_string(options.device_budget_bytes) +
+          " B); the byte deficit is " +
+          std::to_string(resident + expert_tier - options.device_budget_bytes) +
+          " B. The bf16 arm's " + std::to_string(expert_tier) +
+          " B would STREAM instead — the kolibri 384-expert wall this arm "
+          "exists to remove.");
+    }
+    return plan;
+  }
   if (resident > options.device_budget_bytes) {
     throw std::runtime_error(
         "flint TT staging: the resident slice (" +

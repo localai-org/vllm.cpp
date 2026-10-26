@@ -162,3 +162,15 @@ before/after resident bytes, distances + band justification, recipe/env.
   rows slice block-cleanly — recorded here so the check is done).
 - Device unavailable or container missing: the CPU-half lands with the device
   gate recorded PENDING, never faked.
+
+## Owed
+
+- THE DEVICE-FORWARD DISPATCH GATE: the loader arm and the staging plan are
+  gated (census + budget + refusal, 4/4 on device), but the flint_tt dispatch
+  arm's forward with RESIDENT block weights has not yet run end to end — the
+  W0-harness leg with VT_FLINT_KEEP_QUANT=1 (distances vs the CPU reference
+  on the same quantized weights, near-tie band) is the next increment.
+- The remaining containers (UD-Q4_K_XL, UD-IQ1_M, the 7 APEX files): same
+  census + gate per container; IQ2_S admission verified in the capability
+  set check.
+- The kolibri no-regress leg if shared keepquant code changes further.

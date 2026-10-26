@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "vllm/model_executor/model_loader/gguf_dequant.h"
+#include "vllm/model_executor/model_loader/gguf_keep_quant.h"
 #include "vt/dtype.h"
 
 namespace vllm {
@@ -124,6 +125,106 @@ FlintLinear OwnTowerSliceBf16(const std::vector<uint16_t>& dq,
       dq.begin() + static_cast<size_t>((e + 1) * out) * static_cast<size_t>(in));
   FlintLinear l;
   l.w = OwnTransposedBf16(slice, out, in);
+  return l;
+}
+
+// One 2-D projection for the KEEP-QUANT arm: a block-carrying tensor keeps
+// its VERBATIM GGUF block bytes in [N=out, K=in] nk order (the disk order,
+// which IS the MatmulBTQuant orientation — no transpose); a float-carrying
+// tensor (F32/F16/BF16 — there is no block to keep) takes the bf16 arm
+// exactly as before. A block encoding the Tenstorrent keep-quant kernel set
+// cannot decode refuses BY NAME (encoding + tensor) rather than silently
+// expanding — the pre-existing expand path would resurrect the 70.5 GiB
+// streaming tier this arm exists to remove, with the model resident
+// (gguf_keep_quant.cpp DeviceKeepQuantSupported's own rationale).
+FlintLinear OwnProjectionKeepQuant(const GgufFile& g, const std::string& name,
+                                   int64_t in, int64_t out) {
+  const GgufTensorInfo& t = g.Get(name);
+  VT_CHECK(t.shape.size() == 2 && t.shape[0] == out && t.shape[1] == in,
+           "flint gguf: " + name + " is [" +
+               std::to_string(t.shape.empty() ? -1 : t.shape[0]) + ", " +
+               std::to_string(t.shape.size() < 2 ? -1 : t.shape[1]) +
+               "], expected [" + std::to_string(out) + ", " +
+               std::to_string(in) + "]");
+  FlintLinear l;
+  vt::DType dt = vt::DType::kF32;
+  if (!vt::BlockDTypeFromGgmlTypeId(t.ggml_type, &dt)) {
+    l = OwnProjectionBf16(g, name, in, out);
+    return l;
+  }
+  VT_CHECK(KeepQuantDType(t.ggml_type, &dt) &&
+               DeviceKeepQuantSupported(dt, vt::DeviceType::kTENSTORRENT),
+           "flint gguf keep-quant: " + name + " carries " +
+               std::string(vt::Name(dt)) +
+               ", which the Tenstorrent keep-quant kernel set does not decode "
+               "(gguf_keep_quant.cpp DeviceKeepQuantSupported, kTENSTORRENT); "
+               "the arm refuses by name rather than silently expanding to the "
+               "70.5 GiB bf16 streaming tier");
+  VT_CHECK(t.shape[1] % vt::BlockElems(dt) == 0,
+           "flint gguf keep-quant: " + name +
+               " K is not a whole number of " + std::string(vt::Name(dt)) +
+               " blocks");
+  const size_t row_bytes = vt::RowSizeBytes(dt, in);
+  VT_CHECK(static_cast<int64_t>(row_bytes) * out <=
+               static_cast<int64_t>(t.nbytes),
+           "flint gguf keep-quant: " + name + " block span exceeds the tensor");
+  l.w.dtype = dt;
+  l.w.rank = 2;
+  l.w.shape[0] = out;
+  l.w.shape[1] = in;
+  l.w.nk = true;
+  l.w.bytes.resize(static_cast<size_t>(row_bytes) *
+                   static_cast<size_t>(out));
+  std::memcpy(l.w.bytes.data(), t.data, l.w.bytes.size());
+  return l;
+}
+
+// One routed expert cut out of the KEEP-QUANT arm's stacked tower. Whole
+// rows of the same K per expert, so the cut is block-aligned by
+// construction (experts tile the OUT dimension). A float-carrying tower
+// takes the dequant-once + slice bf16 path unchanged.
+FlintLinear OwnTowerKeepQuant(const GgufFile& g, const std::string& name,
+                              int64_t e, int64_t in, int64_t out) {
+  const GgufTensorInfo& t = g.Get(name);
+  vt::DType dt = vt::DType::kF32;
+  if (!vt::BlockDTypeFromGgmlTypeId(t.ggml_type, &dt))
+    return OwnTowerSliceBf16(
+        DequantGgufRowToBf16(t.ggml_type, t.data, ShapeNumel(t.shape), 1.0F),
+        t, e, in, out);
+  // Admit ONCE per tower (the same verdict every expert slice inherits);
+  // the per-slice geometry check keeps every cut loud.
+  VT_CHECK(KeepQuantDType(t.ggml_type, &dt) &&
+               DeviceKeepQuantSupported(dt, vt::DeviceType::kTENSTORRENT),
+           "flint gguf keep-quant: " + name + " carries " +
+               std::string(vt::Name(dt)) +
+               ", which the Tenstorrent keep-quant kernel set does not decode "
+               "(gguf_keep_quant.cpp DeviceKeepQuantSupported, kTENSTORRENT); "
+               "the arm refuses by name rather than silently expanding to the "
+               "70.5 GiB bf16 streaming tier");
+  VT_CHECK(t.shape.size() == 3 && t.shape[2] == in,
+           "flint gguf keep-quant: " + name + " is not the [E, out, in] tower (shape=[" +
+               std::to_string(t.shape.size() > 0 ? t.shape[0] : -1) + "," +
+               std::to_string(t.shape.size() > 1 ? t.shape[1] : -1) + "," +
+               std::to_string(t.shape.size() > 2 ? t.shape[2] : -1) + "], in=" +
+               std::to_string(in) + ", out=" + std::to_string(out) + ")");
+  VT_CHECK((e + 1) * out <= t.shape[0] * t.shape[1],
+           "flint gguf keep-quant: expert slice out of range for " + name);
+  VT_CHECK(in % vt::BlockElems(dt) == 0,
+           "flint gguf keep-quant: " + name +
+               " K is not a whole number of " + std::string(vt::Name(dt)) +
+               " blocks");
+  const size_t row_bytes = vt::RowSizeBytes(dt, in);
+  FlintLinear l;
+  l.w.dtype = dt;
+  l.w.rank = 2;
+  l.w.shape[0] = out;
+  l.w.shape[1] = in;
+  l.w.nk = true;
+  l.w.bytes.resize(static_cast<size_t>(row_bytes) *
+                   static_cast<size_t>(out));
+  std::memcpy(l.w.bytes.data(),
+              t.data + static_cast<size_t>(e * out) * row_bytes,
+              l.w.bytes.size());
   return l;
 }
 
@@ -359,7 +460,8 @@ HfConfig FlintHfConfigFromGguf(const GgufFile& gguf) {
   return c;
 }
 
-FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
+FlintWeights LoadFlintFromGgufImpl(const GgufFile& gguf,
+                                   const HfConfig& config, bool keep_quant) {
   VT_CHECK(IsFlintGguf(gguf),
            "flint gguf: general.architecture must be '" +
                std::string(kFlintGgufArch) + "'");
@@ -397,7 +499,12 @@ FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
   FlintWeights w;
   w.params = p;
   w.embed_tokens = OwnBf16(gguf, "token_embd.weight", {v, h});
-  {
+  if (keep_quant) {
+    // The untied head in the keep-quant arm: the CONSUMER dispatches per
+    // dtype (flint_tt.cpp MatmulWeight), so a block-carrying head keeps its
+    // [V, H] disk order and a float-carrying head takes the bf16 transpose.
+    w.lm_head = OwnProjectionKeepQuant(gguf, "output.weight", h, v).w;
+  } else {
     // The untied head, CONSUMED [H, V] Matmul-B (flint.h: lm_head
     // "[H, vocab] Matmul-B, untied" — the safetensors arm's
     // LoadBf16Transposed orientation). Stored [V, H] it would be read
@@ -417,10 +524,22 @@ FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
     lw.input_layernorm = OwnNormBf16(gguf, Blk(l, "attn_norm.weight"), h);
     lw.post_attention_layernorm =
         OwnNormBf16(gguf, Blk(l, "ffn_norm.weight"), h);
-    lw.attn.q_proj = OwnProjectionBf16(gguf, Blk(l, "attn_q.weight"), h, q);
-    lw.attn.k_proj = OwnProjectionBf16(gguf, Blk(l, "attn_k.weight"), h, kv);
-    lw.attn.v_proj = OwnProjectionBf16(gguf, Blk(l, "attn_v.weight"), h, kv);
-    lw.attn.o_proj = OwnProjectionBf16(gguf, Blk(l, "attn_output.weight"), q, h);
+    if (keep_quant) {
+      lw.attn.q_proj =
+          OwnProjectionKeepQuant(gguf, Blk(l, "attn_q.weight"), h, q);
+      lw.attn.k_proj =
+          OwnProjectionKeepQuant(gguf, Blk(l, "attn_k.weight"), h, kv);
+      lw.attn.v_proj =
+          OwnProjectionKeepQuant(gguf, Blk(l, "attn_v.weight"), h, kv);
+      lw.attn.o_proj =
+          OwnProjectionKeepQuant(gguf, Blk(l, "attn_output.weight"), q, h);
+    } else {
+      lw.attn.q_proj = OwnProjectionBf16(gguf, Blk(l, "attn_q.weight"), h, q);
+      lw.attn.k_proj = OwnProjectionBf16(gguf, Blk(l, "attn_k.weight"), h, kv);
+      lw.attn.v_proj = OwnProjectionBf16(gguf, Blk(l, "attn_v.weight"), h, kv);
+      lw.attn.o_proj =
+          OwnProjectionBf16(gguf, Blk(l, "attn_output.weight"), q, h);
+    }
     lw.attn.q_norm =
         OwnNormBf16(gguf, Blk(l, "attn_q_norm.weight"), p.head_dim);
     lw.attn.k_norm =
@@ -429,18 +548,31 @@ FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
                                  p.num_attention_heads);
 
     if (p.IsDenseLayer(l)) {
-      lw.dense_mlp.gate_proj =
-          OwnProjectionBf16(gguf, Blk(l, "ffn_gate.weight"), h, dense_inter);
-      lw.dense_mlp.up_proj =
-          OwnProjectionBf16(gguf, Blk(l, "ffn_up.weight"), h, dense_inter);
-      lw.dense_mlp.down_proj =
-          OwnProjectionBf16(gguf, Blk(l, "ffn_down.weight"), dense_inter, h);
+      if (keep_quant) {
+        lw.dense_mlp.gate_proj = OwnProjectionKeepQuant(
+            gguf, Blk(l, "ffn_gate.weight"), h, dense_inter);
+        lw.dense_mlp.up_proj =
+            OwnProjectionKeepQuant(gguf, Blk(l, "ffn_up.weight"), h, dense_inter);
+        lw.dense_mlp.down_proj = OwnProjectionKeepQuant(
+            gguf, Blk(l, "ffn_down.weight"), dense_inter, h);
+      } else {
+        lw.dense_mlp.gate_proj =
+            OwnProjectionBf16(gguf, Blk(l, "ffn_gate.weight"), h, dense_inter);
+        lw.dense_mlp.up_proj =
+            OwnProjectionBf16(gguf, Blk(l, "ffn_up.weight"), h, dense_inter);
+        lw.dense_mlp.down_proj =
+            OwnProjectionBf16(gguf, Blk(l, "ffn_down.weight"), dense_inter, h);
+      }
     } else {
       // Router [E, H] on disk, consumed [H, E] (the safetensors arm's
       // LoadBf16Transposed orientation).
-      {
-        // Router [E, H] on disk, consumed [H, E] (the safetensors arm's
-        // LoadBf16Transposed orientation).
+      if (keep_quant) {
+        lw.moe.router_gate =
+            OwnProjectionKeepQuant(gguf, Blk(l, "ffn_gate_inp.weight"), h,
+                                   p.num_experts)
+                .w;  // the router is f32/bf16 on disk: the KeepQuant helper
+                     // falls back to the bf16 arm for it (non-block dtype)
+      } else {
         const GgufTensorInfo& r = gguf.Get(Blk(l, "ffn_gate_inp.weight"));
         VT_CHECK(r.shape.size() == 2 && r.shape[0] == p.num_experts &&
                      r.shape[1] == h,
@@ -451,6 +583,24 @@ FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
         lw.moe.router_gate = OwnTransposedBf16(rdq, p.num_experts, h);
       }
 
+      if (keep_quant) {
+        lw.moe.experts.resize(static_cast<size_t>(p.num_experts));
+        for (int64_t e = 0; e < p.num_experts; ++e) {
+          FlintExpertWeights& x = lw.moe.experts[static_cast<size_t>(e)];
+          x.gate_proj = OwnTowerKeepQuant(gguf, Blk(l, "ffn_gate_exps.weight"),
+                                          e, h, inter);
+          x.up_proj =
+              OwnTowerKeepQuant(gguf, Blk(l, "ffn_up_exps.weight"), e, h, inter);
+          x.down_proj = OwnTowerKeepQuant(gguf, Blk(l, "ffn_down_exps.weight"),
+                                          e, inter, h);
+        }
+        lw.moe.shared_expert.gate_proj = OwnProjectionKeepQuant(
+            gguf, Blk(l, "ffn_gate_shexp.weight"), h, shared_inter);
+        lw.moe.shared_expert.up_proj = OwnProjectionKeepQuant(
+            gguf, Blk(l, "ffn_up_shexp.weight"), h, shared_inter);
+        lw.moe.shared_expert.down_proj = OwnProjectionKeepQuant(
+            gguf, Blk(l, "ffn_down_shexp.weight"), shared_inter, h);
+      } else {
       // Dequantize each stacked tower ONCE for the layer, then cut + transpose
       // the 256 experts out of the resident decode (see OwnTowerSliceBf16).
       const GgufTensorInfo& gate = gguf.Get(Blk(l, "ffn_gate_exps.weight"));
@@ -475,9 +625,25 @@ FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
           OwnProjectionBf16(gguf, Blk(l, "ffn_up_shexp.weight"), h, shared_inter);
       lw.moe.shared_expert.down_proj =
           OwnProjectionBf16(gguf, Blk(l, "ffn_down_shexp.weight"), shared_inter, h);
+      }
     }
   }
   return w;
+}
+
+FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config) {
+  return LoadFlintFromGgufImpl(gguf, config, /*keep_quant=*/false);
+}
+
+FlintWeights LoadFlintKeepQuantFromGguf(const GgufFile& gguf,
+                                        const HfConfig& config) {
+  // THE ARM IS OPT-IN: VT_FLINT_KEEP_QUANT=1 admits the keep-quant arm;
+  // unset (or 0) restores the bf16 arm byte-for-byte — the production
+  // entry self-gates so no caller can take the new arm by accident.
+  const char* e = std::getenv("VT_FLINT_KEEP_QUANT");
+  if (e == nullptr || e[0] != '1')
+    return LoadFlintFromGgufImpl(gguf, config, /*keep_quant=*/false);
+  return LoadFlintFromGgufImpl(gguf, config, /*keep_quant=*/true);
 }
 
 }  // namespace vllm

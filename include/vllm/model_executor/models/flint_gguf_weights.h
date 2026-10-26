@@ -50,4 +50,18 @@ std::vector<FlintGgufTensor> EnumerateFlintGgufTensors(const FlintParams& p);
 // missing or unaccounted tensor and on an unsupported ggml type.
 FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config);
 
+// The keep-quant arm (.agents/specs/flint-keepquant.md, issue
+// ISSUE-LOCAL-01M5WCPZC4TWR9GZVJHH73E1XE): the SAME FlintWeights, but every
+// weight tensor that carries an ADMITTED block encoding (KeepQuantDType AND
+// DeviceKeepQuantSupported(dt, kTENSTORRENT)) keeps its VERBATIM GGUF block
+// bytes in [N, K] nk order — the MatmulBTQuant orientation, no transpose.
+// A weight tensor carrying an inadmissible block encoding refuses BY NAME
+// (encoding + tensor); float-carrying tensors (embedding table, norms,
+// sinks, a float router) take the bf16 arm exactly as before. The
+// `flint_tt.cpp` device arm dispatches per-tensor dtype, and the CPU
+// reference forward refuses a keep-quant weight set by name (it consumes
+// bf16).
+FlintWeights LoadFlintKeepQuantFromGguf(const GgufFile& gguf,
+                                        const HfConfig& config);
+
 }  // namespace vllm

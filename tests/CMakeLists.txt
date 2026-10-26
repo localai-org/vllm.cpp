@@ -267,6 +267,13 @@ if(VLLM_CPP_TENSTORRENT)
   # docs/bench-evidence/flint-tt-w0-20261025/).
   vllm_cpp_add_test(test_flint_tt_w0 vllm/models/test_flint_tt_w0.cpp)
   target_include_directories(test_flint_tt_w0 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # Flint keep-quant device arm (spec .agents/specs/flint-keepquant.md,
+  # issue ISSUE-LOCAL-01M5WCPZC4TWR9GZVJHH73E1XE): the loader-arm host gates
+  # (admission census, refusal by name, re-derived budget) plus the
+  # env-gated device-vs-CPU distance leg.
+  vllm_cpp_add_test(test_flint_keepquant vllm/models/test_flint_keepquant.cpp)
+  target_include_directories(test_flint_keepquant PRIVATE ${CMAKE_SOURCE_DIR}/src
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
   # SCRATCH W2 diagnostic (operator-run under the gpu.lock mutex, evidence in
   # docs/bench-evidence/flint-tt-w2-20261025/): the ttnn::matmul f32-to-tf32
   # operand micro-probe.
