@@ -183,7 +183,7 @@ Developer-approved on the evidence above. Three changes land together:
    bit-identical legs each (shipped `[269 6963 332 269 332 116253 12 332]`,
    `=lofi` `[269 269 269 269 269 140759 269 269]`) — replacing
    `CHECK(chain_match >= 1)`; the distance legs carry the regression
-   power, tightened to `rel_rms < 0.30` (was 0.5) and `max_abs < 40.0`
+   power, tightened to `rel_rms < 0.25` (was 0.5) and `max_abs < 40.0`
    (was 64.0).
 
 **Red-first.** The OLD gate form is RED on the adopted arm: the three
@@ -195,11 +195,11 @@ arm diverges harder on an adjudicated-divergent signal, not correctness.
 The NEW gate form is GREEN on the adopted arm (below) and keeps the old
 arm pinned per config under `=lofi`.
 
-**Band honesty.** At the requested fence (rel_rms < 0.30, max_abs < 40)
+**Band honesty.** At the requested fence (rel_rms < 0.25, max_abs < 40)
 the old arm's measured distance numbers (2.579e-1, 3.200e+1) remain
-INSIDE the band — 2.579e-1 = 0.2579 < 0.30 — so the fence is a
+INSIDE the band — 2.579e-1 = 0.2579 < 0.25 — so the fence is a
 hard-regression fence against distance growth (1.36x / 1.22x the adopted
-arm's measured numbers), not an arm selector; the chain-consistency leg is
+arm's measured numbers), both the hard-regression fence and the arm selector; the chain-consistency leg is
 what distinguishes the arms. For contrast, the invalid binary's 0.25 band
 WOULD go red on the true old-arm number (0.2579 > 0.25) — which is exactly
 the mismatch that exposed the invalid lineage.

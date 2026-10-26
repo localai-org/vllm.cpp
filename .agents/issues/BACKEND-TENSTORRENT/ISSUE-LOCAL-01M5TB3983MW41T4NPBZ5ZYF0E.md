@@ -36,7 +36,7 @@ on the leg mean, not claimed as a speedup; first-token rel_rms 2.579e-1 ->
 2.212e-1), so the shipped default is now the exact arm (HiFi4 + approx off
 + fp32_dest_acc_en) and VT_TT_MATMUL_MATH_FIDELITY=lofi restores the old
 arm for A/B. The W0 gate is re-specified to the adjudicated-divergent form
-(chain consistency per config; distance band tightened to 0.30 / 40). No
+(chain consistency per config; distance band tightened to 0.25 / 40 (the old arm is red on the fence on device; the red/green pair is committed as w0-lofi-red.log / w0-hifi4-green.log)). No
 upstream filing:
 the behavior is documented math_fidelity semantics, not a defect. The W2 MatmulBT/bf16-out
 "anomaly" is corrected as a test-side staging bug (correct-staging map rerun

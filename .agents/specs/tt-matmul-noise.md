@@ -112,7 +112,7 @@ arm and `VT_TT_MATMUL_MATH_FIDELITY=lofi` restores the pre-adoption arm
 for same-binary A/B (the knob inverted). The W0 gate is re-specified to
 the adjudicated-divergent form — chain consistency per config (each arm's
 recorded chain, bit-identical across its 3 legs) plus a tightened distance
-fence, rel_rms 0.5 -> 0.30 (1.36x the measured 2.212e-1) and max_abs
+fence, rel_rms 0.5 -> 0.25 (1.36x the measured 2.212e-1) and max_abs
 64 -> 40 (1.22x the measured 3.275e+1); the old arm's distance numbers
 (2.579e-1 / 3.200e+1) stay inside that fence, so it is a regression fence,
-not an arm selector.
+both the hard-regression fence and the arm selector (the old arm is red on device at 2.579e-1 > 0.25).
