@@ -45,3 +45,11 @@ w0-after.log; W0 gate re-run 2/2 PASS, rel_rms 2.579e-01 unchanged, band
 not re-tightened). The substrate matmul-noise defect and the dense
 gate_proj outliers are named for the substrate row.
 
+
+## Addendum 2026-10-26: the "gate_proj outlier generator" is retracted
+
+The 20x-energy finding was a dump-tag artifact — the CPU dump block fuses
+silu*u into g before printing, so the comparison was device pre-activation
+against CPU post-activation. Apples-to-apples energies match at every
+layer-0 stage (docs/bench-evidence/tt-matmul-noise-20261025/report.md, the
+2026-10-26 addendum; instrument fixed in daf378deb).

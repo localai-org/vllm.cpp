@@ -532,7 +532,6 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
         };
         stage("a", g);  // the loop above FUSED silu*u into g: this IS the post-activation a (the device arm prints raw pre-silu g under "g")
         stage("u", u);
-        stage("a", g);  // the CPU arm fuses silu*u in place into g
       }
       MatmulBf16(gi.data(), lw.dense_mlp.down_proj.w, t, ff.data());
       if (cpu_dump && layer == 0) {
