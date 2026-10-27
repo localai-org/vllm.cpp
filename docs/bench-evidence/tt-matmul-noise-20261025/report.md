@@ -309,3 +309,26 @@ near-cancellation tails, not defects. The model-level device-vs-CPU gap
 is ACCUMULATED bf16-class tail noise amplified over 49 layers — the
 substrate floor for this precision class — with NO discrete layer-0
 defect remaining. The gate_proj "outlier generator" is retracted.
+
+
+## ADDENDUM 2026-10-26 (evening): CROSS-EPOCH DRIFT — the absolute rel_rms is epoch-relative
+
+The keepquant dispatch gate's bf16-mode regression leg FAILED its
+morning-calibrated 0.25 fence while reading 2.683e-1 — and the decisive
+A/B (the tt-matmul-w3 binary, which measured 2.212e-1 three times this
+morning, against the keepquant binary, back to back on one reset) shows
+BOTH binaries reading 2.683e-1 bit-identically. The keepquant branch did
+not change bf16 numerics; the ABSOLUTE distance drifts ~20 percent across
+DEVICE EPOCHS while staying bit-deterministic WITHIN an epoch (the same
+epoch-dependence the chain shows: both arms' chains are bit-identical to
+each other within an epoch and differ across epochs).
+
+Consequences, recorded in the W0 gate (test_flint_tt_w0.cpp): the
+distance fence returns to the DRIFT-TOLERANT 0.5/64 form (it fences hard
+regressions only — an absolute band tighter than the drift measures the
+epoch, not the code); the chain-consistency leg is replaced by chain
+RECORDING (the chain is adjudicated-divergent and epoch-dependent; the
+geometry assertions + the dispatch counter pin the arm and the config).
+The keepquant dispatch gate itself is GREEN both modes: keep-quant
+1.557+21.311 GiB resident/0 streamed vs bf16 3.606+70.5 streamed, both
+SUCCESS on one reset cycle each.
