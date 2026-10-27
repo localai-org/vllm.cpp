@@ -981,6 +981,44 @@ The [author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) runs on
 CPU with a BF16-converted reference checkpoint, but its outputs differ from the transcription.
 Full correctness and speed parity against the plugin remain unverified.
 
+## Flint (RecursiveSI) from a GGUF k-quant
+
+The `flint`-architecture container (hybrid FFSSSF sliding/full attention, no
+RoPE on the full layers, per-head attention sinks, sigmoid top-6 MoE with an
+ungated shared expert) serves on CPU through the shared paged engine with
+continuous batching. Point `--model` straight at the file; the config comes
+from the GGUF's own metadata:
+
+```sh
+./build/vllm-server --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+# or the benchmark harness:
+build/examples/vllm-bench --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf \
+  --num-prompts 8 --input-len 128 --output-len 32 --concurrency 4 \
+  --seed 0 --temperature 0
+```
+
+Published containers on the dev share: `flint-GGUF/flint-Q4_K_M.gguf`
+(sha256 `20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e`),
+plus the `unsloth-flint-GGUF/` and `flint-APEX-GGUF/` variants of the same
+converter family. Weights are the one part of a port a reader cannot infer:
+the gates were built and run against exactly these files.
+
+Correctness record, all on the published Q4_K_M container:
+
+- the reference-forward token gate (`test_flint_gguf`) replays the pinned
+  llama-cpp-flint oracle (PR #30928 head `1b44e307`, the sinks PR whose paged
+  sink handling this engine mirrors): 46/53 greedy positions token-exact,
+  0 hard flips, everything else inside the house 2.5-nat near-tie band;
+- the synthetic paged gate (`test_flint_paged`) gates the paged arm's
+  structure and the same band against the reference forward;
+- the real-weights paged-engine gate (`test_flint_paged_engine`) serves three
+  continuously-arriving requests through the full LLMEngine stack and
+  adjudicates each chain against the reference forward: measured divergence
+  margins 0.036–0.114 nats.
+
+CUDA/ROCm and safetensors arms are refused by name. The container's
+`flint.context_length` drives the engine context; the KV pool auto-fits it.
+
 ## Muse Glimmer 30B from a GGUF k-quant
 
 The text tower loads from a `muse-glimmer`-architecture GGUF, so the 30B model

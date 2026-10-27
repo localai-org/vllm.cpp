@@ -133,9 +133,53 @@ control), silu-mul consumes the same bf16 g/u. FLINT_CPU_DUMP now dumps
 every paged layer ([FLINT-PAGED] L<l> <stage>) for like-for-like stage
 sums against the reference.
 
+W-c (2026-10-27): the REAL-WEIGHTS paged-engine gate
+(`test_flint_paged_engine`) drives the published Q4_K_M through the full
+LLMEngine stack with three continuously-arriving requests; every chain
+adjudicates against the reference forward inside the 2.5-nat band (measured
+margins 0.114 / 0.036 / 0.042 nats; request 0's text replays the reference
+exactly). Two engine-side defects surfaced and were fixed in the same flow
+(both closed with red-first evidence): the GGUF config never mapped
+`flint.context_length` (ISSUE-LOCAL-01M5YRQ1SWC93MDG52QZGDFBY4 — segfault on
+the first add_request), and the multi-group cache write used the target
+group's slot mapping (ISSUE-LOCAL-01M5Z079R7RFSCPB1F4P9C94S5 — every sliding
+layer's attention output exactly 0.0). The arm now consumes the
+MultiKvCacheIndex by name and derives each layer's slots from its own
+group's table.
+
+W-d (2026-10-27): the FIRST CPU throughput numbers, `vllm-bench` on the
+published container at 32 threads on the shared aarch64 box: prefill 7.44
+tok/s (512 in), decode 1.26 tok/s (TPOT 797 ms, c=1), 0.97 tok/s aggregate
+at c=4. Baseline, not a parity claim — no vLLM denominator exists for flint.
+[docs/benchmarks/flint-cpu-paged.md], evidence
+[docs/bench-evidence/flint-paged-20261027/].
+
+W-e (2026-10-27): `docs/USAGE.md` Flint serving section with the container
+pins; `docs/FEATURES.md` row updated; the benchmark record is
+`docs/benchmarks/flint-cpu-paged.md`.
+
+## Outcome
+
+The row landed as five committed waves on `row/FLINT-PAGED` (base e4918e776):
+W-a the hybrid KV-group gate, W-b the paged arm + synthetic gate, W-c the
+real-weights paged-engine gate, W-d the first throughput numbers, W-e the
+docs. Measured: the numbers above. Rejected: token-exact paged-vs-reference
+agreement as the gate form — the paged path rounds the head stream and the
+KV cache through the model dtype bf16 where the reference keeps its f32
+score path, so the house near-tie band is the correct contract (measured
+margins sit two orders of magnitude inside it). Each default's reason: the
+per-layer slot derivation lives model-side (not engine-side) because the
+single-CAM seam is the engine's and the arm already reads the group tables;
+`consumes_multi_kv` mirrors MiMoV2/DeepSeek-V4; the reference forward stays
+byte-identical as the oracle.
+
 ## Owed
 
 - CUDA/ROCm device arms: refused by name in the registry switch (existing
   behavior).
 - The llama.cpp token gate for the paged arm is NOT owed: the reference
   forward is the oracle for paged batching per row direction.
+- The engine-side per-group slot-mapping seam (one CommonAttentionMetadata
+  per step) is owned by the engine row; the closed multi-group slot-mapping
+  issue in this row's directory records the finding, and MiMoV2 is exposed
+  identically.

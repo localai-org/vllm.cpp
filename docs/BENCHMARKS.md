@@ -14,6 +14,7 @@ to the file stem.
 | `llama-cpp-cpu` | llama.cpp on CPU, including the RPi5/A76 gating arm that does not transfer | Results | [Detail](benchmarks/llama-cpp-cpu.md) |
 | `kolibri1-cpu-dequant-cache-default` | Kolibri-1 on CPU with the dequant cache on by default: decode, prefill and the n-gram spec-decode serving number | Results | [Detail](benchmarks/kolibri1-cpu-dequant-cache-default.md) |
 | `mlx-lm-apple-m4` | MLX-LM on Apple M4, warm, batch 1, 6 interleaved runs | Results | [Detail](benchmarks/mlx-lm-apple-m4.md) |
+| `flint-cpu-paged` | Flint (RecursiveSI) Q4_K_M on CPU through the paged engine: the first prefill/decode numbers | Results | [Detail](benchmarks/flint-cpu-paged.md) |
 | `dwarfstar-gguf` | DwarfStar vs ds4 on DeepSeek-V4-Flash GGUF, GB10, byte-exact | Results | [Detail](benchmarks/dwarfstar-gguf.md) |
 | `speculative-decoding` | MTP / DFlash / n-gram / DSpark rows against vLLM | Results | [Detail](benchmarks/speculative-decoding.md) |
 | `tt-capture-default-decode` | Qwen3-0.6B decode on the P150 with captured decode as the shipped default | Results | [Detail](benchmarks/tt-capture-default-decode.md) |
