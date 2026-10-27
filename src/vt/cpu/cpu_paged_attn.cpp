@@ -398,7 +398,9 @@ using vt::cpu::PagedAttnKDotBfDot;
               probs[static_cast<size_t>(j - jmin)] = dot;
               if (dot > m) m = dot;
             }
-            float denom = sink_p != nullptr ? 1.0f : 0.0f;
+            // The exp(sink - m) sink seed; see the scalar pass 2 below for
+            // why it is not exp(0).
+            float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
             for (int64_t j = jmin; j <= jmax; ++j) {
               const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
               probs[static_cast<size_t>(j - jmin)] = e;
@@ -449,9 +451,20 @@ using vt::cpu::PagedAttnKDotBfDot;
             probs[static_cast<size_t>(j - jmin)] = dot;
             if (dot > m) m = dot;
           }
-          // Pass 2: exp + denominator. Seeded at 1.0 when a sink is
-          // present (the sink's own exp(sink - m) contribution).
-          float denom = sink_p != nullptr ? 1.0f : 0.0f;
+          // Pass 2: exp + denominator. The sink's own contribution is
+          // exp(sink - m), NOT exp(0): m starts AT the sink but pass 1 then
+          // grows it past the sink whenever any score is larger, and an
+          // un-rescaled exp(0) seed silently turns the sink into exp(m - m)
+          // -- a LARGER term than the sink deserves, which shrinks every
+          // value weight (observed on Flint, whose per-head sinks are small:
+          // the attention output off by ~6%, the model logits off by ~2).
+          // Seeding at exp(sink - m_final) is bit-identical to the old seed
+          // whenever the sink IS the max (exp(0) == 1.0f, the MiMoV2
+          // large-sink regime this kernel was written for) and correct
+          // everywhere else. The online-softmax arms (`cpu_mla_attn.cpp`,
+          // `cuda_mla_attn.cu`) rescale their seed as m grows and never had
+          // the defect.
+          float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
             probs[static_cast<size_t>(j - jmin)] = e;

@@ -95,6 +95,44 @@ NEEDS_CONTEXT if the shared paged attention cannot express per-head
 sinks or the hybrid window split — checked false at base; sinks and
 windows both exist on CPU.
 
+## Findings
+
+W-b (2026-10-26/27, worktree /tmp/flint-paged): the paged arm LANDED and
+the synthetic gate runs green and GATES: the hybrid KV groups, a mixed
+2-request batch through `ModelRegistry::Forward` with continuous decode,
+window masking, sinks, and the house 2.5-nat near-tie band against the
+reference forward (request 0 replays the reference chain token-for-token;
+the one request-1 divergence sits inside the band).
+
+The gate caught THREE real defects:
+
+1. The per-head QK RMSNorm ran IN-PLACE over the head view and corrupted
+   the normed stream (q/k sums off ~5%); the arm now writes qn/kn.
+2. THE SHARED KERNEL (ISSUE-LOCAL-01M5YMB0XZ8723N0688YHMKP3N, fixed in
+   the same flow): `cpu_paged_attn.cpp` seeded the softmax denominator at
+   exp(0) with the running max seeded at the sink, in a two-pass form
+   that never rescales the seed once a score exceeds the sink — the sink
+   term silently became exp(m-m)=1 instead of exp(sink-m). MiMoV2's big
+   learned sinks always stay the max, so every earlier gate passed;
+   Flint's small sinks exposed it. Both lanes now seed exp(sink - m)
+   (bit-identical when the sink IS the max). Measured red-first: L0
+   attention output -0.128 vs hand-computed -1.139 over identical bf16
+   streams; exact after the fix.
+3. The paged arm passed a LIVE residual buffer to the fused
+   `vt::RmsNorm(residual=...)` on BOTH norms, so the second call added
+   the residual again (residual += x) and every MLP input was
+   rmsnorm(2x). The reference keeps ONE residual stream (x itself), so
+   the arm now runs plain norms + explicit adds.
+
+Contract alignment (the dead agent's ~3-nat "unexplained residual" was
+defects 2+3, not conditioning): the arm mirrors the reference's rounding
+exactly at every stage the dump can see — projections round to bf16
+before the head norm (MatmulBf16's own final store), the head norm runs
+f32-in/f32-out with one bf16 rounding after (the FLINT_REF_BF16_HEAD
+control), silu-mul consumes the same bf16 g/u. FLINT_CPU_DUMP now dumps
+every paged layer ([FLINT-PAGED] L<l> <stage>) for like-for-like stage
+sums against the reference.
+
 ## Owed
 
 - CUDA/ROCm device arms: refused by name in the registry switch (existing

@@ -41,9 +41,11 @@
 #include <utility>
 #include <vector>
 
+#include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/paged glue
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
+#include "vt/ops.h"
 
 namespace vllm {
 
@@ -365,6 +367,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
     for (float v : x) s += v;
     std::fprintf(stderr, "[FLINT-CPU] embed sum=%.6f\n", s);
   }
+  // (the paged arm's own dump lives in FlintForwardPaged below)
 
   std::vector<float> normed(static_cast<size_t>(t) * h);
   std::vector<float> proj(static_cast<size_t>(t) * h);
@@ -389,7 +392,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           s += w2;
           sq += static_cast<double>(w2) * w2;
         }
-        std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+        std::fprintf(stderr, "[FLINT-PAGED] L0 %-9s sum=%16.6f sumsq=%.6e\n",
                      tag, s, sq);
       };
       stage("q", q);
@@ -409,7 +412,13 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           for (int64_t d = 0; d < dh; ++d) ss += double(head[d]) * head[d];
           const float inv =
               static_cast<float>(1.0 / std::sqrt(ss / double(dh) + p.rms_norm_eps));
-          for (int64_t d = 0; d < dh; ++d) head[d] *= inv * Bf16(nw[d]);
+          static const bool bf16_head = std::getenv("FLINT_REF_BF16_HEAD") != nullptr;
+          for (int64_t d = 0; d < dh; ++d) {
+            head[d] *= inv * Bf16(nw[d]);
+            // CONTROL ARM: round the head stream through bf16 the way the
+            // paged path does, to separate ill-conditioning from defects.
+            if (bf16_head) head[d] = Bf16(ToBf16(head[d]));
+          }
         }
       };
       head_norm(q.data(), t * hq, qw);
@@ -473,7 +482,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
             s += w2;
             sq += static_cast<double>(w2) * w2;
           }
-          std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+          std::fprintf(stderr, "[FLINT-PAGED] L0 %-9s sum=%16.6f sumsq=%.6e\n",
                        tag, s, sq);
         };
         stage("attn_out", attn_out);
@@ -489,7 +498,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           s += w2;
           sq += static_cast<double>(w2) * w2;
         }
-        std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+        std::fprintf(stderr, "[FLINT-PAGED] L0 %-9s sum=%16.6f sumsq=%.6e\n",
                      tag, s, sq);
       };
       stage("ao", ao);
@@ -527,7 +536,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
             s += w2;
             sq += static_cast<double>(w2) * w2;
           }
-          std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+          std::fprintf(stderr, "[FLINT-PAGED] L0 %-9s sum=%16.6f sumsq=%.6e\n",
                        tag, s, sq);
         };
         stage("a", g);  // the loop above FUSED silu*u into g: this IS the post-activation a (the device arm prints raw pre-silu g under "g")
@@ -541,7 +550,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
             s += w2;
             sq += static_cast<double>(w2) * w2;
           }
-          std::fprintf(stderr, "[FLINT-CPU] L0 %-9s sum=%16.6f sumsq=%.6e\n",
+          std::fprintf(stderr, "[FLINT-PAGED] L0 %-9s sum=%16.6f sumsq=%.6e\n",
                        tag, s, sq);
         };
         stage("ff", ff);
@@ -652,6 +661,402 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
   return logits;
 }
 
+// ---------------------------------------------------------------------------
+// The paged-engine arm (MODEL-TEXT-FLINT paged row, spec
+// .agents/specs/flint-paged.md, issue ISSUE-LOCAL-01M5W2QQBJ32HRB29G1KVQJS77).
+//
+// The same architecture as FlintModel::Forward above, expressed through the
+// shared paged seams (dense_attn StepInputs / vt::PagedAttention / the per-
+// layer KV caches the runner hands the model) instead of the host cache, so
+// the LLMEngine can batch and schedule it continuously. The reference forward
+// stays byte-identical and remains the oracle this arm is gated against.
+//
+// Numerics contract carried over from the reference:
+//   - q/k RMSNorm over the head dim BEFORE RoPE (a per-row RmsNorm over the
+//     [T*heads, head_dim] view — the head stream stays f32 past the norm);
+//   - RoPE on the SLIDING layers only (full-attention layers carry no
+//     positional encoding at all);
+//   - per-head attention sinks on EVERY layer, folded into the softmax
+//     denominator (PagedAttentionArgs::attn_sink, cpu_paged_attn.cpp);
+//   - the sliding window reaches back sliding_window-1 positions
+//     (AttentionWindow{W-1, 0}, the mimo_v2.cpp convention);
+//   - router logits and lm_head logits accumulate f32 and STAY f32
+//     (vt::Matmul with an f32 output — the score path wideness);
+//   - linear outputs and the residual stream round to bf16.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using dense_attn::DBuf;
+using dense_attn::Dev;
+using dense_attn::Reshape;
+using dense_attn::ResidentWeight;
+using dense_attn::StepInputs;
+using vt::DType;
+using vt::Tensor;
+
+// GatherRows: gather the idx-indexed rows of `src` [.,H] into contiguous `dst`
+// (the gemma3.cpp:377 helper).
+void GatherRows(Dev d, void* dst, const Tensor& src,
+                const std::vector<int32_t>& idx, int64_t row_elems) {
+  const size_t rb = static_cast<size_t>(row_elems) * vt::SizeOf(src.dtype);
+  auto* dp = static_cast<char*>(dst);
+  const auto* sp = static_cast<const char*>(src.data);
+  for (size_t s = 0; s < idx.size(); ++s)
+    d.b.Copy(d.q, dp + s * rb, sp + static_cast<size_t>(idx[s]) * rb, rb);
+}
+
+// Matmul-B over a FlintLinear ([in, out] bf16) into an f32 or bf16 out.
+DBuf FlintLinearMatmul(Dev d, const Tensor& x, const FlintLinear& w,
+                       DType out_dtype) {
+  Tensor wt = ResidentWeight(d, w.w);
+  DBuf out(d, out_dtype, {x.shape[0], wt.shape[1]});
+  vt::Matmul(d.q, out.t(), x, wt);  // the flint weights are [K, N] (x @ w), not the B-transposed layout
+  return out;
+}
+
+// The ungated shared expert, always added (flint-cpu-gguf spec): gate/up ->
+// SiLU-mul -> down. bf16 activation rounding, as the reference rounds each
+// stage through bf16.
+DBuf FlintSharedExpert(Dev d, const FlintMlpWeights& w, const Tensor& x) {
+  DBuf g = FlintLinearMatmul(d, x, w.gate_proj, DType::kBF16);
+  DBuf u = FlintLinearMatmul(d, x, w.up_proj, DType::kBF16);
+  DBuf a(d, DType::kBF16, {x.shape[0], g.t().shape[1]});
+  vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
+  return FlintLinearMatmul(d, a.t(), w.down_proj, DType::kBF16);
+}
+
+// One dense SiLU MLP (the leading dense layers).
+DBuf FlintDenseMlp(Dev d, const FlintMlpWeights& w, const Tensor& x) {
+  return FlintSharedExpert(d, w, x);
+}
+
+// The MoE block: f32 router logits (MatmulBT with an f32 out) -> sigmoid
+// top-k renormalised (MoeRouterTopK, kSigmoid + renormalize) -> per-expert
+// gather/SiLU-MLP/scatter (the mimo_v2.cpp CPU reference path) -> MoeCombine
+// with the UNGATED shared expert as the shared term.
+DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
+                   const Tensor& x) {
+  const int64_t t = x.shape[0];
+  const int64_t e = p.num_experts;
+  const int64_t top_k = p.num_experts_per_tok;
+  const int64_t inter = p.moe_intermediate_size;
+
+  // Router: bf16 x bf16 accumulating straight into f32 — the architecture's
+  // own f32 score path, no intermediate bf16 rounding.
+  DBuf dlog(d, DType::kF32, {t, e});
+  vt::Matmul(d.q, dlog.t(), x, dense_attn::ResidentWeight(d, w.router_gate));
+
+  // Sigmoid -> top-k -> renormalise (expert_weights_norm) ON THE HOST over
+  // the downloaded f32 logits, exactly the reference forward's partial_sort.
+  DBuf dtw(d, DType::kF32, {t, top_k});
+  DBuf dtid(d, DType::kI32, {t, top_k});
+  {
+    std::vector<float> hlog(static_cast<size_t>(t * e));
+    dlog.Download(d, hlog.data());
+    std::vector<float> hw(static_cast<size_t>(t * top_k));
+    std::vector<int32_t> hi(static_cast<size_t>(t * top_k));
+    for (int64_t i = 0; i < t; ++i) {
+      std::vector<std::pair<float, int64_t>> score(static_cast<size_t>(e));
+      for (int64_t n = 0; n < e; ++n) {
+        const float lg = hlog[static_cast<size_t>(i) * e + n];
+        score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
+      }
+      std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
+                        [](const auto& a, const auto& b) { return a.first > b.first; });
+      double sum = 0.0;
+      for (int64_t kk = 0; kk < top_k; ++kk)
+        sum += score[static_cast<size_t>(kk)].first;
+      for (int64_t kk = 0; kk < top_k; ++kk) {
+        hw[static_cast<size_t>(i * top_k + kk)] = static_cast<float>(
+            score[static_cast<size_t>(kk)].first / sum);
+        hi[static_cast<size_t>(i * top_k + kk)] =
+            static_cast<int32_t>(score[static_cast<size_t>(kk)].second);
+      }
+    }
+    d.b.Copy(d.q, dtw.ptr(), hw.data(), hw.size() * sizeof(float));
+    d.b.Copy(d.q, dtid.ptr(), hi.data(), hi.size() * sizeof(int32_t));
+  }
+
+  // Routed experts (CPU reference path): download routing, per-expert
+  // gather -> gate/up -> SiLU-mul -> down -> scatter.
+  DBuf expert_out(d, DType::kBF16, {t, top_k, p.hidden_size});
+  expert_out.Zero(d);
+  std::vector<int32_t> hid(static_cast<size_t>(t * top_k));
+  std::vector<int32_t> slot(static_cast<size_t>(t * top_k));
+  dtid.Download(d, hid.data());
+  for (int64_t ex = 0; ex < e; ++ex) {
+    std::vector<int32_t> rows;
+    std::vector<int32_t> slots;
+    for (int64_t ti = 0; ti < t; ++ti)
+      for (int64_t kk = 0; kk < top_k; ++kk) {
+        const int64_t idx = ti * top_k + kk;
+        if (hid[static_cast<size_t>(idx)] == static_cast<int32_t>(ex)) {
+          rows.push_back(static_cast<int32_t>(ti));
+          slots.push_back(static_cast<int32_t>(idx));
+          break;
+        }
+      }
+    if (rows.empty()) continue;
+    const int64_t ne = static_cast<int64_t>(rows.size());
+    DBuf gathered(d, DType::kBF16, {ne, p.hidden_size});
+    GatherRows(d, gathered.ptr(), x, rows, p.hidden_size);
+    DBuf g = FlintLinearMatmul(d, gathered.t(),
+                               w.experts[static_cast<size_t>(ex)].gate_proj,
+                               DType::kBF16);
+    DBuf u = FlintLinearMatmul(d, gathered.t(),
+                               w.experts[static_cast<size_t>(ex)].up_proj,
+                               DType::kBF16);
+    DBuf a(d, DType::kBF16, {ne, inter});
+    vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
+    DBuf o = FlintLinearMatmul(d, a.t(),
+                               w.experts[static_cast<size_t>(ex)].down_proj,
+                               DType::kBF16);
+    for (int64_t i = 0; i < ne; ++i) {
+      // Device-to-device row copy (the mimo_v2.cpp:177 scatter).
+      d.b.Copy(d.q,
+               static_cast<char*>(expert_out.ptr()) +
+                   static_cast<size_t>(slots[static_cast<size_t>(i)]) *
+                       static_cast<size_t>(p.hidden_size) * sizeof(uint16_t),
+               static_cast<const char*>(o.ptr()) +
+                   static_cast<size_t>(i) * static_cast<size_t>(p.hidden_size) *
+                       sizeof(uint16_t),
+               static_cast<size_t>(p.hidden_size) * sizeof(uint16_t));
+    }
+  }
+
+  DBuf shared = FlintSharedExpert(d, w.shared_expert, x);
+  DBuf out(d, DType::kBF16, {t, p.hidden_size});
+  vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared.t());
+  return out;
+}
+
+}  // namespace
+
+ForwardLogits FlintForwardPaged(
+    const std::vector<int32_t>& token_ids, const std::vector<int32_t>& positions,
+    const v1::CommonAttentionMetadata& attn_meta,
+    const std::vector<PagedKvCache>& attn_kv, const FlintWeights& w,
+    const HfConfig& config, vt::Queue& queue,
+    const std::vector<int32_t>& logits_indices) {
+  const FlintParams& p = w.params;
+  const int64_t t = static_cast<int64_t>(token_ids.size());
+  const int64_t h = p.hidden_size;
+  const int64_t hq = p.num_attention_heads;
+  const int64_t hkv = p.num_key_value_heads;
+  const int64_t dh = p.head_dim;
+  FLINT_CHECK(static_cast<int64_t>(positions.size()) == t,
+              "flint paged: positions length must equal token_ids");
+  FLINT_CHECK(attn_kv.size() == static_cast<size_t>(p.num_hidden_layers),
+              "flint paged: one PagedKvCache per layer required (got " +
+                  std::to_string(attn_kv.size()) + ")");
+  FLINT_CHECK(attn_meta.num_reqs >= 1,
+              "flint paged: empty batch metadata");
+  FLINT_CHECK(attn_meta.seq_lens.size() == static_cast<size_t>(attn_meta.num_reqs),
+              "flint paged: seq_lens must cover every request");
+
+  Dev d{vt::GetBackend(queue.device.type), queue};
+  const float eps = static_cast<float>(p.rms_norm_eps);
+  // The paged-vs-reference stage dump, the same tags the reference prints
+  // behind FLINT_CPU_DUMP ([FLINT-CPU] L0 <stage>), so the like-for-like
+  // distance is readable per stage.
+  const bool cpu_dump = std::getenv("FLINT_CPU_DUMP") != nullptr;
+  auto dump_bf16 = [&](const char* tag, const Tensor& z, int64_t ll = 0) {
+    if (!cpu_dump) return;
+    int64_t n = 1;
+    for (int i = 0; i < z.rank; ++i) n *= z.shape[i];
+    const auto* p16 = z.Ptr<uint16_t>();
+    double s = 0.0, sq = 0.0;
+    for (int64_t i = 0; i < n; ++i) {
+      const float v = Bf16(p16[i]);
+      s += v;
+      sq += static_cast<double>(v) * v;
+    }
+    std::fprintf(stderr, "[FLINT-PAGED] L%lld %-9s sum=%16.6f sumsq=%.6e\n", (long long)ll, tag, s, sq);
+  };
+
+  // Embedding lookup. `ids` lives to the end of the function: the CPU queue
+  // may run the op on a worker thread after this scope closes, and a scoped
+  // DBuf would hand its pool block back mid-flight (observed as "embedding:
+  // id out of range" on garbage ids).
+  DBuf hidden(d, DType::kBF16, {t, h});
+  DBuf ids(d, DType::kI32, {t}, token_ids.data());
+  vt::Embedding(d.q, hidden.t(),
+                ResidentWeight(d, w.embed_tokens, {p.vocab_size, h}), ids.t());
+  d.b.Synchronize(d.q);
+  if (cpu_dump) {
+    double s = 0.0;
+    const auto* p16 = hidden.t().Ptr<uint16_t>();
+    for (int64_t i = 0; i < t * h; ++i) s += Bf16(p16[i]);
+    std::fprintf(stderr, "[FLINT-PAGED] embed sum=%.6f\n", s);
+  }
+  StepInputs si = dense_attn::BuildStepInputs(d, positions, attn_meta, config);
+
+  // The paged attention needs the f32 sink vector per layer; CONVERT, do not
+  // reinterpret: attn_sink->Ptr<float>() reads f32 (cpu_paged_attn.cpp:211)
+  // and the weights are bf16.
+  std::vector<DBuf> sink_f32;
+  sink_f32.reserve(static_cast<size_t>(p.num_hidden_layers));
+  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+    DBuf s(d, DType::kF32, {hq});
+    vt::CastF32(d.q, s.t(),
+                ResidentWeight(d, w.layers[static_cast<size_t>(l)].attn.sinks, {hq}));
+    sink_f32.push_back(std::move(s));
+  }
+
+  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+    const FlintLayerWeights& lw = w.layers[static_cast<size_t>(l)];
+    const bool is_sliding = p.IsSlidingLayer(l);
+    const bool has_rope = p.LayerHasRope(l);
+
+    // input_layernorm. The reference keeps ONE residual stream (x itself:
+    // x = bf16(x + attn); normed = rmsnorm(x); x = bf16(x + mlp)), so the
+    // norms run WITHOUT the fused residual argument — passing a live buffer
+    // there ADDS it again (residual += x), which made every MLP input
+    // rmsnorm(2x) after the first attention.
+    DBuf dhn(d, DType::kBF16, {t, h});
+    Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
+    vt::RmsNorm(d.q, dhn.t(), hidden.t(), w_in, vt::RmsNormArgs{eps, false});
+
+    // q/k/v projections. vt::Matmul accumulates f32; the reference's
+    // MatmulBf16 ROUNDS each projection output to bf16 before anything else
+    // reads it (flint.cpp MatmulBf16's final store), so the arm rounds here
+    // once and every later stage — head norm, RoPE, cache, kernel — consumes
+    // the same bf16 stream the reference does.
+    DBuf q32 = FlintLinearMatmul(d, dhn.t(), lw.attn.q_proj, DType::kF32);
+    DBuf k32 = FlintLinearMatmul(d, dhn.t(), lw.attn.k_proj, DType::kF32);
+    DBuf v32 = FlintLinearMatmul(d, dhn.t(), lw.attn.v_proj, DType::kF32);
+    DBuf q(d, DType::kBF16, {t, hq * dh});
+    DBuf k(d, DType::kBF16, {t, hkv * dh});
+    DBuf vb(d, DType::kBF16, {t, hkv * dh});
+    vt::CastBf16(d.q, q.t(), q32.t());
+    vt::CastBf16(d.q, k.t(), k32.t());
+    vt::CastBf16(d.q, vb.t(), v32.t());
+    if (cpu_dump) dump_bf16("normed", dhn.t(), l);
+    Tensor v3 = Reshape(vb.t(), {t, hkv, dh});
+
+    // Per-head q/k RMSNorm over the head dim, BEFORE RoPE: a per-row RmsNorm
+    // over the [T*heads, dh] view of the head stream. NOT in-place: the op
+    // writes each element before the row reduction has passed over it, which
+    // corrupts the normed stream (observed: q/k sums off by ~5% against the
+    // reference while v, which is never normed, matched exactly). qn/kn own
+    // the normed head streams the cache write and RoPE consume.
+    // The head norm runs f32-in f32-out (the reference's f32 head stream);
+    // ONE bf16 rounding after it (the FLINT_REF_BF16_HEAD control) feeds the
+    // bf16 cache and the bf16-query paged kernel.
+    DBuf qnf(d, DType::kF32, {t, hq * dh});
+    DBuf knf(d, DType::kF32, {t, hkv * dh});
+    Tensor qn2 = Reshape(qnf.t(), {t * hq, dh});
+    Tensor q2 = Reshape(q.t(), {t * hq, dh});
+    Tensor kn2 = Reshape(knf.t(), {t * hkv, dh});
+    Tensor k2 = Reshape(k.t(), {t * hkv, dh});
+    vt::RmsNorm(d.q, qn2, q2, ResidentWeight(d, lw.attn.q_norm, {dh}),
+                vt::RmsNormArgs{eps, false});
+    vt::RmsNorm(d.q, kn2, k2, ResidentWeight(d, lw.attn.k_norm, {dh}),
+                vt::RmsNormArgs{eps, false});
+    DBuf qn(d, DType::kBF16, {t, hq * dh});
+    DBuf kn(d, DType::kBF16, {t, hkv * dh});
+    vt::CastBf16(d.q, qn.t(), qnf.t());
+    vt::CastBf16(d.q, kn.t(), knf.t());
+    Tensor q3 = Reshape(qn.t(), {t, hq, dh});
+    if (cpu_dump) {
+      dump_bf16("q_norm", qn.t(), l);
+      dump_bf16("k_norm", kn.t(), l);
+    }
+    Tensor k3 = Reshape(kn.t(), {t, hkv, dh});
+
+    // RoPE on the SLIDING layers only.
+    if (has_rope) {
+      VT_CHECK(is_sliding,
+               "flint paged: no_rope_layer_indices must name exactly the "
+               "full_attention layers");
+      vt::RopeArgs ra{};
+      ra.base = static_cast<float>(p.rope_theta);
+      ra.rotary_dim = static_cast<int>(dh);
+      ra.is_neox_style = true;
+      vt::RopeNeox(d.q, q3, k3, si.positions.t(), ra);
+    }
+
+    // KV cache write + paged attention.
+    Tensor k_cache =
+        dense_attn::KvSlice(attn_kv[static_cast<size_t>(l)], d.q.device, 0);
+    Tensor v_cache =
+        dense_attn::KvSlice(attn_kv[static_cast<size_t>(l)], d.q.device, 1);
+    dense_attn::WriteKvCache(d.q, attn_kv[static_cast<size_t>(l)], k3, v3,
+                             k_cache, v_cache, si.slot_mapping.t());
+
+    DBuf attn(d, DType::kBF16, {t, hq, dh});
+    vt::PagedAttentionArgs pa{1.0f / std::sqrt(static_cast<float>(dh)),
+                              /*causal=*/true};
+    if (is_sliding)
+      pa.window_size = vt::AttentionWindow{
+          static_cast<int32_t>(p.sliding_window - 1), 0};
+    // The per-head sink folds into the softmax denominator on EVERY layer.
+    pa.attn_sink = &sink_f32[static_cast<size_t>(l)].t();
+    dense_attn::ApplyKvCacheQuant(pa, attn_kv[static_cast<size_t>(l)]);
+    vt::PagedAttention(d.q, attn.t(), q3, k_cache, v_cache,
+                       si.block_table.t(), si.seq_lens.t(),
+                       si.query_start_loc.t(), pa);
+
+    // o_proj + residual add.
+    Tensor o_in = Reshape(attn.t(), {t, hq * dh});
+    
+    DBuf ao = FlintLinearMatmul(d, o_in, lw.attn.o_proj, DType::kBF16);
+    DBuf post_attn(d, DType::kBF16, {t, h});
+    vt::Add(d.q, post_attn.t(), hidden.t(), ao.t());
+    if (cpu_dump) {
+      dump_bf16("ao", ao.t(), l);
+      dump_bf16("post_attn_x", post_attn.t(), l);
+    }
+    hidden = std::move(post_attn);
+
+    // post_attention_layernorm + residual add.
+    DBuf dh2(d, DType::kBF16, {t, h});
+    Tensor w_post = ResidentWeight(d, lw.post_attention_layernorm, {h});
+    vt::RmsNorm(d.q, dh2.t(), hidden.t(), w_post, vt::RmsNormArgs{eps, false});
+
+    // Dense MLP or MoE, then the residual add the next layer's input norm
+    // consumes.
+    DBuf ff = p.IsDenseLayer(l)
+                  ? FlintDenseMlp(d, lw.dense_mlp, dh2.t())
+                  : FlintMoeBlock(d, lw.moe, p, dh2.t());
+    DBuf next(d, DType::kBF16, {t, h});
+    vt::Add(d.q, next.t(), hidden.t(), ff.t());
+    if (cpu_dump) {
+      dump_bf16("ff", ff.t(), l);
+      dump_bf16("post_mlp_x", next.t(), l);
+    }
+    hidden = std::move(next);
+  }
+
+  // Final norm + untied lm_head, f32 logits (the sampler contract).
+  DBuf dnorm(d, DType::kBF16, {t, h});
+  vt::RmsNorm(d.q, dnorm.t(), hidden.t(), ResidentWeight(d, w.final_norm, {h}),
+              vt::RmsNormArgs{eps, false});
+
+  const bool do_gather =
+      !logits_indices.empty() &&
+      static_cast<int64_t>(logits_indices.size()) < t;
+  Tensor src = dnorm.t();
+  DBuf dgather(d, DType::kBF16,
+               {do_gather ? static_cast<int64_t>(logits_indices.size()) : t, h});
+  if (do_gather) {
+    GatherRows(d, dgather.ptr(), dnorm.t(), logits_indices, h);
+    src = dgather.t();
+  }
+  const int64_t n_out = src.shape[0];
+  DBuf logits(d, DType::kF32, {n_out, p.vocab_size});
+  vt::Matmul(d.q, logits.t(), src,
+               ResidentWeight(d, w.lm_head, {h, p.vocab_size}));
+
+  ForwardLogits fl;
+  fl.rows = n_out;
+  fl.vocab = p.vocab_size;
+  fl.device_tensor = logits.t();
+  fl.device_storage = logits.ReleaseShared();
+  return fl;
+}
+
 // ---- registry wiring (the qwen3_moe_registry.cpp seam) ----
 
 namespace {
@@ -750,6 +1155,18 @@ ForwardLogits ForwardFlintForCausalLM(LoadedModel& model,
           "arm (spec .agents/specs/flint-tenstorrent.md); the " +
           vt::DeviceTypeName(input.queue.device.type) +
           " arm is a separate owed row.");
+  }
+  if (!input.attn_kv.empty()) {
+    // The paged-engine arm (spec .agents/specs/flint-paged.md): the shared
+    // LLMEngine path with continuous batching. CPU only — the device arms
+    // remain owed rows.
+    VT_CHECK(input.queue.device.type == vt::DeviceType::kCPU,
+             "FlintForCausalLM: the paged arm serves the CPU device; the " +
+                 std::string(vt::DeviceTypeName(input.queue.device.type)) +
+                 " arm is a separate owed row");
+    return FlintForwardPaged(input.token_ids, input.positions, input.attn_meta,
+                             input.attn_kv, flint.weights(), input.config,
+                             input.queue, input.logits_indices);
   }
   if (input.attn_meta.num_reqs != 1) {
     throw std::runtime_error(

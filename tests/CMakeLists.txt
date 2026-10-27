@@ -1042,6 +1042,11 @@ vllm_cpp_add_test(test_qwen3_moe_forward vllm/models/test_qwen3_moe_forward.cpp)
 target_include_directories(test_qwen3_moe_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_flint_forward vllm/models/test_flint_forward.cpp)
 target_include_directories(test_flint_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Flint paged-engine arm (spec .agents/specs/flint-paged.md, issue
+# ISSUE-LOCAL-01M5W2QQBJ32HRB29G1KVQJS77): the paged KV config groups and the
+# registry-entered mixed-batch paged gate against the reference forward.
+vllm_cpp_add_test(test_flint_paged vllm/models/test_flint_paged.cpp)
+target_include_directories(test_flint_paged PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # flint GGUF arm (.agents/specs/flint-gguf-arm.md): the published Q4_K_M
 # container loads through the production registry and its greedy chain
 # replays the pinned llama-cpp-flint oracle's goldens within the house band.
