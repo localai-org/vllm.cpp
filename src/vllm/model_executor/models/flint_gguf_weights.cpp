@@ -194,6 +194,11 @@ int64_t ReqInt(const GgufFile& g, const std::string& key) {
   return KvInt(*v, key);
 }
 
+int64_t OptInt(const GgufFile& g, const std::string& key, int64_t fallback) {
+  const GgufValue* v = g.FindKv(key);
+  return v == nullptr ? fallback : KvInt(*v, key);
+}
+
 double ReqFloat(const GgufFile& g, const std::string& key) {
   const GgufValue* v = g.FindKv(key);
   VT_CHECK(v != nullptr, "flint gguf: missing metadata key " + key);
@@ -273,6 +278,11 @@ HfConfig FlintHfConfigFromGguf(const GgufFile& gguf) {
   c.num_attention_heads = ReqInt(gguf, p + "attention.head_count");
   c.num_key_value_heads = ReqInt(gguf, p + "attention.head_count_kv");
   c.vocab_size = gguf.Get("token_embd.weight").shape[0];
+  // The context length drives max_model_len and with it every runner-side
+  // buffer the engine sizes from it (InputBatch's per-request token rows);
+  // leaving it unset meant max_model_len 0 and a segfault on the first
+  // add_request of any FromModelDir serve (ISSUE-LOCAL-01M5YRQ1SWC93MDG52QZGDFBY4).
+  c.max_position_embeddings = OptInt(gguf, p + "context_length", 0);
 
   // --- architecture-specific numbers, under HF's OWN key names -------------
   // ParseFlintParams reads `raw`; the names are the checkpoint's config.json

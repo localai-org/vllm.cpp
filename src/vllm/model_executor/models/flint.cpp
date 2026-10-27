@@ -833,12 +833,20 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
 
 }  // namespace
 
+int ArgmaxRow(const float* row, int64_t n) {
+  int best = 0;
+  for (int64_t i = 1; i < n; ++i)
+    if (row[i] > row[best]) best = static_cast<int>(i);
+  return best;
+}
+
 ForwardLogits FlintForwardPaged(
     const std::vector<int32_t>& token_ids, const std::vector<int32_t>& positions,
     const v1::CommonAttentionMetadata& attn_meta,
     const std::vector<PagedKvCache>& attn_kv, const FlintWeights& w,
     const HfConfig& config, vt::Queue& queue,
-    const std::vector<int32_t>& logits_indices) {
+    const std::vector<int32_t>& logits_indices,
+    const MultiKvCacheIndex* multi_kv = nullptr) {
   const FlintParams& p = w.params;
   const int64_t t = static_cast<int64_t>(token_ids.size());
   const int64_t h = p.hidden_size;
@@ -977,13 +985,80 @@ ForwardLogits FlintForwardPaged(
       vt::RopeNeox(d.q, q3, k3, si.positions.t(), ra);
     }
 
-    // KV cache write + paged attention.
+    // KV cache write + paged attention. On the engine's MULTI-GROUP topology
+    // (full + sliding-window, the hybrid KV split) the caches arrive through
+    // the by-name MultiKvCacheIndex and each group carries its OWN block
+    // table (separate pools), so both the cache and the table resolve per
+    // layer; the positional path (the synthetic gate) keeps the 1:1 layout.
+    const PagedKvCache* layer_kv = &attn_kv[static_cast<size_t>(l)];
+    Tensor group_bt;
+    if (multi_kv != nullptr) {
+      const std::string name =
+          "model.layers." + std::to_string(l) + ".self_attn";
+      const int64_t idx = multi_kv->Find(name);
+      VT_CHECK(idx >= 0 && idx < static_cast<int64_t>(attn_kv.size()),
+               "flint paged: no published KV cache named '" + name + "'");
+      layer_kv = &attn_kv[static_cast<size_t>(idx)];
+      const int32_t gid =
+          multi_kv->group_ids != nullptr
+              ? multi_kv->group_ids->at(static_cast<size_t>(idx))
+              : 0;
+      if (multi_kv->group_block_tables != nullptr) {
+        const std::vector<int32_t>& tbl =
+            multi_kv->group_block_tables->at(static_cast<size_t>(gid));
+        const int32_t cols =
+            multi_kv->group_block_table_cols != nullptr
+                ? multi_kv->group_block_table_cols->at(static_cast<size_t>(gid))
+                : static_cast<int32_t>(attn_meta.block_table_num_cols);
+        group_bt.data = const_cast<int32_t*>(tbl.data());
+        group_bt.dtype = vt::DType::kI32;
+        group_bt.device = d.q.device;
+        group_bt.rank = 2;
+        group_bt.shape[0] = attn_meta.num_reqs;
+        group_bt.shape[1] = cols;
+        group_bt.stride[0] = cols;
+        group_bt.stride[1] = 1;
+      }
+    }
     Tensor k_cache =
-        dense_attn::KvSlice(attn_kv[static_cast<size_t>(l)], d.q.device, 0);
+        dense_attn::KvSlice(*layer_kv, d.q.device, 0);
     Tensor v_cache =
-        dense_attn::KvSlice(attn_kv[static_cast<size_t>(l)], d.q.device, 1);
-    dense_attn::WriteKvCache(d.q, attn_kv[static_cast<size_t>(l)], k3, v3,
-                             k_cache, v_cache, si.slot_mapping.t());
+        dense_attn::KvSlice(*layer_kv, d.q.device, 1);
+    // THE PER-GROUP SLOT MAPPING. The engine's CommonAttentionMetadata
+    // carries the TARGET group's slot mapping (one CAM per step), and the
+    // groups' pools allocate DIFFERENT block ids for the same positions
+    // (measured on flint-Q4_K_M: the full group's first block is 1, the
+    // sliding group's is 2). Writing the full group's slots into the sliding
+    // group's cache puts every key in the wrong page and the sliding layers
+    // attend over ZERO pages — measured as ao == 0 exactly, on every sliding
+    // layer. Each group's own block table is published on the multi_kv
+    // channel, and slot = table[pos/block_size]*block_size + pos%block_size,
+    // so the arm derives the per-layer mapping from the table it already
+    // reads the pages with.
+    DBuf layer_slots;
+    const Tensor* slots = &si.slot_mapping.t();
+    if (multi_kv != nullptr && group_bt.data != nullptr) {
+      const int64_t bs = layer_kv->block_size;
+      const auto* btp = group_bt.Ptr<int32_t>();
+      const int64_t cols = group_bt.shape[1];
+      const auto* qsl = attn_meta.query_start_loc.data();
+      std::vector<int64_t> host(static_cast<size_t>(t));
+      for (int64_t r = 0; r < attn_meta.num_reqs; ++r) {
+        const int64_t q0 = qsl[r], q1 = qsl[r + 1];
+        for (int64_t i = q0; i < q1; ++i) {
+          const int64_t pos = positions[static_cast<size_t>(i)];
+          host[static_cast<size_t>(i)] =
+              static_cast<int64_t>(
+                  btp[r * cols + pos / bs]) *
+                  bs +
+              pos % bs;
+        }
+      }
+      layer_slots = DBuf(d, DType::kI64, {t}, host.data());
+      slots = &layer_slots.t();
+    }
+    dense_attn::WriteKvCache(d.q, *layer_kv, k3, v3,
+                             k_cache, v_cache, *slots);
 
     DBuf attn(d, DType::kBF16, {t, hq, dh});
     vt::PagedAttentionArgs pa{1.0f / std::sqrt(static_cast<float>(dh)),
@@ -993,9 +1068,12 @@ ForwardLogits FlintForwardPaged(
           static_cast<int32_t>(p.sliding_window - 1), 0};
     // The per-head sink folds into the softmax denominator on EVERY layer.
     pa.attn_sink = &sink_f32[static_cast<size_t>(l)].t();
-    dense_attn::ApplyKvCacheQuant(pa, attn_kv[static_cast<size_t>(l)]);
+    dense_attn::ApplyKvCacheQuant(pa, *layer_kv);
+    const Tensor& bt =
+        multi_kv != nullptr && group_bt.data != nullptr ? group_bt
+                                                        : si.block_table.t();
     vt::PagedAttention(d.q, attn.t(), q3, k_cache, v_cache,
-                       si.block_table.t(), si.seq_lens.t(),
+                       bt, si.seq_lens.t(),
                        si.query_start_loc.t(), pa);
 
     // o_proj + residual add.
@@ -1049,6 +1127,14 @@ ForwardLogits FlintForwardPaged(
   vt::Matmul(d.q, logits.t(), src,
                ResidentWeight(d, w.lm_head, {h, p.vocab_size}));
 
+  if (cpu_dump) {
+    d.b.Synchronize(d.q);
+    const auto* p32 = logits.t().Ptr<float>();
+    double s0 = 0.0;
+    for (int64_t v = 0; v < p.vocab_size; ++v) s0 += p32[v];
+    std::fprintf(stderr, "[FLINT-PAGED] logits row0 sum=%.6f argmax=%d max=%.6f\n",
+                 s0, static_cast<int>(ArgmaxRow(p32, p.vocab_size)), p32[0]);
+  }
   ForwardLogits fl;
   fl.rows = n_out;
   fl.vocab = p.vocab_size;
@@ -1166,7 +1252,8 @@ ForwardLogits ForwardFlintForCausalLM(LoadedModel& model,
                  " arm is a separate owed row");
     return FlintForwardPaged(input.token_ids, input.positions, input.attn_meta,
                              input.attn_kv, flint.weights(), input.config,
-                             input.queue, input.logits_indices);
+                             input.queue, input.logits_indices,
+                             input.multi_kv);
   }
   if (input.attn_meta.num_reqs != 1) {
     throw std::runtime_error(
@@ -1193,6 +1280,7 @@ const ModelFactory kFlintFactory{
     .forward = &ForwardFlintForCausalLM,
     .make_kv_cache = &MakeFlintKVCache,
     .is_dense_model = false,
+    .consumes_multi_kv = true,  // the hybrid full/SWA split is a 2-group topology
     .consumes_device_token_ids = false,
     .streams_routed_experts = false,
 };

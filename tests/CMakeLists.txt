@@ -1047,6 +1047,11 @@ target_include_directories(test_flint_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # registry-entered mixed-batch paged gate against the reference forward.
 vllm_cpp_add_test(test_flint_paged vllm/models/test_flint_paged.cpp)
 target_include_directories(test_flint_paged PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# W-c: the REAL-WEIGHTS paged-engine gate — the published Q4_K_M through the
+# full LLMEngine stack with continuous arrival, chains adjudicated against the
+# reference forward (checkpoint-gated: skips loudly without the container).
+vllm_cpp_add_test(test_flint_paged_engine vllm/models/test_flint_paged_engine.cpp)
+target_include_directories(test_flint_paged_engine PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # flint GGUF arm (.agents/specs/flint-gguf-arm.md): the published Q4_K_M
 # container loads through the production registry and its greedy chain
 # replays the pinned llama-cpp-flint oracle's goldens within the house band.
