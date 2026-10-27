@@ -165,6 +165,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Free runner disk
+        # CI-AGENT-RECORD-DISK. The shared runner's free disk drifts under 20
+        # GiB mid-job, and the late tools-suite steps then fail on pressure
+        # that has nothing to do with the tree: 49 strix-oracle tests die on
+        # `ValueError("disk headroom exhausted")` (worker.py:257) and the
+        # cache-drop proof dies with resident bytes it cannot evict. Both
+        # failures are intermittent on `main` (runs 40521291883,
+        # 40452744901) and reproduced on the #3513 rerun (job
+        # 122404172875). Reclaim the image's largest unused tenants --
+        # Android SDK, .NET, GHC, JVM, stale docker layers. Best-effort: a
+        # path the image no longer ships must not red the job. No workflow
+        # here uses any of them (grep across .github/workflows/). The
+        # worker's 20 GiB floor itself is untouched: the fix removes the
+        # pressure, not the check.
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /usr/lib/jvm || true
+          sudo docker image prune -af || true
+          df -h /
       # The docs-site suite RENDERS the site, so this lane needs the renderer.
       # Without it `test_rendered_benchmark_index_links_resolve_to_emitted_pages`
       # cannot run at all -- and neither of its two ways of not running is a
