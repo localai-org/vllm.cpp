@@ -319,9 +319,18 @@ A/B (the tt-matmul-w3 binary, which measured 2.212e-1 three times this
 morning, against the keepquant binary, back to back on one reset) shows
 BOTH binaries reading 2.683e-1 bit-identically. The keepquant branch did
 not change bf16 numerics; the ABSOLUTE distance drifts ~20 percent across
-DEVICE EPOCHS while staying bit-deterministic WITHIN an epoch (the same
-epoch-dependence the chain shows: both arms' chains are bit-identical to
-each other within an epoch and differ across epochs).
+DEVICE EPOCHS while staying bit-deterministic WITHIN an epoch.
+
+CORRECTION (reviewer, 2026-10-27): the "keepquant dispatch gate" legs
+measured the BF16 ARM TWICE — the W0 device case loads through
+ModelRegistry::Load, which always takes the bf16 loader
+(flint.cpp:705); nothing production routes to
+LoadFlintKeepQuantFromGguf, and flint_tt's staging cannot consume block
+weights (StageBf16 reinterprets; vt::Matmul requires float). The
+"both arms bit-identical" reading was one arm measured twice. The
+registry routing and the flint_tt block staging/dispatch are the row's
+remaining increment; the reviewer's reachability mutation (throw on the
+first block-carrying tensor) left the leg green, proving the gap.
 
 Consequences, recorded in the W0 gate (test_flint_tt_w0.cpp): the
 distance fence returns to the DRIFT-TOLERANT 0.5/64 form (it fences hard
