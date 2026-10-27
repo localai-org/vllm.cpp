@@ -100,11 +100,10 @@ struct Step {
   }
 };
 
-int32_t Argmax(const vllm::ForwardLogits& fl) {
-  const int64_t last = (fl.rows - 1) * fl.vocab;
+int32_t Argmax(const std::vector<float>& host, int64_t vocab) {
+  const int64_t last = host.size() - vocab;
   return static_cast<int32_t>(
-      std::max_element(fl.host.begin() + last, fl.host.end()) -
-      (fl.host.begin() + last));
+      std::max_element(host.begin() + last, host.end()) - (host.begin() + last));
 }
 
 }  // namespace
@@ -224,46 +223,82 @@ TEST_CASE("flint TT W0: the registry dispatch reaches the device forward and "
                static_cast<long long>(calls_before),
                static_cast<long long>(vllm::FlintTTForwardCalls()));
 
-  // The CPU reference leg, same weights, same prompt, same worktree.
+  // THE CPU REFERENCE LEG. On the bf16 arm it rides the same registry model
+  // (the committed path). On the keep-quant arm the registry CPU forward
+  // REFUSES by name (the CPU reference arm reads bf16 elementwise weights;
+  // flint.cpp FlintModel::Forward), so the reference is the BF16 ARM over the
+  // SAME quantized container — LoadFlintFromGguf dequantizes at load, the
+  // device keeps blocks and decodes on device: the CPU dequantizes, the
+  // device keeps blocks (spec flint-keepquant.md W-c). The distance therefore
+  // isolates the int8-dot activation quantization, which is coarser than the
+  // CPU bf16 path BY DESIGN — the near-tie band below, never per-op
+  // bit-exactness.
+  const bool keep_quant_mode =
+      std::getenv("VT_FLINT_KEEP_QUANT") != nullptr &&
+      std::getenv("VT_FLINT_KEEP_QUANT")[0] == '1';
+  std::unique_ptr<vllm::FlintWeights> cpu_ref_weights;
+  if (keep_quant_mode)
+    cpu_ref_weights = std::make_unique<vllm::FlintWeights>(
+        vllm::LoadFlintFromGguf(gguf, config));
   vt::Queue cpu_q{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
-  vllm::ForwardLogits cpu_first;
-  {
-    Step cpu_step(prompt_ids, config, cpu_q);
-    cpu_first = vllm::ModelRegistry::Forward(*model, cpu_step.input);
-  }
-  REQUIRE(dev_first.host.size() == cpu_first.host.size());
+  auto cpu_forward = [&](const std::vector<int32_t>& ids) {
+    if (keep_quant_mode) {
+      std::vector<int32_t> pos(ids.size());
+      for (size_t i = 0; i < ids.size(); ++i)
+        pos[i] = static_cast<int32_t>(i);
+      return vllm::FlintModel::Forward(ids, pos, *cpu_ref_weights, config);
+    }
+    Step cs(ids, config, cpu_q);
+    return vllm::ModelRegistry::Forward(*model, cs.input).host;
+  };
+
+  // THE DISPATCH COUNTER: the keep-quant leg must prove blocks were CONSUMED
+  // by the device forward (> 0), and the bf16 leg that none were (== 0). A
+  // throw on the first block-carrying tensor in the dispatch path turns the
+  // keep-quant leg RED here — the reachability mutation is the acceptance.
+  std::fprintf(stderr, "[flint-tt-w0] mode=%s quant_dispatch_calls=%lld\n",
+               keep_quant_mode ? "keep-quant" : "bf16",
+               static_cast<long long>(vllm::FlintTTQuantDispatchCalls()));
+  if (keep_quant_mode)
+    CHECK(vllm::FlintTTQuantDispatchCalls() > 0);
+  else
+    CHECK(vllm::FlintTTQuantDispatchCalls() == 0);
+
+  const std::vector<float> cpu_first = cpu_forward(prompt_ids);
+  REQUIRE(dev_first.host.size() == cpu_first.size());
 
   // First-token logits distance (the like-for-like baseline; the kolibri
   // frame is CPU-vs-oracle 2.0e-3 layer-0 l_out).
   double max_abs = 0.0, sum_sq = 0.0, sum_cpu_sq = 0.0;
-  for (size_t i = 0; i < cpu_first.host.size(); ++i) {
-    const double diff = double(dev_first.host[i]) - double(cpu_first.host[i]);
+  for (size_t i = 0; i < cpu_first.size(); ++i) {
+    const double diff = double(dev_first.host[i]) - double(cpu_first[i]);
     max_abs = std::max(max_abs, std::abs(diff));
     sum_sq += diff * diff;
-    sum_cpu_sq += double(cpu_first.host[i]) * double(cpu_first.host[i]);
+    sum_cpu_sq += double(cpu_first[i]) * double(cpu_first[i]);
   }
-  const double rms = std::sqrt(sum_sq / double(cpu_first.host.size()));
+  const double rms = std::sqrt(sum_sq / double(cpu_first.size()));
   const double rel_rms =
-      rms / std::sqrt(sum_cpu_sq / double(cpu_first.host.size()));
+      rms / std::sqrt(sum_cpu_sq / double(cpu_first.size()));
   std::fprintf(stderr,
                "[flint-tt-w0] first-token logits: max_abs=%.3e rms=%.3e "
                "rel_rms=%.3e (n=%zu)\n",
-               max_abs, rms, rel_rms, cpu_first.host.size());
+               max_abs, rms, rel_rms, cpu_first.size());
 
   // The greedy chains: device vs CPU, 8 steps (prefill + append).
   std::vector<int32_t> dev_ids = prompt_ids, cpu_ids = prompt_ids;
   std::vector<int32_t> dev_chain, cpu_chain;
   for (int step = 0; step < kGreedySteps; ++step) {
-    vllm::ForwardLogits dl, cl;
+    vllm::ForwardLogits dl;
     {
       Step ds(dev_ids, config, q);
       dl = vllm::ModelRegistry::Forward(*model, ds.input);
     }
-    {
-      Step cs(cpu_ids, config, cpu_q);
-      cl = vllm::ModelRegistry::Forward(*model, cs.input);
-    }
-    const int32_t dt = Argmax(dl), ct = Argmax(cl);
+    const std::vector<float> cl = cpu_forward(cpu_ids);
+    const int32_t dt = Argmax(dl.host, dl.vocab);
+    const int64_t last = static_cast<int64_t>(cpu_ids.size() - 1) *
+                         static_cast<int64_t>(config.vocab_size);
+    const int32_t ct = static_cast<int32_t>(
+        std::max_element(cl.begin() + last, cl.end()) - (cl.begin() + last));
     dev_chain.push_back(dt);
     cpu_chain.push_back(ct);
     dev_ids.push_back(dt);

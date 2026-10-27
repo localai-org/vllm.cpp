@@ -46,11 +46,20 @@
 #include <vector>
 
 #include "vllm/model_executor/models/dense_device_glue.h"
+#include "vllm/model_executor/models/dense_attn_block.h"  // ResidentWeight
 #include "vt/dtype.h"
 #include "vt/ops.h"
 #include "vt/tenstorrent/tenstorrent_device.h"
 
 namespace vllm {
+
+// THE DISPATCH-REACHABILITY COUNTER for the keep-quant arm: MatmulWeight
+// increments it on every BLOCK-CARRYING weight routed to vt::MatmulBT (which
+// dispatches to kMatmulBTQuant). The keep-quant gate asserts > 0 — the
+// reviewer's reachability mutation (a throw on the first block-carrying
+// tensor in this path) turns the leg RED, which is the acceptance for this
+// row (the prior gate stayed green with nothing consuming blocks).
+int64_t g_flint_tt_quant_dispatch_calls = 0;
 
 namespace {
 
@@ -295,9 +304,25 @@ namespace {
 // One layer's resident device weights + the host copies the W0 host
 // attention leg consumes (the bf16 norm/sink scalars widened once at build).
 struct TtLayerWeights {
-  DBuf ln1{}, ln2{}, qw{}, kw{}, vw{}, ow{};
-  DBuf gate{}, up{}, down{};                     // dense layers
-  DBuf router{}, sh_gate{}, sh_up{}, sh_down{};  // MoE layers
+  // The resident WEIGHTS are vt::Tensor views over the staged device bytes:
+  // a bf16 weight is [K,N] Matmul-B (vt::Matmul), a block-carrying weight is
+  // [N,K] nk (vt::MatmulBT -> kMatmulBTQuant). DBuf cannot hold a block dtype
+  // (its byte count is numel * SizeOf, and SizeOf refuses block dtypes), so
+  // the staging goes through dense_attn::ResidentWeight, which allocates the
+  // RAW byte length and uploads verbatim — the same device staging the
+  // Qwen3.8 keep-quant arm uses. The views borrow the OwnedTensor's d_dev
+  // keep-alive, which lives in the FlintWeights the context was built from.
+  vt::Tensor qw{}, kw{}, vw{}, ow{};
+  vt::Tensor gate{}, up{}, down{};                     // dense layers
+  vt::Tensor router{}, sh_gate{}, sh_up{}, sh_down{};  // MoE layers
+  // The routed-expert tier, RESIDENT as raw block bytes (the row's reason to
+  // exist): filled only when the tier carries blocks — the bf16 arm keeps the
+  // per-token host streaming path untouched.
+  struct TtExpertWeights {
+    vt::Tensor gate{}, up{}, down{};
+  };
+  std::vector<TtExpertWeights> experts;
+  DBuf ln1{}, ln2{};
   int64_t dense_inter = 0, shared_inter = 0;
   bool has_rope = false, is_dense = false, is_sliding = false;
   std::vector<float> q_norm, k_norm, sinks;  // widened host copies
@@ -309,6 +334,21 @@ DBuf StageBf16(Dev d, const void* host_bytes, int64_t rows, int64_t cols) {
   return DBuf(d, vt::DType::kBF16, {rows, cols}, host_bytes);
 }
 
+// THE BLOCK STAGING PATH: a keep-quant weight uploads its VERBATIM block
+// bytes (rows * RowSizeBytes(dt, K)) and is viewed [N, K] under the block
+// dtype — the MatmulBTQuant orientation; a float weight stages exactly as
+// before. ResidentWeight allocates the RAW byte length (never numel *
+// SizeOf), copies once, caches on the OwnedTensor's d_dev, and drops every
+// CPU-only repack marker by refusing them — the same device staging the
+// Qwen3.8 keep-quant arm uses. Reinterpreting block bytes as bf16 (the
+// StageBf16 path) is the defect this helper exists to make unreachable.
+vt::Tensor StageWeight(Dev d, const OwnedTensor& w) {
+  VT_CHECK(!vt::IsBlockQuant(w.dtype) || (w.rank == 2 && w.nk),
+           "flint TT build: a block-carrying weight must be rank-2 [N,K] "
+           "nk (the MatmulBTQuant orientation)");
+  return dense_attn::ResidentWeight(d, w);
+}
+
 }  // namespace
 
 struct FlintTTDeviceContext::Impl {
@@ -316,7 +356,11 @@ struct FlintTTDeviceContext::Impl {
   vt::Queue& q;
   Dev d;
   int64_t resident = 0;
-  DBuf embed{}, lm_head{}, final_norm{};
+  // The resident EXPERT-tier bytes (nonzero only on the keep-quant arm,
+  // where the tier RESIDES; the bf16 arm streams it and stages nothing).
+  int64_t expert_resident = 0;
+  DBuf embed{}, final_norm{};
+  vt::Tensor lm_head{};
   std::vector<TtLayerWeights> layers;
 
   Impl(vt::Backend& backend, vt::Queue& queue)
@@ -347,13 +391,12 @@ std::unique_ptr<FlintTTDeviceContext> BuildFlintTTDeviceContext(
 
   c.embed = StageBf16(d, Bf16Data(weights.embed_tokens), p.vocab_size,
                       p.hidden_size);
-  c.lm_head = StageBf16(d, Bf16Data(weights.lm_head), p.hidden_size,
-                        p.vocab_size);
+  c.lm_head = StageWeight(d, weights.lm_head);
   // The RMSNorm weights are RANK-1 [H] (vt::RmsNorm's contract).
   c.final_norm = DBuf(d, vt::DType::kBF16, {p.hidden_size},
                       Bf16Data(weights.final_norm));
   c.resident += Bf16Numel(weights.embed_tokens) * 2;
-  c.resident += Bf16Numel(weights.lm_head) * 2;
+  c.resident += WeightBytes(weights.lm_head);
   c.resident += Bf16Numel(weights.final_norm) * 2;
 
   c.layers.reserve(static_cast<size_t>(p.num_hidden_layers));
@@ -367,48 +410,57 @@ std::unique_ptr<FlintTTDeviceContext> BuildFlintTTDeviceContext(
                   Bf16Data(lw.input_layernorm));
     tl.ln2 = DBuf(d, vt::DType::kBF16, {p.hidden_size},
                   Bf16Data(lw.post_attention_layernorm));
-    tl.qw = StageBf16(d, Bf16Data(lw.attn.q_proj.w), lw.attn.q_proj.w.shape[0],
-                      lw.attn.q_proj.w.shape[1]);
-    tl.kw = StageBf16(d, Bf16Data(lw.attn.k_proj.w), lw.attn.k_proj.w.shape[0],
-                      lw.attn.k_proj.w.shape[1]);
-    tl.vw = StageBf16(d, Bf16Data(lw.attn.v_proj.w), lw.attn.v_proj.w.shape[0],
-                      lw.attn.v_proj.w.shape[1]);
-    tl.ow = StageBf16(d, Bf16Data(lw.attn.o_proj.w), lw.attn.o_proj.w.shape[0],
-                      lw.attn.o_proj.w.shape[1]);
+    tl.qw = StageWeight(d, lw.attn.q_proj.w);
+    tl.kw = StageWeight(d, lw.attn.k_proj.w);
+    tl.vw = StageWeight(d, lw.attn.v_proj.w);
+    tl.ow = StageWeight(d, lw.attn.o_proj.w);
     c.resident += Bf16Numel(lw.input_layernorm) * 2 +
                   Bf16Numel(lw.post_attention_layernorm) * 2 +
-                  Bf16Numel(lw.attn.q_proj.w) * 2 +
-                  Bf16Numel(lw.attn.k_proj.w) * 2 +
-                  Bf16Numel(lw.attn.v_proj.w) * 2 +
-                  Bf16Numel(lw.attn.o_proj.w) * 2;
+                  WeightBytes(lw.attn.q_proj.w) +
+                  WeightBytes(lw.attn.k_proj.w) +
+                  WeightBytes(lw.attn.v_proj.w) +
+                  WeightBytes(lw.attn.o_proj.w);
     if (tl.is_dense) {
-      tl.dense_inter = lw.dense_mlp.gate_proj.w.shape[1];
-      tl.gate = StageBf16(d, Bf16Data(lw.dense_mlp.gate_proj.w),
-                          lw.dense_mlp.gate_proj.w.shape[0], tl.dense_inter);
-      tl.up = StageBf16(d, Bf16Data(lw.dense_mlp.up_proj.w),
-                        lw.dense_mlp.up_proj.w.shape[0], tl.dense_inter);
-      tl.down = StageBf16(d, Bf16Data(lw.dense_mlp.down_proj.w),
-                          lw.dense_mlp.down_proj.w.shape[0], p.hidden_size);
-      c.resident += (Bf16Numel(lw.dense_mlp.gate_proj.w) +
-                     Bf16Numel(lw.dense_mlp.up_proj.w) +
-                     Bf16Numel(lw.dense_mlp.down_proj.w)) * 2;
+      // The LOGICAL out-features: a bf16 weight is stored [K,N] (the loader
+      // transposed), a block weight is [N,K] nk — read the out dim off the
+      // orientation the tensor actually carries.
+      const OwnedTensor& dgw = lw.dense_mlp.gate_proj.w;
+      tl.dense_inter =
+          vt::IsBlockQuant(dgw.dtype) ? dgw.shape[0] : dgw.shape[1];
+      tl.gate = StageWeight(d, lw.dense_mlp.gate_proj.w);
+      tl.up = StageWeight(d, lw.dense_mlp.up_proj.w);
+      tl.down = StageWeight(d, lw.dense_mlp.down_proj.w);
+      c.resident += (WeightBytes(lw.dense_mlp.gate_proj.w) +
+                     WeightBytes(lw.dense_mlp.up_proj.w) +
+                     WeightBytes(lw.dense_mlp.down_proj.w));
     } else {
-      tl.router = StageBf16(d, Bf16Data(lw.moe.router_gate), p.hidden_size,
-                            p.num_experts);
-      tl.shared_inter = lw.moe.shared_expert.gate_proj.w.shape[1];
-      tl.sh_gate = StageBf16(d, Bf16Data(lw.moe.shared_expert.gate_proj.w),
-                             lw.moe.shared_expert.gate_proj.w.shape[0],
-                             tl.shared_inter);
-      tl.sh_up = StageBf16(d, Bf16Data(lw.moe.shared_expert.up_proj.w),
-                           lw.moe.shared_expert.up_proj.w.shape[0],
-                           tl.shared_inter);
-      tl.sh_down = StageBf16(d, Bf16Data(lw.moe.shared_expert.down_proj.w),
-                             lw.moe.shared_expert.down_proj.w.shape[0],
-                             p.hidden_size);
-      c.resident += (Bf16Numel(lw.moe.router_gate) +
-                     Bf16Numel(lw.moe.shared_expert.gate_proj.w) +
-                     Bf16Numel(lw.moe.shared_expert.up_proj.w) +
-                     Bf16Numel(lw.moe.shared_expert.down_proj.w)) * 2;
+      tl.router = StageWeight(d, lw.moe.router_gate);
+      const OwnedTensor& sgw = lw.moe.shared_expert.gate_proj.w;
+      tl.shared_inter = vt::IsBlockQuant(sgw.dtype) ? sgw.shape[0] : sgw.shape[1];
+      tl.sh_gate = StageWeight(d, lw.moe.shared_expert.gate_proj.w);
+      tl.sh_up = StageWeight(d, lw.moe.shared_expert.up_proj.w);
+      tl.sh_down = StageWeight(d, lw.moe.shared_expert.down_proj.w);
+      c.resident += (Bf16Numel(lw.moe.router_gate) * 2 +
+                     WeightBytes(lw.moe.shared_expert.gate_proj.w) +
+                     WeightBytes(lw.moe.shared_expert.up_proj.w) +
+                     WeightBytes(lw.moe.shared_expert.down_proj.w));
+      // THE EXPERT TIER RESIDES on the keep-quant arm: every expert's three
+      // projections upload their verbatim block bytes once at build. The
+      // loader cut each expert as whole rows of the stacked tower, so each
+      // slice is block-aligned by construction. The bf16 arm stages nothing
+      // here — its tier STREAMS from host per token, unchanged below.
+      if (!lw.moe.experts.empty() &&
+          vt::IsBlockQuant(lw.moe.experts.front().gate_proj.w.dtype)) {
+        tl.experts.reserve(lw.moe.experts.size());
+        for (const FlintExpertWeights& ex : lw.moe.experts) {
+          tl.experts.push_back({StageWeight(d, ex.gate_proj.w),
+                                StageWeight(d, ex.up_proj.w),
+                                StageWeight(d, ex.down_proj.w)});
+          c.expert_resident += WeightBytes(ex.gate_proj.w) +
+                               WeightBytes(ex.up_proj.w) +
+                               WeightBytes(ex.down_proj.w);
+        }
+      }
     }
     // The host attention leg's widened scalars.
     tl.q_norm = Widen(lw.attn.q_norm);
@@ -426,6 +478,17 @@ std::unique_ptr<FlintTTDeviceContext> BuildFlintTTDeviceContext(
         ") disagree with the plan (" + std::to_string(plan.resident_bytes) +
         "); the plan and the build must account the same slice");
   }
+  // The keep-quant arm's staged expert tier must equal the plan's tier
+  // accounting too (the bf16 arm stages nothing — its tier STREAMS and never
+  // enters the build's accounting).
+  if (c.expert_resident != 0 && c.expert_resident != plan.expert_tier_bytes) {
+    throw std::runtime_error(
+        "flint TT build: staged expert tier (" +
+        std::to_string(c.expert_resident) +
+        ") disagrees with the plan (" +
+        std::to_string(plan.expert_tier_bytes) +
+        "); the plan and the build must account the same slice");
+  }
   return ctx;
 }
 
@@ -434,6 +497,33 @@ std::unique_ptr<FlintTTDeviceContext> BuildFlintTTDeviceContext(
 int64_t g_flint_tt_forward_calls = 0;
 
 int64_t FlintTTForwardCalls() { return g_flint_tt_forward_calls; }
+
+int64_t FlintTTQuantDispatchCalls() {
+  return g_flint_tt_quant_dispatch_calls;
+}
+
+namespace {
+
+// THE FORWARD DISPATCH PER WEIGHT DTYPE. A block-carrying weight routes to
+// vt::MatmulBT, whose IsBlockQuant hand-off (vt/ops.cpp:181) reaches
+// kMatmulBTQuant — the Tenstorrent keep-quant kernels the Qwen3.8 arm
+// reaches (IQ encodings unconditional int8-dot; the k-quants under
+// VT_TT_KEEPQUANT_INT8DOT, with the grouped E=1 arm as the =0 fallback). A
+// float weight keeps today's vt::Matmul path unchanged. vt::Matmul
+// hard-requires float weights (vt/ops.cpp:149) — handing it a block tensor
+// throws, which is exactly why the routing decision lives here and not at
+// the call sites.
+void MatmulWeight(vt::Queue& q, vt::Tensor& out, const vt::Tensor& act,
+                  const vt::Tensor& w) {
+  if (vt::IsBlockQuant(w.dtype)) {
+    ++g_flint_tt_quant_dispatch_calls;
+    vt::MatmulBT(q, out, act, w);
+    return;
+  }
+  vt::Matmul(q, out, act, w);
+}
+
+}  // namespace
 
 std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
                                   const std::vector<int32_t>& positions,
@@ -505,9 +595,9 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     DBuf q_dev(d, vt::DType::kBF16, {t, hq * dh});
     DBuf k_dev(d, vt::DType::kBF16, {t, hkv * dh});
     DBuf v_dev(d, vt::DType::kBF16, {t, hkv * dh});
-    vt::Matmul(d.q, q_dev.t(), normed_dev.t(), tl.qw.t());
-    vt::Matmul(d.q, k_dev.t(), normed_dev.t(), tl.kw.t());
-    vt::Matmul(d.q, v_dev.t(), normed_dev.t(), tl.vw.t());
+    MatmulWeight(d.q, q_dev.t(), normed_dev.t(), tl.qw);
+    MatmulWeight(d.q, k_dev.t(), normed_dev.t(), tl.kw);
+    MatmulWeight(d.q, v_dev.t(), normed_dev.t(), tl.vw);
     q = DownloadBf16AsF32(d, q_dev);
     k = DownloadBf16AsF32(d, k_dev);
     v = DownloadBf16AsF32(d, v_dev);
@@ -568,7 +658,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       ao_bits[static_cast<size_t>(i)] = ToBf16(attn_out[static_cast<size_t>(i)]);
     DBuf ao_dev(d, vt::DType::kBF16, {t, hq * dh}, ao_bits.data());
     DBuf aoout_dev(d, vt::DType::kBF16, {t, h});
-    vt::Matmul(d.q, aoout_dev.t(), ao_dev.t(), tl.ow.t());
+    MatmulWeight(d.q, aoout_dev.t(), ao_dev.t(), tl.ow);
     ao = DownloadBf16AsF32(d, aoout_dev);
     if (DumpOn() && layer == 0) {
       auto stage = [](const char* tag, const std::vector<float>& z) {
@@ -605,8 +695,8 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     if (tl.is_dense) {
       DBuf g(d, vt::DType::kBF16, {t, tl.dense_inter});
       DBuf u(d, vt::DType::kBF16, {t, tl.dense_inter});
-      vt::Matmul(d.q, g.t(), normed2_dev.t(), tl.gate.t());
-      vt::Matmul(d.q, u.t(), normed2_dev.t(), tl.up.t());
+      MatmulWeight(d.q, g.t(), normed2_dev.t(), tl.gate);
+      MatmulWeight(d.q, u.t(), normed2_dev.t(), tl.up);
       DBuf a(d, vt::DType::kBF16, {t, tl.dense_inter});
       vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
       if (DumpOn() && layer == 0) {
@@ -637,7 +727,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         // silu'd a is expected, never a defect.
       }
       DBuf ff_dev(d, vt::DType::kBF16, {t, h});
-      vt::Matmul(d.q, ff_dev.t(), a.t(), tl.down.t());
+      MatmulWeight(d.q, ff_dev.t(), a.t(), tl.down);
       ff = DownloadBf16AsF32(d, ff_dev);
       if (DumpOn() && layer == 0) {
         auto stage = [](const char* tag, const std::vector<float>& z) {
@@ -654,7 +744,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     } else {
       // Router on device, f32 out (the score path's wideness).
       DBuf rt_dev(d, vt::DType::kF32, {t, p.num_experts});
-      vt::Matmul(d.q, rt_dev.t(), normed2_dev.t(), tl.router.t());
+      MatmulWeight(d.q, rt_dev.t(), normed2_dev.t(), tl.router);
       const std::vector<float> rlogits = DownloadF32(d, rt_dev);
       normed2_host = DownloadBf16AsF32(d, normed2_dev);
 
@@ -690,20 +780,34 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         for (int64_t kk = 0; kk < top_k; ++kk) {
           const float wgt = static_cast<float>(
               score[static_cast<size_t>(kk)].first / sum);
-          const FlintExpertWeights& ex =
-              lw.moe.experts[static_cast<size_t>(
-                  score[static_cast<size_t>(kk)].second)];
-          DBuf gw = StageBf16(d, Bf16Data(ex.gate_proj.w), h, inter);
-          DBuf uw = StageBf16(d, Bf16Data(ex.up_proj.w), h, inter);
-          DBuf dw = StageBf16(d, Bf16Data(ex.down_proj.w), inter, h);
+          const int64_t ex_idx = score[static_cast<size_t>(kk)].second;
+          // THE EXPERT WEIGHTS: resident block tensors on the keep-quant arm
+          // (staged once at build — nothing streams); the bf16 arm keeps its
+          // per-token host streaming upload.
+          vt::Tensor gw, uw, dw2;
+          DBuf gw_s, uw_s, dw_s;
+          if (!tl.experts.empty()) {
+            gw = tl.experts[static_cast<size_t>(ex_idx)].gate;
+            uw = tl.experts[static_cast<size_t>(ex_idx)].up;
+            dw2 = tl.experts[static_cast<size_t>(ex_idx)].down;
+          } else {
+            const FlintExpertWeights& ex =
+                lw.moe.experts[static_cast<size_t>(ex_idx)];
+            gw_s = StageBf16(d, Bf16Data(ex.gate_proj.w), h, inter);
+            uw_s = StageBf16(d, Bf16Data(ex.up_proj.w), h, inter);
+            dw_s = StageBf16(d, Bf16Data(ex.down_proj.w), inter, h);
+            gw = gw_s.t();
+            uw = uw_s.t();
+            dw2 = dw_s.t();
+          }
           DBuf g(d, vt::DType::kBF16, {1, inter});
           DBuf u(d, vt::DType::kBF16, {1, inter});
-          vt::Matmul(d.q, g.t(), tok_in.t(), gw.t());
-          vt::Matmul(d.q, u.t(), tok_in.t(), uw.t());
+          MatmulWeight(d.q, g.t(), tok_in.t(), gw);
+          MatmulWeight(d.q, u.t(), tok_in.t(), uw);
           DBuf a(d, vt::DType::kBF16, {1, inter});
           vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
           DBuf down(d, vt::DType::kBF16, {1, h});
-          vt::Matmul(d.q, down.t(), a.t(), dw.t());
+          MatmulWeight(d.q, down.t(), a.t(), dw2);
           const std::vector<float> dhost = DownloadBf16AsF32(d, down);
           for (int64_t d2 = 0; d2 < h; ++d2)
             combined[static_cast<size_t>(d2)] += wgt * dhost[static_cast<size_t>(d2)];
@@ -712,12 +816,12 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         {
           DBuf sg(d, vt::DType::kBF16, {1, tl.shared_inter});
           DBuf su(d, vt::DType::kBF16, {1, tl.shared_inter});
-          vt::Matmul(d.q, sg.t(), tok_in.t(), tl.sh_gate.t());
-          vt::Matmul(d.q, su.t(), tok_in.t(), tl.sh_up.t());
+          MatmulWeight(d.q, sg.t(), tok_in.t(), tl.sh_gate);
+          MatmulWeight(d.q, su.t(), tok_in.t(), tl.sh_up);
           DBuf sa(d, vt::DType::kBF16, {1, tl.shared_inter});
           vt::MoeSiluMul(d.q, sa.t(), sg.t(), su.t());
           DBuf sdown(d, vt::DType::kBF16, {1, h});
-          vt::Matmul(d.q, sdown.t(), sa.t(), tl.sh_down.t());
+          MatmulWeight(d.q, sdown.t(), sa.t(), tl.sh_down);
           const std::vector<float> shost = DownloadBf16AsF32(d, sdown);
           for (int64_t d2 = 0; d2 < h; ++d2)
             combined[static_cast<size_t>(d2)] += shost[static_cast<size_t>(d2)];
@@ -747,7 +851,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
   vt::RmsNorm(d.q, fnorm_dev.t(), x_dev.t(), c.final_norm.t(),
               vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
   DBuf logits_dev(d, vt::DType::kF32, {t, p.vocab_size});
-  vt::Matmul(d.q, logits_dev.t(), fnorm_dev.t(), c.lm_head.t());
+  MatmulWeight(d.q, logits_dev.t(), fnorm_dev.t(), c.lm_head);
   std::vector<float> logits = DownloadF32(d, logits_dev);
   if (DumpOn()) {
     double s = 0.0;

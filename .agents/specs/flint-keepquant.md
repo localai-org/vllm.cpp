@@ -165,12 +165,28 @@ before/after resident bytes, distances + band justification, recipe/env.
 
 ## Owed
 
-- THE DEVICE-FORWARD DISPATCH GATE: the loader arm and the staging plan are
-  gated (census + budget + refusal, 4/4 on device), but the flint_tt dispatch
-  arm's forward with RESIDENT block weights has not yet run end to end — the
-  W0-harness leg with VT_FLINT_KEEP_QUANT=1 (distances vs the CPU reference
-  on the same quantized weights, near-tie band) is the next increment.
 - The remaining containers (UD-Q4_K_XL, UD-IQ1_M, the 7 APEX files): same
   census + gate per container; IQ2_S admission verified in the capability
   set check.
 - The kolibri no-regress leg if shared keepquant code changes further.
+- The CPU reference arm on a block-carrying tree REFUSES by name
+  (FlintModel::Forward, this increment); a CPU keepquant consumer is not
+  owed by this row — the CPU reference dequantizes via the bf16 arm.
+- The routed-expert tier stages per-expert (256 x 3 ResidentWeight uploads
+  per MoE layer, ~36k device allocations at build). It measured green and
+  resident (21.311 GiB); if pool churn ever shows, the whole-tower + row
+  offset fallback in the spec's Risks is the named fallback, not a new row.
+
+## Outcome (the dispatch increment, 2026-10-27)
+
+The W-b/W-c device-forward dispatch gate LANDED GREEN (evidence:
+`docs/bench-evidence/flint-keepquant-dispatch-20261027/report.md`): routing
+reads VT_FLINT_KEEP_QUANT at the registry call site; StageWeight stages
+verbatim block bytes via ResidentWeight; MatmulWeight routes block weights to
+vt::MatmulBT -> kMatmulBTQuant; the reachability mutation (throw on the first
+block-carrying tensor) turns the leg RED and the restored tree re-gates
+bit-identically green (rel_rms 2.198e-1, 5138 block dispatches, 19/19).
+The bf16 regression leg is byte-identical to the committed arm
+(2.683e-1 / 2/8 chain, 18/18). The default-on question (currently opt-in)
+stays with the operator's container-wave decision, not this increment.
+

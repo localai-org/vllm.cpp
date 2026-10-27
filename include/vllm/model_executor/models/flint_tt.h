@@ -90,4 +90,10 @@ std::vector<float> ForwardFlintTT(
 // proven EXERCISED, not merely compiled.
 int64_t FlintTTForwardCalls();
 
+// The keep-quant dispatch counter: every block-carrying weight MatmulWeight
+// routes to vt::MatmulBT (-> kMatmulBTQuant) increments it. The keep-quant
+// gate asserts > 0 after a device forward — blocks CONSUMED, not carried;
+// the bf16 arm asserts == 0 (no block dispatch on that config).
+int64_t FlintTTQuantDispatchCalls();
+
 }  // namespace vllm

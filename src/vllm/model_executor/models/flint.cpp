@@ -46,6 +46,7 @@
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
 #include "vt/ops.h"
+#include "vt/dtype.h"  // IsBlockQuant
 
 namespace vllm {
 
@@ -320,6 +321,23 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
                                        const HfConfig& config) {
   (void)config;
   const FlintParams& p = w.params;
+  // THE CPU REFERENCE ARM IS BF16-OWNED. The keep-quant loader arm stores
+  // block-carrying weights ([N,K] verbatim GGUF blocks, nk), which this arm's
+  // scalar helpers read as bf16 elementwise — a silent misread, the worst
+  // failure shape. The keep-quant arm's consumer is the Tenstorrent device
+  // forward (flint_tt.cpp), whose kernels decode the blocks; a CPU consumer of
+  // the SAME tree refuses BY NAME here. The dispatch gate's CPU reference
+  // loads the bf16 arm (LoadFlintFromGguf) over the same container instead —
+  // the CPU dequantizes, the device keeps blocks (spec flint-keepquant.md
+  // W-c).
+  for (const FlintLayerWeights& lw : w.layers) {
+    FLINT_CHECK(
+        !vt::IsBlockQuant(lw.attn.q_proj.w.dtype),
+        "flint CPU reference arm: the weight tree carries keep-quant block "
+        "tensors (VT_FLINT_KEEP_QUANT=1); this arm reads bf16 elementwise "
+        "weights only — reload the bf16 arm (VT_FLINT_KEEP_QUANT=0) or serve "
+        "the keep-quant tree on the Tenstorrent device arm");
+  }
   const int64_t t = static_cast<int64_t>(token_ids.size());
   FLINT_CHECK(t > 0, "forward: empty token_ids");
   FLINT_CHECK(positions.size() == token_ids.size(),
@@ -1192,8 +1210,17 @@ std::unique_ptr<LoadedModel> LoadFlintForCausalLM(
           "FlintForCausalLM: the model source says GGUF but carries no "
           "file. See .agents/specs/flint-gguf-arm.md");
     }
+    // THE KEEP-QUANT DISPATCH ROUTING (the loader arm's production call
+    // site). The routing reads VT_FLINT_KEEP_QUANT explicitly so the knob is
+    // greppable HERE, at the registry case, and not only inside the loader's
+    // self-gate (LoadFlintKeepQuantFromGguf re-checks the same env, so the
+    // two can never disagree). Unset or =0 keeps the bf16 arm
+    // byte-for-byte — the same-binary A/B the dispatch gate rides.
+    const char* kq = std::getenv("VT_FLINT_KEEP_QUANT");
     return std::make_unique<FlintLoadedModel>(
-        registration, LoadFlintFromGguf(*source.gguf, config));
+        registration, kq != nullptr && kq[0] == '1'
+                          ? LoadFlintKeepQuantFromGguf(*source.gguf, config)
+                          : LoadFlintFromGguf(*source.gguf, config));
   }
   if (source.kind != ModelSource::Kind::kSafetensors) {
     throw std::runtime_error(
