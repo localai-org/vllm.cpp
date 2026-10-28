@@ -162,6 +162,21 @@ jobs:
       # which `website/hugo.toml` uses.
       HUGO_VERSION: "0.146.3"
     steps:
+      - name: Put /tmp back on the root disk
+        # ubuntu-26.04 mounts /tmp as a 50%-of-RAM tmpfs with a per-user quota
+        # (actions/runner-images#14777), while / has ~90+ GiB free. The strix
+        # worker's headroom() measures the filesystems under /tmp
+        # (worker.py:226,256), so on a 26.04 runner the 20 GiB floor is
+        # unmeetable no matter how empty / is -- and the image rollout makes
+        # the job red intermittently by runner assignment, not by workload.
+        # The runner-images maintainer-endorsed workaround: mask tmp.mount
+        # and lazy-unmount /tmp, as the FIRST step, before anything writes
+        # there (files in /tmp are not visible after the unmount). On a 24.04
+        # runner both commands are harmless no-ops.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -1181,6 +1196,13 @@ jobs:
     timeout-minutes: 180
     container: nvidia/cuda:13.3.0-devel-ubuntu24.04
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): nvcc drives its sub-invocations through /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - name: Install build tools
         run: |
           apt-get update
@@ -1291,6 +1313,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): ctest here runs the tools suites, and compilers write /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
       - name: Install the software Vulkan ICD
         # Loader + llvmpipe only. No shader toolchain: the backend consumes the
@@ -1465,6 +1494,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): ctest here runs the tools suites, and compilers write /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
       - name: Configure
         run: |
@@ -1526,6 +1562,13 @@ jobs:
     timeout-minutes: 90
     container: gcc:16
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): this lane compiles with the newest gcc, which writes /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - name: Install build tools
         # The gcc image ships the toolchain only; git is needed BEFORE checkout
         # so actions/checkout uses git rather than the slower tarball path.
@@ -1777,6 +1820,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): ctest here runs the tools suites, and compilers write /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
       - name: Configure
         run: |
