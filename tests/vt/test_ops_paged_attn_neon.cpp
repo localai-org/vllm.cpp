@@ -363,7 +363,12 @@ TEST_CASE("PERF-CPU-ATTN-NEON: NEON lane matches the scalar oracle over the swee
   // onto the lane. This case is about the NEON lane's own bit-identity, so
   // the escape hatch pins the f32 tier for its duration; the BFDOT case
   // below owns the default arm.
+
   setenv("VT_CPU_KOLIBRI_BF16_DOT", "0", 1);
+  // FIX-PAGED-REGRESSION: this sweep adjudicates the FMA-contracted scalar
+  // body, which is now the VT_CPU_PAGED_ATTN_SCALAR_FMA=1 opt-in arm — the
+  // default restored the pre-batch sequential order (bisect: 2cd6b8a14).
+  setenv("VT_CPU_PAGED_ATTN_SCALAR_FMA", "1", 1);
   const std::vector<DType> kv_dts = {DType::kF32, DType::kF16, DType::kBF16, DType::kI8};
   const std::vector<DType> q_dts = {DType::kF32, DType::kBF16};
   const std::vector<DType> out_dts = {DType::kF32, DType::kBF16};

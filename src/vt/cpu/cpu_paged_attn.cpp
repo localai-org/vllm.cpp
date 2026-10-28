@@ -136,6 +136,17 @@ void StoreRowF32(const Tensor& t, int64_t elem_offset, int64_t n, const float* s
 // (F16ToF32 / BF16ToF32 / LoadKvFp8E4M3), four elements at a time; the bf16
 // lane widens by a 16-bit shift into the high half, exactly BitsToF32 does.
 // ---------------------------------------------------------------------------
+// ROLLED BACK to the pre-batch arithmetic order (ISSUE-LOCAL-01M61X3Q5N51S2AGHB5N8SS3HH):
+// the 2cd6b8a14 draft FMA-contracted the scalar body (4-lane pairwise dot, fused V
+// accumulate), which changed the summation order and broke BOTH the hoisted dtype
+// dispatch bit-identity contract (test_ops_paged_attn_dtype) and the glm4-moe-lite
+// strict goldens (test_glm4_moe_lite_paged_engine). The pre-batch sequential body is
+// the default again; an explicit `=1` opts into the draft FMA arm for the perf hunt.
+bool PagedAttnScalarFmaActive() {
+  const char* e = std::getenv("VT_CPU_PAGED_ATTN_SCALAR_FMA");
+  return e != nullptr && e[0] == '1';
+}
+
 #if defined(__aarch64__)
 bool PagedAttnNeonActive() {
   // ROLLED BACK to opt-in (ISSUE-LOCAL-01M4J4QNTE166QFG5MN7V3H4DG): under
@@ -318,6 +329,9 @@ using vt::cpu::PagedAttnKDotBfDot;
   const bool neon_active = false;
   (void)neon_active;
 #endif
+  // The draft FMA scalar body (2cd6b8a14): opt-in, it is NOT bit-identical to the
+  // pre-batch sequential order the reference and the strict goldens license.
+  const bool scalar_fma = PagedAttnScalarFmaActive();
 
   // The token loop, with the K and V element encodings bound at compile time.
   // Body text is unchanged from the per-element form apart from the two loads.
@@ -428,8 +442,8 @@ using vt::cpu::PagedAttnKDotBfDot;
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
             const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
-            float dot;
-            if (d % 4 == 0) {
+            float dot = 0.0f;
+            if (scalar_fma && d % 4 == 0) {
               float lane[4] = {0.0f, 0.0f, 0.0f, 0.0f};
               for (int64_t e = 0; e < d; e += 4)
                 for (int l = 0; l < 4; ++l)
@@ -439,12 +453,10 @@ using vt::cpu::PagedAttnKDotBfDot;
                       lane[l]);
               dot = (lane[0] + lane[1]) + (lane[2] + lane[3]);
             } else {
-              // Non-x4 widths have no lane form to match; plain fused dot.
-              dot = 0.0f;
+              // The pre-batch body: plain sequential dot, the reference order.
               for (int64_t e = 0; e < d; ++e)
-                dot = std::fma(
-                    q[e], KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale),
-                    dot);
+                dot += q[e] *
+                       KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale);
             }
             dot *= scale;
             if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
@@ -479,9 +491,13 @@ using vt::cpu::PagedAttnKDotBfDot;
             const int64_t off = j % block_size;
             const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
             for (int64_t e = 0; e < d_v; ++e)
-              acc[static_cast<size_t>(e)] = std::fma(
-                  pw, KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale),
-                  acc[static_cast<size_t>(e)]);
+              if (scalar_fma)
+                acc[static_cast<size_t>(e)] = std::fma(
+                    pw, KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale),
+                    acc[static_cast<size_t>(e)]);
+              else
+                acc[static_cast<size_t>(e)] +=
+                    pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
           }
           StoreRowF32(out, qoff, d_v, acc.data());
           }

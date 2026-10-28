@@ -389,6 +389,11 @@ TEST_CASE("kolibri1 W3: CPU forward reproduces the transformers golden run") {
   // tier, otherwise the bf16-dot DEFAULT. Read ONCE, before the loop, so
   // every arm of the gate agrees on which class it is judging.
   const bool f32_tier = F32Tier();
+  // FIX-PAGED-REGRESSION: the paged-attention scalar body the golden bands
+  // were measured against is now the VT_CPU_PAGED_ATTN_SCALAR_FMA=1 opt-in
+  // arm — the default restored the pre-batch sequential order (bisect:
+  // 2cd6b8a14). Pin the measured arm for the whole gate.
+  setenv("VT_CPU_PAGED_ATTN_SCALAR_FMA", "1", 1);
   int64_t argmax_matches = 0;
   int64_t argmax_total = 0;
   int64_t near_ties = 0;
