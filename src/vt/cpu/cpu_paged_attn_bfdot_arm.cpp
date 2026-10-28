@@ -41,14 +41,15 @@ namespace vt::cpu {
 
 bool PagedAttnBfDotUsable() {
   if (DetectArmBf16() == false) return false;
-  // Legacy per-arm opt-in keeps working as an explicit `=1` (deprecated).
-  const char* legacy = std::getenv("VT_CPU_PAGED_ATTN_BFDOT");
-  if (legacy != nullptr && legacy[0] == '1') return true;
-  // DEFAULT dispatch (SPEC kolibri1-bf16-dot-cpu): feature-gated, no env
-  // gate on the default path. `VT_CPU_KOLIBRI_BF16_DOT=0` is the single
-  // escape hatch back to the f32 tier for every kolibri1 bf16-dot arm.
-  const char* e = std::getenv("VT_CPU_KOLIBRI_BF16_DOT");
-  return !(e != nullptr && e[0] == '0');
+  // RESTORED OPT-IN (row FIX-PAGED-REGRESSION): the kolibri1-bf16-dot-cpu
+  // default flip moved the shared paged kernel's bf16 K-dot onto a
+  // pair-dot reduction DAG that is not bit-exact with the pre-batch order
+  // (bisect: 3c4925def, ruled by b42c8f787). The default is the pre-batch
+  // path again; VT_CPU_PAGED_ATTN_BFDOT=1 is the explicit opt-in. This is
+  // the paged kernel's own knob — kolibri1's GEMV/forward bf16-dot arms
+  // (VT_CPU_KOLIBRI_BF16_DOT) keep their own ruling and default.
+  const char* e = std::getenv("VT_CPU_PAGED_ATTN_BFDOT");
+  return e != nullptr && e[0] == '1';
 }
 
 float PagedAttnKDotBfDot(const uint16_t* q, const uint16_t* k, int64_t d) {

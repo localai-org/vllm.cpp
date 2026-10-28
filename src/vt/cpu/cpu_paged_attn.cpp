@@ -30,10 +30,13 @@
 
 // PERF-CPU-ATTN-BFDOT (DRAFT, FMA-contract branch): native bf16 K-dot arm.
 // The kernel and its knob live in cpu_paged_attn_bfdot_arm.cpp (+bf16 TU);
-// non-Arm or no-bf16 builds link the stubs. Usable() is feature-gated
-// (HWCAP2 FEAT_BF16 probe) since the kolibri1-bf16-dot-cpu default flip;
-// VT_CPU_KOLIBRI_BF16_DOT=0 is the f32-tier escape hatch and the legacy
-// VT_CPU_PAGED_ATTN_BFDOT=1 stays an explicit opt-in. This arm changes the reduction DAG (bf16 PAIR dots + no query
+// non-Arm or no-bf16 builds link the stubs. RESTORED OPT-IN (row
+// FIX-PAGED-REGRESSION): Usable() is feature-gated AND requires an explicit
+// VT_CPU_PAGED_ATTN_BFDOT=1 — the kolibri1-bf16-dot-cpu default flip moved
+// the shared paged kernel onto a pair-dot DAG that is not bit-exact with the
+// pre-batch order (bisect: 3c4925def, ruled by b42c8f787). kolibri1's own
+// GEMV/forward bf16-dot arms keep their separate VT_CPU_KOLIBRI_BF16_DOT
+// ruling. This arm changes the reduction DAG (bf16 PAIR dots + no query
 // widen), so it is a THIRD mode measured beside the scalar and widen+vfma
 // NEON arms — never a silent replacement: the scalar-vs-NEON bit-identity the
 // FMA-contract draft rests on is untouched.
@@ -313,14 +316,13 @@ using vt::cpu::PagedAttnKDotBfDot;
   // BFDOT is a sub-mode OF the NEON lane: it serves only bf16 keys with a
   // bf16 query row (the kernel consumes bf16 PAIRS, so there is no widen
   // step to reuse) at x8 widths. Resolved once per call.
-  // SPEC kolibri1-bf16-dot-cpu: the BFDOT K-dot is the DEFAULT on a
-  // FEAT_BF16 host (PagedAttnBfDotUsable is feature-gated; the single
-  // escape hatch is VT_CPU_KOLIBRI_BF16_DOT=0, and the legacy
-  // VT_CPU_PAGED_ATTN_BFDOT=1 opt-in keeps working). The lane body engages
-  // when EITHER the NEON knob opts in OR the BFDOT arm is eligible at an
+  // RESTORED OPT-IN (row FIX-PAGED-REGRESSION): the BFDOT K-dot serves only
+  // after an explicit VT_CPU_PAGED_ATTN_BFDOT=1 (bisect: the 3c4925def arm
+  // plus the default dispatch moved the shared paged kernel off the
+  // pre-batch order; ruled by b42c8f787). The lane body engages when EITHER
+  // the NEON knob opts in OR the BFDOT arm is opted in and eligible at an
   // x8 width; a bf16 shape the BFDOT arm cannot serve (d % 8 != 0) keeps
-  // the scalar body — the default flip never widens past the arm's own
-  // eligibility.
+  // the scalar body — the knob never widens past the arm's own eligibility.
   const bool bfdot_requested =
       PagedAttnBfDotUsable() && kv_kind == KvKind::kBF16 &&
       query.dtype == DType::kBF16 && d % 8 == 0;

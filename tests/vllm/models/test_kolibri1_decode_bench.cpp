@@ -64,12 +64,14 @@ constexpr int kSteps = 63;
 //     last token captured on main 323f81ca6 (2026-10-07) and re-anchored
 //     under the FMA-contract paged-attention numerics (GitHub #3438 option
 //     C) — the pre-fuse anchor was 109726 (chain 101807/109726).
-//   bf16-dot DEFAULT tier: 11622, the greedy last token measured with this
-//     change (2026-10-19, this host, VT_KOLIBRI1_DEQUANT_CACHE_MB=16384,
-//     3/3 identical chains) — the tier's own chain is constant 11622 from
-//     the prefill token on, the same alternate-near-tie shape.
+//   bf16-dot DEFAULT tier: 101807, re-anchored under the RESTORED default
+//     (row FIX-PAGED-REGRESSION, 2026-10-28, this host): the shared paged
+//     kernel's BFDOT arm is opt-in again, so the default tier's stream is
+//     the pre-batch order — the historical 101807/109726 alternate-near-tie
+//     shape. The 11622 anchor recorded 2026-10-19 belongs to the reverted
+//     pair-dot default (bisect: 3c4925def, ruled by b42c8f787).
 constexpr int32_t kAnchorLastTokenF32 = 33382;
-constexpr int32_t kAnchorLastTokenBf16Dot = 11622;
+constexpr int32_t kAnchorLastTokenBf16Dot = 101807;
 
 struct Topology {
   vt::DType dtype = vt::DType::kBF16;
