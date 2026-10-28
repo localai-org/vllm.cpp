@@ -682,8 +682,24 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
            "kolibri1-tt B2b-ii: the per-step stream guard is missing");
   st.guard->Charge(layer, list.stream_bytes);
   vt::Backend& be = vt::GetBackend(d.q.device.type);
-  std::vector<uint8_t> slot_image(
-      static_cast<size_t>(st.pool.packed_bytes_per_slot));
+  // Lever 2 (TT-KOLIBRI1-READBACK): one buffer per fill, not one shared
+  // slot_image — the D2H readbacks now settle at the layer drain point, so
+  // a shared destination would be overwritten by the next fill's memcpy
+  // before the previous fill's device bytes land.
+  std::vector<std::vector<uint8_t>> fill_images;
+  // The fills whose device readback has not been verified yet: (slot,
+  // destination buffer). The drain below settles the queue and runs the
+  // byte-exact compares — the verification itself is unchanged, only its
+  // timing moves (per fill -> per layer).
+  std::vector<std::pair<int64_t, const uint8_t*>> pending_verify;
+  auto drain_readbacks = [&]() {
+    be.Synchronize(d.q);
+    for (const auto& pv : pending_verify) {
+      st.readback_verified_bytes += st.shadow->VerifyReadback(
+          layer, pv.first, pv.second, st.pool.packed_bytes_per_slot);
+    }
+    pending_verify.clear();
+  };
   // The same-step residents must not become eviction victims: refresh
   // their recency BEFORE the fetch loop, so a miss's LRU victim is never
   // an expert THIS step's route selected (observed on the production-shape
@@ -717,36 +733,43 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
                                           &ew.down_proj};
     int64_t off = 0;
     const bool was_swap = st.shadow->Has(layer, slot);
+    fill_images.emplace_back(
+        static_cast<size_t>(st.pool.packed_bytes_per_slot));
+    uint8_t* image = fill_images.back().data();
     for (const Kolibri1Projection* pr : projs) {
       const size_t nb = pr->fp8_block.packed.bytes.size();
       // H2D: the packed bytes VERBATIM, row-major, into the slot.
       d.b.Copy(d.q, static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
                         device_offset + off,
                pr->fp8_block.packed.bytes.data(), nb);
-      std::memcpy(slot_image.data() + off, pr->fp8_block.packed.bytes.data(),
-                  nb);
+      std::memcpy(image + off, pr->fp8_block.packed.bytes.data(), nb);
       // The f32 scale grids stay HOST-side (staged with the slot's shadow).
       off += static_cast<int64_t>(nb);
     }
     VT_CHECK(off == st.pool.packed_bytes_per_slot,
              "kolibri1-tt B2b-ii: slot payload byte math diverged");
-    // The readback pivot: D2H the staged slot and verify BYTE-EXACT
-    // against the shadow (no extract_shard on this tt-metal).
-    be.Copy(d.q, slot_image.data(),
+    // The shadow records the HOST image BEFORE the D2H enqueues, so the
+    // drain-point compare is device bytes vs host image — the H2D
+    // integrity gate itself (no extract_shard on this tt-metal). The D2H
+    // enqueues WITHOUT a blocking Synchronize: the copies settle at the
+    // layer's drain point, before any expert computes over the slot.
+    st.shadow->Record(layer, slot, image,
+                      st.pool.packed_bytes_per_slot);
+    be.Copy(d.q, image,
             static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
                 device_offset,
             static_cast<size_t>(st.pool.packed_bytes_per_slot));
-    be.Synchronize(d.q);
-    st.shadow->Record(layer, slot, slot_image.data(),
-                      st.pool.packed_bytes_per_slot);
-    st.readback_verified_bytes += st.shadow->VerifyReadback(
-        layer, slot, slot_image.data(), st.pool.packed_bytes_per_slot);
+    pending_verify.emplace_back(slot, image);
     ++st.slot_fills;
     st.staged_bytes += st.pool.packed_bytes_per_slot;
     if (was_swap) ++st.swap_fills;
     return slot;
   };
   for (const Kolibri1TTSlotFetchJob& job : list.jobs) stage_expert(job.expert);
+  // THE DRAIN POINT (lever 2): one Synchronize per layer settles every
+  // fill's D2H readback BEFORE the compute loop runs — a corrupt stage is
+  // still caught before any expert computes over it, by construction.
+  drain_readbacks();
   // Re-record the epoch AFTER the fills so the next layer's check fires
   // only on a NEW content change (swaps it did not cause itself).
   st.epoch.Record(st.pool.policy);
@@ -798,6 +821,10 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       // the extra stream bytes so the B1 bound still sees the truth.
       st.guard->Charge(layer, st.pool.packed_bytes_per_slot);
       slot = stage_expert(ex);
+      // The on-demand fill's readback must be settled before anything
+      // computes over the slot: drain immediately (this is the compute
+      // loop, past the fetch-loop drain point).
+      drain_readbacks();
     }
     VT_CHECK(slot >= 0,
              "kolibri1-tt B2b-ii: expert " + std::to_string(ex) +
