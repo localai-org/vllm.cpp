@@ -180,6 +180,12 @@ class Kolibri1TTSlotShadow {
   int64_t VerifyReadback(int64_t layer, int64_t slot,
                          const uint8_t* packed, int64_t bytes) const;
   bool Has(int64_t layer, int64_t slot) const;
+  // The authoritative host bytes of a filled slot. The fill-time readback
+  // verification proved the device slot equals these bytes when the slot
+  // was staged, and the eviction hook keeps the shadow exact across slot
+  // swaps — so a consumer may dequant from these instead of re-reading
+  // the device.
+  const std::vector<uint8_t>& Bytes(int64_t layer, int64_t slot) const;
   // Number of slots carrying a shadow (the fill count, for the gates).
   int64_t FilledSlots() const { return filled_; }
 

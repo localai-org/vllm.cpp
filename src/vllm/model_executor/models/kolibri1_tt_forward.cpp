@@ -813,18 +813,15 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       // LRU touch: refresh the entry's recency stamp.
       it->second.stamp = ++st.memo_clock;
     } else {
-      // The slot bytes are authoritative ON DEVICE: read the slot back
-      // (the readback pivot) and verify byte-exact against the shadow
-      // before computing over its dequant.
-      std::vector<uint8_t> rb(
-          static_cast<size_t>(st.pool.packed_bytes_per_slot));
-      be.Copy(d.q, rb.data(),
-              static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
-                  slot * st.pool.packed_bytes_per_slot,
-              rb.size());
-      be.Synchronize(d.q);
-      st.readback_verified_bytes += st.shadow->VerifyReadback(
-          layer, slot, rb.data(), st.pool.packed_bytes_per_slot);
+      // Lever 1 (TT-KOLIBRI1-READBACK): the shadow already holds the
+      // authoritative slot bytes host-side — the fill-time readback
+      // verification proved device == shadow when the slot was staged,
+      // the eviction hook invalidates the shadow on every swap, and the
+      // slot-pool policy refuses a SlotFor on a slot the shadow does not
+      // hold. Dequant from those bytes instead of a second D2H re-read
+      // with its own blocking Synchronize on the decode critical path.
+      const std::vector<uint8_t>& rb =
+          st.shadow->Bytes(layer, slot);
       // ONE allocation per expert (all three projections are inter x h
       // up to transpose), carved into three views; freed through the
       // backend when the memo entry dies.
