@@ -33,6 +33,14 @@ same-session A/B against the baseline leg above.
 
 ## Mutation RED evidence
 
+**Correction (fresh reviewer):** `mutation-red-drain-verify.log` was taken on
+LEVER-1 code — it predates the lever-2 commit by roughly two hours — so the
+gate it exercises is the lever-1 readback compare, not the lever-2
+drain-point ordering. The reviewer reproduced the equivalent RED on the true
+head `d9b55d5e4`: with the mutation applied, one device byte is corrupted
+before the readback enqueue and the run aborts at the first fill
+(`kolibri1_tt_stream.cpp:272`).
+
 `mutation-red-drain-verify.log`: with lever 1+2 in the tree, a scratch-copy
 mutation writes one flipped byte into the staged DEVICE slot after the H2D
 lands (single-byte H2D of `byte ^ 0xFF` after a `Synchronize`). The
@@ -51,6 +59,27 @@ detects device-vs-shadow divergence, which is the H2D-integrity failure
 mode it exists for. The mutation was reverted byte-for-byte afterward
 (`git checkout` of the file; the lever-2 edits were re-applied and
 re-verified).
+
+## Correctness claims, restated (fresh reviewer)
+
+The claim "all `test_kolibri1_tt*` suites green on every arm" was green with
+DEVICE LEGS SKIPPED: the ctest runs completed in 0.29 s with no
+`VT_KOLIBRI1_TT_B2II_MODEL` set, so no device leg executed. The device golden
+gate is red at base AND head with byte-identical signatures (flip-record md5
+`59746f64...` on both) — pre-existing environment drift, not a regression of
+this row, filed as `ISSUE-LOCAL-01M62AJ8XNK23FG6ZVATKEJ0D9` on row
+MODEL-TEXT-kolibri-1-tenstorrent. The CHAIN byte-identity claims in the table
+above were re-verified by the reviewer directly from the raw
+baseline/lever1/lever12 logs.
+
+## Gate-history nuance
+
+The pre-change fill-time verify was a tautology: it `Record`ed the device
+buffer after the sync and then compared that same buffer against itself, so it
+could never fail. The genuine compare lived only in the memo-miss re-read.
+Lever 2's `Record`-before-enqueue ordering replaces the tautology with a
+strictly stronger device-vs-host compare at the drain point. Net effect:
+strengthened.
 
 ## Notes
 
