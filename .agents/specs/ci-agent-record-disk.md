@@ -149,6 +149,33 @@ locally.
   workaround (mask `tmp.mount`, lazy-unmount `/tmp` as the first step) is
   the one this change lands, and runner-images#14814 is the image-side fix.
 
+## Outcome
+
+Landed as f484c76ad (PR #3515, merged 2026-10-28T11:05Z). What settled it:
+
+- The first hypothesis (shared-runner disk pressure on `/`) was **rejected
+  by evidence from its own fix**: PR #3515's first commit freed `/` to
+  113 GiB and the job still failed 49+2 strix tests. The worker measures
+  `/tmp` filesystems, not `/`.
+- The root cause is the ubuntu-26.04 image's `/tmp` tmpfs
+  (actions/runner-images#14777), which makes the worker's 20 GiB floor
+  unmeetable by construction; the flakiness is runner-image assignment
+  during the 24.04→26.04 rollout.
+- Defaults: the mask+lazy-unmount step lands FIRST in six ubuntu-latest
+  compile/ctest lanes (`agent-record`, `build-test-cpu`, `sanitize-cpu`,
+  `build-test-vulkan`, `build-newest-gcc`, `cuda-fat-build`), and only
+  those — the trivial record/document lanes do not write `/tmp`, and the
+  pinned `ubuntu-24.04-arm` lanes keep `/tmp` on the root disk. The
+  agent-record reclamation step stays because `/tmp` returning to the root
+  disk makes the freed space reachable by the suites and compilers. The
+  worker's 20 GiB floor is untouched: a safety property of the oracle
+  runner is not weakened to green a gate.
+- Verified green on run 40637909804: `agent-record` and
+  `build-test-vulkan` passed with `df -h / /tmp` showing `/tmp` on
+  `/dev/root` at 88 GiB free; the long ctest lanes and the pre-existing
+  windows-msvc flint.cpp warning-as-error break are recorded separately
+  and do not belong to this row.
+
 ## Stop conditions
 
 - If GitHub's runner image changes so that the reclaimed paths no longer
