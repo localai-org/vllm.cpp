@@ -713,6 +713,17 @@ jobs:
         run: |
           python3 scripts/check-evidence-refs.py
           python3 tests/scripts/test_check_evidence_refs.py
+      - name: A single-sha evidence report agrees with its oracle pin (CHECKER-HARDENING)
+        # Registered in TWO places, like the suites above: here and in the
+        # `CHECKERS`/`SUITES` arrays of `scripts/agent-preflight.sh`. The
+        # trigger is deliberately narrow: only when the pin's evidence file
+        # records EXACTLY ONE distinct 64-hex sha256 AND the pin file records
+        # exactly one does the two-sided equality hold — a multi-artifact
+        # report has no single sha to bind.
+        run: |
+          python3 scripts/check-evidence-pin-sha.py
+          python3 scripts/check-evidence-pin-sha.py --self-test
+          python3 tests/scripts/test_check_evidence_pin_sha.py
       - name: ROCm cooperative tests follow production toggle values (#3063)
         run: python3 tests/scripts/test_rocm_cooperative_toggles.py
       - name: The staged gfx1151 paired measurement still refuses to run (#2497)
