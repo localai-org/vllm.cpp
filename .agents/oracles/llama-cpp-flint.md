@@ -1,80 +1,65 @@
-# Oracle: llama.cpp PR #30928 head, the model author's own Flint implementation
+# Oracle: `ggml-org/llama.cpp` PR #30928, the only llama.cpp that knows `flint`
 
-A scoped, second llama.cpp record. It exists for one reason: RecursiveSI's
-`FlintForCausalLM` (published 21 October 2026) is carried by NO llama.cpp
-release, and the row `MODEL-TEXT-FLINT` needs a runnable reference and a
-quant-matched denominator on the artifact users actually download (the
-`unsloth/flint-GGUF` containers). It does not replace the
-[`llama-cpp`](llama-cpp.md) oracle, it does not outrank vLLM, and it is never a
-mirror source.
+A scoped, second llama.cpp record, admitted for one narrow reason, in the
+same shape as [`llama-cpp-qwen4exp`](llama-cpp-qwen4exp.md) and
+[`llama-cpp-glm5next`](llama-cpp-glm5next.md). It is the only llama.cpp that
+converts or loads the `flint` architecture (`FlintForCausalLM`), and the
+`FLINT-CPU-PARITY` gate needs a llama.cpp denominator on the identical GGUF
+artifact. It does not replace the [`llama-cpp`](llama-cpp.md) oracle, it does
+not outrank vLLM, and it is never a mirror source.
 
-## Why this record pins a pull-request head, not a release
+## Why the `llama-cpp` file cannot carry this pin
 
-No llama.cpp release converts, loads or runs `flint`: the architecture lands in
-the unmerged model-author PR
-[ggml-org/llama.cpp#30928](https://github.com/ggml-org/llama.cpp/pull/30928)
-("models: Add Flint model"), and this record pins its head
-`1b44e30775dcb2f93952116b05f89e5bd797fb00`. The precedent is
-[`llama-cpp-qwen4exp`](llama-cpp-qwen4exp.md) and
-[`llama-cpp-glm5next`](llama-cpp-glm5next.md), which pin PR heads for exactly
-this reason: the architecture exists only on the PR. The contrast is
-[`llama-cpp-dsv4vision`](llama-cpp-dsv4vision.md), whose support is merged and
-released and therefore pins release `b10766` instead. An unmerged head is a
-weaker pin than a release — the PR can be rebased or closed — so this record
-must be retired the moment a llama.cpp release carries `flint`, and the
-[`llama-cpp`](llama-cpp.md) pin advances then.
+`scripts/check-oracle-pins.py` admits exactly one ` ```oracle-pin ` block per
+file, and the `llama-cpp` pin is deliberately stock release `b10451`, which
+predates Flint entirely. Folding a PR head into that record would change what
+the floor means for every measurement already taken against it.
 
-The head was MERGEABLE at pin time with CI green on
-ubuntu/windows/webgpu/vulkan/cuda/metal/model-naming/Lint (vulkan-amd and rocm
-pending), read from the PR's own check state on 23 October 2026.
+## Provenance
 
-## Scope, and what this oracle may not do
+PR ggml-org/llama.cpp#30928 "models: Add Flint model (FlintForCausalLM)",
+author alexey-rsi (RecursiveSI — the model author), head `1b44e3077`.
+Checked 2026-10-21 against the real files: stock master and the
+`unslothai` fork both carry zero flint hits. CI on the PR is green on
+ubuntu / windows / webgpu / vulkan / cuda / metal / model-naming / lint.
+The converter records `expert_shared_count` =
+`shared_expert_intermediate_size // moe_intermediate_size` (= 2 for flint:
+one shared expert of double width stored as two single-expert slots in one
+rank-2 `ffn_*_shexp` matrix — never two shared experts), `leading_dense_block_count` = 2,
+`expert_gating_func` = SIGMOID, per-layer `attention.sliding_window_pattern`
+and `attention.rope_pattern`, and the per-head `attn_sinks`.
 
-Use it ONLY for the `flint` architecture: the GGUF conversion in the PR's
-converter entry, the graph in `src/models/flint.cpp`, the arch and
-hyper-parameter registration (`LLM_ARCH_FLINT`, `src/llama-arch.cpp`,
-`src/llama-model.cpp`), the `flint` pre-tokenizer type
-(`LLAMA_VOCAB_PRE_TYPE_FLINT`, `src/llama-vocab.cpp`), the sigmoid-gated MoE
-router (`expert_gating_func` sigmoid with `expert_weights_norm` renormalisation
-and the optional `ffn_exp_probs_b`), the ungated shared expert
-(`ffn_{gate,up,down}_shexp`, `expert_shared_count`), the per-head attention
-sinks (`attn_sinks`, one scalar per query head), and the CPU and GGUF k-quant
-speed and memory numbers those produce on a Flint checkpoint.
-
-The architecture this scope names: 49 layers, hidden 2048, 32 query heads
-against 4 KV heads at head_dim 128, vocab 150144, RMS eps 1e-6, hybrid
-`FFSSSF` sliding/full attention (sliding window 513, `is_swa_impl` array) with
-NO RoPE on the full-attention layers (`rope_pattern` array), 256 routed experts
-top-6 with layers 0-1 dense (`n_layer_dense_lead` 2), and standard pre-norm
-residual (NOT Kolibri-1's sandwich).
-
-For every other path, including CPU and GGUF k-quant floors generally, the
-oracle is [`llama-cpp`](llama-cpp.md) at its own pin. Where vLLM implements the
-behaviour at all, vLLM wins; llama.cpp's structure is not vLLM's, and a
-difference in structure is never a reason to diverge. The model author's own
-runtime wins where the two disagree on model semantics.
-
-## Gateability
-
-`gateable = yes`. The flag says one thing: this head BUILT and RAN the Flint
-model and produced tokens. The evidence is
-[the Flint llama.cpp oracle gate](../../docs/bench-evidence/flint-llamacpp-oracle-gate-20261023.md),
-which records the clone at the exact SHA, the CPU-only build flags, the loaded
-container with its sha256, the prompt, and the generated tokens.
-
-**Gateable is not measured.** The flag says the oracle runs. It says nothing
-about a throughput, a latency or a memory floor; the evidence run was a
-correctness gate on a busy host and no rate in it is quotable. The floors are
-the row's own later gates.
+A local build of this exact head exists at `/tmp/llamacpp-flint-oracle`
+(git log head `1b44e3077`), and an external session measured it serving
+the Flint I-Mini IQ-class artifact at tg200 24.99 / tg400 24.33 tok/s
+(untracked log, not a record). That demonstrates the head builds and runs;
+the tracked gateability measurement on the shipped Q4_K_M artifact is what
+this row owes.
 
 ```oracle-pin
 id = llama-cpp-flint
 role = secondary
 upstream = https://github.com/ggml-org/llama.cpp
-scope = the flint architecture only: its GGUF conversion, its graph, its arch and hyper-parameter registration, its sigmoid-gated MoE router, its shared expert, its per-head attention sinks, and the CPU and GGUF k-quant floor those produce on a Flint checkpoint
+scope = the flint architecture, its GGUF conversion, its graph, and the CPU GGUF floor on a flint checkpoint, which no released llama.cpp defines
 pin = 1b44e30775dcb2f93952116b05f89e5bd797fb00
-pin_label = PR #30928 head (unmerged; the model author's own Flint PR)
-pinned_on = 2026-10-23
+pin_label = pr-30928
+pinned_on = 2026-10-28
 gateable = yes
-evidence = docs/bench-evidence/flint-llamacpp-oracle-gate-20261023.md
+evidence = docs/bench-evidence/flint-cpu-parity-20261029/report.md
 ```
+
+Gateability evidence (2026-10-29, row FLINT-CPU-PARITY,
+ISSUE-LOCAL-01M61G9R7D4EAM54RKXMES0Z6J): build 1b44e3077 served the shipped
+flint-Q4_K_M.gguf (sha256
+`20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e`, the SAME
+file both sides) on the shared aarch64 box: greedy token goldens on three
+fixed prompts (`golden-sayhi-raw.log`, `golden-count-raw.log`,
+`golden-200tok-raw.log`, temperature 0, seed 42, finish reason length) and
+llama.cpp tg rates, 3-rep medians (`llama-bench-tg.log`: tg200 26.29 / tg400
+25.66 tok/s at 16 threads, tg200 26.38 / tg400 24.69 tok/s at 32 threads,
+`taskset -c 32-63`). One noted harness quirk, recorded in the evidence
+report: the container's chat-template metadata crashes template init (a
+`\x00` escape the lexer rejects), so the golden legs pass an explicit
+raw-passthrough chat template with `--jinja` — numerics are unaffected, the
+graph is the same.
+
