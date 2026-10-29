@@ -1,0 +1,40 @@
+0.00.003.485 I llama_completion: llama backend init
+0.00.005.412 I llama_completion: load the model and apply lora adapter, if any
+0.10.675.046 I cmn          init: llama threadpool init, n_threads = 128
+0.11.235.310 I llama_completion: chat template is available, enabling conversation mode (disable it with -no-cnv)
+0.11.235.316 W *** User-specified prompt will pre-start conversation, did you mean to set --system-prompt (-sys) instead?
+0.11.235.630 I llama_completion: chat template example:
+You are a helpful assistantHelloHi thereHow are you?
+0.11.235.632 I 
+0.11.235.697 I system_info: n_threads = 128 (n_threads_batch = 128) / 128 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | OPENMP = 1 | REPACK = 1 | 
+0.11.235.698 I 
+0.11.236.175 I llama_completion: interactive mode on.
+0.11.236.177 I sampler seed: 4294967295
+0.11.236.183 I sampler params: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	dry_multiplier = 0.000, dry_base = 1.750, dry_allowed_length = 2, dry_penalty_last_n = 64
+	top_k = 20, top_p = 0.950, min_p = 0.050, xtc_probability = 0.000, xtc_threshold = 0.100, typical_p = 1.000, top_n_sigma = -1.000, temp = 0.000
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000, adaptive_target = -1.000, adaptive_decay = 0.900
+0.11.236.186 I sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> greedy 
+0.11.236.187 I generate: n_ctx = 262144, n_batch = 2048, n_predict = 40, n_keep = 0
+0.11.236.187 I 
+0.11.236.187 I == Running in interactive mode. ==
+0.11.236.187 I  - Press Ctrl+C to interject at any time.
+0.11.236.187 I  - Press Return to return control to the AI.
+ - To return control without starting a new line, end your input with '/'.
+ - If you want to submit another line, end your input with '\'.
+0.11.236.188 I  - Not using system message. To change it, set a different value via -sys PROMPT
+0.11.236.188 I 
+Count from 1 to 30 in words: one, two, three, four, five, [fifteen] fifteen, sixteen, seventeen, eighteen, nineteen, twenty, twenty-one, twenty-two, twenty-three, twenty-four, twenty-five, twenty-six, twenty-seven
+> EOF by user
+
+
+0.32.787.614 I common_perf_print:    sampling time =      26.27 ms
+0.32.787.619 I common_perf_print:    samplers time =      13.88 ms /    56 tokens
+0.32.787.623 I common_perf_print:        load time =   10976.02 ms
+0.32.787.627 I common_perf_print: prompt eval time =     695.45 ms /    16 tokens (   43.47 ms per token,    23.01 tokens per second)
+0.32.787.630 I common_perf_print:        eval time =   20281.86 ms /    39 runs   (  520.05 ms per token,     1.92 tokens per second)
+0.32.787.632 I common_perf_print:       total time =   21552.31 ms /    55 tokens
+0.32.787.634 I common_perf_print: unaccounted time =     548.73 ms /   2.5 %      (total - sampling - prompt eval - eval) / (total)
+0.32.787.635 I common_perf_print:    graphs reused =         39
+0.32.787.636 I common_perf_print:   graph reallocs =          0    /     0        (same size) / (changed size)

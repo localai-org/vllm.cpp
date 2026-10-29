@@ -1,0 +1,40 @@
+0.00.003.454 I llama_completion: llama backend init
+0.00.005.346 I llama_completion: load the model and apply lora adapter, if any
+0.11.220.818 I cmn          init: llama threadpool init, n_threads = 128
+0.11.849.252 I llama_completion: chat template is available, enabling conversation mode (disable it with -no-cnv)
+0.11.849.259 W *** User-specified prompt will pre-start conversation, did you mean to set --system-prompt (-sys) instead?
+0.11.849.588 I llama_completion: chat template example:
+You are a helpful assistantHelloHi thereHow are you?
+0.11.849.590 I 
+0.11.849.651 I system_info: n_threads = 128 (n_threads_batch = 128) / 128 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | OPENMP = 1 | REPACK = 1 | 
+0.11.849.652 I 
+0.11.850.019 I llama_completion: interactive mode on.
+0.11.850.021 I sampler seed: 4294967295
+0.11.850.027 I sampler params: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	dry_multiplier = 0.000, dry_base = 1.750, dry_allowed_length = 2, dry_penalty_last_n = 64
+	top_k = 20, top_p = 0.950, min_p = 0.050, xtc_probability = 0.000, xtc_threshold = 0.100, typical_p = 1.000, top_n_sigma = -1.000, temp = 0.000
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000, adaptive_target = -1.000, adaptive_decay = 0.900
+0.11.850.031 I sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> greedy 
+0.11.850.032 I generate: n_ctx = 262144, n_batch = 2048, n_predict = 24, n_keep = 0
+0.11.850.034 I 
+0.11.850.034 I == Running in interactive mode. ==
+0.11.850.034 I  - Press Ctrl+C to interject at any time.
+0.11.850.035 I  - Press Return to return control to the AI.
+ - To return control without starting a new line, end your input with '/'.
+ - If you want to submit another line, end your input with '\'.
+0.11.850.035 I  - Not using system message. To change it, set a different value via -sys PROMPT
+0.11.850.035 I 
+Say hi. The Australia is a country is located in thecur southern hemisphere. It is the world's sixth-largest island, but often described
+> EOF by user
+
+
+0.24.791.433 I common_perf_print:    sampling time =      14.63 ms
+0.24.791.438 I common_perf_print:    samplers time =       7.64 ms /    27 tokens
+0.24.791.442 I common_perf_print:        load time =   11588.92 ms
+0.24.791.445 I common_perf_print: prompt eval time =     563.71 ms /     3 tokens (  187.90 ms per token,     5.32 tokens per second)
+0.24.791.449 I common_perf_print:        eval time =   11851.23 ms /    23 runs   (  515.27 ms per token,     1.94 tokens per second)
+0.24.791.450 I common_perf_print:       total time =   12942.19 ms /    26 tokens
+0.24.791.453 I common_perf_print: unaccounted time =     512.62 ms /   4.0 %      (total - sampling - prompt eval - eval) / (total)
+0.24.791.453 I common_perf_print:    graphs reused =         23
+0.24.791.454 I common_perf_print:   graph reallocs =          0    /     0        (same size) / (changed size)

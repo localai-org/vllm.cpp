@@ -142,3 +142,10 @@ does not.
 `golden-sayhi-raw.log`, `golden-count-raw.log`, `golden-200tok-raw.log`,
 `keepquant-refusal.log` (post-fix named refusal),
 `ours-t16.log`, `ours-t32.log`, `ours-t32-contaminated-run1.log`.
+
+## Evidence completeness
+
+The nine raw logs above are committed with `git add -f`. The global `*.log`
+rule in `.gitignore` silently excludes evidence logs at `git add` time, and
+this repair adds them in response to the fresh review's finding that the
+committed evidence directory originally contained only `report.md`.
