@@ -867,6 +867,20 @@ ForwardLogits FlintForwardPaged(
     const MultiKvCacheIndex* multi_kv = nullptr) {
   const FlintParams& p = w.params;
   const int64_t t = static_cast<int64_t>(token_ids.size());
+  // THE CPU PAGED ARM IS ALSO BF16-OWNED (the same policy as the reference
+  // forward's audit above). The keep-quant loader arm stores block-carrying
+  // weights whose only consumer is the Tenstorrent device forward
+  // (flint_tt.cpp); a CPU consumer of that tree refuses BY NAME here instead
+  // of letting the packed bytes reach a bf16 matmul and die on an opaque
+  // inner-dims mismatch (the FLINT-CPU-PARITY finding).
+  for (const FlintLayerWeights& lw : w.layers) {
+    FLINT_CHECK(
+        !vt::IsBlockQuant(lw.attn.q_proj.w.dtype),
+        "flint CPU paged arm: the weight tree carries keep-quant block "
+        "tensors (VT_FLINT_KEEP_QUANT=1); this arm reads bf16 elementwise "
+        "weights only — reload the bf16 arm (VT_FLINT_KEEP_QUANT=0) or serve "
+        "the keep-quant tree on the Tenstorrent device arm");
+  }
   const int64_t h = p.hidden_size;
   const int64_t hq = p.num_attention_heads;
   const int64_t hkv = p.num_key_value_heads;
