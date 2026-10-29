@@ -28,3 +28,34 @@ rc=1
 
 Green after restore: `check-evidence-pin-sha: ok` at rc=0, self-test
 `6 evidence-pin-sha fixtures` ok, unit suite `tests/scripts/test_check_evidence_pin_sha.py` OK.
+
+## 2. Registry multiplicity (`check-oracle-pins`)
+
+Red of the PRE-change world: the `llama-cpp-flint` row duplicated in the
+AGENTS.md oracle-registry table (scratch copy, restored byte-for-byte after
+the capture) — the set comparison passed it:
+
+```text
+$ python3 scripts/check-oracle-pins.py; echo red-rc=$?
+oracle-pins ok (23 oracles pinned)
+red-rc=0
+```
+
+Green after the multiset change on the clean tree, then red on the same
+mutation:
+
+```text
+$ python3 scripts/check-oracle-pins.py; echo restored=$?
+oracle-pins ok (23 oracles pinned)
+restored=0
+
+$ python3 scripts/check-oracle-pins.py; echo green-check-rc=$?   # AGENTS.md row duplicated again
+oracle-pins: llama-cpp-flint: admitted 2x by the AGENTS.md table but pinned 1x — a duplicated registry row
+oracle-pins FAILED (1 error(s)) — see AGENTS.md "When vLLM has no implementation"
+green-check-rc=1
+```
+
+Self-test extended with a 4-case registry corpus (agree, duplicated row,
+absent row both directions); unit tests
+`test_duplicated_agents_registry_row_is_reported` and
+`test_a_singly_admitted_row_stays_green` added.

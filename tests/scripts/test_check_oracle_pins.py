@@ -237,6 +237,26 @@ class RegistryConsistencyTests(unittest.TestCase):
         errs = errors_for({"vllm": GOOD_PRIMARY}, ["vllm", "ghost"])
         self.assertTrue(any("ghost" in e for e in errs), errs)
 
+    # Multiset, not set (CHECKER-HARDENING, FLINT-CPU-PARITY M4): the SAME row
+    # admitted twice holds the same SET of ids, so the old set comparison
+    # passed it. The failure must name the duplicated id and the counts.
+    def test_duplicated_agents_registry_row_is_reported(self) -> None:
+        errs = errors_for(
+            {"vllm": GOOD_PRIMARY, "fixture": GOOD_SECONDARY},
+            ["vllm", "fixture", "fixture"],
+        )
+        self.assertTrue(
+            any("fixture" in e and "2x" in e and "duplicated" in e for e in errs),
+            errs,
+        )
+
+    def test_a_singly_admitted_row_stays_green(self) -> None:
+        errs = errors_for(
+            {"vllm": GOOD_PRIMARY, "fixture": GOOD_SECONDARY},
+            ["vllm", "fixture"],
+        )
+        self.assertEqual([e for e in errs if "fixture" in e], [])
+
 
 class GateabilityTests(unittest.TestCase):
     def test_gateable_yes_needs_a_real_pin(self) -> None:

@@ -98,6 +98,7 @@ every `bad=True` fixture must be reported and every `bad=False` one must not.
 from __future__ import annotations
 
 import argparse
+import collections
 import re
 import sys
 from dataclasses import dataclass
@@ -580,16 +581,38 @@ def check_registry(files: dict[Path, str], agents_ids: list[str]) -> list[str]:
                 f"not {primary.fields.get('id')!r} — a secondary never outranks vLLM"
             )
 
-    registry_ids = {r.path.stem for r in records}
-    for oracle_id in sorted(registry_ids - set(agents_ids)):
-        errors.append(
-            f"{oracle_id}: pinned in .agents/oracles/ but absent from the AGENTS.md table"
-        )
-    for oracle_id in sorted(set(agents_ids) - registry_ids):
-        errors.append(
-            f"{oracle_id}: admitted by the AGENTS.md table but has no "
-            ".agents/oracles/ record, so it has no pin"
-        )
+    # Multiset, not set (CHECKER-HARDENING, FLINT-CPU-PARITY M4): a set diff
+    # cannot see DUPLICATION, so a registry row admitted twice by the AGENTS.md
+    # table — or a pin id pinned by two records — passed while every set held
+    # the same elements. Compare the multiplicities and name each id whose
+    # count differs.
+    record_ids = [r.fields.get("id", r.path.stem).strip() for r in records]
+    record_counts = collections.Counter(record_ids)
+    agents_counts = collections.Counter(agents_ids)
+    for oracle_id in sorted(set(record_counts) | set(agents_counts)):
+        pinned = record_counts[oracle_id]
+        admitted = agents_counts[oracle_id]
+        if pinned == admitted:
+            continue
+        if pinned == 0:
+            errors.append(
+                f"{oracle_id}: admitted by the AGENTS.md table but has no "
+                ".agents/oracles/ record, so it has no pin"
+            )
+        elif admitted == 0:
+            errors.append(
+                f"{oracle_id}: pinned in .agents/oracles/ but absent from the AGENTS.md table"
+            )
+        elif admitted > 1:
+            errors.append(
+                f"{oracle_id}: admitted {admitted}x by the AGENTS.md table but "
+                f"pinned {pinned}x — a duplicated registry row"
+            )
+        else:
+            errors.append(
+                f"{oracle_id}: pinned {pinned}x in .agents/oracles/ but admitted "
+                f"{admitted}x by the AGENTS.md table — a duplicated pin id"
+            )
     return errors
 
 
@@ -671,6 +694,55 @@ vllm_distribution_version = 9.9.9rc1.dev1+g1111111111.precompiled
 flashinfer_version = 0.6.18
 ```
 """
+
+# The registry multiplicity corpus (CHECKER-HARDENING), swept beside the record
+# corpus. The rule is a MULTISET comparison: a duplicated AGENTS.md registry row
+# must fail exactly as an unregistered id does, which a set diff cannot see.
+_REGISTRY_PRIMARY = {
+    "vllm": """# fixture primary
+
+```oracle-pin
+id = vllm
+role = primary
+upstream = https://github.com/vllm-project/vllm
+scope = everything vLLM implements
+pin = 1111111111111111111111111111111111111111
+pin_label = 9.9.9rc1.dev1
+pinned_on = 2026-09-04
+gateable = yes
+evidence = AGENTS.md
+```
+""",
+}
+_REGISTRY_SECONDARY = {
+    "fixture": """# fixture secondary
+
+```oracle-pin
+id = fixture
+role = secondary
+upstream = https://github.com/example/fixture
+scope = a path vLLM does not implement
+pin = UNPINNED
+pin_label = none
+pinned_on = 2026-08-13
+gateable = no
+evidence = #647
+```
+""",
+}
+
+REGISTRY_FIXTURES: tuple[tuple[str, dict[str, str], list[str], bool], ...] = (
+    ("agree", {**_REGISTRY_PRIMARY, **_REGISTRY_SECONDARY}, ["vllm", "fixture"], False),
+    # The M4 shape: the SAME row admitted twice. A set comparison passes this.
+    (
+        "duplicated AGENTS registry row",
+        {**_REGISTRY_PRIMARY, **_REGISTRY_SECONDARY},
+        ["vllm", "fixture", "fixture"],
+        True,
+    ),
+    ("agents entry absent from the registry", {**_REGISTRY_PRIMARY, **_REGISTRY_SECONDARY}, ["vllm", "fixture", "ghost"], True),
+    ("registry entry absent from AGENTS", {**_REGISTRY_PRIMARY, **_REGISTRY_SECONDARY}, ["vllm"], True),
+)
 
 PARITY_FIXTURES: tuple[tuple[str, str, str, bool], ...] = (
     ("agree", _PARITY_RECORD, _PARITY_SYNC, False),
@@ -857,6 +929,15 @@ def self_test() -> int:
         if reported != bad:
             verb = "was not reported" if bad else "was reported"
             failures.append(f"parity fixture {name!r} {verb}: {errors}")
+    for name, files, agents_ids, bad in REGISTRY_FIXTURES:
+        registry_errors = check_registry(
+            {Path(f"{stem}.md"): text for stem, text in files.items()},
+            agents_ids,
+        )
+        reported = bool(registry_errors)
+        if reported != bad:
+            verb = "was reported" if reported else "was not reported"
+            failures.append(f"registry fixture {name!r} {verb}: {registry_errors}")
     for name, text, bad in FIXTURES:
         errors: list[str] = []
         record = parse_record(Path(name), text, errors)
@@ -868,12 +949,18 @@ def self_test() -> int:
             failures.append(f"fixture {name} {verb}: {errors}")
     for failure in failures:
         print(f"self-test: {failure}", file=sys.stderr)
-    total = len(FIXTURES) + len(PARITY_FIXTURES) + len(PIN_SURFACE_FIXTURES)
+    total = (
+        len(FIXTURES)
+        + len(REGISTRY_FIXTURES)
+        + len(PARITY_FIXTURES)
+        + len(PIN_SURFACE_FIXTURES)
+    )
     if failures:
         print(f"self-test FAILED ({len(failures)} of {total})", file=sys.stderr)
         return 1
     print(
         f"self-test ok ({len(FIXTURES)} record fixtures, "
+        f"{len(REGISTRY_FIXTURES)} registry fixtures, "
         f"{len(PARITY_FIXTURES)} parity fixtures, "
         f"{len(PIN_SURFACE_FIXTURES)} pin-surface fixtures)"
     )
