@@ -40,7 +40,47 @@ vllm_cpp_add_test(test_device_selection
   vllm/entrypoints/test_device_selection.cpp)
 """
 
-PASSING_CI = """jobs:
+PASSING_CI = """
+jobs:
+  agent-record:
+    steps:
+      - name: The pinned agent-record checker-step list (CHECKER-HARDENING)
+        run: |
+          python3 scripts/check-agent-record.py
+          python3 scripts/check-attention-rung-consistency.py
+          python3 scripts/check-benchmark-index.py
+          python3 scripts/check-build-runtime-deps.py
+          python3 scripts/check-conflict-markers.py
+          python3 scripts/check-container-matrix.py
+          python3 scripts/check-container-workflow.py
+          python3 scripts/check-cuda-op-arch-gate.py
+          python3 scripts/check-deepseek-v4-vision-manifests.py
+          python3 scripts/check-env-doc.py
+          python3 scripts/check-evidence-pin-sha.py
+          python3 scripts/check-evidence-refs.py
+          python3 scripts/check-fp4-resident-consistency.py
+          python3 scripts/check-fusion-consistency.py
+          python3 scripts/check-gate-commands.py
+          python3 scripts/check-gemv-invocation-consistency.py
+          python3 scripts/check-lease-ccache.py
+          python3 scripts/check-model-checklist.py
+          python3 scripts/check-now-current.py
+          python3 scripts/check-oracle-denominator-flags.py
+          python3 scripts/check-oracle-pins.py
+          python3 scripts/check-prompt-contract.py
+          python3 scripts/check-quickstart-recipes.py
+          python3 scripts/check-readme-structure.py
+          python3 scripts/check-release-binary-contract.py
+          python3 scripts/check-release-workflow.py
+          python3 scripts/check-runner-routing-consistency.py
+          python3 scripts/check-site.py
+          python3 scripts/check-snapshot-pins.py
+          python3 scripts/check-supported-models.py
+          python3 scripts/check-surface-coverage.py
+          python3 scripts/check-symbol-anchors.py
+          python3 scripts/check-test-registration.py
+          python3 scripts/check-windows-portability.py
+          python3 scripts/check-windows-release-state.py
   checks:
     steps:
       - name: Critical regression tests remain executable and CTest-registered
@@ -57,6 +97,7 @@ PASSING_CI = """jobs:
         run: |
           python3 tests/scripts/test_q4exp_layerfp_diff.py
 """
+
 
 PASSING_PREFLIGHT = """CHECKERS=(
   check-test-registration
@@ -316,6 +357,38 @@ class WiringMutationTests(unittest.TestCase):
             "          python3 tests/scripts/test_check_test_registration.py\n", ""
         )
         self.assert_wiring_error(self.preflight, mutated, "CI mutation suite")
+
+    # The agent-record checker-step pin (CHECKER-HARDENING, M5). Before it,
+    # deleting ANY wired step of that job reded nothing: this suite pinned only
+    # its own step and three named suites. Deliberately NOT test_M* names --
+    # an M-number would drag the digest-pinned mutation manifest into this
+    # change (see the #2553 note below).
+    def test_deleting_the_evidence_refs_step_from_agent_record_fails(self) -> None:
+        mutated = self.ci.replace("          python3 scripts/check-evidence-refs.py\n", "")
+        self.assert_wiring_error(
+            self.preflight, mutated, "check-evidence-refs.py is missing"
+        )
+
+    def test_adding_an_unrecorded_checker_step_to_agent_record_fails(self) -> None:
+        step = (
+            "      - name: An unpinned checker step\n"
+            "        run: |\n"
+            "          python3 scripts/check-some-new-checker.py\n"
+        )
+        mutated = self.ci.replace(
+            "  checks:\n", step + "  checks:\n", 1
+        )
+        self.assert_wiring_error(
+            self.preflight, mutated, "check-some-new-checker.py runs in"
+        )
+
+    def test_a_job_level_if_on_agent_record_fails(self) -> None:
+        mutated = self.ci.replace(
+            "  agent-record:\n", "  agent-record:\n    if: always()\n", 1
+        )
+        self.assert_wiring_error(
+            self.preflight, mutated, "job-level `if:`"
+        )
 
     # The pinned-suite lane (#1833).  Before it, deleting either registration of
     # `test_sglang_lease_identity` left `check-test-registration.py` at rc=0 --
