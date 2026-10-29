@@ -105,6 +105,10 @@ CHECKERS=(
   # landed rows' evidence dirs lost their logs silently to the old global
   # `*.log` ignore (FIX-EVIDENCE-LOG-GATE, 2026-10-30).
   check-evidence-refs
+  # An evidence report that records exactly one artifact sha256 must agree
+  # with the oracle pin that names it as evidence (FLINT-CPU-PARITY M3,
+  # CHECKER-HARDENING).
+  check-evidence-pin-sha
   check-prompt-contract
   check-agent-record
   check-release-binary-contract
@@ -144,6 +148,7 @@ CHECKERS=(
 SUITES=(
   test_check_prompt_contract
   test_check_evidence_refs
+  test_check_evidence_pin_sha
   test_agent_gates
   test_agent_record
   test_check_release_binary_contract
