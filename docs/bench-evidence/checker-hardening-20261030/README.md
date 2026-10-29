@@ -83,7 +83,32 @@ rc=1
 Two further reds the pin catches: an unpinned checker step added to the job
 (`check-new-unpinned.py runs in the agent-record job but is not in
 AGENT_RECORD_CHECKER_STEPS`), and a job-level `if: always()` on the job
-(`the agent-record job carries a job-level \`if:\` — a step behind a
+(`the agent-record job carries a job-level `if:` — a step behind a
 condition is not a registration`). Green restored byte-for-byte afterwards
 (`restored-green`). Unit tests added in
 `tests/scripts/test_check_test_registration.py` (87 tests, OK).
+
+## 4. Stderr-count gate for the kolibri1 NUMA fallback
+
+Red-first: the warning `fprintf` reverted in
+`src/vllm/model_executor/models/kolibri1_numa.h` (a compileable silent
+fallback — `(void)err;` in its place), the test rebuilt, and the new gate run
+(the refusal is forced in-process through `detail::set_mempolicy_hook`, so
+this holds on any host). Then the header restored byte-for-byte:
+
+```text
+[doctest] test cases:  2 |  1 passed | 1 failed | 6 skipped
+[doctest] assertions: 15 | 12 passed | 3 failed |
+./tests/vllm/models/test_kolibri1_numa.cpp:378: ERROR: CHECK_EQ( CountOccurrances(first, "kolibri1_numa:"), 1 ) is NOT correct!
+  values: CHECK_EQ( 0, 1 )
+./tests/vllm/models/test_kolibri1_numa.cpp:379: ERROR: CHECK( CountOccurrances(first, "set_mempolicy(MPOL_INTERLEAVE) failed") == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+./tests/vllm/models/test_kolibri1_numa.cpp:389: ERROR: CHECK_EQ( CountOccurrances(both, "kolibri1_numa:"), 2 ) is NOT correct!
+  values: CHECK_EQ( 0, 2 )
+[doctest] Status: FAILURE!
+```
+
+Green after restore: the full `test_kolibri1_numa` binary reports
+`8 | 8 passed | 0 failed` (the model-gated loader case ran against the
+mounted checkpoint), stable over three sequential and three random-order
+repeats.
