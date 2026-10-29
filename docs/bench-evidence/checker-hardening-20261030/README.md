@@ -59,3 +59,31 @@ Self-test extended with a 4-case registry corpus (agree, duplicated row,
 absent row both directions); unit tests
 `test_duplicated_agents_registry_row_is_reported` and
 `test_a_singly_admitted_row_stays_green` added.
+
+## 3. CI wiring coverage of the agent-record job (`check-test-registration`)
+
+Red of the PRE-change world: the `check-evidence-refs` step deleted from the
+agent-record job (scratch copy, restored byte-for-byte after the capture) —
+the checker passed it:
+
+```text
+$ python3 scripts/check-test-registration.py >/dev/null; echo red-rc=$?
+red-rc=0
+```
+
+After the pin, the same deletion names the missing step (the span also
+carried the item-1 step, which is named beside it):
+
+```text
+ERROR: check-evidence-pin-sha.py is missing from the agent-record job's checker steps
+ERROR: check-evidence-refs.py is missing from the agent-record job's checker steps
+rc=1
+```
+
+Two further reds the pin catches: an unpinned checker step added to the job
+(`check-new-unpinned.py runs in the agent-record job but is not in
+AGENT_RECORD_CHECKER_STEPS`), and a job-level `if: always()` on the job
+(`the agent-record job carries a job-level \`if:\` — a step behind a
+condition is not a registration`). Green restored byte-for-byte afterwards
+(`restored-green`). Unit tests added in
+`tests/scripts/test_check_test_registration.py` (87 tests, OK).

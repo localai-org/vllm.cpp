@@ -77,6 +77,55 @@ REQUIRED_LABEL_SELECTIONS = {
 # `check-test-registration` and `test_check_test_registration` are NOT listed
 # here.  They keep their own hardcoded checks below, whose diagnostics are what
 # the M9-M12 mutation cases match on.
+# The full expected checker-step list of the `agent-record` CI job
+# (CHECKER-HARDENING, the FIX-EVIDENCE-LOG-GATE review's M5). Before this pin,
+# deleting ANY wired step from that job reded nothing: this checker pinned only
+# its own step and three named suites, so a checker could silently leave the
+# lane. The set is pinned literally and compared for EXACT equality against the
+# `scripts/check-*.py` invocations parsed out of the job: deleting a pinned
+# step fails naming it, and adding an unpinned one fails naming that, so the
+# list is maintained deliberately. The job deliberately carries no job-level
+# `if:` -- a step behind a condition is not a registration -- and the pin
+# enforces that too.
+AGENT_RECORD_JOB = "agent-record"
+AGENT_RECORD_CHECKER_STEPS: frozenset[str] = frozenset({
+    "check-agent-record.py",
+    "check-attention-rung-consistency.py",
+    "check-benchmark-index.py",
+    "check-build-runtime-deps.py",
+    "check-conflict-markers.py",
+    "check-container-matrix.py",
+    "check-container-workflow.py",
+    "check-cuda-op-arch-gate.py",
+    "check-deepseek-v4-vision-manifests.py",
+    "check-env-doc.py",
+    "check-evidence-pin-sha.py",
+    "check-evidence-refs.py",
+    "check-fp4-resident-consistency.py",
+    "check-fusion-consistency.py",
+    "check-gate-commands.py",
+    "check-gemv-invocation-consistency.py",
+    "check-lease-ccache.py",
+    "check-model-checklist.py",
+    "check-now-current.py",
+    "check-oracle-denominator-flags.py",
+    "check-oracle-pins.py",
+    "check-prompt-contract.py",
+    "check-quickstart-recipes.py",
+    "check-readme-structure.py",
+    "check-release-binary-contract.py",
+    "check-release-workflow.py",
+    "check-runner-routing-consistency.py",
+    "check-site.py",
+    "check-snapshot-pins.py",
+    "check-supported-models.py",
+    "check-surface-coverage.py",
+    "check-symbol-anchors.py",
+    "check-test-registration.py",
+    "check-windows-portability.py",
+    "check-windows-release-state.py",
+})
+
 REQUIRED_SUITE_REGISTRATIONS = {
     "test_sglang_lease_identity": "tests/scripts/test_sglang_lease_identity.py",
     # #2553. Added the moment the suite reached both lanes, which is the only
@@ -875,6 +924,103 @@ def _direct_commands(block: list[str]) -> list[list[str]] | None:
     return commands
 
 
+def _agent_record_job_blocks(ci_text: str) -> tuple[list[list[str]], list[str]]:
+    """The unconditional run blocks of the `agent-record` job, and its defects.
+
+    Returns the literal run blocks of that ONE job (the same narrow structural
+    parse `_unconditional_ci_run_blocks` applies) plus a defect list: the job
+    is absent, or it carries a job-level ``if`` -- which would make every step
+    conditional and therefore, by this repository's own rule, not a
+    registration.
+    """
+    lines = ci_text.splitlines()
+    jobs_index = next(
+        (i for i, line in enumerate(lines) if line == "jobs:"), None
+    )
+    if jobs_index is None:
+        return [], [f"the {AGENT_RECORD_JOB} job is missing from ci.yml (no jobs:)"]
+    job_names = {
+        mapping[0]: i
+        for i in range(jobs_index + 1, len(lines))
+        if (mapping := _yaml_mapping(lines[i], 2)) is not None
+        and mapping[1] == ""
+    }
+    job_start = job_names.get(AGENT_RECORD_JOB)
+    if job_start is None:
+        return [], [f"the {AGENT_RECORD_JOB} job is missing from ci.yml"]
+    later = [i for i in job_names.values() if i > job_start]
+    job_end = min(later) if later else len(lines)
+    job_lines = lines[job_start + 1 : job_end]
+    job_fields = {
+        mapping[0]
+        for line in job_lines
+        if (mapping := _yaml_mapping(line, 4)) is not None
+    }
+    defects: list[str] = []
+    if "if" in job_fields:
+        defects.append(
+            f"the {AGENT_RECORD_JOB} job carries a job-level `if:` -- a step "
+            "behind a condition is not a registration"
+        )
+    steps_offset = next(
+        (
+            i
+            for i, line in enumerate(job_lines)
+            if _yaml_mapping(line, 4) == ("steps", "")
+        ),
+        None,
+    )
+    if steps_offset is None:
+        return [], defects + [f"the {AGENT_RECORD_JOB} job has no steps:"]
+    steps_start = job_start + 1 + steps_offset + 1
+    step_starts = [
+        i
+        for i in range(steps_start, job_end)
+        if _indent(lines[i]) == 6 and lines[i][6:].startswith("-")
+    ]
+    blocks: list[list[str]] = []
+    for step_pos, step_start in enumerate(step_starts):
+        step_end = (
+            step_starts[step_pos + 1]
+            if step_pos + 1 < len(step_starts)
+            else job_end
+        )
+        step_fields: dict[str, tuple[str, int]] = {}
+        first = _yaml_mapping(lines[step_start], 6, sequence=True)
+        if first is not None:
+            step_fields[first[0]] = (first[1], step_start)
+        for index in range(step_start + 1, step_end):
+            mapping = _yaml_mapping(lines[index], 8)
+            if mapping is not None:
+                step_fields[mapping[0]] = (mapping[1], index)
+        if {"if", "continue-on-error", "shell"} & step_fields.keys():
+            continue
+        run = step_fields.get("run")
+        if run is not None and re.fullmatch(r"\|[-+]?", run[0]):
+            blocks.append(_literal_block(lines, run[1]))
+    return blocks, defects
+
+
+# One `python3 scripts/check-<name>.py` invocation line inside a run block.
+# Scanned per line rather than through `_direct_commands`: some agent-record
+# steps legitimately carry shell continuations and `set -eu`, which the
+# direct-command parser refuses wholesale, and the pin wants the STEP present,
+# not the step in a particular canonical shape.
+_CHECKER_INVOCATION = re.compile(
+    r"^\s*python3 (scripts/check-[A-Za-z0-9-]+\.py)\b", re.M
+)
+
+
+def _agent_record_checker_scripts(ci_text: str) -> set[str]:
+    """The `scripts/check-*.py` names the agent-record job invokes."""
+    scripts: set[str] = set()
+    for block in _agent_record_job_blocks(ci_text)[0]:
+        scripts.update(
+            Path(name).name for name in _CHECKER_INVOCATION.findall("\n".join(block))
+        )
+    return scripts
+
+
 def _ci_has_active_guard_step(ci_text: str) -> bool:
     expected = [
         ["python3", "scripts/check-test-registration.py"],
@@ -999,6 +1145,19 @@ def wiring_errors(preflight_text: str, ci_text: str) -> list[str]:
     if not _ci_has_active_guard_step(ci_text):
         errors.append(
             "CI guard step must contain the checker and mutation suite as direct active commands"
+        )
+    # The agent-record lane's full checker-step pin (CHECKER-HARDENING M5):
+    # exact set equality, so a deleted step AND an unrecorded addition both red.
+    errors.extend(_agent_record_job_blocks(ci_text)[1])
+    actual_steps = _agent_record_checker_scripts(ci_text)
+    for script in sorted(AGENT_RECORD_CHECKER_STEPS - actual_steps):
+        errors.append(
+            f"{script} is missing from the {AGENT_RECORD_JOB} job's checker steps"
+        )
+    for script in sorted(actual_steps - AGENT_RECORD_CHECKER_STEPS):
+        errors.append(
+            f"{script} runs in the {AGENT_RECORD_JOB} job but is not in "
+            "AGENT_RECORD_CHECKER_STEPS -- record it in the pin or move the step"
         )
     for suite, command in sorted(REQUIRED_SUITE_REGISTRATIONS.items()):
         if suites is None or suite not in suites:
