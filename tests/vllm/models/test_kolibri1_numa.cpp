@@ -39,6 +39,9 @@
 
 #include <doctest/doctest.h>
 
+#include <unistd.h>
+#include <functional>
+
 #include <cstdint>
 #include <cstdlib>
 #include <malloc.h>
@@ -291,6 +294,117 @@ TEST_CASE("kolibri1 NUMA interleave: the loader's weight pages span nodes") {
   // nodes within its first few MiB, the first-touch arena never leaves one.
   const size_t window = std::min<size_t>(probe->size(), 64ull << 20);
   CHECK(Distinct(TouchedPageNodes(probe->data(), window)) > 1);
+}
+
+
+// 3b. THE AUDIT TRAIL (CHECKER-HARDENING, the FIX-TT-NUMA-DEGRADE review's
+// M1): on a refused set_mempolicy the best-effort guard must emit EXACTLY
+// ONE named warning per construction — a silent fallback corrupts nothing
+// but loses the audit trail, and a double warning is noise that trains
+// readers to ignore the guard. The refusal is forced in-process through
+// detail::set_mempolicy_hook, so this holds on every host, including ones
+// whose kernel would accept the real call. TEST_CASEs, not SUBCASEs: the
+// 2.5.2 sibling-loss hazard applies (a REQUIRE-style failure in one case
+// must not drop the knob-off case).
+//
+// Stderr capture: fd 2 is redirected onto a pipe around the construction,
+// because doctest owns stdout and the warning is written to stderr directly.
+namespace {
+
+std::string CaptureStderrWhile(const std::function<void()>& body) {
+  std::fflush(stderr);
+  const int saved = ::dup(2);
+  int fds[2];
+  REQUIRE_EQ(::pipe(fds), 0);
+  REQUIRE_EQ(::dup2(fds[1], 2), 2);
+  ::close(fds[1]);
+  body();
+  std::fflush(stderr);
+  ::dup2(saved, 2);
+  ::close(saved);
+  std::string captured;
+  char buf[4096];
+  ssize_t n;
+  while ((n = ::read(fds[0], buf, sizeof(buf))) > 0) {
+    captured.append(buf, static_cast<size_t>(n));
+  }
+  ::close(fds[0]);
+  return captured;
+}
+
+size_t CountOccurrances(const std::string& haystack, const std::string& needle) {
+  size_t count = 0;
+  for (size_t pos = 0; (pos = haystack.find(needle, pos)) != std::string::npos;
+       pos += needle.size()) {
+    ++count;
+  }
+  return count;
+}
+
+// Captureless: the hook is a plain function pointer, so the counter lives at
+// namespace scope.
+int g_hook_calls = 0;
+
+int FailSetMempolicy(int, const unsigned long*, unsigned long) {
+  ++g_hook_calls;
+  return -1;
+}
+
+}  // namespace
+
+TEST_CASE("kolibri1 NUMA fallback: a refused set_mempolicy warns EXACTLY ONCE "
+          "per construction") {
+  // The guard reads get_mempolicy (real syscall) before it reaches the
+  // hooked set_mempolicy; a host that refuses the query cannot run this
+  // case — skip it, never fail on an unrelated host restriction.
+  {
+    int mode = 0;
+    unsigned long mask[vllm::kolibri1_numa::detail::kMaxNodes / 64] = {0};
+    if (vllm::kolibri1_numa::detail::GetMempolicy(
+            &mode, mask, vllm::kolibri1_numa::detail::kMaxNodes, nullptr, 0) !=
+        0) {
+      MESSAGE("SKIP: the host refuses get_mempolicy; the warning path cannot "
+              "be driven here");
+      return;
+    }
+  }
+  REQUIRE_EQ(unsetenv("VT_KOLIBRI1_NUMA_INTERLEAVE"), 0);  // best-effort arm
+  vllm::kolibri1_numa::detail::set_mempolicy_hook = &FailSetMempolicy;
+
+  const std::string first = CaptureStderrWhile([] {
+    vllm::kolibri1_numa::PolicyGuard guard;
+    (void)guard;
+  });
+  CHECK_EQ(CountOccurrances(first, "kolibri1_numa:"), 1);
+  CHECK(CountOccurrances(first, "set_mempolicy(MPOL_INTERLEAVE) failed") == 1);
+
+  // One warning PER CONSTRUCTION, not one per process: a second refused
+  // construction warns again.
+  const std::string both = CaptureStderrWhile([] {
+    vllm::kolibri1_numa::PolicyGuard g1;
+    vllm::kolibri1_numa::PolicyGuard g2;
+    (void)g1;
+    (void)g2;
+  });
+  CHECK_EQ(CountOccurrances(both, "kolibri1_numa:"), 2);
+
+  vllm::kolibri1_numa::detail::set_mempolicy_hook = nullptr;
+  REQUIRE_EQ(unsetenv("VT_KOLIBRI1_NUMA_INTERLEAVE"), 0);
+}
+
+TEST_CASE("kolibri1 NUMA fallback: the knob-off guard issues NO policy write "
+          "and NO warning") {
+  REQUIRE_EQ(setenv("VT_KOLIBRI1_NUMA_INTERLEAVE", "0", 1), 0);
+  g_hook_calls = 0;
+  vllm::kolibri1_numa::detail::set_mempolicy_hook = &FailSetMempolicy;
+  const std::string captured = CaptureStderrWhile([] {
+    vllm::kolibri1_numa::PolicyGuard guard;
+    (void)guard;
+  });
+  CHECK_EQ(g_hook_calls, 0);
+  CHECK(captured.empty());
+  vllm::kolibri1_numa::detail::set_mempolicy_hook = nullptr;
+  REQUIRE_EQ(unsetenv("VT_KOLIBRI1_NUMA_INTERLEAVE"), 0);
 }
 
 #endif  // __linux__
