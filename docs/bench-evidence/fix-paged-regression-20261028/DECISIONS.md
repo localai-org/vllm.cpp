@@ -29,14 +29,23 @@ opt-in arm, not the default. The default stays the bit-exact pre-batch order.
 
 Landed in the "re-gate the FMA-contracted scalar body" commit.
 
-## Decision 3 — APPROVED: glm4 69/128 is a PRE-EXISTING DELIBERATE RED, owned by issue #2906
+## Decision 3 — APPROVED: glm4 69/128 is a PRE-EXISTING DELIBERATE RED, owned by issue #2839
 
 `test_glm4_moe_lite_paged_engine` measures 69/128 strict positions because
-commit `fd8eae928f` (2026-09-27) DELIBERATELY landed the strict bar red —
+commit `fd8eae928f` (2026-09-27, the merged pull request that landed the
+gate, [#2906](https://github.com/mudler/vllm.cpp/issues/2906))
+DELIBERATELY landed the strict bar red —
 its own commit message says "THIS PULL REQUEST MAKES A GATE FAIL, AND THAT
 IS THE RESULT". The 69/128 predates the 2026-10-19 kolibri1 batch by three
 weeks and is NOT a regression from this row. Out of this row's scope; the
 glm4 test is untouched. Dated note recorded here 2026-10-28.
+
+The canonical tree record for the deliberate red is commit `de4c0ba03`,
+owned by issue
+[#2839](https://github.com/mudler/vllm.cpp/issues/2839) (row
+MODEL-TEXT-GLM4-MOE-LITE-GATE-2839). #2906 alone is incomplete as a cite:
+it is the merged PR that landed the gate, while #2839 / `de4c0ba03` carry
+the deliberate-red ruling itself.
 
 ## Consequences re-measured under the restored default (2026-10-28, this host)
 
@@ -63,4 +72,4 @@ draft counts moved to 59 proposed / 53 accepted and the golden band to
 | test_kolibri1_spec_probe | green |
 | test_kolibri1_decode_bench | green (2/2 identical chains) |
 | test_kolibri1_threeway_capture | green |
-| test_glm4_moe_lite_paged_engine | RED 69/128 — deliberate #2906 bar, out of scope |
+| test_glm4_moe_lite_paged_engine | RED 69/128 — deliberate #2839 bar, out of scope |
