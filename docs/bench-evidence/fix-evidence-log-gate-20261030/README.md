@@ -19,9 +19,13 @@ git 2.54.0. Standard library only, offline throughout.
 ## Red-before (checker against origin/main, 3c69df47a4, 2026-10-30)
 
 `python3 scripts/check-evidence-refs.py` in a detached worktree of
-`origin/main` exits 1 with 47 references missing or untracked across **nine**
-evidence dirs — the three the spec names, plus six more the checker exposed
-with the identical failure mode:
+`origin/main` exits 1 with 46 failure entries covering **41 distinct**
+filenames across **nine** evidence dirs — the three the spec names, plus six
+more the checker exposed with the identical failure mode. (One filename is
+referenced twice: `mutation-red-drain-verify.log` appears at
+`tt-kolibri1-readback/README.md:36` and again at `:44`; the reviewer
+reproduced 46 entries / 41 distinct filenames, and this README's original
+"47" did not reproduce.)
 
 > EVIDENCE-LOST (2026-10-30): every filename below is a recorded loss from the
 > red-before run; the per-dir notes carry the reasons.
@@ -54,7 +58,7 @@ worktrees, and each now carries the same dated `EVIDENCE-LOST` note.
 
 `python3 scripts/check-evidence-refs.py` → exit 0:
 `check-evidence-refs: ok — every referenced evidence log is tracked and on disk`.
-`python3 tests/scripts/test_check_evidence_refs.py` → 12 tests OK, including
+`python3 tests/scripts/test_check_evidence_refs.py` → 13 tests OK, including
 the shipped-tree test that reruns the full scan.
 
 ## Mutation (scratch copy of this tree, one whitelisted log deleted)
@@ -70,3 +74,27 @@ Either restore the file under docs/bench-evidence/, or record the loss with an `
 ```
 
 The gate detects the exact defect it exists to catch.
+
+## Full preflight and unit-test count
+
+The implementer's first background preflight was killed by a tool timeout and
+silently truncated; it is not evidence. The relaunched detached run completed:
+full preflight with exactly one failure, the known host failure
+`check-windows-portability.py` (the dotnet/pwsh fake-tool contract), with the
+rest green.
+
+Accepted nits: two of the recorded-loss notes exceed the five-line shape —
+`rocm-quant-gather` at 7 lines and `rocm-rdna3-quant-wmma` at 6. Both are
+accepted as-is; the filename lists are the content, and trimming would drop
+filenames the checker verifies.
+
+## Known gap: CI wiring is unguarded (recorded debt)
+
+Deleting the `ci.yml` `agent-record` step that runs `check-evidence-refs`
+reds nothing today: `check-test-registration` pins only its own step and three
+named suites, so CI could silently drop the step and every local gate stays
+green. The checker still runs locally through `agent-preflight.sh`
+(`CHECKERS`), so the floor holds for anyone who runs preflight; only the CI
+wiring is unguarded. Owned as recorded debt; the candidate repair is extending
+`check-test-registration` or adding a wiring-coverage checker. No checker
+change ships in this row.
