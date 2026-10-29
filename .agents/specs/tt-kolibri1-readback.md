@@ -125,6 +125,10 @@ does not close the gap.
 - If byte-identical steps do not reproduce (any step diverges), stop:
   that is a correctness defect in the change, and the row fails red-first.
 
+## Outcome
+
+Landed 2026-10-29 as 90fe546b9 (PR #3517, squash; levers 51a82216a + d9b5544/d81dd34fb lineage). Measured: 3358.1 -> 3184.6 ms/step (-5.2% same-session A/B, 3-run medians), byte-identical greedy chains 3/3 per arm. Review MERGEABLE (6 claims, 5 mutations); the review's key finding is recorded in the evidence README: the old fill-time verify was a tautology and lever 2's ordering is the first genuine device-vs-host compare. Rejected: removing or weakening any verification (the M1 mutation proved a silent fallback corrupts 4846 fills with zero errors — the drain-point verify is load-bearing). Defaults: best-effort K-doc; the memo consumes shadow bytes; the drain is per layer. Left open: the absolute anchoring (548 vs 3358) + first green device-golden record, owed under ISSUE-LOCAL-01M62AJ8XNK23FG6ZVATKEJ0D9; a stderr/counter-assertion gate for readback-verified (candidate); the M3 reachability characterization (drain deletion caught only by the stats counter).
+
 ## Git integration
 
 One pull request, `row/TT-KOLIBRI1-READBACK`, spec committed before the

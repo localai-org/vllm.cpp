@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M62YS0ZP0F5PC7YJFJ8CP91A
 Title: kolibri1 NUMA interleave refusal reds every test that constructs PolicyGuard on restricted runners
 Row: FIX-TT-NUMA-DEGRADE
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-29
 Updated: 2026-10-29
-Closed: -
+Closed: 2026-10-29
 
 ## Problem
 
@@ -16,4 +16,4 @@ CI runners (ubuntu image rollout) refuse set_mempolicy(MPOL_INTERLEAVE) -- kolib
 
 ## Resolution
 
--
+Landed 2026-10-29 as db1d71c9b (PR #3519, squash of row/FIX-TT-NUMA-DEGRADE). The guard degrades: set_mempolicy(MPOL_INTERLEAVE) refusal now emits one named warning (errno + 'interleave refused by the host; continuing with the default policy') and constructs a no-op guard; knob VT_KOLIBRI1_NUMA_INTERLEAVE is three-valued (unset/other = best-effort, 0 = off, 1 = strict throw-by-name); the dtor never touches the policy after a fallback (mutation-probed: a restoring dtor would issue writes from knob-off inert guards and clobber an outer active guard). Four suites green under forced SetMempolicy failure with exactly one warning per guard (4/63/1420/4); strict arm throws the old message by name. Review MERGEABLE (6 claims, 5 mutations). Recorded gap: the fallback warning is enforced by count evidence only — no in-tree gate captures stderr (candidate for a stderr-count gate).

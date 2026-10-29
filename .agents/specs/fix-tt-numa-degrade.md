@@ -72,6 +72,10 @@ If the fallback fires but results diverge from the strict arm (they must not —
 the policy affects page placement, not arithmetic), STOP: that would mean a
 hidden dependency on interleave in the numerics, which is a different bug.
 
+## Outcome
+
+Landed 2026-10-29 as db1d71c9b (PR #3519). The knob is three-valued (unset/other = best-effort fallback with one named warning; "0" = off; "1" = strict throw-by-name); the dtor never touches the policy after a fallback. Verified by review (6 claims, 5 mutations): identical assertion counts under forced fallback (5/12498/1608/234), exactly one warning per guard (4/63/1420/4), the strict arm throws the old message, and the M3 probe shows a restoring dtor would write policy from knob-off inert guards (9 set_mempolicy calls vs 4) — active_=false is load-bearing. The doctest 2.5.2 SUBCASE finding (a return silently suppresses sibling SUBCASEs) is recorded in the evidence README — it shaped the TEST_CASE split. Left open: the fallback warning is enforced by count evidence only (no stderr-capturing gate — candidate); check-env-doc enforces presence, not semantics drift (review-enforced). Both ubuntu-runner-class reds (tmpfs, set_mempolicy) now carry the same lesson: gate the environment, name the fallback.
+
 ## Git integration
 
 One pull request, row/FIX-TT-NUMA-DEGRADE, spec first.
