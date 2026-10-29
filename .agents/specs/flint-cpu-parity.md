@@ -112,6 +112,10 @@ floor and must never be quoted as one.
 - If our keepquant tokens diverge from the golden beyond the band, STOP
   the perf legs: correctness first, file the defect, fix, then measure.
 
+## Outcome
+
+Landed 2026-10-29 as 19979acf9 (PR #3521). Deliverable 1: the llama-cpp-flint oracle is gateable=yes (llama.cpp 1b44e3077 serves the shipped flint-Q4_K_M.gguf, sha 20c89707...927e; goldens x3 + llama-bench raw logs committed; AGENTS.md registry row landed). Deliverable 2: the like-for-like floor is 26.29/25.66 tok/s at 200/400 completions at 16 threads, 26.38/24.69 at 32 (bench zone, 3-rep medians, governor schedutil as observed and logged). Deliverable 3 changed shape: the CPU keep-quant serving arm DOES NOT EXIST -- the block tree's only consumer is the Tenstorrent forward, and the paged arm died on an opaque matmul inner-dims mismatch. That was a defect, fixed in-row: FlintForwardPaged now refuses a keep-quant tree by name (flint.cpp:868-881). The keepquant-vs-floor gap stays unrecorded pending the CPU keep-quant dispatch arm, which files its own row (the real lever: ~8x under the floor). The bf16 paged bound (3.25/3.28 tok/s at 16 t) is recorded labeled as a different kernel class, never as parity. The shexp mapping verified correct: one double-width shared expert (1024) as 2 slots of 512, never two experts. Review MERGEABLE (6 claims verified; M1/M2 RED; M3/M4/M5 characterized detection gaps -- M5 owned by FIX-EVIDENCE-LOG-GATE, landed 007c67b6a). Lesson recorded: "landed" names the backend that consumes it, not every backend a reader assumes.
+
 ## Git integration
 
 One pull request, `row/FLINT-CPU-PARITY`, spec committed first. The

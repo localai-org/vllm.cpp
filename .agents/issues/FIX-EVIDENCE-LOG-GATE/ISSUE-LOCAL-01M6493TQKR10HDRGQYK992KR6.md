@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M6493TQKR10HDRGQYK992KR6
 Title: Evidence dirs silently lose their raw logs: global *.log gitignore drops them at git add, no gate checks evidence contents
 Row: FIX-EVIDENCE-LOG-GATE
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-29
 Updated: 2026-10-29
-Closed: -
+Closed: 2026-10-29
 
 ## Problem
 
@@ -16,4 +16,4 @@ Closed: -
 
 ## Resolution
 
--
+Landed 2026-10-29 as 007c67b6a (PR #3522, squash of row/FIX-EVIDENCE-LOG-GATE). The whitelist !docs/bench-evidence/**/*.log is in .gitignore (verified on git 2.54: nested evidence logs tracked, root/scratch logs still ignored) and scripts/check-evidence-refs.py is wired into the agent-record CI job (ci.yml:704) and preflight CHECKERS/SUITES. Red-before: 46 entries / 41 distinct filenames across NINE evidence dirs referencing untracked logs (the reviewer corrected the implementer's 47). Review MERGEABLE (6 claims; M1/M2/M4/M6 RED prove the checker, whitelist, and tracked-check load-bearing; M5 characterized the CI-wiring gap -- recorded debt, candidate wiring-coverage checker). Evidence loss notes dated 2026-10-30 on nine dirs; the raw logs for the pre-gate rows are unrecoverable (recorded, not papered over).

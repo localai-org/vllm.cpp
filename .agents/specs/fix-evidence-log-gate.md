@@ -94,6 +94,10 @@ preflight — a checker wired nowhere is a decoration.
   log after the change), fall back to renaming the whitelist to a dedicated
   extension (`.evlog`) — record the choice.
 
+## Outcome
+
+Landed 2026-10-29 as 007c67b6a (PR #3522). The whitelist !docs/bench-evidence/**/*.log is in .gitignore (verified on git 2.54: nested evidence logs tracked; root and scratch logs still ignored) and scripts/check-evidence-refs.py is wired into the agent-record CI job (ci.yml:704) and preflight CHECKERS/SUITES -- no job-level if touched. Red-before: 46 failure entries / 41 distinct filenames across NINE evidence dirs (the spec's three plus six more: flint-gate-harden, flint-keepquant-dispatch, kolibri1-dequant-cache, tt-rmsnorm-w1, rocm-quant-gather, rocm-rdna3-quant-wmma) -- the hole was 3x the spec's estimate. Each dir carries a dated EVIDENCE-LOST note; the raw logs for the pre-gate rows are unrecoverable and recorded as lost, not papered over. Review MERGEABLE (6 claims; M1/M2/M4/M6 RED prove the checker, whitelist, and tracked-check load-bearing). Named known gaps left open: the CI wiring of the checker is itself unguarded (deleting the ci.yml step reds nothing; check-test-registration pins only its own step and three suites) -- a wiring-coverage checker is the candidate; the fence exemption is a floor by design; check-env-doc still enforces presence, not semantics drift.
+
 ## Git integration
 
 One pull request, `row/FIX-EVIDENCE-LOG-GATE`, spec committed first. The
