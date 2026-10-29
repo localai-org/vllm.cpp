@@ -123,3 +123,8 @@ returns without touching the policy, and every allocation in scope runs the
 default-policy path exactly — the pre-NUMA-row path. The numerics gates are
 untouched and pass unmutated (the tables above; the W3 anchor coverage in the
 spec's stop condition).
+
+> EVIDENCE-LOST (2026-10-30): `01-patched-four-suites.log`, `02-patched-strict-arm.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

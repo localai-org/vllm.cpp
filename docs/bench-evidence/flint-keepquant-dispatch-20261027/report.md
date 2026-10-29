@@ -121,3 +121,8 @@ Host: local P150 (non-fleet). env: `~/Sources/tt/env-tt-common.sh`,
 luwen `reset` + 15 s before the first run; `nice -n 10 taskset -c 0-31` on
 every run; build `/tmp/flint-keepquant-bld` (ninja), tests run from
 `/tmp/flint-keepquant`.
+
+> EVIDENCE-LOST (2026-10-30): `w0-mutation-red.log`, `w0-keepquant-green.log`, `w0-keepquant-green-restored.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

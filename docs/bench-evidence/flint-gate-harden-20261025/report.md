@@ -71,3 +71,9 @@ test_flint_forward`.
 
 `test_flint_gguf` (785 s) was skipped per the unit's scope; main's
 Q4_K_M band evidence stands.
+
+> EVIDENCE-LOST (2026-10-30): `green-baseline.log`, `red-mutation-A-attn-out-t-h.log`,
+> `red-mutation-B-embedding-memcpy.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

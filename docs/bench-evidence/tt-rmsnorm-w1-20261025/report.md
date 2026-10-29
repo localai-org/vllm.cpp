@@ -83,3 +83,8 @@ review is still owed on the whole unit.
 - ISSUE RECORDS: the A/B falsification is recorded in the owning issues
   (see the records commit); ISSUE-LOCAL-01M4YVEP000ENCRECVB0S6FDDY carries
   the dated entry.
+
+> EVIDENCE-LOST (2026-10-30): `w1-kolibri-after.log`, `w1-kolibri-ttnn.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

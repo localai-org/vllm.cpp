@@ -95,3 +95,8 @@ strengthened.
   memo misses), which is why lever 1's measured win exceeds what the
   steady-state miss rate alone would predict — the memo-miss arm also
   carries the prefill walk's misses.
+
+> EVIDENCE-LOST (2026-10-30): `lever12.log`, `mutation-red-drain-verify.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

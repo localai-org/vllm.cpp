@@ -107,3 +107,9 @@ Memory values are sampled device-wide or process-tree peaks. Small decode or mem
 Native/primary total whole-run throughput is 0.9443 and decode is 0.8880. Native/llama.cpp ratios are 0.2439 and 0.5743.
 The [open performance issue](../../../.agents/issues/_owed/ISSUE-LOCAL-01M2F4WCD6ZK5VH5S8TF83APD6.md) retains every below-floor axis, comparable timing windows, matching oracle traces, and accepted clock reproduction.
 The archived `model-summary.md` retains every value and ratio. Architecture admission claims no full-model parity or performance ceiling.
+
+> EVIDENCE-LOST (2026-10-30): `arch-green.log`, `arch-red.log`, `hardware-green.log`, `hardware-red.log`,
+> `hardware-scalar.log`, `public-green.log`, `public-red.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

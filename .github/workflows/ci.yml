@@ -701,6 +701,18 @@ jobs:
         run: |
           python3 scripts/check-conflict-markers.py
           python3 tests/scripts/test_check_conflict_markers.py
+      - name: Evidence reports only name raw logs the tree carries (FIX-EVIDENCE-LOG-GATE)
+        # Registered in TWO places, like the suites above: here and in the
+        # `CHECKERS`/`SUITES` arrays of `scripts/agent-preflight.sh`. The
+        # incident: the global `*.log` ignore silently dropped the raw logs of
+        # three landed rows' evidence dirs at `git add`, the merged worktree
+        # removal took the untracked files, and no gate noticed — the landed
+        # record was summary assertions with no backing bytes. This step fails
+        # when a report names a `.log` that is missing or untracked, unless a
+        # dated `EVIDENCE-LOST` note records the loss in the same file.
+        run: |
+          python3 scripts/check-evidence-refs.py
+          python3 tests/scripts/test_check_evidence_refs.py
       - name: ROCm cooperative tests follow production toggle values (#3063)
         run: python3 tests/scripts/test_rocm_cooperative_toggles.py
       - name: The staged gfx1151 paired measurement still refuses to run (#2497)

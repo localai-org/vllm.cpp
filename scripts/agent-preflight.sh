@@ -101,6 +101,10 @@ CHECKERS=(
   # wrote into a tracked file at all, and a reader who sees it fail knows to
   # stop reading the verdicts below.
   check-conflict-markers
+  # Evidence reports must not promise raw logs the tree does not carry. Three
+  # landed rows' evidence dirs lost their logs silently to the old global
+  # `*.log` ignore (FIX-EVIDENCE-LOG-GATE, 2026-10-30).
+  check-evidence-refs
   check-prompt-contract
   check-agent-record
   check-release-binary-contract
@@ -139,6 +143,7 @@ CHECKERS=(
 
 SUITES=(
   test_check_prompt_contract
+  test_check_evidence_refs
   test_agent_gates
   test_agent_record
   test_check_release_binary_contract

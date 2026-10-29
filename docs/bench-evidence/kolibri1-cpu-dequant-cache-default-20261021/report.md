@@ -331,3 +331,9 @@ reading of the decode table's cells: the same explicit 16 GiB leg reads
   first projected the 12 tok/s target.
 - `docs/bench-evidence/kolibri1-bf16dot-adoption-20261019/report.md` — the
   bf16-dot tier this record's runs inherit (default on a FEAT_BF16 host).
+
+> EVIDENCE-LOST (2026-10-30): `bench_repair.log`, `bench_window.log`, `final_sweep.log`, `mymeasure.log`,
+> `prof-default2.log`, `spec_repair.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.
