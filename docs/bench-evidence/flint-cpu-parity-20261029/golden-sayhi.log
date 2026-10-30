@@ -1,0 +1,54 @@
+0.00.001.509 I llama_completion: llama backend init
+0.00.003.427 I llama_completion: load the model and apply lora adapter, if any
+0.10.220.223 I cmn          init: llama threadpool init, n_threads = 128
+0.10.848.086 I llama_completion: chat template is available, enabling conversation mode (disable it with -no-cnv)
+0.10.848.092 W *** User-specified prompt will pre-start conversation, did you mean to set --system-prompt (-sys) instead?
+0.10.848.142 I llama_completion: chat template example:
+<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+
+0.10.848.143 I 
+0.10.848.213 I system_info: n_threads = 128 (n_threads_batch = 128) / 128 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | OPENMP = 1 | REPACK = 1 | 
+0.10.848.215 I 
+0.10.848.500 I llama_completion: interactive mode on.
+0.10.848.502 I sampler seed: 4294967295
+0.10.848.508 I sampler params: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	dry_multiplier = 0.000, dry_base = 1.750, dry_allowed_length = 2, dry_penalty_last_n = 64
+	top_k = 20, top_p = 0.950, min_p = 0.050, xtc_probability = 0.000, xtc_threshold = 0.100, typical_p = 1.000, top_n_sigma = -1.000, temp = 0.000
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000, adaptive_target = -1.000, adaptive_decay = 0.900
+0.10.848.512 I sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> greedy 
+0.10.848.513 I generate: n_ctx = 262144, n_batch = 2048, n_predict = 24, n_keep = 0
+0.10.848.514 I 
+0.10.848.514 I == Running in interactive mode. ==
+0.10.848.514 I  - Press Ctrl+C to interject at any time.
+0.10.848.516 I  - Press Return to return control to the AI.
+ - To return control without starting a new line, end your input with '/'.
+ - If you want to submit another line, end your input with '\'.
+0.10.848.517 I  - Not using system message. To change it, set a different value via -sys PROMPT
+0.10.848.517 I 
+<|im_start|>user
+Say hi.<|im_end|>
+<|im_start|>assistant
+Hello! How can I assist you today?<|im_end|>
+<|im_start|>user
+Say hi.<|
+> EOF by user
+
+
+0.23.880.891 I common_perf_print:    sampling time =      15.23 ms
+0.23.880.897 I common_perf_print:    samplers time =       8.00 ms /    44 tokens
+0.23.880.901 I common_perf_print:        load time =   10587.52 ms
+0.23.880.906 I common_perf_print: prompt eval time =     688.92 ms /    20 tokens (   34.45 ms per token,    29.03 tokens per second)
+0.23.880.910 I common_perf_print:        eval time =   11790.26 ms /    23 runs   (  512.62 ms per token,     1.95 tokens per second)
+0.23.880.911 I common_perf_print:       total time =   13032.81 ms /    43 tokens
+0.23.880.914 I common_perf_print: unaccounted time =     538.40 ms /   4.1 %      (total - sampling - prompt eval - eval) / (total)
+0.23.880.914 I common_perf_print:    graphs reused =         23
+0.23.880.916 I common_perf_print:   graph reallocs =          0    /     0        (same size) / (changed size)

@@ -1,0 +1,8 @@
+| model                          |       size |     params | backend    | threads |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | --------------: | -------------------: |
+| flint ?B Q4_K - Medium         |  22.50 GiB |    39.79 B | CPU        |      16 |           tg200 |         26.29 ± 0.05 |
+| flint ?B Q4_K - Medium         |  22.50 GiB |    39.79 B | CPU        |      16 |           tg400 |         25.66 ± 0.08 |
+| flint ?B Q4_K - Medium         |  22.50 GiB |    39.79 B | CPU        |      32 |           tg200 |         26.38 ± 0.10 |
+| flint ?B Q4_K - Medium         |  22.50 GiB |    39.79 B | CPU        |      32 |           tg400 |         24.69 ± 1.75 |
+
+build: 1b44e3077 (11797)

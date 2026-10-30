@@ -1,0 +1,102 @@
+ 13:39:19 up 59 days,  5:43,  8 users,  load average: 13.75, 8.22, 8.70
+vllm-bench: /mnt/models/flint-GGUF/flint-Q4_K_M.gguf engine | num_prompts=1 input_len=8 output_len=200 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+
+============= vllm.cpp Benchmark Result =============
+Engine frontend:                           AsyncLLM    
+Output wait:                               poll        
+Blocking wait calls:                       0           
+Async scheduling enabled:                  1           
+Pretokenized prompt admission:             1           
+KV cache dtype (requested):                auto
+KV cache dtype (resolved storage):         bf16
+Ignore EOS (requested):                    1           
+Ignore EOS (resolved sampling):            1           
+Chat template:                             skipped (raw prompt)
+Chat template kwargs:                      {}
+Maximum concurrent batches:                2           
+Successful requests:                       1           
+Maximum request concurrency:               1           
+Benchmark duration (s):                    81.63       
+Total input tokens:                        9           
+Total generated tokens:                    200         
+Request throughput (req/s):                0.01        
+Output token throughput (tok/s):           2.45        
+Total token throughput (tok/s):            2.56        
+-------- Time to First Token --------
+Mean TTFT (ms):                            2086.12     
+Median TTFT (ms):                          2086.12     
+P99 TTFT (ms):                             2086.12     
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            399.73      
+Median TPOT (ms):                          399.73      
+P99 TPOT (ms):                             399.73      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             399.73      
+Median ITL (ms):                           400.25      
+P99 ITL (ms):                              452.12      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            81631.87    
+Median E2EL (ms):                          81631.87    
+P99 E2EL (ms):                             81631.87    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 0.11        
+Prefill token throughput (tok/s, in/TTFT): 4.31        
+Output (decode) token throughput (tok/s):  2.45        
+Mean per-stream decode rate (tok/s):       2.50        
+====================================================
+LEG200 EXIT=0
+ 13:47:17 up 59 days,  5:51,  8 users,  load average: 24.79, 11.55, 9.07
+ 13:47:17 up 59 days,  5:51,  8 users,  load average: 24.79, 11.55, 9.07
+vllm-bench: /mnt/models/flint-GGUF/flint-Q4_K_M.gguf engine | num_prompts=1 input_len=8 output_len=400 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+
+============= vllm.cpp Benchmark Result =============
+Engine frontend:                           AsyncLLM    
+Output wait:                               poll        
+Blocking wait calls:                       0           
+Async scheduling enabled:                  1           
+Pretokenized prompt admission:             1           
+KV cache dtype (requested):                auto
+KV cache dtype (resolved storage):         bf16
+Ignore EOS (requested):                    1           
+Ignore EOS (resolved sampling):            1           
+Chat template:                             skipped (raw prompt)
+Chat template kwargs:                      {}
+Maximum concurrent batches:                2           
+Successful requests:                       1           
+Maximum request concurrency:               1           
+Benchmark duration (s):                    153.65      
+Total input tokens:                        9           
+Total generated tokens:                    400         
+Request throughput (req/s):                0.01        
+Output token throughput (tok/s):           2.60        
+Total token throughput (tok/s):            2.66        
+-------- Time to First Token --------
+Mean TTFT (ms):                            2052.38     
+Median TTFT (ms):                          2052.38     
+P99 TTFT (ms):                             2052.38     
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            379.95      
+Median TPOT (ms):                          379.95      
+P99 TPOT (ms):                             379.95      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             379.95      
+Median ITL (ms):                           379.74      
+P99 ITL (ms):                              422.62      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            153654.00   
+Median E2EL (ms):                          153654.00   
+P99 E2EL (ms):                             153654.00   
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 0.06        
+Prefill token throughput (tok/s, in/TTFT): 4.39        
+Output (decode) token throughput (tok/s):  2.60        
+Mean per-stream decode rate (tok/s):       2.63        
+====================================================
+LEG400 EXIT=0
+ 13:56:25 up 59 days,  6:00,  8 users,  load average: 31.70, 16.76, 11.03

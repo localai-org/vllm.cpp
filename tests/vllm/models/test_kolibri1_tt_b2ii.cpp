@@ -955,6 +955,20 @@ TEST_CASE("SCRATCH dbg rmsnorm micro") {
     MESSAGE("with_res=" << with_res << " sum_cpu=" << sc << " sum_tt=" << st
                         << " ratio=" << (sc != 0 ? st / sc : 0.0)
                         << " max_abs=" << mad);
+    // THE EXACTNESS GATE (W1 review minor): the micro previously printed
+    // MESSAGEs only, so the exactness claim rested on observed output, not
+    // a gate. The DEFAULT composed arm must be BIT-EXACT against the CPU
+    // arm here; the pinned ttnn::rms_norm arm (VT_TT_RMSNORM_TTNN=1) is the
+    // recorded red (ratio 0.99, hundreds of differing elements). Run under
+    // the default so the gate binds the shipped arm.
+    if (std::getenv("VT_TT_RMSNORM_TTNN") == nullptr) {
+      CHECK_MESSAGE(mad == 0.0,
+                    "device rms_norm is not bit-exact vs the CPU arm: max_abs="
+                        << mad);
+      CHECK_MESSAGE(ndiff == 0,
+                    "device rms_norm differs from CPU on " << ndiff
+                                                           << " elements");
+    }
     if (micro_in != nullptr && micro_in[0] != '\0') {
       std::vector<float> outv(static_cast<size_t>(d));
       for (int64_t i = 0; i < d; ++i)
@@ -1153,6 +1167,12 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
 
   int64_t argmax_matches = 0, argmax_total = 0, near_ties = 0, hard_flips = 0;
   std::vector<std::string> flip_records;
+  // The RATIFIED BAND GATE (developer ratification, 2026-10-19): a sequence
+  // is ON iff it has ZERO hard flips — divergences INSIDE the kNatBand band
+  // are not gate failures. Reported alongside the exact-token count; the
+  // exact-token CHECKs below stay as the documented pre-existing red.
+  int64_t band_on = 0, band_total = 0;
+  double worst_inband_gap = 0.0;
 
   for (const GateGolden& gp : LoadGateGoldens()) {
     // Fresh KV per prompt (zeroed: no stale context can leak across
@@ -1176,6 +1196,7 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
     std::vector<float> logits;
     int32_t prev_got = -1;
     bool diverged = false;
+    bool seq_hard_flip = false;
     for (int32_t step = 0; step < kGateSteps && !diverged; ++step) {
       // The prompt walk first: one token per step, no comparison.
       if (static_cast<size_t>(step) < gp.input_ids.size()) {
@@ -1221,8 +1242,10 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
                                std::to_string(gap));
         if (-gap <= kNatBand) {
           ++near_ties;
+          worst_inband_gap = std::min(worst_inband_gap, gap);
         } else {
           ++hard_flips;
+          seq_hard_flip = true;
           MESSAGE("HARD flip at '" << gp.prompt << "' step " << d
                                    << ": got " << got << " want " << want
                                    << " (gap " << gap << " beyond band "
@@ -1232,8 +1255,14 @@ TEST_CASE("kolibri1 TT B2b-ii: device token gate — the golden argmax chains "
         break;
       }
     }
+    ++band_total;
+    if (!seq_hard_flip) ++band_on;
   }
 
+  MESSAGE("BAND GATE (ratified 2026-10-19): " << band_on << "/" << band_total
+           << " sequences ON (zero hard flips); worst in-band divergence "
+           << worst_inband_gap << " nats against the " << kNatBand
+           << "-nat band edge");
   MESSAGE("ARGMAX CHAIN: " << argmax_matches << "/" << argmax_total
                            << " compared positions match the golden greedy "
                               "decode; flips "
@@ -1611,6 +1640,198 @@ TEST_CASE("kolibri1 TT B2b-ii: chunked-prefill near-tie adjudication — "
            << serial_prefill_total / chunked_prefill_total << ")");
   for (const std::string& r : hard_records) MESSAGE("HARD: " << r);
   CHECK(chunked_prefill_total > 0.0);
+}
+
+// ---- ITEM-C diagnostic: the chunk-size sweep discriminator -----------------
+//
+// Splits the chunked-prefill divergence into kernel precision vs logic bug.
+// Both arms' decode teacher-forced steps are bit-identical code paths, so
+// every chunked-vs-serial difference must be BORN in the multi-token prefill
+// forwards (the logits of the last prefill row, or the KV the earlier chunk
+// forwards wrote). If the divergence is prefill-kernel bf16 precision, it
+// must appear smoothly with chunk size: ~nothing at chunk=2, growing with
+// the chunk. If it is a logic bug (KV write ordering, slot mapping, causal
+// mask within the chunk), even chunk=2 shows it at full strength, because
+// one wrong byte is one wrong byte at any chunk size.
+//
+// One gate golden, last-prefill-row (d=0) plus the first 5 teacher-forced
+// decode rows, chunk sizes 2/4/8/16 against the serial reference.
+//
+// THE NULL ARM (issue ISSUE-LOCAL-01M5HHEV4DWX0D4S5E955VE0AN): every chunk
+// size runs the SAME chunked walk TWICE, with the KV cache zeroed between
+// the two runs, and prints the chunked-vs-chunked difference beside the
+// chunked-vs-serial one. The chunked-vs-chunked difference IS the chunked
+// path's own noise floor. A chunked-vs-serial difference that is not read
+// against that floor is not a measurement: the chunked prefill path is NOT
+// reproducible run to run (a repeated forward moves its top-1 logit by
+// nats), so its flip set cannot carry a precision reading on its own.
+//
+// THE RATIO IS A MIXED MEASURE. The null arm is WARM vs WARM, because its
+// two chunked runs are two runs in one process, and the chunked-vs-serial
+// comparison is WARM-chunk against a COLD-serial reference, because the
+// serial reference is the first forward in the process. The printed ratio
+// therefore divides a warm-cold difference by a warm-warm noise floor. The
+// arm labels stay "chunked run 1" and "chunked run 2", and the caveat rides
+// the ratio line and this comment.
+//
+// Opt-in: VT_KOLIBRI1_TT_CHUNK_SWEEP=1.
+TEST_CASE("SCRATCH dbg chunk sweep") {
+  if (!TenstorrentDevicePresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || model_dir[0] == '\0') {
+    MESSAGE("SKIPPED: VT_KOLIBRI1_TT_B2II_MODEL not set");
+    return;
+  }
+  if (const char* o = std::getenv("VT_KOLIBRI1_TT_CHUNK_SWEEP");
+      o == nullptr || o[0] != '1') {
+    MESSAGE("SKIPPED: opt-in required (VT_KOLIBRI1_TT_CHUNK_SWEEP=1)");
+    return;
+  }
+  const std::string dir = model_dir;
+  const HfConfig config = vllm::LoadHfConfig(dir + "/config.json");
+  const auto index = nlohmann::json::parse(
+      std::ifstream(dir + "/model.safetensors.index.json"));
+  std::set<std::string> shard_names;
+  for (const auto& [name, shard] : index.at("weight_map").items()) {
+    (void)name;
+    shard_names.insert(shard.get<std::string>());
+  }
+  std::vector<SafetensorsFile> shards;
+  for (const std::string& shard : shard_names)
+    shards.push_back(SafetensorsFile::Open(dir + "/" + shard));
+  const ModelSource source = ModelSource::FromSafetensors(shards);
+  std::unique_ptr<LoadedModel> model = ModelRegistry::Load(config, source);
+  REQUIRE(model != nullptr);
+  vt::Backend& be = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  vt::Queue q = be.CreateQueue();
+  ModelRegistry::Prepare(*model, config, q);
+  const Kolibri1Weights& w = Kolibri1LoadedModelWeights(*model);
+  const Kolibri1Params& p = w.params;
+  const int64_t hkv = p.num_key_value_heads;
+  const int64_t hd = p.head_dim;
+  const int64_t num_blocks = 32;
+  const int64_t kv_bytes = num_blocks * 2 * 16 * hkv * hd *
+                           static_cast<int64_t>(vt::SizeOf(vt::DType::kBF16));
+  std::vector<std::shared_ptr<void>> kv_keep;
+  std::vector<PagedKvCache> kv;
+  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+    void* buf = be.Alloc(kv_bytes);
+    kv_keep.emplace_back(buf, [&be](void* ptr) { be.Free(ptr); });
+    std::memset(buf, 0, static_cast<size_t>(kv_bytes));
+    PagedKvCache c;
+    c.data = buf;
+    c.dtype = vt::DType::kBF16;
+    c.num_blocks = num_blocks;
+    c.block_size = 16;
+    c.num_kv_heads = hkv;
+    c.head_size = hd;
+    kv.push_back(c);
+  }
+  auto reset_kv = [&] {
+    for (auto& keep : kv_keep)
+      std::memset(keep.get(), 0, static_cast<size_t>(kv_bytes));
+  };
+  const GateGolden gp = LoadGateGoldens()[0];
+  const size_t plen = gp.input_ids.size();
+  constexpr size_t kDecodes = 5;
+
+  // Prefill in `chunk`-token forwards, then kDecodes teacher-forced steps.
+  // rows[0] = the last prefill row; rows[1..kDecodes] = TF decode rows.
+  auto walk = [&](int64_t chunk, std::vector<std::vector<float>>& rows) {
+    int64_t ctx = 0;
+    size_t consumed = 0;
+    while (consumed < plen) {
+      const size_t take = std::min(static_cast<size_t>(chunk),
+                                   static_cast<size_t>(plen - consumed));
+      std::vector<int32_t> part(
+          gp.input_ids.begin() + static_cast<int64_t>(consumed),
+          gp.input_ids.begin() + static_cast<int64_t>(consumed + take));
+      const bool last = consumed + take == plen;
+      if (last)
+        rows.push_back(ForwardLastLogits(*model, config, q, be, kv, part, ctx,
+                                         num_blocks));
+      else
+        (void)ForwardLastLogits(*model, config, q, be, kv, part, ctx,
+                                num_blocks);
+      consumed += take;
+      ctx += static_cast<int64_t>(take);
+    }
+    for (size_t d = 0; d < kDecodes; ++d)
+      rows.push_back(ForwardLastLogits(*model, config, q, be, kv,
+                                       {gp.generated_ids[d]},
+                                       ctx + static_cast<int64_t>(d),
+                                       num_blocks));
+  };
+  // One comparison: the two argmaxes, the gap, and the rms of the
+  // difference. The labels name the two arms, because the null arm compares
+  // two chunked runs and the sweep compares a chunked run with the serial
+  // reference. Returns the rms of the difference.
+  auto score = [&](const std::vector<float>& ref, const std::vector<float>& got,
+                   const char* ref_label, const char* got_label) {
+    double mad = 0, sumdsq = 0;
+    for (size_t k = 0; k < ref.size() && k < got.size(); ++k) {
+      const double dd = static_cast<double>(got[k]) -
+                        static_cast<double>(ref[k]);
+      mad = std::max(mad, std::fabs(dd));
+      sumdsq += dd * dd;
+    }
+    const int32_t r_am = static_cast<int32_t>(
+        std::max_element(ref.begin(), ref.end()) - ref.begin());
+    const int32_t g_am = static_cast<int32_t>(
+        std::max_element(got.begin(), got.end()) - got.begin());
+    const double gap = static_cast<double>(got[static_cast<size_t>(g_am)]) -
+                       static_cast<double>(got[static_cast<size_t>(r_am)]);
+    const double rms = std::sqrt(sumdsq / ref.size());
+    MESSAGE("      " << ref_label << " vs " << got_label << ": max|d|=" << mad
+                      << ", rms(d)=" << rms << ", " << ref_label << " argmax "
+                      << r_am << ", " << got_label << " argmax " << g_am
+                      << ", gap " << gap << " nats");
+    return rms;
+  };
+
+  reset_kv();
+  std::vector<std::vector<float>> ref_rows;
+  walk(1, ref_rows);
+  MESSAGE("golden '" << gp.prompt << "' plen=" << plen
+                     << ", serial reference done");
+  for (int64_t chunk : {2, 4, 8, 16}) {
+    reset_kv();
+    std::vector<std::vector<float>> rows;
+    walk(chunk, rows);
+    // The NULL ARM: the SAME chunked walk again, with the KV cache zeroed
+    // in between. Its difference is the chunked path's OWN noise floor.
+    // `rows` is chunked run 1 and `null_rows` is chunked run 2, so the
+    // comparison names run 1 as the reference and run 2 as the arm under
+    // test.
+    reset_kv();
+    std::vector<std::vector<float>> null_rows;
+    walk(chunk, null_rows);
+    MESSAGE("  chunk=" << chunk << ":");
+    for (size_t d = 0; d <= kDecodes; ++d) {
+      MESSAGE("    d=" << d << (d == 0 ? " (last prefill row)"
+                                      : " (TF decode over chunked KV)")
+                      << ":");
+      const double vs_serial =
+          score(ref_rows[d], rows[d], "serial", "chunked");
+      const double null_rms =
+          score(rows[d], null_rows[d], "chunked run 1", "chunked run 2");
+      if (null_rms > 0.0) {
+        MESSAGE("      ratio (chunked-vs-serial rms / null-arm rms) = "
+                << vs_serial / null_rms
+                << " [CAVEAT: the null arm is warm vs warm and the "
+                   "chunked-vs-serial comparison is warm-chunk vs "
+                   "cold-serial, so this ratio mixes a warm-warm noise floor "
+                   "with a warm-cold difference]");
+      } else {
+        MESSAGE("      null arm byte-identical (rms(d)=0): the "
+                   "chunked-vs-serial rms(d)="
+                << vs_serial << " is the whole difference");
+      }
+    }
+  }
 }
 
 // ---- SCRATCH DEBUG: the router diagnostic's reference separation -----------

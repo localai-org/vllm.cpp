@@ -812,6 +812,10 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/qwen3_moe_registry.cpp
   src/vllm/model_executor/models/qwen3_moe_weights.cpp
   src/vllm/model_executor/models/qwen3_moe.cpp
+  src/vllm/model_executor/models/flint.cpp
+  src/vllm/model_executor/models/flint_tt.cpp
+  src/vllm/model_executor/models/flint_weights.cpp
+  src/vllm/model_executor/models/flint_gguf_weights.cpp
   src/vllm/model_executor/models/qwen4_exp_hc.cpp
   src/vllm/model_executor/models/deepseek_v2_registry.cpp
   src/vllm/model_executor/models/deepseek_v2_weights.cpp
@@ -867,7 +871,17 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/kolibri1_tt_stream.cpp
   src/vllm/model_executor/models/kolibri1_registry.cpp
   src/vllm/model_executor/models/kolibri1_weights.cpp
+  src/vllm/model_executor/models/kolibri1_gguf_weights.cpp
   src/vllm/model_executor/models/kolibri1_forward.cpp
+  # vdotq_s32 GEMV needs the dotprod ISA enabled, so this ONE TU is built
+
+  # wide on aarch64 (the cpu_quant_dot_sdot.cpp shape below) while every
+
+  # entry is runtime-gated on the HWCAP_ASIMDDP probe behind
+
+  # serves the non-dotprod build.
+
+  src/vllm/model_executor/models/kolibri1_bfdot_gemv.cpp
   src/vllm/model_executor/models/qwen4_exp_ple.cpp
   src/vllm/model_executor/models/qwen4_exp.cpp
   src/vllm/model_executor/models/qwen4_exp_weights.cpp
@@ -1470,6 +1484,7 @@ add_library(vllm STATIC
   src/vt/cpu/cpu_quant_dot.cpp
   src/vt/cpu/cpu_quant_dot_sdot.cpp
   src/vt/cpu/cpu_quant_dot_arm.cpp
+  src/vt/cpu/cpu_paged_attn_bfdot_arm.cpp
   src/vt/cpu/cpu_quant_repack.cpp
   src/vt/cpu/cpu_quant_repack_arm.cpp
   src/vt/cpu/cpu_quant_traits.cpp
@@ -1558,6 +1573,18 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     src/vt/cpu/cpu_quant_dot_arm.cpp
     src/vt/cpu/cpu_quant_repack_arm.cpp PROPERTIES
     COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+i8mm+dotprod>")
+  # Paged-attention BFDOT arm: same per-file +bf16 / runtime-HWCAP shape as the
+  # mmla tier above. The kernel is handed out only after DetectArmBf16() proves
+  # FEAT_BF16, and only behind VT_CPU_PAGED_ATTN_BFDOT=1 (default off).
+  set_source_files_properties(
+    src/vt/cpu/cpu_paged_attn_bfdot_arm.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+bf16>")
+  # kolibri1 BFDOT bf16 GEMV draft arm: same per-file +bf16 shape as the
+  # paged-attention BFDOT arm, runtime DetectArmBf16-gated behind
+  # VT_CPU_KOLIBRI_BFDOT_GEMV=1 (default off; deliberately dotprod-free).
+  set_source_files_properties(
+    src/vllm/model_executor/models/kolibri1_bfdot_gemv.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+bf16>")
 endif()
 # Static-init registrars (e.g. the CPU backend, the platform table, the op
 # table, the attention backends) live in archive members no consumer references

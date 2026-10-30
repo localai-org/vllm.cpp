@@ -506,6 +506,109 @@ ReshapeAndCache / device residual norm), the `kGdnDecode` wide-range
 drift and the `kMatmulBTQuantGrouped` Q4_K decode envelope miss, the
 141/145 pass, and the bench anchor 109726.
 
+BAND-GATE STANDARD RATIFIED + B2b-ii TOKEN GATE RESCORED (2026-10-19,
+`row/TT-B2II-BAND-GATE`): the developer ratified the band gate as the
+P150 correctness standard for the B2b-ii device token gate — a sequence
+is ON iff it has ZERO hard flips (divergences beyond the 2.5-nat
+near-tie band); exact-token ON/OFF counting is no longer the bar, and
+the primary oracle rows stay the denominator. The scorer prints the
+band-gate verdict beside the exact-token counts (reporting only; the
+classifier is unchanged). Three runs on 61d333e52, byte-identical flip
+sets per arm: host-free ON — BAND GATE 3/8 sequences ON (worst in-band
+-1.747 nats, margin 0.753), exact-token 3/11; host-free OFF — 6/8 ON
+(worst in-band -2.157 nats, margin 0.343), exact-token 12/20. Evidence:
+issue ISSUE-LOCAL-01M4P21TZ1Q9CA7P66XBH0BQTX (2026-10-19 entry). The
+141/145 pass and the hard-flip sequences stay owed; the pre-existing
+`:1263`/`:1264`/`:1419` assertion failures remain, documented.
+
+P150 PERFORMANCE NUMBERS REFRESHED (2026-10-21, `row/P150-NUMBERS-REFRESH`,
+records-only): the P150 numbers the tree carried were a second vintage, and
+the current ones come from a clean three-run measurement on `origin/main`
+`3ce14f35c` (Release, `-DVLLM_CPP_TENSTORRENT=ON`, built at
+`/tmp/build-p150-bench`, host `thalia`, P150 Blackhole, `taskset -c 32-63`,
+governor `schedutil`, tt-metal substrate pin `a585e5744a8`, file mutex
+`$HOME/gpu.lock`, model `/mnt/models/Aleph-Alpha/Kolibri-1`). Decode over
+the bench's 64 incremental steps after a 128-token prompt prefill: 1.82585 /
+1.81767 / 1.82310 tok/s (median 1.823). Decode phase: 35.05 / 35.21 / 35.11 s
+(median 35.11 s, which is 0.548 s per decode step). 128-token prompt
+prefill: 146.97 / 131.11 / 124.89 s (median 131.1 s; the spread is the prompt
+forward's load-time variance, and the decode phase of the same three runs
+does not move with it). The band gate reproduces the standing verdict
+byte-identically across all three runs: host-free ON, BAND GATE 3/8
+sequences ON, worst in-band divergence -1.74672 nats against the 2.5-nat
+band edge, margin 0.753 nats. The host-free OFF arm was not re-measured, so
+its 2026-10-19 numbers stand (6/8 ON, worst in-band -2.157 nats, margin
+0.343 nats).
+
+HARNESS: the decode bench times 64 incremental decode steps after a
+128-token prompt prefill, and its tok/s figure covers the decode phase
+alone. So 0.548 s per token is the per-step decode cost, and the prefill
+number is the cost of the 128-token prompt. A bare tok/s is not a
+measurement on this box, which carries a single-run noise floor of about 4%
+(measured: two single runs of one cell read 8.45 and 8.11), so every number
+above is a three-run set with its median. The superseded vintages stay in
+the records that own them, with their dates: the 2026-10-11 prototype
+(0.929 / 0.798 / 0.868 tok/s at 1077 / 1254 / 1152 ms per step), the
+2026-10-17 memo and shadow cost (1576 / 1000 / 610 ms per step, 1556 to
+1130 ms with the shadow drop disarmed, prefill 214.6 to 166.7 s), and the
+2026-10-12 perf note (decode about 104 s against about 73.5 s, prefill about
+214 s against about 181 s).
+
+WHAT DID NOT CHANGE, AND WHAT DID: the band-gate verdict did not change,
+and it reproduces byte-identically, so the correctness quantity is stable.
+The decode speed did change: today's per-step cost is 548.5 ms, while the
+same decode bench read about 1556 ms/step on 2026-10-18 (`53c6a4666`,
+prefill 156.4 s), so the step time fell by about 2.8x in three days and the
+tree carries no attribution for the fall. The CPU-side work of 2026-10-19 to
+2026-10-21 (the bf16-dot adoption `61d333e52` and the CPU dequant-cache
+default `d9e669582`, `e451be705`, `3ce14f35c`) is CPU-PATH and cannot have
+moved a P150 number, so a reader must not infer that the P150 number moved
+because the CPU work landed. CORRECTION TO A WORKING PREMISE: the f32-mean
+reduction repair (`4b3a0091c`) is a Tenstorrent-path change and not a
+CPU-path change; it landed on 2026-10-19, inside that window, and it is the
+only Tenstorrent-path product change in it, so it is the leading hypothesis
+for the fall (it replaced the pin's tf32 FPU tile-reduce `ttnn::sum` with
+the accurate full-fp32 `ttnn::mean` in the GDN decode dots). The second
+candidate is the host condition, because the 2026-10-17 and 2026-10-18
+sessions recorded host load and concurrent builds, while today's three runs
+are on a quiet host; the box's about 4% single-run noise floor does not
+cover a 65% move, and the CPU governor on this host is not pinned, so the
+host clock state is a third candidate. The attribution stays OPEN, and the
+next traceable step is a same-session A/B of `4b3a0091c`'s parent against
+`3ce14f35c`. The P150
+path still carries the tt-metal rms_norm deviation
+(ISSUE-LOCAL-01M578VP02HPVBYSMRP32GWZGF, upstream probe
+ISSUE-LOCAL-01M5B60NEFSEHYZXMR6FSS1RAF), which is the subject of the
+upstream filing. Evidence:
+`docs/bench-evidence/kolibri1-tt-p150-refresh-20261021.md`; issue
+ISSUE-LOCAL-01M5F68A30HNPG4V95BKTAQS79.
+
+CHUNKED-PREFILL VERDICT CORRECTED (2026-10-22, `row/TT-CHUNKED-NULL-ARM`,
+issue ISSUE-LOCAL-01M5HHEV4DWX0D4S5E955VE0AN): the chunked-prefill record
+(issue ISSUE-LOCAL-01M54CKCJNWHRDJB7PYRG31Y1D) stated the root cause
+"inherent multi-token prefill kernel precision, NOT chunk logic". That
+statement is corrected, and its 2026-10-18 entry is marked superseded with
+its historical text kept. The chunked-vs-serial divergence is 5x to 123x the
+chunked path's own run-to-run spread (reproduced 2026-10-22), so the
+divergence is NOT born in the walk logic, and that part of the earlier
+verdict survives. The 600x upper bound of the 2026-10-21 measurement does
+not reproduce and is owed to be reconciled. The flip set the
+chunk sweep measured is contaminated by the path's own nondeterminism, so it
+CANNOT be read as a precision signature, and the verdict "inherent
+multi-token prefill kernel precision" is NOT ESTABLISHED by the evidence the
+record cites. The chunked path is not reproducible run to run: a repeated
+forward moves its top-1 logit by about 0.3 nats within one process, and the
+`p3-warm` arm, the third chunked process, reads 3.4 nats away from the
+repeats that follow it, while the serial walk is byte identical over two
+repeats. The chunked-prefill knob stays opt-in. Measurement, provenance and
+the labelled tap artifacts:
+`docs/bench-evidence/kolibri1-tt-chunked-null-arm-20261022.md`. The sweep's
+null arm now rides the instrument: the `SCRATCH dbg chunk sweep` case runs
+the same chunked walk twice per chunk size and prints the
+chunked-versus-chunked difference, and its ratio to the chunked-versus-serial
+difference, beside the chunked-versus-serial one.
+
+
 
 ## Git integration
 
@@ -514,6 +617,15 @@ One pull request for wave A (spec + implementation together), branched from
 
 ## Owed
 
+- A P150 decode-bench leg must record the box's swap delta and its memory
+  pressure (`grep SwapTotal/SwapFree /proc/meminfo` before and after, and the
+  top consumers' `VmSwap`), because the 128-token prefill streams the whole
+  weight set and its number is only meaningful when the model's pages are
+  resident. The warm arm of 2026-10-22 (`/tmp/p150/logs/warm-prefill.log`)
+  measured a 5.8 % prefill spread with neither a device reset nor a
+  kernel-cache clear under a constant host load, against the cold arms' 30 %,
+  so the reset and the clear are not the variable; the box's memory pressure
+  is, and no leg recorded it.
 - B2b-ii device legs (blocked, section 4 of
   `docs/bench-evidence/kolibri1-tt-b2ii-20261009.md`): the card window
   must reopen on a HEALTHY board — the smoke (slot fills + readback
@@ -540,3 +652,24 @@ One pull request for wave A (spec + implementation together), branched from
 - Mesh / expert-parallel staging of the full 73.6 GiB fp8 model.
 - Single-P150 expert streaming: B1 planner spec + implementation landed;
   the NVMe backing tier is a pluggable leaf behind the RAM tier.
+- The chunked prefill path's reproducibility (the null arm of
+  `docs/bench-evidence/kolibri1-tt-chunked-null-arm-20261022.md`): the
+  chunked path must reproduce run to run, with its own spread far below the
+  chunk-vs-serial difference, before any chunked comparison can carry a
+  reading.
+- A re-run of the chunk-size sweep with the null arm the instrument now
+  carries: the `SCRATCH dbg chunk sweep` case in
+  `tests/vllm/models/test_kolibri1_tt_b2ii.cpp` prints the
+  chunked-versus-chunked difference, and its ratio to the
+  chunked-versus-serial difference, beside the chunked-versus-serial one. The
+  two values of the 2026-10-21 measurement that the 2026-10-22 reproduction
+  check does not reproduce are owed to be reconciled in the same run.
+- The mechanism hunt for the chunked path's divergence: the per-layer taps
+  localise it at the last dumped query row of layer 0, where 1296 of 2560
+  elements differ, 822 by 1 to 2 bf16 steps and 474 by 3 or more, and the
+  max element difference 9.766e-04 is two bf16 steps at the element that
+  carries it. The birth point inside layer 0 is not localised, because the
+  dumps carry the query rows 0 and 5 only. The divergence grows with depth
+  to rms(d) 3.24 at layer 49, with the router's expert order flipping in 36
+  of 50 layers between two runs of the same path. The
+  measurements show the shape of the divergence and not its cause.

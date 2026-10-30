@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-25
-Updated: 2026-09-25
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -16,4 +16,15 @@ With the BH core-bound decomposition landed (row/TT-GDN-BATCH-SPLIT), the 27B AP
 
 ## Resolution
 
--
+2026-10-21: STILL TRUE; not verifiable offline. The L1 circular-buffer overflow
+at the BH' sub-shape is unchanged in the tree. The decomposition that reaches
+it (`d482c6585`, at `src/vt/tenstorrent/tenstorrent_gdn.cpp:288-319` and
+`:823-848`) still picks `sub_b = max(1, cores / hv)` with no per-program
+circular-buffer sizing, and the commit that landed it records the overflow as
+"a distinct, newly visible device limit, recorded as the open gap" -- this
+record.
+
+What settles it: a P150 run at c=4 and c=16 on the current pin with the
+tt-metal cache cleared, which is where the overflow was first seen. The
+core-count assert this record was distinct from is closed by `d482c6585` and
+recorded as `ISSUE-LOCAL-01M3AF30AE0KR6M7JN8D9BA46B`.

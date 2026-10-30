@@ -5370,12 +5370,16 @@ TEST_CASE("kTENSTORRENT kAttnQkNormRopeGate matches the CPU f32 oracle (fused pr
     // q/k: f32 tile norm + rope (inside the row's RopeApplyDeviceNeox
     // envelope); outputs are O(1) (unit-RMS rows, rotation preserves
     // magnitude). bf16 outs add one store round per side (<= 2^-7 rel).
-    // f32 outs carry no store round, so the abs floor is pinned at 1e-3:
-    // measured green headroom on P150 is <= 5.3e-4, while an unconditional
-    // pre-norm bf16 typecast of q (the ops.cpp:4140 branch this guards)
-    // lands at 5.4e-3 — 1e-3 separates both sides.
+    // f32 outs carry no store round, so the abs floor pins the op's f32
+    // exactness: the q/k row statistic reduces through ttnn::mean (the
+    // pin's accurate full-fp32 SFPU path; an f32 ttnn::sum lands on the
+    // tf32 tile-reduce), and the P150 measures <= 7.2e-7 abs. The floor is
+    // 1e-5 — 14x the measured headroom, 540x below the 5.4e-3 an
+    // unconditional pre-norm bf16 typecast of q lands at (the ops.cpp:4140
+    // branch this guards), and it separates the tf32 sum regression too:
+    // the sum arm measured 3.5e-4..5.2e-4 on these arms.
     const float o_rel = c.out_bf16 ? 1.0f / 128.0f : 0.0f;
-    const float o_abs = c.out_bf16 ? 0.02f : 1e-3f;
+    const float o_abs = c.out_bf16 ? 0.02f : 1e-5f;
     GdnDiffStats dq = CompareVsOracle(q_tt, q_cpu, o_rel, o_abs);
     GdnDiffStats dk = CompareVsOracle(k_tt, k_cpu, o_rel, o_abs);
     // gate: EXACT passthrough when it stays f32 or when the inputs are

@@ -1,0 +1,215 @@
+2026-10-26 02:52:06.666 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-26 02:52:06.666 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-26 02:52:06.667 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-26 02:52:06.667 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-26 02:52:06.670 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-26 02:52:06.670 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-26 02:52:06.711 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-26 02:52:06.711 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-26 02:52:06.711 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-26 02:52:06.711 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-26 02:52:06.711 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-26 02:52:06.733 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-26 02:52:06.796 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-26 02:52:06.796 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-26 02:52:06.796 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-26 02:52:06.796 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-26 02:52:06.796 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-26 02:52:07.471 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:156:
+TEST CASE:  SCRATCH dbg W3 noise map: K sweep
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=32 N=512 arm=1 max_abs=0.00292309 rel_rms=0.0254481 frac_bad=0.00976562
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=32 N=512 arm=1 max_abs=0.156128 rel_rms=1.2212 frac_bad=0.927734
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=64 N=512 arm=1 max_abs=0.00353145 rel_rms=0.0270455 frac_bad=0.0234375
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=64 N=512 arm=1 max_abs=0.16265 rel_rms=1.27567 frac_bad=0.929688
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=128 N=512 arm=1 max_abs=0.00586974 rel_rms=0.0262501 frac_bad=0.0214844
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=128 N=512 arm=1 max_abs=0.273768 rel_rms=1.20598 frac_bad=0.898438
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=256 N=512 arm=1 max_abs=0.00788627 rel_rms=0.0259313 frac_bad=0.00195312
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=256 N=512 arm=1 max_abs=0.37059 rel_rms=1.26984 frac_bad=0.912109
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.00859748 rel_rms=0.0255632 frac_bad=0.0136719
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.419518 rel_rms=1.25631 frac_bad=0.925781
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=1024 N=512 arm=1 max_abs=0.0134166 rel_rms=0.0271132 frac_bad=0.0175781
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=1024 N=512 arm=1 max_abs=0.911742 rel_rms=1.26648 frac_bad=0.916016
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=512 arm=1 max_abs=0.018182 rel_rms=0.0254738 frac_bad=0.0117188
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=512 arm=1 max_abs=1.13098 rel_rms=1.25054 frac_bad=0.912109
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2560 N=512 arm=1 max_abs=0.0269598 rel_rms=0.025712 frac_bad=0.0195312
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2560 N=512 arm=1 max_abs=1.20217 rel_rms=1.2204 frac_bad=0.898438
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:176:
+TEST CASE:  SCRATCH dbg W3 noise map: M sweep
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.0106562 rel_rms=0.0265247 frac_bad=0.0195312
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=2 K=512 N=512 arm=1 max_abs=0.0099707 rel_rms=0.0267262 frac_bad=0.0146484
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=4 K=512 N=512 arm=1 max_abs=0.0109303 rel_rms=0.0260077 frac_bad=0.0205078
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=512 arm=1 max_abs=0.01285 rel_rms=0.026183 frac_bad=0.0217285
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=16 K=512 N=512 arm=1 max_abs=0.0116393 rel_rms=0.0258929 frac_bad=0.0174561
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=32 K=512 N=512 arm=1 max_abs=0.0132757 rel_rms=0.0261441 frac_bad=0.0180054
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:194:
+TEST CASE:  SCRATCH dbg W3 noise map: N sweep
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=32 arm=1 max_abs=0.00636931 rel_rms=0.0272562 frac_bad=0
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=64 arm=1 max_abs=0.00717975 rel_rms=0.0290875 frac_bad=0.03125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=128 arm=1 max_abs=0.00893341 rel_rms=0.0250928 frac_bad=0.0078125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=256 arm=1 max_abs=0.00833644 rel_rms=0.0252997 frac_bad=0.0273438
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.00973499 rel_rms=0.0255896 frac_bad=0.0214844
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=1024 arm=1 max_abs=0.00986992 rel_rms=0.0262405 frac_bad=0.0185547
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=2048 arm=1 max_abs=0.0105172 rel_rms=0.0253133 frac_bad=0.0136719
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:213:
+TEST CASE:  SCRATCH dbg W3 noise map: tiles and the model shape
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.00786124 rel_rms=0.02596 frac_bad=0.0195312
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=520 arm=1 max_abs=0.00859087 rel_rms=0.0270552 frac_bad=0.0173077
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=520 N=512 arm=1 max_abs=0.0103018 rel_rms=0.0245305 frac_bad=0.0234375
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=516 N=516 arm=1 max_abs=0.00940172 rel_rms=0.0253155 frac_bad=0.0251938
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=2048 arm=1 max_abs=0.0231044 rel_rms=0.0263723 frac_bad=0.0185547
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=6144 arm=1 max_abs=0.0229375 rel_rms=0.0260244 frac_bad=0.0164388
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=0.0225342 rel_rms=0.0259703 frac_bad=0.0165039
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:235:
+TEST CASE:  SCRATCH dbg W3 noise map: path compare
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=64 N=64 arm=1 max_abs=0.00307196 rel_rms=0.0288828 frac_bad=0.015625
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=64 N=64 arm=1 max_abs=0.0981005 rel_rms=1.1935 frac_bad=0.953125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=64 N=64 arm=1 max_abs=0.00307196 rel_rms=0.0288828 frac_bad=0.015625
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=64 N=64 arm=1 max_abs=0.0981005 rel_rms=1.1935 frac_bad=0.953125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.0100298 rel_rms=0.0275022 frac_bad=0.0214844
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.498136 rel_rms=1.23449 frac_bad=0.923828
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.0100298 rel_rms=0.0275022 frac_bad=0.0214844
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=512 N=512 arm=1 max_abs=0.498136 rel_rms=1.23449 frac_bad=0.923828
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.0103192 rel_rms=0.026056 frac_bad=0.01875
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.00390285 rel_rms=0.0075902 frac_bad=0.0078125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.0103192 rel_rms=0.026056 frac_bad=0.01875
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.00390285 rel_rms=0.0075902 frac_bad=0.0078125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=512 arm=1 max_abs=0.0132037 rel_rms=0.0259181 frac_bad=0.0200195
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=512 arm=1 max_abs=0.00482491 rel_rms=0.00749705 frac_bad=0.00805664
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=512 arm=1 max_abs=0.0132037 rel_rms=0.0259181 frac_bad=0.0200195
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=8 K=512 N=512 arm=1 max_abs=0.00482491 rel_rms=0.00749705 frac_bad=0.00805664
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=2048 arm=1 max_abs=0.0273205 rel_rms=0.026189 frac_bad=0.0141602
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=2048 arm=1 max_abs=0.0100952 rel_rms=0.0097239 frac_bad=0.00488281
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=2048 arm=1 max_abs=0.0273205 rel_rms=0.026189 frac_bad=0.0141602
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=2048 arm=1 max_abs=0.0100952 rel_rms=0.0097239 frac_bad=0.00488281
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2560 N=2560 arm=1 max_abs=0.0257719 rel_rms=0.025969 frac_bad=0.0178125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2560 N=2560 arm=1 max_abs=0.0170745 rel_rms=0.00998484 frac_bad=0.00828125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2560 N=2560 arm=1 max_abs=0.0257719 rel_rms=0.025969 frac_bad=0.0178125
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2560 N=2560 arm=1 max_abs=0.0170745 rel_rms=0.00998484 frac_bad=0.00828125
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:263:
+TEST CASE:  SCRATCH dbg W3 noise map: per-product
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:288: MESSAGE: perproduct k=0 max_abs=0.00170898 rel_rms=0.0234243 frac_bad=0
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:288: MESSAGE: perproduct k=256 max_abs=0.00170898 rel_rms=0.0214154 frac_bad=0
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:288: MESSAGE: perproduct k=511 max_abs=0.00170898 rel_rms=0.0222758 frac_bad=0
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:301:
+TEST CASE:  SCRATCH dbg W3 exactness check (dest-acc arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:304: MESSAGE: skipped: requires VT_TT_MATMUL_MATH_FIDELITY=hifi4 (the experimental exact arm; the shipped arm is red here BY the map, see docs/bench-evidence/tt-matmul-noise-20261025/)
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:349:
+TEST CASE:  SCRATCH dbg W3 exactness check (default arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=512 N=512 arm=1 max_abs=0.0035412 rel_rms=0.00741981 frac_bad=0.00585938
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:367: SUCCESS: CHECK( s.rel_rms < 2e-2 ) is correct!
+  values: CHECK( 0.00741981 <  0.02 )
+  logged: bf16-out arm rel_rms 0.00741981
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=5 K=2048 N=2048 arm=1 max_abs=0.0137283 rel_rms=0.00947876 frac_bad=0.00839844
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:367: SUCCESS: CHECK( s.rel_rms < 2e-2 ) is correct!
+  values: CHECK( 0.00947876 <  0.02 )
+  logged: bf16-out arm rel_rms 0.00947876
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:147: MESSAGE: 1 M=1 K=2048 N=6144 arm=1 max_abs=0.0129237 rel_rms=0.00932639 frac_bad=0.0069987
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:367: SUCCESS: CHECK( s.rel_rms < 2e-2 ) is correct!
+  values: CHECK( 0.00932639 <  0.02 )
+  logged: bf16-out arm rel_rms 0.00932639
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:374:
+TEST CASE:  SCRATCH dbg W3 exactness check (MatmulBT arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:377: MESSAGE: skipped: requires VT_TT_MATMUL_MATH_FIDELITY=hifi4
+
+===============================================================================
+[doctest] test cases: 9 | 9 passed | 0 failed | 0 skipped
+[doctest] assertions: 3 | 3 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-26 02:52:09.603 | info     |    BuildKernels | JIT cache stats: 180/180 hits (100.0%) [180 cached, 101 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-26 02:52:09.603 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-26 02:52:09.607 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-26 02:52:09.607 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-26 02:52:09.647 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-26 02:52:09.647 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-26 02:52:09.647 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

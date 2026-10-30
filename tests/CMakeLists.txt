@@ -140,6 +140,27 @@ target_compile_definitions(test_kolibri1 PRIVATE
 # partitions.
 vllm_cpp_add_test(test_kolibri1_dequant vllm/models/test_kolibri1_dequant.cpp)
 target_include_directories(test_kolibri1_dequant PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# MODEL-TEXT-kolibri-1 bf16 arm (spec .agents/specs/kolibri1-bf16-arm.md):
+# the plain bf16 checkpoint loads and runs, the fp8 arm is unchanged, an
+# unknown scheme is refused by name, and the two arms agree on the same
+# bytes.
+vllm_cpp_add_test(test_kolibri1_bf16_arm vllm/models/test_kolibri1_bf16_arm.cpp)
+target_include_directories(test_kolibri1_bf16_arm PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# ENVELOPE pin (~2% vs the dequant-f32 reference) on the production kolibri
+
+# shapes. Perf is bench-only; the W3 chain movement under the knob is the
+
+# Kolibri1 BFDOT bf16 GEMV draft arm: bf16-ULP envelope pin (<=2 bf16 ULP vs
+
+# the f32-widen production reference) on the production shapes + tail cases;
+
+# skips by name without FEAT_BF16. Perf is bench-only; the chain movement
+
+# under the knob is the accepted draft rounding change, not a defect.
+
+vllm_cpp_add_test(test_kolibri1_bfdot_gemv vllm/models/test_kolibri1_bfdot_gemv.cpp)
+
+target_include_directories(test_kolibri1_bfdot_gemv PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-TEXT-kolibri-1 re-land of the dequant cache
 # (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2): byte identity cold/hot, budget
 # invariance in one binary, and entry OWNERSHIP under pool traffic (the v1
@@ -174,8 +195,33 @@ vllm_cpp_add_test(test_kolibri1_w3 vllm/models/test_kolibri1_w3.cpp)
 target_include_directories(test_kolibri1_w3 PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_w3 PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# kolibri1 GGUF arm (.agents/specs/kolibri1-gguf-arch.md): the published
+# Hob-forge Q2_K container loads through the same Kolibri1Weights and its
+# greedy chain replays the same goldens within the W3 band.
+vllm_cpp_add_test(test_kolibri1_gguf vllm/models/test_kolibri1_gguf.cpp)
+target_include_directories(test_kolibri1_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_gguf PRIVATE
+  KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# The container under test is a build choice, not a code choice: the gate is
+# the SAME harness against whichever kolibri1 GGUF is mounted (the Hob-forge
+# Q2_K by default; the mudler APEX tiers via -DKOLIBRI1_GGUF_PATH=...).
+set(KOLIBRI1_GGUF_PATH "" CACHE STRING
+    "Path to the kolibri1 GGUF container the gguf gate loads")
+if(KOLIBRI1_GGUF_PATH)
+  target_compile_definitions(test_kolibri1_gguf PRIVATE
+    KOLIBRI1_GGUF_PATH="${KOLIBRI1_GGUF_PATH}")
+endif()
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Kolibri-1 three-way numerics capture (row/kolibri-three-way): inert without
+# VT_THREEWAY_DUMP_DIR; dumps teacher-forced per-position f32 logit rows.
+vllm_cpp_add_test(test_kolibri1_threeway_capture vllm/models/test_kolibri1_threeway_capture.cpp)
+target_include_directories(test_kolibri1_threeway_capture PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_kolibri1_threeway_capture PRIVATE
+  KOLIBRI1_PRIMARY_TOPK_ROWS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_primary_topk_rows.json")
+# SCRATCH MEASUREMENT HARNESS (the f32-residual A/B; NOT for main).
+vllm_cpp_add_test(test_kolibri1_layerdump vllm/models/test_kolibri1_layerdump.cpp)
+target_include_directories(test_kolibri1_layerdump PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Kolibri-1 n-gram SPEC-DECODE engine gate (ISSUE-LOCAL-01M4P22PX6BPRQAY1CK20FZQF6,
 # branch row/kolibri-spec-engine): pins the FIXED KV seam at unit level (an
 # ngram spec config keeps kolibri's own KV groups — no MambaSpec, no fa_draft —
@@ -222,6 +268,42 @@ target_include_directories(test_kolibri1_moe_glue PRIVATE ${CMAKE_SOURCE_DIR}/sr
 if(VLLM_CPP_TENSTORRENT)
   vllm_cpp_add_test(test_kolibri1_tt vllm/models/test_kolibri1_tt.cpp)
   target_include_directories(test_kolibri1_tt PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # Flint W0 on Tenstorrent (spec .agents/specs/flint-tenstorrent.md, issue
+  # ISSUE-LOCAL-01M5RVS7Q3EFVHGC6YBVF02A9Q): the staging-plan host gates (NO
+  # card) plus the W0 dispatch + device-vs-CPU correctness leg (card +
+  # FLINT_TT_W0_MODEL pointing at the published flint GGUF container;
+  # operator-run under the gpu.lock mutex, evidence in
+  # docs/bench-evidence/flint-tt-w0-20261025/).
+  vllm_cpp_add_test(test_flint_tt_w0 vllm/models/test_flint_tt_w0.cpp)
+  target_include_directories(test_flint_tt_w0 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # Flint keep-quant device arm (spec .agents/specs/flint-keepquant.md,
+  # issue ISSUE-LOCAL-01M5WCPZC4TWR9GZVJHH73E1XE): the loader-arm host gates
+  # (admission census, refusal by name, re-derived budget) plus the
+  # env-gated device-vs-CPU distance leg.
+  vllm_cpp_add_test(test_flint_keepquant vllm/models/test_flint_keepquant.cpp)
+  target_include_directories(test_flint_keepquant PRIVATE ${CMAKE_SOURCE_DIR}/src
+                           ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
+  # SCRATCH W2 diagnostic (operator-run under the gpu.lock mutex, evidence in
+  # docs/bench-evidence/flint-tt-w2-20261025/): the ttnn::matmul f32-to-tf32
+  # operand micro-probe.
+  vllm_cpp_add_test(test_flint_tt_w2_micro vllm/models/test_flint_tt_w2_micro.cpp)
+  target_include_directories(test_flint_tt_w2_micro PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH W3 diagnostic (operator-run under the gpu.lock mutex, evidence
+  # in docs/bench-evidence/tt-matmul-noise-20261025/): the substrate
+  # matmul-noise map (spec .agents/specs/tt-matmul-noise.md).
+  vllm_cpp_add_test(test_flint_tt_w3_noise vllm/models/test_flint_tt_w3_noise.cpp)
+  target_include_directories(test_flint_tt_w3_noise PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH W3 plain-ttnn leg: the raw tt-metal matmul repro (route (c)
+  # evidence — noise outside our staging), same evidence dir.
+  vllm_cpp_add_test(test_flint_tt_w3_plain vllm/models/test_flint_tt_w3_plain.cpp)
+  target_include_directories(test_flint_tt_w3_plain PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # The pinned tt-metal headers carry their own nlohmann/json version; the
+  # repo-wide third_party include dir must NOT shadow it in this TU (the two
+  # versions collide on json_pointer). tt-metal's dirs get BEFORE priority.
+  target_include_directories(test_flint_tt_w3_plain SYSTEM BEFORE PRIVATE
+    /tmp/umdtrial-install/libexec/tt-metalium/ttnn/cpp
+    /tmp/umdtrial-install/libexec/tt-metalium
+    /tmp/umdtrial-install/include)
   # B2b-i first slice (spec .agents/specs/kolibri-tt.md ### B2 scope — B2b
   # addendum): the resident staging plan's host-side gates (run under ctest
   # with NO card) plus the device bring-up leg (card + VT_KOLIBRI1_TT_B2I_
@@ -974,6 +1056,25 @@ target_compile_definitions(test_gemma4_indexed_max_t PRIVATE
 vllm_cpp_add_test(test_qwen3_moe_load vllm/models/test_qwen3_moe_load.cpp)
 vllm_cpp_add_test(test_qwen3_moe_forward vllm/models/test_qwen3_moe_forward.cpp)
 target_include_directories(test_qwen3_moe_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
+vllm_cpp_add_test(test_flint_forward vllm/models/test_flint_forward.cpp)
+target_include_directories(test_flint_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Flint paged-engine arm (spec .agents/specs/flint-paged.md, issue
+# ISSUE-LOCAL-01M5W2QQBJ32HRB29G1KVQJS77): the paged KV config groups and the
+# registry-entered mixed-batch paged gate against the reference forward.
+vllm_cpp_add_test(test_flint_paged vllm/models/test_flint_paged.cpp)
+target_include_directories(test_flint_paged PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# W-c: the REAL-WEIGHTS paged-engine gate — the published Q4_K_M through the
+# full LLMEngine stack with continuous arrival, chains adjudicated against the
+# reference forward (checkpoint-gated: skips loudly without the container).
+vllm_cpp_add_test(test_flint_paged_engine vllm/models/test_flint_paged_engine.cpp)
+target_include_directories(test_flint_paged_engine PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# flint GGUF arm (.agents/specs/flint-gguf-arm.md): the published Q4_K_M
+# container loads through the production registry and its greedy chain
+# replays the pinned llama-cpp-flint oracle's goldens within the house band.
+vllm_cpp_add_test(test_flint_gguf vllm/models/test_flint_gguf.cpp)
+target_include_directories(test_flint_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_flint_gguf PRIVATE
+  FLINT_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/flint_goldens_q4_k_m.json")
 vllm_cpp_add_test(test_deepseek_v2_load vllm/models/test_deepseek_v2_load.cpp)
 vllm_cpp_add_test(test_deepseek_v2_forward vllm/models/test_deepseek_v2_forward.cpp)
 target_include_directories(test_deepseek_v2_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -3913,6 +4014,7 @@ vllm_cpp_add_test(test_ops_paged_attn vt/test_ops_paged_attn.cpp)
 # adjudicated by the stated tolerance envelope, not a memcmp. Non-aarch64
 # builds skip loudly.
 vllm_cpp_add_test(test_ops_paged_attn_neon vt/test_ops_paged_attn_neon.cpp)
+target_include_directories(test_ops_paged_attn_neon PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # SPEC-DFLASH2 W10 (#1857): the host lane-classification seam of the CUDA
 # paged-attention dispatch (include/vt/paged_attn_route.h).
 vllm_cpp_add_test(test_paged_attn_route vt/test_paged_attn_route.cpp)

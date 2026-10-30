@@ -162,9 +162,43 @@ jobs:
       # which `website/hugo.toml` uses.
       HUGO_VERSION: "0.146.3"
     steps:
+      - name: Put /tmp back on the root disk
+        # ubuntu-26.04 mounts /tmp as a 50%-of-RAM tmpfs with a per-user quota
+        # (actions/runner-images#14777), while / has ~90+ GiB free. The strix
+        # worker's headroom() measures the filesystems under /tmp
+        # (worker.py:226,256), so on a 26.04 runner the 20 GiB floor is
+        # unmeetable no matter how empty / is -- and the image rollout makes
+        # the job red intermittently by runner assignment, not by workload.
+        # The runner-images maintainer-endorsed workaround: mask tmp.mount
+        # and lazy-unmount /tmp, as the FIRST step, before anything writes
+        # there (files in /tmp are not visible after the unmount). On a 24.04
+        # runner both commands are harmless no-ops.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Free runner disk
+        # CI-AGENT-RECORD-DISK. The shared runner's free disk drifts under 20
+        # GiB mid-job, and the late tools-suite steps then fail on pressure
+        # that has nothing to do with the tree: 49 strix-oracle tests die on
+        # `ValueError("disk headroom exhausted")` (worker.py:257) and the
+        # cache-drop proof dies with resident bytes it cannot evict. Both
+        # failures are intermittent on `main` (runs 40521291883,
+        # 40452744901) and reproduced on the #3513 rerun (job
+        # 122404172875). Reclaim the image's largest unused tenants --
+        # Android SDK, .NET, GHC, JVM, stale docker layers. Best-effort: a
+        # path the image no longer ships must not red the job. No workflow
+        # here uses any of them (grep across .github/workflows/). The
+        # worker's 20 GiB floor itself is untouched: the fix removes the
+        # pressure, not the check.
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /usr/lib/jvm || true
+          sudo docker image prune -af || true
+          df -h /
       # The docs-site suite RENDERS the site, so this lane needs the renderer.
       # Without it `test_rendered_benchmark_index_links_resolve_to_emitted_pages`
       # cannot run at all -- and neither of its two ways of not running is a
@@ -264,6 +298,24 @@ jobs:
         # which this lane has; it does not build this tree.
         run: |
           python3 tests/scripts/test_check_tree_compiles.py
+      - name: The windows-msvc /WX classes stay clean on the host compiler
+        # Registered in TWO places, like the pre-push compile gate above: here
+        # and in the `SUITES` array of `scripts/agent-preflight.sh`. The
+        # windows-msvc lane builds with /W4 /WX, so a local shadow (MSVC
+        # C4456) or an unreferenced local of an empty class (MSVC C4101) is a
+        # BUILD FAILURE there and a green build on every POSIX lane, which is
+        # how kolibri1_forward.cpp:326 stayed red on `main` for a week after
+        # the C4101 and the tt_forward C4456 were fixed.
+        #
+        # The probe compiles the PRODUCTION translation units twice: in the
+        # host shape with -Wshadow, and in the non-Linux shape the lane
+        # compiles with -Wshadow -Wunused-variable, which is the shape in
+        # which the NUMA guard is an empty class and an unreferenced local of
+        # it is the C4101 class. Both classes are reported at the same file,
+        # line and column the MSVC job log names. Host compiler only: no
+        # artifact, no GPU, no network.
+        run: |
+          python3 tests/scripts/test_msvc_wx_diagnostics.py
       - name: scripts/ and tools/ resolve their values, refuse, and keep records
         # Registered in TWO places, like the bring-up suite above: here and in
         # the `SUITES` array of `scripts/agent-preflight.sh`. Half of it guards
@@ -649,6 +701,18 @@ jobs:
         run: |
           python3 scripts/check-conflict-markers.py
           python3 tests/scripts/test_check_conflict_markers.py
+      - name: Evidence reports only name raw logs the tree carries (FIX-EVIDENCE-LOG-GATE)
+        # Registered in TWO places, like the suites above: here and in the
+        # `CHECKERS`/`SUITES` arrays of `scripts/agent-preflight.sh`. The
+        # incident: the global `*.log` ignore silently dropped the raw logs of
+        # three landed rows' evidence dirs at `git add`, the merged worktree
+        # removal took the untracked files, and no gate noticed — the landed
+        # record was summary assertions with no backing bytes. This step fails
+        # when a report names a `.log` that is missing or untracked, unless a
+        # dated `EVIDENCE-LOST` note records the loss in the same file.
+        run: |
+          python3 scripts/check-evidence-refs.py
+          python3 tests/scripts/test_check_evidence_refs.py
       - name: ROCm cooperative tests follow production toggle values (#3063)
         run: python3 tests/scripts/test_rocm_cooperative_toggles.py
       - name: The staged gfx1151 paired measurement still refuses to run (#2497)
@@ -1144,6 +1208,13 @@ jobs:
     timeout-minutes: 180
     container: nvidia/cuda:13.3.0-devel-ubuntu24.04
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): nvcc drives its sub-invocations through /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - name: Install build tools
         run: |
           apt-get update
@@ -1254,6 +1325,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): ctest here runs the tools suites, and compilers write /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
       - name: Install the software Vulkan ICD
         # Loader + llvmpipe only. No shader toolchain: the backend consumes the
@@ -1428,6 +1506,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): ctest here runs the tools suites, and compilers write /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
       - name: Configure
         run: |
@@ -1489,6 +1574,13 @@ jobs:
     timeout-minutes: 90
     container: gcc:16
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): this lane compiles with the newest gcc, which writes /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - name: Install build tools
         # The gcc image ships the toolchain only; git is needed BEFORE checkout
         # so actions/checkout uses git rather than the slower tarball path.
@@ -1740,6 +1832,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - name: Put /tmp back on the root disk
+        # Same ubuntu-26.04 /tmp-tmpfs wall as agent-record (runner-images
+        # #14777): ctest here runs the tools suites, and compilers write /tmp.
+        run: |
+          sudo systemctl mask tmp.mount || true
+          sudo umount -l /tmp || true
+          df -h / /tmp
       - uses: actions/checkout@v4
       - name: Configure
         run: |

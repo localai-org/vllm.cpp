@@ -1,0 +1,18 @@
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=1 K=64 N=64  F: max_abs=0.00309755 rel_rms=0.0256748  B: max_abs=0.00309755 rel_rms=0.0256748
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=1 K=512 N=512  F: max_abs=0.0116933 rel_rms=0.0263092  B: max_abs=0.0116933 rel_rms=0.0263092
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=1 K=2560 N=2560  F: max_abs=0.0250611 rel_rms=0.0258076  B: max_abs=0.0250611 rel_rms=0.0258076
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=8 K=64 N=64  F: max_abs=0.00497506 rel_rms=0.0263426  B: max_abs=0.00497506 rel_rms=0.0263426
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=8 K=512 N=512  F: max_abs=0.0110165 rel_rms=0.026009  B: max_abs=0.0110165 rel_rms=0.026009
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=8 K=2560 N=2560  F: max_abs=0.0285034 rel_rms=0.0261702  B: max_abs=0.0285034 rel_rms=0.0261702
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=8 K=2048 N=512  F: max_abs=0.0231756 rel_rms=0.0263541  B: max_abs=0.0231756 rel_rms=0.0263541
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=8 K=512 N=2048  F: max_abs=0.0119015 rel_rms=0.026059  B: max_abs=0.0119015 rel_rms=0.026059
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:136: MESSAGE: M=5 K=2560 N=2560  F: max_abs=0.0244639 rel_rms=0.0259145  B: max_abs=0.0244639 rel_rms=0.0259145
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:144: MESSAGE: arms bit-identical across shapes: true
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:197: MESSAGE: A multiply-only: max_abs=0.00976562 rel_rms=0.0238839
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:209: MESSAGE: B accumulate-only: max_abs=0.19075 rel_rms=0.0253222
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:232: MESSAGE: C integer-exact: max_abs=0
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:273: MESSAGE: D MatmulBT bf16: max_abs=1.21552 rel_rms=1.21694
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:291: MESSAGE: E Matmul bf16 out: max_abs=1.45578 rel_rms=1.23078
+./tests/vllm/models/test_flint_tt_w2_micro.cpp:307: MESSAGE: F Matmul bf16 f32-out: max_abs=0.0248288 rel_rms=0.0262325
+[doctest] Status: SUCCESS!
+EXIT=0

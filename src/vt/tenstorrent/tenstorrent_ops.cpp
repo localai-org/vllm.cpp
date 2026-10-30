@@ -58,7 +58,42 @@ namespace {
 // the selection-flip class that drove the L1-moe 3% divergence
 // (ISSUE-LOCAL-01M4ER0E9HHM95YZYJB7T5FECN, this branch's record).
 std::optional<ttnn::DeviceComputeKernelConfig> F32AccKernelConfig() {
+  // W3 noise map (spec .agents/specs/tt-matmul-noise.md,
+  // ISSUE-LOCAL-01M5TB3983MW41T4NPBZ5ZYF0E): the substrate noise is ttnn's
+  // DEFAULT math fidelity, LoFi — product truncation, ~2.3e-2 rel_rms on
+  // the micro (K/M/N- and layout-independent, perproduct probe), and it
+  // reproduces on a PLAIN ttnn matmul with no vt staging
+  // (test_flint_tt_w3_plain). The exactness arm (HiFi4 + approx off +
+  // fp32_dest_acc_en) measures rel_rms 3.3e-4, frac_bad=0 — a ~70x micro
+  // improvement — and on the W0 model it IMPROVES first-token rel_rms
+  // 2.579e-1 -> 2.212e-1 (~14%) at no throughput cost: 3 alternating
+  // full-wall legs each (docs/bench-evidence/tt-matmul-noise-20261025/
+  // throughput-w0-legs.log), walls 853.4-882.7s shipped vs 846.1-857.9s
+  // HiFi4, ~1.4% faster on the leg mean — a tie, not a claimed speedup.
+  // The first W0 comparison ("shipped 2.045e-1") came from an uncommitted
+  // binary and is invalid (report.md correction); the flip was re-taken on
+  // the committed-head numbers and APPROVED by the developer 2026-10-26,
+  // so the exactness arm IS the shipped default. The greedy chain is
+  // adjudicated-divergent on BOTH arms (the first token flips 12834->269
+  // either way — the recorded hard-divergence bias class, not multiply
+  // noise), so the adoption trades nothing the old band could see.
+  // VT_TT_MATMUL_MATH_FIDELITY=lofi restores the pre-adoption arm for
+  // same-binary A/B; unset or any other value is the shipped arm.
   ttnn::DeviceComputeKernelConfig cfg{};
+  static const int mode = [] {
+    const char* e = std::getenv("VT_TT_MATMUL_MATH_FIDELITY");
+    if (e == nullptr) return 1;
+    return std::string(e) == "lofi" ? 0 : 1;
+  }();
+  if (mode != 1) {
+    // The A/B arm: the pinned default fidelity (LoFi, approx mode on)
+    // with fp32 destination accumulation — the pre-adoption shipped arm.
+    cfg.fp32_dest_acc_en = true;
+    return cfg;
+  }
+  // The shipped arm: HiFi4, approx mode off, fp32 destination accumulation.
+  cfg.math_fidelity = tt::tt_metal::MathFidelity::HiFi4;
+  cfg.math_approx_mode = false;
   cfg.fp32_dest_acc_en = true;
   return cfg;
 }
@@ -681,31 +716,74 @@ void RmsNormKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& weight,
     }
   }
 
-  // The composed f32 arm is the micro-test-clean one but its row broadcast
-  // does not survive the model's tensor geometry on this stack (binary_ng
-  // refuses the subtile), so the pinned ttnn::rms_norm stays the device
-  // default; VT_TT_RMSNORM_COMPOSED=1 selects the composed arm for A/B.
-  static const bool rms_composed = [] {
+  // W1 REPAIR (row BACKEND-TENSTORRENT): the device default is the composed
+  // f32 chain (x^2 -> mean -> +eps -> rsqrt -> scale -> gamma) with the row
+  // scale delivered as a 3D-broadcast multiply — inv reshaped [rows,1,1]
+  // against norm [rows,1,d], the tenstorrent_gdn.cpp delta-rule pattern. It
+  // is BIT-EXACT against the CPU arm on every captured in-model row
+  // (normrow-000..007 plus the random row: sum ratio 1, max_abs 0, 0
+  // differing elements), where the pinned ttnn::rms_norm reads 0.9899-1.0077
+  // input-dependently. The refused plain 2D multiply leaked the padded-tile
+  // garbage of the [rows,1] operand into every column; the 3D reshape hits a
+  // broadcast path that does not. VT_TT_RMSNORM_COMPOSED selects the row-
+  // scale delivery for A/B (default 2):
+  //   1 repeat+same-shape multiply  (refused in-model: binary_ng "Invalid
+  //     subtile broadcast type" — kept only to prove reachability)
+  //   2 3D-broadcast multiply       (the default)
+  //   3 ROW_MAJOR inv multiply      (no tile padding to leak; also exact)
+  //   4 matmul outer product        (diagnostic: the gdn record shows matmul
+  //     MACs truncate f32 to tf32 on this pin, so this arm is ~2^-11-bounded)
+  // The pinned ttnn::rms_norm arm stays behind VT_TT_RMSNORM_TTNN=1.
+  static const int rms_composed = [] {
+    if (std::getenv("VT_TT_RMSNORM_TTNN") != nullptr &&
+        std::getenv("VT_TT_RMSNORM_TTNN")[0] == '1')
+      return 0;
     const char* e = std::getenv("VT_TT_RMSNORM_COMPOSED");
-    return e != nullptr && e[0] == '1';
+    return e != nullptr && *e ? std::atoi(e) : 2;
   }();
-  if (!rms_composed) {
+  if (rms_composed == 0) {
     dev_y = ttnn::rms_norm(norm_f32, args.eps, wf32);
   } else {
+    // Exact f32 reduce: ttnn::mean over the H dim is the accurate SFPU full
+    // fp32 path; ttnn::sum lands on the tf32 FPU tile-reduce on this pin
+    // (the tenstorrent_gdn.cpp record, commit b67b30fd).
     ttnn::Tensor sq = ttnn::multiply(norm_f32, norm_f32);
-    ttnn::Tensor ssq = ttnn::sum(sq, ttsl::SmallVector<int>{1}, true);
-    ttnn::Tensor ms = ttnn::multiply(
-        ssq, 1.0f / static_cast<float>(d));
+    ttnn::Tensor ms = ttnn::mean(sq, ttsl::SmallVector<int>{1},
+                                 /*keep_dim=*/true);
     ttnn::Tensor inv = ttnn::rsqrt(ttnn::add(ms, args.eps));
-    // The plain multiply of [rows,cols] by [rows,1] and the bcast kernel
-    // both mis-broadcast on this stack (the micro-test measured ratio 1.019
-    // through BcastOpDim::W, and the gate recorded sporadic 1e37 garbage
-    // logits through the plain multiply). Materialize the row scale with an
-    // exact data-movement replication instead: repeat([rows,1] -> [rows,cols])
-    // and a same-shape f32 multiply.
-    dev_y = ttnn::multiply(
-        norm_f32,
-        ttnn::repeat(inv, ttnn::Shape({rows, d})));
+    switch (rms_composed) {
+      case 1:
+        dev_y = ttnn::multiply(
+            norm_f32,
+            ttnn::repeat(inv, ttnn::Shape({rows, d})));
+        break;
+      case 2:
+        dev_y = ttnn::reshape(ttnn::multiply(
+                                  ttnn::reshape(norm_f32,
+                                                ttnn::Shape({rows, 1, d})),
+                                  ttnn::reshape(inv,
+                                                ttnn::Shape({rows, 1, 1}))),
+                              ttnn::Shape({rows, d}));
+        break;
+      case 3:
+        dev_y = ttnn::multiply(
+            norm_f32,
+            ttnn::to_layout(inv, ttnn::Layout::ROW_MAJOR));
+        break;
+      default: {
+        // NOTE the gdn record: matmul MACs truncate f32 to tf32 on this pin,
+        // so this arm is bounded ~2^-11 — kept as a diagnostic, not a
+        // candidate default (both operands must be TILE for the matmul).
+        ttnn::Tensor inv_t =
+            ttnn::to_layout(inv, ttnn::Layout::TILE);
+        ttnn::Tensor ones_t = ttnn::ones(
+            ttnn::Shape({1, d}), /*dtype=*/std::nullopt,
+            /*layout=*/ttnn::Layout::TILE, /*device=*/device,
+            /*memory_config=*/std::nullopt);
+        dev_y = ttnn::multiply(norm_f32, ttnn::matmul(inv_t, ones_t));
+        break;
+      }
+    }
     dev_y = ttnn::multiply(dev_y, wf32);
   }
   static const bool out_dbg = std::getenv("VT_TT_NORM_DEBUG") != nullptr;
@@ -1286,10 +1364,27 @@ void AttnQkNormRopeGateKernel(Queue&, Tensor& q_out, Tensor& k_out,
                        const ttnn::Tensor& dev_cos,
                        const ttnn::Tensor& dev_sin, int64_t nrows) {
     const uint32_t nr = static_cast<uint32_t>(nrows);
+    // f32-exact row statistic. On the tt-metal stack this backend builds
+    // against (tt_umd 0.9.12 era, /tmp/umdtrial-install), an f32 ttnn::sum
+    // lands on the tf32 FPU tile-reduce: the pin's own headers document the
+    // split (generic_reductions.hpp: mean's default
+    // fast_and_approximate_mode=false is "the accurate SFPU path (full
+    // fp32)", true is "the faster tf32 FPU path", and sum has no SFPU arm;
+    // reduce_helpers_common.hpp:14 "Fast keeps fp32 on the FPU/GMPOOL path
+    // (inputs truncated to tf32 — faster, lossy)"). The row scale therefore
+    // carried a 2^-11 truncation, and THIS row is kept at f32 (the model's
+    // dq3/dk3 are DType::kF32, qwen3_5.cpp:5877-5878), so the truncation was
+    // the op's dominant error: the device case measured 3.5e-4..5.2e-4 abs
+    // against the CPU f32 oracle, 35-52 percent of its 1e-3 floor.
+    // ttnn::mean takes the accurate SFPU path, and the CPU oracle's chain is
+    // rsqrt(mean(x^2)+eps) (cpu_ops.cpp:1707) — the same mean scale this arm
+    // now uses, where the sum arm applied eps at the sum scale. Measured on
+    // the P150: 3.5e-4 -> 4.8e-7 abs (the bf16-out arm becomes the
+    // oracle's exact RNE round, which the op's own doctrine at :1077-1082
+    // claims it should be).
     ttnn::Tensor sq = ttnn::multiply(x, x);
-    ttnn::Tensor s = ttnn::sum(sq, ttsl::SmallVector<int>{1}, true);
-    ttnn::Tensor denom =
-        ttnn::add(ttnn::multiply(s, 1.0f / static_cast<float>(dh)), na.eps);
+    ttnn::Tensor m = ttnn::mean(sq, ttsl::SmallVector<int>{1}, true);
+    ttnn::Tensor denom = ttnn::add(m, na.eps);
     ttnn::Tensor inv = ttnn::rsqrt(denom);
     ttnn::Tensor normed = ttnn::multiply(ttnn::multiply(x, inv), dev_w);
     ttnn::Tensor x1 = ttnn::slice(normed, ttsl::SmallVector<uint32_t>{0, 0},

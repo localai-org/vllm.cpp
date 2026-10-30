@@ -31,9 +31,16 @@
 // surface adds no link-time dependency to the shared seam for every host
 // that does not have libnuma installed.
 //
-// KNOB: `VT_KOLIBRI1_NUMA_INTERLEAVE=0` disables the guard entirely (the
-// off legs of the A/B); unset or any other value enables. Default ON with
-// the measured evidence recorded in the issue and the bench-evidence file.
+// KNOB: `VT_KOLIBRI1_NUMA_INTERLEAVE` is three-valued (FIX-TT-NUMA-DEGRADE,
+// ISSUE-LOCAL-01M62YS0ZP0F5PC7YJFJ8CP91A). Unset — and any value other than
+// `0`/`1` — is BEST-EFFORT: the guard tries the interleave and, when the host
+// refuses `set_mempolicy` (restricted sandboxes do), emits ONE named warning
+// on stderr and continues with the default policy — the pre-NUMA-row path
+// exactly, so a degraded host degrades instead of failing. `0` disables the
+// guard entirely (the off legs of the A/B). `1` is STRICT: the guard requires
+// the interleave and throws by name on refusal (the old behavior, for a host
+// that wants the guarantee). Default best-effort, with the measured evidence
+// recorded in the issue and the bench-evidence files.
 
 #pragma once
 
@@ -41,8 +48,10 @@
 #include <string>
 
 #if defined(__linux__) && !defined(_WIN32)
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 #include <linux/mempolicy.h>  // MPOL_INTERLEAVE, MPOL_F_*
 #include <sys/syscall.h>
@@ -54,13 +63,26 @@
 namespace vllm {
 namespace kolibri1_numa {
 
-// Knob: enabled unless `VT_KOLIBRI1_NUMA_INTERLEAVE` is exactly "0". Read on
-// every guard construction (uncached) so a test binary can flip the env —
-// the call rate is per load and per cache miss, never per element.
+// Knob: enabled unless `VT_KOLIBRI1_NUMA_INTERLEAVE` is exactly "0"; "1"
+// additionally selects the strict arm (Strict()). Read on every guard
+// construction (uncached) so a test binary can flip the env — the call rate
+// is per load and per cache miss, never per element.
 inline bool Enabled() {
 #if defined(__linux__) && !defined(_WIN32)
   const char* v = std::getenv("VT_KOLIBRI1_NUMA_INTERLEAVE");
   return v == nullptr || std::string(v) != "0";
+#else
+  return false;
+#endif
+}
+
+// Strict arm: `VT_KOLIBRI1_NUMA_INTERLEAVE=1` (exactly) requires the
+// interleave — the guard throws by name on refusal instead of degrading to
+// the default policy. Any other set value is best-effort.
+inline bool Strict() {
+#if defined(__linux__) && !defined(_WIN32)
+  const char* v = std::getenv("VT_KOLIBRI1_NUMA_INTERLEAVE");
+  return v != nullptr && std::string(v) == "1";
 #else
   return false;
 #endif
@@ -127,7 +149,12 @@ inline bool CurrentPolicyIsInterleave() {
 }
 
 // Scoped MPOL_INTERLEAVE over every allowed node. Restores the previous
-// policy on destruction.
+// policy on destruction. When the host refuses `set_mempolicy`
+// (FIX-TT-NUMA-DEGRADE): the strict arm (`VT_KOLIBRI1_NUMA_INTERLEAVE=1`)
+// throws by name; best-effort (unset, or any other value) emits ONE named
+// warning on stderr and constructs as a NO-OP guard (`active_ == false`) —
+// the failed call changed no state, so the dtor touches nothing and every
+// allocation in scope runs the default-policy path exactly.
 class PolicyGuard {
  public:
   PolicyGuard() : active_(Enabled()) {
@@ -139,8 +166,18 @@ class PolicyGuard {
     unsigned long allowed[detail::kMaxNodes / 64] = {0};
     VT_CHECK(detail::AllowedNodes(allowed, &maxnode),
              "kolibri1_numa: MPOL_F_MEMS_ALLOWED query failed");
-    VT_CHECK(detail::SetMempolicy(MPOL_INTERLEAVE, allowed, maxnode) == 0,
-             "kolibri1_numa: set_mempolicy(MPOL_INTERLEAVE) failed");
+    if (detail::SetMempolicy(MPOL_INTERLEAVE, allowed, maxnode) != 0) {
+      const int err = errno;
+      VT_CHECK(!Strict(),
+               "kolibri1_numa: set_mempolicy(MPOL_INTERLEAVE) failed");
+      std::fprintf(stderr,
+                   "kolibri1_numa: VT_KOLIBRI1_NUMA_INTERLEAVE: "
+                   "set_mempolicy(MPOL_INTERLEAVE) failed (errno %d): "
+                   "interleave refused by the host; continuing with the "
+                   "default policy\n",
+                   err);
+      active_ = false;
+    }
   }
   ~PolicyGuard() {
     if (!active_) return;

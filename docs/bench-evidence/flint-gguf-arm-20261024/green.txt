@@ -1,0 +1,32 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_gguf.cpp:126:
+TEST CASE:  flint gguf: the published Q4_K_M replays the oracle golden run
+
+./tests/vllm/models/test_flint_gguf.cpp:135: MESSAGE: resolving the registry entry...
+
+./tests/vllm/models/test_flint_gguf.cpp:138: MESSAGE: loading the published Q4_K_M container through the registry...
+
+./tests/vllm/models/test_flint_gguf.cpp:144: MESSAGE: weights loaded
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'The capital of France is' diverged at step 4 with gap 0.1141 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'RecursiveSI published the Flint model on' diverged at step 0 with gap 0.596935 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'The first three prime numbers are' diverged at step 7 with gap 0.734849 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'Water boils at a temperature of' diverged at step 9 with gap 0.1505 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'In machine learning, a mixture of experts layer routes' diverged at step 2 with gap 0.439113 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'Der Name der deutschen Hauptstadt ist' diverged at step 0 with gap 0.0607011 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:227: MESSAGE: chain 'The largest planet in the solar system is' diverged at step 0 with gap 0.228928 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_flint_gguf.cpp:234: MESSAGE: token gate: 46/53 greedy tokens exact, 7 flips (7 near-tie, 0 hard), worst gap 0.734849
+
+===============================================================================
+[doctest] test cases:   3 |   3 passed | 0 failed | 0 skipped
+[doctest] assertions: 178 | 178 passed | 0 failed |
+[doctest] Status: SUCCESS!

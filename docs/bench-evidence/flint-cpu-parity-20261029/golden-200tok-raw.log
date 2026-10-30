@@ -1,0 +1,40 @@
+0.00.003.519 I llama_completion: llama backend init
+0.00.005.402 I llama_completion: load the model and apply lora adapter, if any
+0.11.512.231 I cmn          init: llama threadpool init, n_threads = 128
+0.12.138.464 I llama_completion: chat template is available, enabling conversation mode (disable it with -no-cnv)
+0.12.138.471 W *** User-specified prompt will pre-start conversation, did you mean to set --system-prompt (-sys) instead?
+0.12.138.780 I llama_completion: chat template example:
+You are a helpful assistantHelloHi thereHow are you?
+0.12.138.782 I 
+0.12.138.842 I system_info: n_threads = 128 (n_threads_batch = 128) / 128 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | OPENMP = 1 | REPACK = 1 | 
+0.12.138.843 I 
+0.12.140.749 I llama_completion: interactive mode on.
+0.12.140.754 I sampler seed: 4294967295
+0.12.140.761 I sampler params: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	dry_multiplier = 0.000, dry_base = 1.750, dry_allowed_length = 2, dry_penalty_last_n = 64
+	top_k = 20, top_p = 0.950, min_p = 0.050, xtc_probability = 0.000, xtc_threshold = 0.100, typical_p = 1.000, top_n_sigma = -1.000, temp = 0.000
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000, adaptive_target = -1.000, adaptive_decay = 0.900
+0.12.140.764 I sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> greedy 
+0.12.140.764 I generate: n_ctx = 262144, n_batch = 2048, n_predict = 32, n_keep = 0
+0.12.140.765 I 
+0.12.140.765 I == Running in interactive mode. ==
+0.12.140.765 I  - Press Ctrl+C to interject at any time.
+0.12.140.765 I  - Press Return to return control to the AI.
+ - To return control without starting a new line, end your input with '/'.
+ - If you want to submit another line, end your input with '\'.
+0.12.140.766 I  - Not using system message. To change it, set a different value via -sys PROMPT
+0.12.140.766 I 
+The history of computing is a long and winding road. It begins with mechanical calculating devices in the nineteenth century, moves through the relay computers of the nineteen thirties and forties, the vacuum tube machines that followed them, the transistor revolution of the nineteen fifties, and the integrated circuit era that made microprocessors possible. Each generation of hardware brought new programming languages, new operating systems, and new ideas about how people and machines should work together. Operating systems grew from simple batch monitors into complex multitasking kernels with virtual memory, file systems, and networking stacks. Compilers evolved from hand written assemblers into optimizing toolchains. High level languages arrived, spread, and diversified. Databases grew from flat files into relational systems, then into distributed stores. The graphical user interface replaced the command line for most users, while the internet connected machines across the world and turned software into a service. Machine learning arrived next, and neural networks moved from research curiosities into everyday tools. The history of computing is not just a story of circuits and code. It is a story of how we think, how we organize knowledge, and how we imagine
+> EOF by user
+
+
+0.29.674.286 I common_perf_print:    sampling time =      14.74 ms
+0.29.674.291 I common_perf_print:    samplers time =       7.85 ms /   222 tokens
+0.29.674.295 I common_perf_print:        load time =   11881.86 ms
+0.29.674.301 I common_perf_print: prompt eval time =    1913.85 ms /   190 tokens (   10.07 ms per token,    99.28 tokens per second)
+0.29.674.306 I common_perf_print:        eval time =   15100.95 ms /    31 runs   (  487.13 ms per token,     2.05 tokens per second)
+0.29.674.307 I common_perf_print:       total time =   17535.83 ms /   221 tokens
+0.29.674.310 I common_perf_print: unaccounted time =     506.29 ms /   2.9 %      (total - sampling - prompt eval - eval) / (total)
+0.29.674.310 I common_perf_print:    graphs reused =         31
+0.29.674.312 I common_perf_print:   graph reallocs =          0    /     0        (same size) / (changed size)

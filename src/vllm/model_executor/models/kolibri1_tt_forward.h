@@ -146,6 +146,13 @@ struct Kolibri1TTStreamingDeviceContext {
   int64_t readback_verified_bytes = 0; // slot bytes verified vs the shadow
   int64_t swap_fills = 0;              // fills that evicted a resident
   int64_t memo_hits = 0;               // dequant memo hits
+  int64_t memo_misses = 0;             // dequant memo misses
+  // The memo LRU clock: monotonic, stamped on every hit and every fill.
+  uint64_t memo_clock = 0;
+  // The previous forward's memo-counter totals (the per-step delta report).
+  int64_t memo_prev_hits = 0;
+  int64_t memo_prev_misses = 0;
+  int64_t memo_prev_fills = 0;
   int64_t dram_free_before_staging = 0;
   int64_t dram_free_after_staging = 0;
   bool built = false;
@@ -155,6 +162,11 @@ struct Kolibri1TTStreamingDeviceContext {
   // entry is also invalid when the expert's slot moved.
   struct SlotDequant {
     int64_t slot = -1;
+    // LRU stamp (the owning context's memo_clock at the last touch). The
+    // eviction victim is the SMALLEST stamp — the least recently used
+    // entry — not the smallest key (the pre-LRU order, which always
+    // sacrificed the lowest layers' entries to every other layer's miss).
+    uint64_t stamp = 0;
     std::shared_ptr<void> owner;
     vt::Tensor gate, up, down;  // bf16 [n, k] device views
     // The memo entry OWNS its staged device tensors (opaque
@@ -175,15 +187,17 @@ using Kolibri1TTMemo =
     std::map<std::pair<int64_t, int64_t>,
              Kolibri1TTStreamingDeviceContext::SlotDequant>;
 
-// Evicts `memo` down to `cap` - 1 entries, smallest key first, so the
-// caller's IMMEDIATELY FOLLOWING emplace lands at size <= cap and is never
-// the eviction victim. The caller must emplace right after this returns and
-// must not hold iterators across the call. Evicting AFTER the emplace (the
-// old order) erased the just-emplaced entry once the memo's smallest key
-// caught up to the current (layer, expert) — a dangling-iterator
-// use-after-free that fed freed dequant buffers to the expert GEMMs and
-// made the decode run-to-run nondeterministic (host-side testable, no
-// card: tests/vllm/models/test_kolibri1_tt.cpp).
+// Evicts `memo` down to `cap` - 1 entries, the LEAST RECENTLY USED entry
+// first (smallest `SlotDequant::stamp`; ties break to the smallest key for
+// determinism), so the caller's IMMEDIATELY FOLLOWING emplace lands at size
+// <= cap and is never the eviction victim. The caller must emplace right
+// after this returns and must not hold iterators across the call. Evicting
+// AFTER the emplace (the old order) erased the just-emplaced entry — a
+// dangling-iterator use-after-free that fed freed dequant buffers to the
+// expert GEMMs and made the decode run-to-run nondeterministic (host-side
+// testable, no card: tests/vllm/models/test_kolibri1_tt.cpp). The stamp
+// discipline is the caller's: stamp the entry on every hit and on every
+// fill with the context's monotonic memo_clock.
 void Kolibri1TTMemoEvictForEmplace(Kolibri1TTMemo& memo, size_t cap);
 
 // Builds the streaming context: the B1 streaming plan over the REAL

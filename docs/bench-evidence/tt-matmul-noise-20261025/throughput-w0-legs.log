@@ -1,0 +1,30 @@
+=== leg 1 shipped start 1792986405.615926650 ===
+=== leg 1 shipped rc=0 wall=882.719681029 ===
+[flint-tt-w0] first-token logits: max_abs=3.200e+01 rms=5.930e+00 rel_rms=2.579e-01 (n=750720)
+[flint-tt-w0] greedy chain match=1/8 dev=[ 269 269 269 269 269 140759 269 269 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 18 | 18 passed | 0 failed |
+=== leg 1 hifi4 start 1792987288.342504932 ===
+=== leg 1 hifi4 rc=1 wall=857.872573199 ===
+[flint-tt-w0] first-token logits: max_abs=3.275e+01 rms=5.085e+00 rel_rms=2.212e-01 (n=750720)
+[flint-tt-w0] greedy chain match=0/8 dev=[ 269 6963 332 269 332 116253 12 332 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 18 | 17 passed | 1 failed |
+=== leg 2 shipped start 1792988146.222407636 ===
+=== leg 2 shipped rc=0 wall=859.390176239 ===
+[flint-tt-w0] first-token logits: max_abs=3.200e+01 rms=5.930e+00 rel_rms=2.579e-01 (n=750720)
+[flint-tt-w0] greedy chain match=1/8 dev=[ 269 269 269 269 269 140759 269 269 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 18 | 18 passed | 0 failed |
+=== leg 2 hifi4 start 1792989005.620141275 ===
+=== leg 2 hifi4 rc=1 wall=855.957599905 ===
+[flint-tt-w0] first-token logits: max_abs=3.275e+01 rms=5.085e+00 rel_rms=2.212e-01 (n=750720)
+[flint-tt-w0] greedy chain match=0/8 dev=[ 269 6963 332 269 332 116253 12 332 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 18 | 17 passed | 1 failed |
+=== leg 3 shipped start 1792989861.584975735 ===
+=== leg 3 shipped rc=0 wall=853.372737753 ===
+[flint-tt-w0] first-token logits: max_abs=3.200e+01 rms=5.930e+00 rel_rms=2.579e-01 (n=750720)
+[flint-tt-w0] greedy chain match=1/8 dev=[ 269 269 269 269 269 140759 269 269 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 18 | 18 passed | 0 failed |
+=== leg 3 hifi4 start 1792990714.964731301 ===
+=== leg 3 hifi4 rc=1 wall=846.107298901 ===
+[flint-tt-w0] first-token logits: max_abs=3.275e+01 rms=5.085e+00 rel_rms=2.212e-01 (n=750720)
+[flint-tt-w0] greedy chain match=0/8 dev=[ 269 6963 332 269 332 116253 12 332 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 18 | 17 passed | 1 failed |

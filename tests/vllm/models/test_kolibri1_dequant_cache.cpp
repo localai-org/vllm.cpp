@@ -22,17 +22,42 @@
 //     on the hardened pool, a second return now throws instead).
 //  4. LRU VICTIM: the evicting budget evicts the LEAST recently used entry,
 //     not the most recent one (distinguished by which key hits next).
-//  5. DEFAULT OFF: `ProcessCache()` with `VT_KOLIBRI1_DEQUANT_CACHE_MB`
-//     unset is disabled (budget 0), pinned in a fork/exec'd helper whose
-//     environment provably lacks the variable. POSIX-only probe (fork/exec):
-//     preprocessor-gated so the file compiles under MSVC, where the probe is
-//     disabled-and-documented (maint-bot P2 on PR #3414).
+//  5. DEFAULT ON: `ProcessCache()` with `VT_KOLIBRI1_DEQUANT_CACHE_MB` unset
+//     is an ENABLED cache whose budget is DERIVED from the host's available
+//     memory, pinned in a fork/exec'd helper whose environment provably lacks
+//     the variable. POSIX-only probe (fork/exec): preprocessor-gated so the
+//     file compiles under MSVC, where the probe is disabled-and-documented
+//     (maint-bot P2 on PR #3414). THIS CASE USED TO ASSERT THE OPPOSITE (the
+//     cache OFF by default); the default flipped on 2026-10-20 because the
+//     cache is worth more than 2x on CPU decode, and the case was rewritten
+//     deliberately rather than deleted.
 //  6. RELOAD IDENTITY: a model reloaded at REUSED weight-buffer addresses
 //     (same geometry, different bytes) is served its own decode, never the
 //     previous model's cached bytes (maint-bot P1a on PR #3414).
 //  7. LEASE LIFETIME: a hit held live by one caller keeps its bytes intact
 //     while a second, barrier-synchronized caller evicts its entry and
 //     reuses the freed memory for scratch decodes (maint-bot P1b on PR #3414).
+//  8. THE KNOB: `0` disables, an explicit value sets the budget EXACTLY, and
+//     an unparseable value falls back to the default policy (it must not
+//     silently switch a default-ON lever off). Same fork/exec'd helper.
+//  9. THE POLICY: the pure derivation (floor, cap, divisor, the unknown
+//     nominal, the MEASURED KNEE and the HOST THRESHOLD) is pinned without
+//     reading the host, so a policy change is a deterministic red and not a
+//     race against the machine's memory. The policy reads the host's HONEST
+//     available memory, the maximum of the process-start reading and the
+//     reading at plan time: our own 74 GB checkpoint load depresses
+//     MemAvailable (66 GiB) under the host's idle reading (~145 GiB), and a
+//     budget derived from the depressed reading lands BELOW the knee, where
+//     the cache thrashes and the decode throughput is indistinguishable from
+//     the cache being off.
+// 12. THE SAMPLING MOMENT: the plan's source reading is that honest maximum,
+//     the budget is the policy applied to it, and the process-start reading
+//     was really taken (a zero would mean the capture never happened).
+// 10. BYTE IDENTITY AGAINST THE PRODUCTION UNCACHED PATH: the cached bytes
+//     are byte-identical to the bytes the PRODUCTION uncached dequant
+//     (`DequantFp8BlockUncached`, the body the forward runs with the cache
+//     disabled) produces for the same weight, cold and hot. The cache is a
+//     caching change only, and this is where that is proved.
 //
 // KNOWN LIMITS: byte-identity cannot catch a key weakened to scale-pointer
 // only (mitigated by weight-owned process-lifetime storage, not by a test),
@@ -47,6 +72,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -62,6 +88,7 @@
 
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
+#include "vllm/model_executor/models/kolibri1_forward.h"  // the uncached dequant
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vt/device.h"
 
@@ -164,6 +191,64 @@ std::vector<uint16_t> RefDecode(const Fp8BlockWeight& w) {
       sc_cols, 0, w.n, w.k, w.block_n, w.block_k, out.data());
   return out;
 }
+
+#if !defined(_WIN32)
+// Exec the default-budget probe helper with a provably EMPTY environment and
+// the given mode, and return its exit status (-1 when the child did not exit
+// normally). The helper sets the knob itself for every mode except the
+// default one, so the environment stays empty in every case and the default
+// mode really observes an unset variable. `out` receives the helper's report
+// (its budget line on stdout) when it is not null.
+int RunHelper(const char* mode, std::string* out) {
+  int fds[2] = {-1, -1};
+  if (pipe(fds) != 0) return -1;
+  const pid_t pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    return -1;
+  }
+  if (pid == 0) {
+    close(fds[0]);
+    if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
+    close(fds[1]);
+    char* envp[] = {nullptr};  // empty environment: the var is provably unset
+    if (mode == nullptr) {
+      execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper",
+             static_cast<char*>(nullptr), envp);
+    } else {
+      execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper",
+             const_cast<char*>(mode), static_cast<char*>(nullptr), envp);
+    }
+    _exit(127);  // exec failed — not a pass
+  }
+  close(fds[1]);
+  char buf[256];
+  ssize_t n = 0;
+  while ((n = read(fds[0], buf, sizeof(buf))) > 0) {
+    if (out != nullptr) out->append(buf, static_cast<size_t>(n));
+  }
+  close(fds[0]);
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid) return -1;
+  if (!WIFEXITED(status)) return -1;
+  return WEXITSTATUS(status);
+}
+
+// Reads one `key=value` field out of the helper's report. `found` says
+// whether the field was there at all: a missing field is a failure of the
+// report, not a zero.
+uint64_t FieldValue(const std::string& text, const char* key, bool* found) {
+  const std::string needle = std::string(key) + "=";
+  const size_t at = text.find(needle);
+  if (at == std::string::npos) {
+    *found = false;
+    return 0;
+  }
+  *found = true;
+  return std::strtoull(text.c_str() + at + needle.size(), nullptr, 10);
+}
+#endif  // !_WIN32
 
 uint64_t ChainStep(uint64_t h, const uint16_t* p, size_t count) {
   for (size_t i = 0; i < count; ++i) {
@@ -311,9 +396,11 @@ TEST_CASE("kolibri1 dequant cache: the evicting budget evicts the LRU entry, "
   CHECK_EQ(counters.misses - misses0, 4);
 }
 
-// ── 5. Default off: ProcessCache() with the env var unset is disabled ───────
-TEST_CASE("kolibri1 dequant cache: ProcessCache() defaults to a disabled "
-          "cache when VT_KOLIBRI1_DEQUANT_CACHE_MB is unset") {
+// ── 5. The DEFAULT is ON: the unset env var yields an enabled cache ──
+TEST_CASE("kolibri1 dequant cache: ProcessCache() with VT_KOLIBRI1_DEQUANT_CACHE_MB "
+          "unset takes the DEFAULT policy: a budget at or above the measured "
+          "knee on a host that can afford it, and a clean disable on a host "
+          "that cannot") {
 #if defined(_WIN32)
   // PORTABILITY (maint-bot P2 on PR #3414): this probe exec's the helper
   // binary with a provably empty environment, which needs fork/execle —
@@ -321,29 +408,145 @@ TEST_CASE("kolibri1 dequant cache: ProcessCache() defaults to a disabled "
   // and documented here; the portable cache cases (1-4, 6, 7) still run.
   // Re-enable by porting the probe to CreateProcess with an empty
   // environment block.
-  WARN("default-off probe disabled on Windows (POSIX fork/exec only)");
+  WARN("default-budget probe disabled on Windows (POSIX fork/exec only)");
 #else
   // The budget is read ONCE per process at the static init inside
   // ProcessCache(). To pin the DEFAULT (and not whatever this process
   // happens to carry, or an earlier test case has already latched), the
   // assertion runs in a fork/exec'd helper binary launched with an
   // environment that provably lacks the variable; the helper exits 0 iff
-  // budget_bytes() == 0 and !enabled().
+  // the cache's budget is EXACTLY the default policy applied to the
+  // available-memory reading it derived it from, and the cache's enabled
+  // state agrees with that budget.
+  //
+  // The default is ON — at or above the measured knee — on a host that can
+  // afford the knee, and a CLEAN DISABLE (budget 0, the uncached path) on a
+  // host that cannot. The helper checks the policy's answer, so the case
+  // holds on every host; the knee and the disable rule are pinned by the
+  // pure policy case below, which does not read the host at all.
   REQUIRE_EQ(std::getenv("VT_KOLIBRI1_DEQUANT_CACHE_MB"),
              static_cast<char*>(nullptr));
-  const pid_t pid = fork();
-  REQUIRE(pid >= 0);
-  if (pid == 0) {
-    char* envp[] = {nullptr};  // empty environment: the var is provably unset
-    execle(KOLIBRI_DEQUANT_CACHE_DEFAULT_HELPER, "helper", static_cast<char*>(nullptr),
-           envp);
-    _exit(127);  // exec failed — not a pass
-  }
-  int status = 0;
-  REQUIRE_EQ(waitpid(pid, &status, 0), pid);
-  REQUIRE(WIFEXITED(status));
-  CHECK_EQ(WEXITSTATUS(status), 0);
+  CHECK_EQ(RunHelper(nullptr, nullptr), 0);
 #endif
+}
+
+// ── 8. The knob: 0 disables, N is exact, junk falls back to the default ─
+TEST_CASE("kolibri1 dequant cache: VT_KOLIBRI1_DEQUANT_CACHE_MB disables at 0, "
+          "sets the budget exactly, and falls back to the default when "
+          "unparseable") {
+#if defined(_WIN32)
+  WARN("default-budget probe disabled on Windows (POSIX fork/exec only)");
+#else
+  // The OFF switch: the escape hatch that restores the original threaded
+  // pool decode, byte for byte.
+  CHECK_EQ(RunHelper("0", nullptr), 0);
+  // The EXACT budget: the shape the 2026-10-20 measurement was taken in
+  // (16 GiB), and the shape a caller pins when it wants a reproducible
+  // residency.
+  CHECK_EQ(RunHelper("16384", nullptr), 0);
+  CHECK_EQ(RunHelper("1", nullptr), 0);
+  // A MALFORMED value must not switch a default-ON lever off: the default
+  // policy applies instead.
+  CHECK_EQ(RunHelper("not-a-number", nullptr), 0);
+  CHECK_EQ(RunHelper("", nullptr), 0);
+  // A negative value is not a budget either.
+  CHECK_EQ(RunHelper("-1", nullptr), 0);
+#endif
+}
+
+// ── 9. The policy: pure, so a policy change is a deterministic red ─
+TEST_CASE("kolibri1 dequant cache: the default budget policy floors at the "
+          "measured knee, disables a host that cannot afford it, and reads "
+          "the host's memory before the checkpoint load") {
+  using namespace vllm::kolibri1_dequant_cache;
+  // An UNKNOWN memory report uses the KNEE: not a refusal (the house rule:
+  // an unknown budget must not become a false refusal) and never a sub-knee
+  // budget. A host that cannot hold the knee degrades to the uncached path
+  // through the allocation fallback.
+  CHECK_EQ(DefaultBudgetBytesFor(0), kDefaultBudgetKneeBytes);
+  // THE KNEE (2026-07-20, re-measured 2026-10-21; node 3, aarch64, 3.4 GHz,
+  // 32 threads, empty-prompt 32-token decode): 16 GiB is where the cache
+  // stops thrashing. At 8.25 GiB the measured hit rate was 33% with 16068
+  // evictions, and the decode throughput (3.84 tok/s) was indistinguishable
+  // from the cache being off (3.62 tok/s), against 6.38 tok/s at an explicit
+  // 16 GiB. A host that can afford the knee must not be served a budget
+  // below it.
+  CHECK_EQ(DefaultBudgetBytesFor(66ull << 30), kDefaultBudgetKneeBytes);
+  CHECK_EQ(DefaultBudgetBytesFor(64ull << 30), kDefaultBudgetKneeBytes);
+  CHECK_EQ(DefaultBudgetBytesFor(128ull << 30), kDefaultBudgetKneeBytes);
+  // THE DIVISOR: above the knee the budget is the available eighth, until
+  // the cap.
+  CHECK_EQ(DefaultBudgetBytesFor(200ull << 30), 25ull << 30);
+  CHECK_EQ(DefaultBudgetBytesFor(512ull << 30), kDefaultBudgetMaxBytes);
+  // A HOST THAT CANNOT AFFORD THE KNEE DISABLES CLEANLY. A budget of 0 is
+  // the UNCACHED path (the original threaded pool dequant), byte for byte.
+  // A sub-knee cache is WORSE than useless: it costs the memory and buys
+  // nothing, so the policy refuses it instead of serving one.
+  CHECK_EQ(DefaultBudgetBytesFor(1ull << 30), 0);
+  CHECK_EQ(DefaultBudgetBytesFor(8ull << 30), 0);
+  CHECK_EQ(DefaultBudgetBytesFor(kDefaultBudgetKneeBytes +
+                                  kDefaultBudgetHostReserveBytes - 1),
+           0);
+  // ... and the first reading that affords the knee is served the knee.
+  CHECK_EQ(DefaultBudgetBytesFor(kDefaultBudgetKneeBytes +
+                                  kDefaultBudgetHostReserveBytes),
+           kDefaultBudgetKneeBytes);
+  // THE HONEST READING: the MAXIMUM of the process-start reading and the
+  // reading at plan time. Our own 74 GB checkpoint load depresses
+  // MemAvailable (66 GiB) under the host's idle reading (~212 GiB), and the
+  // budget must not be derived from the depressed one.
+  CHECK_EQ(HonestAvailableBytes(212ull << 30, 66ull << 30), 212ull << 30);
+  CHECK_EQ(HonestAvailableBytes(66ull << 30, 212ull << 30), 212ull << 30);
+  CHECK_EQ(HonestAvailableBytes(66ull << 30, 66ull << 30), 66ull << 30);
+  CHECK_EQ(HonestAvailableBytes(0, 66ull << 30), 66ull << 30);
+  // THE DEPRESSED-READING CASE: a plan-time reading of 66 GiB under a
+  // process-start reading of 212 GiB lands on the honest eighth, above the
+  // knee; the same 66 GiB alone lands on the knee.
+  CHECK(DefaultBudgetBytesFor(
+            HonestAvailableBytes(212ull << 30, 66ull << 30)) >=
+        kDefaultBudgetKneeBytes);
+  CHECK_EQ(DefaultBudgetBytesFor(
+               HonestAvailableBytes(212ull << 30, 66ull << 30)),
+           (212ull << 30) / 8);
+  CHECK_EQ(DefaultBudgetBytesFor(
+               HonestAvailableBytes(66ull << 30, 66ull << 30)),
+           kDefaultBudgetKneeBytes);
+  // The policy never leaves the documented band, for every pair of the two
+  // moments the plan can combine: a budget is either DISABLED (0) or at or
+  // above the knee, and never above the cap.
+  for (uint64_t avail = 0; avail <= (1ull << 40); avail += (4ull << 30)) {
+    for (uint64_t start = 0; start <= (1ull << 40); start += (4ull << 30)) {
+      const uint64_t b =
+          DefaultBudgetBytesFor(HonestAvailableBytes(start, avail));
+      const bool in_band =
+          (b == 0) ||
+          (b >= kDefaultBudgetKneeBytes && b <= kDefaultBudgetMaxBytes);
+      CHECK(in_band);
+    }
+  }
+}
+
+// ── 13. The RED-FIRST WITNESS: a load-depressed reading lands at or above
+// the knee, never below it ──────────────────────────────────────────────────
+TEST_CASE("kolibri1 dequant cache: a load-depressed reading must not land "
+          "below the measured knee") {
+  // THE RED-FIRST CASE (2026-10-21). The default budget computed from a
+  // LOAD-DEPRESSED reading — what /proc/meminfo reads while our own 74 GB
+  // checkpoint load fills the page cache — must not land BELOW the measured
+  // knee: 16 GiB is where the cache stops thrashing, and a budget under it
+  // costs the memory and buys nothing (3.84 tok/s against 3.62 tok/s with
+  // the cache off, 2026-10-21, node 3).
+  //
+  // The knee is a LITERAL here on purpose: this case compiles against the
+  // pre-repair policy as well, so the red is an ASSERTION FAILURE and not a
+  // compile error. Against the pre-repair policy the depressed reading
+  // divided by eight lands at 8.25 GiB and this case FAILS; against the
+  // repaired policy the knee floor serves 16 GiB and it PASSES.
+  const uint64_t kDepressedReading = 66ull << 30;  // MemAvailable during the load
+  const uint64_t budget =
+      vllm::kolibri1_dequant_cache::DefaultBudgetBytesFor(kDepressedReading);
+  const bool at_or_above_the_knee = (budget == 0) || (budget >= (16ull << 30));
+  CHECK(at_or_above_the_knee);
 }
 
 // ── 6. Reload identity: reused weight addresses, different model (P1a) ─────
@@ -456,4 +659,130 @@ TEST_CASE("kolibri1 dequant cache: a held hit's bytes survive a concurrent "
   (void)cache.GetOrDequant(wA);
   CHECK(counters.evictions - evictions0 >= 1);
   CHECK(counters.misses - misses0 >= 1);
+}
+
+// ── 12. The SAMPLING MOMENT: the plan reads the host at process start ─
+TEST_CASE("kolibri1 dequant cache: the plan's source reading is the honest "
+          "maximum of the process-start and plan-time readings") {
+  using namespace vllm::kolibri1_dequant_cache;
+#if defined(_WIN32)
+  WARN("default-budget probe disabled on Windows (POSIX fork/exec only)");
+#else
+  // The PROCESS-START reading was taken: /proc/meminfo is readable at process
+  // start, so a zero here would mean the capture never happened.
+  CHECK(kStartAvailableBytes > 0ull);
+  // THIS process's plan reads the process-start reading, and its source
+  // reading is the honest maximum of the two moments.
+  const auto& own = vllm::kolibri1_dequant_cache::ProcessCache();
+  CHECK_EQ(own.budget_start_bytes(), kStartAvailableBytes);
+  CHECK_EQ(own.budget_source_bytes(),
+           vllm::kolibri1_dequant_cache::HonestAvailableBytes(
+               own.budget_start_bytes(), own.budget_plan_bytes()));
+  CHECK_EQ(own.budget_bytes(),
+           vllm::kolibri1_dequant_cache::DefaultBudgetBytesFor(
+               own.budget_source_bytes()));
+  // The DEFAULT plan, in a process whose environment provably lacks the knob.
+  std::string out;
+  REQUIRE_EQ(RunHelper(nullptr, &out), 0);
+  bool found = false;
+  const uint64_t budget = FieldValue(out, "budget_bytes", &found);
+  REQUIRE(found);
+  const uint64_t source = FieldValue(out, "budget_source_bytes", &found);
+  REQUIRE(found);
+  const uint64_t start = FieldValue(out, "budget_start_bytes", &found);
+  REQUIRE(found);
+  const uint64_t plan = FieldValue(out, "budget_plan_bytes", &found);
+  REQUIRE(found);
+  // The source reading is the HONEST one: the maximum of the two moments,
+  // so a checkpoint load that depressed the plan-time reading cannot talk the
+  // budget down.
+  CHECK_EQ(source, HonestAvailableBytes(start, plan));
+  // And the budget is the policy applied to that reading.
+  CHECK_EQ(budget, DefaultBudgetBytesFor(source));
+  // The KNEE: a budget is either DISABLED (the host cannot afford the knee)
+  // or at or above it, so the default cannot ship the thrashing shape.
+  if (budget != 0) {
+    CHECK(budget >= kDefaultBudgetKneeBytes);
+  }
+#endif
+}
+
+// ── 10. Byte identity against the PRODUCTION uncached dequant ────────────────
+TEST_CASE("kolibri1 dequant cache: the cached bytes are byte-identical to the "
+          "production uncached dequant of the same weight") {
+  // THE CLAIM THIS CHANGE MUST NOT BREAK. The cache is a CACHING change, so
+  // the bytes it serves are the bytes the uncached path would have produced.
+  // The reference here is the PRODUCTION uncached dequant itself
+  // (`DequantFp8BlockUncached` — the body the CPU forward runs when the cache
+  // is disabled), not a transcription of it, so a divergence in either
+  // implementation is caught.
+  const int64_t kN = 512, kK = 2560;  // the shape the CACHE MISMATCH named
+  const Fp8BlockWeight w = MakeWeight(kN, kK, 128, 128, 5);
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  vllm::dense_attn::Dev d{vt::GetBackend(vt::DeviceType::kCPU), queue};
+  const vllm::dense_attn::DBuf uncached = vllm::DequantFp8BlockUncached(d, w);
+  const size_t bytes = static_cast<size_t>(kN * kK) * sizeof(uint16_t);
+  REQUIRE_EQ(uncached.bytes(), bytes);
+
+  Cache cache(bytes * 4);
+  // The COLD miss: the bytes the cache stores.
+  const auto cold = cache.GetOrDequant(w);
+  REQUIRE(static_cast<bool>(cold));
+  CHECK_EQ(std::memcmp(cold.data(), uncached.ptr(), bytes), 0);
+  // The HOT hit: the bytes the cache serves, which are the SAME resident
+  // bytes (a hit never re-decodes).
+  const auto hot = cache.GetOrDequant(w);
+  REQUIRE(static_cast<bool>(hot));
+  CHECK_EQ(std::memcmp(hot.data(), uncached.ptr(), bytes), 0);
+  CHECK_EQ(hot.data(), cold.data());
+  // And the cache really held it: the second call was a hit.
+  CHECK_EQ(vllm::kolibri1_dequant_cache::Counters().hits >= 1, true);
+}
+
+// ── 11. The fallback: a degraded cache leaves the forward on the uncached path
+TEST_CASE("kolibri1 dequant cache: a cache that cannot hold its bytes falls "
+          "back to the uncached path with the same bytes") {
+  // A weight no allocator can hold: 2^31 x 2^31 elements is 2^62 bf16
+  // values, 8 EiB. The decode allocation fails, so the cache degrades and
+  // hands back an EMPTY lease — the signal the production resolve reads as
+  // "use the uncached path". The forward must continue, not abort.
+  Fp8BlockWeight impossible;
+  impossible.n = 1ll << 31;
+  impossible.k = 1ll << 31;
+  impossible.block_n = 128;
+  impossible.block_k = 128;
+  impossible.packed.bytes = vllm::OwnedBytes(std::vector<uint8_t>(1, 0));
+  impossible.packed.dtype = vt::DType::kI8;
+  impossible.packed.rank = 2;
+  impossible.scale.bytes = vllm::OwnedBytes(std::vector<uint8_t>(4, 0));
+  impossible.scale.dtype = vt::DType::kF32;
+  impossible.scale.rank = 2;
+
+  Cache cache(1u << 30);
+  const auto& counters = vllm::kolibri1_dequant_cache::Counters();
+  const uint64_t failures0 = counters.alloc_failures;
+  const auto lease = cache.GetOrDequant(impossible);
+  CHECK(!static_cast<bool>(lease));    // the empty lease: the fallback signal
+  CHECK(!cache.enabled());              // the cache degraded itself
+  CHECK_EQ(cache.resident_bytes(), 0);  // and handed its memory back
+  CHECK_EQ(counters.alloc_failures - failures0, 1);
+
+  // The PRODUCTION resolve, on a REAL weight, with the degraded cache: it
+  // must take the uncached path and hand the GEMM the same bytes.
+  const int64_t kN = 64, kK = 512;
+  const Fp8BlockWeight w = MakeWeight(kN, kK, 32, 128, 7);
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  vllm::dense_attn::Dev d{vt::GetBackend(vt::DeviceType::kCPU), queue};
+  const auto degraded = vllm::ResolveFp8Projection(d, w, cache);
+  CHECK_EQ(degraded.cached, false);
+  const auto ref = RefDecode(w);
+  REQUIRE(degraded.wt.data != nullptr);
+  CHECK_EQ(std::memcmp(degraded.wt.data, ref.data(), ref.size() * 2), 0);
+
+  // And with a HEALTHY cache the same resolve takes the cached path and
+  // serves the same bytes: the fallback changes the route, not the result.
+  Cache healthy(1u << 30);
+  const auto cached = vllm::ResolveFp8Projection(d, w, healthy);
+  CHECK_EQ(cached.cached, true);
+  CHECK_EQ(std::memcmp(cached.wt.data, ref.data(), ref.size() * 2), 0);
 }

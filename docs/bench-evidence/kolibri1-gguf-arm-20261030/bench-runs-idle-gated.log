@@ -1,0 +1,332 @@
+idle-gate: load=16 busy=1 — waiting (2026-10-30T17:00:03+01:00)
+idle-gate: load=7 busy=2 — waiting (2026-10-30T17:01:03+01:00)
+=== apex-imicro threads=16 rep=1 2026-10-30T17:02:03+01:00 load=4.49 36.38 63.66 2/3526 112325
+Request throughput (req/s):                0.09        
+Output token throughput (tok/s):           2.94        
+Total token throughput (tok/s):            14.73       
+-------- Time to First Token --------
+Mean TTFT (ms):                            20357.53    
+Median TTFT (ms):                          20357.53    
+P99 TTFT (ms):                             21396.38    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            747.42      
+Median TPOT (ms):                          747.42      
+P99 TPOT (ms):                             1011.28     
+-------- Inter-token Latency --------
+Mean ITL (ms):                             772.33      
+Median ITL (ms):                           599.56      
+P99 ITL (ms):                              1322.92     
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            43527.47    
+Median E2EL (ms):                          43527.47    
+P99 E2EL (ms):                             50668.35    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 11.79       
+Prefill token throughput (tok/s, in/TTFT): 6.30        
+Output (decode) token throughput (tok/s):  2.94        
+Mean per-stream decode rate (tok/s):       1.34        
+====================================================
+idle-gate: load=140 busy=3 — waiting (2026-10-30T17:09:28+01:00)
+idle-gate: load=134 busy=1 — waiting (2026-10-30T17:10:28+01:00)
+idle-gate: load=69 busy=1 — waiting (2026-10-30T17:11:28+01:00)
+idle-gate: load=54 busy=1 — waiting (2026-10-30T17:12:28+01:00)
+idle-gate: load=101 busy=1 — waiting (2026-10-30T17:13:28+01:00)
+idle-gate: load=119 busy=2 — waiting (2026-10-30T17:14:28+01:00)
+idle-gate: load=106 busy=2 — waiting (2026-10-30T17:15:28+01:00)
+idle-gate: load=69 busy=3 — waiting (2026-10-30T17:16:28+01:00)
+idle-gate: load=108 busy=2 — waiting (2026-10-30T17:17:28+01:00)
+idle-gate: load=122 busy=2 — waiting (2026-10-30T17:18:28+01:00)
+idle-gate: load=127 busy=2 — waiting (2026-10-30T17:19:28+01:00)
+idle-gate: load=51 busy=0 — waiting (2026-10-30T17:20:29+01:00)
+idle-gate: load=20 busy=0 — waiting (2026-10-30T17:21:29+01:00)
+=== apex-imicro threads=16 rep=2 2026-10-30T17:22:29+01:00 load=8.41 59.64 71.61 1/3524 6702
+Request throughput (req/s):                0.16        
+Output token throughput (tok/s):           4.97        
+Total token throughput (tok/s):            24.87       
+-------- Time to First Token --------
+Mean TTFT (ms):                            16435.08    
+Median TTFT (ms):                          16435.09    
+P99 TTFT (ms):                             16743.77    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            301.26      
+Median TPOT (ms):                          301.26      
+P99 TPOT (ms):                             304.13      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             301.26      
+Median ITL (ms):                           309.01      
+P99 ITL (ms):                              365.62      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            25774.14    
+Median E2EL (ms):                          25774.13    
+P99 E2EL (ms):                             25994.01    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 19.90       
+Prefill token throughput (tok/s, in/TTFT): 7.80        
+Output (decode) token throughput (tok/s):  4.97        
+Mean per-stream decode rate (tok/s):       3.32        
+====================================================
+=== apex-imicro threads=16 rep=3 2026-10-30T17:29:06+01:00 load=11.10 19.89 48.36 2/3370 8004
+Request throughput (req/s):                0.16        
+Output token throughput (tok/s):           4.97        
+Total token throughput (tok/s):            24.91       
+-------- Time to First Token --------
+Mean TTFT (ms):                            16326.93    
+Median TTFT (ms):                          16326.95    
+P99 TTFT (ms):                             16453.81    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            303.51      
+Median TPOT (ms):                          303.51      
+P99 TPOT (ms):                             305.97      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             303.51      
+Median ITL (ms):                           313.20      
+P99 ITL (ms):                              329.92      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            25735.85    
+Median E2EL (ms):                          25735.85    
+P99 E2EL (ms):                             25786.52    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 19.93       
+Prefill token throughput (tok/s, in/TTFT): 7.86        
+Output (decode) token throughput (tok/s):  4.97        
+Mean per-stream decode rate (tok/s):       3.29        
+====================================================
+=== apex-imicro threads=32 rep=1 2026-10-30T17:35:44+01:00 load=10.66 9.51 33.14 1/3353 11082
+Request throughput (req/s):                0.20        
+Output token throughput (tok/s):           6.49        
+Total token throughput (tok/s):            32.51       
+-------- Time to First Token --------
+Mean TTFT (ms):                            9612.77     
+Median TTFT (ms):                          9612.78     
+P99 TTFT (ms):                             9704.60     
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            326.00      
+Median TPOT (ms):                          326.00      
+P99 TPOT (ms):                             331.20      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             326.00      
+Median ITL (ms):                           336.19      
+P99 ITL (ms):                              355.75      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            19718.68    
+Median E2EL (ms):                          19718.68    
+P99 E2EL (ms):                             19788.00    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 26.02       
+Prefill token throughput (tok/s, in/TTFT): 13.34       
+Output (decode) token throughput (tok/s):  6.49        
+Mean per-stream decode rate (tok/s):       3.07        
+====================================================
+idle-gate: load=17 busy=0 — waiting (2026-10-30T17:42:10+01:00)
+=== apex-imicro threads=32 rep=2 2026-10-30T17:43:10+01:00 load=7.15 6.83 22.49 2/3351 12538
+Request throughput (req/s):                0.20        
+Output token throughput (tok/s):           6.55        
+Total token throughput (tok/s):            32.82       
+-------- Time to First Token --------
+Mean TTFT (ms):                            9627.11     
+Median TTFT (ms):                          9627.12     
+P99 TTFT (ms):                             9712.17     
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            319.52      
+Median TPOT (ms):                          319.52      
+P99 TPOT (ms):                             322.82      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             319.52      
+Median ITL (ms):                           329.29      
+P99 ITL (ms):                              351.26      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            19532.24    
+Median E2EL (ms):                          19532.24    
+P99 E2EL (ms):                             19549.51    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 26.26       
+Prefill token throughput (tok/s, in/TTFT): 13.32       
+Output (decode) token throughput (tok/s):  6.55        
+Mean per-stream decode rate (tok/s):       3.13        
+====================================================
+idle-gate: load=17 busy=0 — waiting (2026-10-30T17:49:33+01:00)
+=== apex-imicro threads=32 rep=3 2026-10-30T17:50:33+01:00 load=7.09 6.20 15.95 1/3345 13947
+Request throughput (req/s):                0.21        
+Output token throughput (tok/s):           6.58        
+Total token throughput (tok/s):            32.93       
+-------- Time to First Token --------
+Mean TTFT (ms):                            9608.70     
+Median TTFT (ms):                          9608.72     
+P99 TTFT (ms):                             9682.17     
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            318.03      
+Median TPOT (ms):                          318.03      
+P99 TPOT (ms):                             320.09      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             318.03      
+Median ITL (ms):                           328.38      
+P99 ITL (ms):                              343.79      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            19467.55    
+Median E2EL (ms):                          19467.54    
+P99 E2EL (ms):                             19477.11    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 26.35       
+Prefill token throughput (tok/s, in/TTFT): 13.35       
+Output (decode) token throughput (tok/s):  6.58        
+Mean per-stream decode rate (tok/s):       3.14        
+====================================================
+idle-gate: load=17 busy=0 — waiting (2026-10-30T17:56:56+01:00)
+=== fp8 threads=16 rep=1 2026-10-30T17:57:56+01:00 load=7.19 6.09 11.85 1/3356 15302
+Request throughput (req/s):                0.14        
+Output token throughput (tok/s):           4.44        
+Total token throughput (tok/s):            22.23       
+-------- Time to First Token --------
+Mean TTFT (ms):                            19524.90    
+Median TTFT (ms):                          19524.91    
+P99 TTFT (ms):                             20686.43    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            300.31      
+Median TPOT (ms):                          300.31      
+P99 TPOT (ms):                             300.33      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             300.31      
+Median ITL (ms):                           305.35      
+P99 ITL (ms):                              380.72      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            28834.51    
+Median E2EL (ms):                          28834.51    
+P99 E2EL (ms):                             29996.73    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 17.79       
+Prefill token throughput (tok/s, in/TTFT): 6.57        
+Output (decode) token throughput (tok/s):  4.44        
+Mean per-stream decode rate (tok/s):       3.33        
+====================================================
+=== fp8 threads=16 rep=2 2026-10-30T17:59:24+01:00 load=12.13 7.74 11.88 1/3444 15538
+Request throughput (req/s):                0.14        
+Output token throughput (tok/s):           4.46        
+Total token throughput (tok/s):            22.31       
+-------- Time to First Token --------
+Mean TTFT (ms):                            19417.37    
+Median TTFT (ms):                          19417.38    
+P99 TTFT (ms):                             20317.73    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            300.35      
+Median TPOT (ms):                          300.35      
+P99 TPOT (ms):                             301.02      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             300.35      
+Median ITL (ms):                           306.29      
+P99 ITL (ms):                              374.57      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            28728.28    
+Median E2EL (ms):                          28728.28    
+P99 E2EL (ms):                             29607.95    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 17.86       
+Prefill token throughput (tok/s, in/TTFT): 6.60        
+Output (decode) token throughput (tok/s):  4.46        
+Mean per-stream decode rate (tok/s):       3.33        
+====================================================
+=== fp8 threads=16 rep=3 2026-10-30T18:00:42+01:00 load=15.09 9.39 12.12 1/3440 15666
+Request throughput (req/s):                0.14        
+Output token throughput (tok/s):           4.48        
+Total token throughput (tok/s):            22.44       
+-------- Time to First Token --------
+Mean TTFT (ms):                            19306.82    
+Median TTFT (ms):                          19306.83    
+P99 TTFT (ms):                             20265.24    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            298.73      
+Median TPOT (ms):                          298.73      
+P99 TPOT (ms):                             299.00      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             298.73      
+Median ITL (ms):                           305.18      
+P99 ITL (ms):                              379.63      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            28567.40    
+Median E2EL (ms):                          28567.39    
+P99 E2EL (ms):                             29517.51    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 17.96       
+Prefill token throughput (tok/s, in/TTFT): 6.64        
+Output (decode) token throughput (tok/s):  4.48        
+Mean per-stream decode rate (tok/s):       3.35        
+====================================================
+=== fp8 threads=32 rep=1 2026-10-30T18:02:00+01:00 load=14.40 10.35 12.22 1/3436 15839
+Request throughput (req/s):                0.18        
+Output token throughput (tok/s):           5.77        
+Total token throughput (tok/s):            28.89       
+-------- Time to First Token --------
+Mean TTFT (ms):                            12910.29    
+Median TTFT (ms):                          12910.30    
+P99 TTFT (ms):                             13774.44    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            299.22      
+Median TPOT (ms):                          299.22      
+P99 TPOT (ms):                             300.71      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             299.22      
+Median ITL (ms):                           305.06      
+P99 ITL (ms):                              390.75      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            22186.06    
+Median E2EL (ms):                          22186.06    
+P99 E2EL (ms):                             23004.07    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 23.12       
+Prefill token throughput (tok/s, in/TTFT): 9.93        
+Output (decode) token throughput (tok/s):  5.77        
+Mean per-stream decode rate (tok/s):       3.34        
+====================================================
+idle-gate: load=22 busy=1 — waiting (2026-10-30T18:03:05+01:00)
+=== fp8 threads=32 rep=2 2026-10-30T18:04:05+01:00 load=8.77 11.00 12.31 1/3355 16586
+Request throughput (req/s):                0.18        
+Output token throughput (tok/s):           5.76        
+Total token throughput (tok/s):            28.85       
+-------- Time to First Token --------
+Mean TTFT (ms):                            12850.08    
+Median TTFT (ms):                          12850.09    
+P99 TTFT (ms):                             13817.70    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            302.27      
+Median TPOT (ms):                          302.27      
+P99 TPOT (ms):                             305.30      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             302.27      
+Median ITL (ms):                           308.23      
+P99 ITL (ms):                              386.89      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            22220.51    
+Median E2EL (ms):                          22220.51    
+P99 E2EL (ms):                             23094.29    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 23.09       
+Prefill token throughput (tok/s, in/TTFT): 9.98        
+Output (decode) token throughput (tok/s):  5.76        
+Mean per-stream decode rate (tok/s):       3.31        
+====================================================
+idle-gate: load=21 busy=0 — waiting (2026-10-30T18:05:09+01:00)
+=== fp8 threads=32 rep=3 2026-10-30T18:06:09+01:00 load=8.56 11.54 12.43 1/3361 16864
+Request throughput (req/s):                0.18        
+Output token throughput (tok/s):           5.80        
+Total token throughput (tok/s):            29.02       
+-------- Time to First Token --------
+Mean TTFT (ms):                            12792.27    
+Median TTFT (ms):                          12792.28    
+P99 TTFT (ms):                             13738.13    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            299.86      
+Median TPOT (ms):                          299.86      
+P99 TPOT (ms):                             302.14      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             299.86      
+Median ITL (ms):                           306.15      
+P99 ITL (ms):                              384.41      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            22087.82    
+Median E2EL (ms):                          22087.82    
+P99 E2EL (ms):                             22962.97    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 23.23       
+Prefill token throughput (tok/s, in/TTFT): 10.03       
+Output (decode) token throughput (tok/s):  5.80        
+Mean per-stream decode rate (tok/s):       3.33        
+====================================================

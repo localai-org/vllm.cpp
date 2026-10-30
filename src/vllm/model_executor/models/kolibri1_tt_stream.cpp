@@ -278,6 +278,14 @@ int64_t Kolibri1TTSlotShadow::VerifyReadback(int64_t layer, int64_t slot,
   return bytes;
 }
 
+const std::vector<uint8_t>& Kolibri1TTSlotShadow::Bytes(
+    int64_t layer, int64_t slot) const {
+  VT_CHECK(Has(layer, slot),
+           "kolibri1-tt B2b-ii: host bytes requested for an unfilled slot " +
+               kRow);
+  return bytes_[static_cast<size_t>(layer)][static_cast<size_t>(slot)];
+}
+
 bool Kolibri1TTSlotShadow::Has(int64_t layer, int64_t slot) const {
   const auto& per_layer = bytes_[static_cast<size_t>(layer)];
   return static_cast<int64_t>(per_layer.size()) > slot &&

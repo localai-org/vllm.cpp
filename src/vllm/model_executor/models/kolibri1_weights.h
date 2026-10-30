@@ -7,7 +7,7 @@
 // q/k RMS norms, and an MoE block on EVERY layer (384 routed experts top-6
 // plus one ungated shared expert).
 //
-// THE CHECKPOINT IS FP8 BLOCK-QUANTIZED (spec risk R1):
+// THE RELEASED CHECKPOINT IS FP8 BLOCK-QUANTIZED (spec risk R1):
 // quantization_config.weight_block_size = [128, 128] and every linear
 // projection ships a weight_scale_inv sibling. The loader stores the fp8
 // bytes RAW beside an f32-widened scale grid (the house Fp8BlockWeight, the
@@ -15,6 +15,14 @@
 // vs CPU-fp8-GEMM decision for the forward arm is the forward wave's and is
 // recorded there. `mlp.gate` (the router) is bf16 and lives in
 // modules_to_not_convert; a router that ships fp8 is refused.
+//
+// THE PLAIN BF16 ARM (spec .agents/specs/kolibri1-bf16-arm.md): a checkpoint
+// with NO quantization_config is a bf16 checkpoint — the upstream
+// `Aleph-Alpha/Kolibri-1-BF16` artifact. Its weights are read as they are:
+// no scale siblings, no dequant, and the same bf16 compute class the fp8
+// arm's decoded weights ride. The scheme is resolved ONCE (see
+// Kolibri1WeightScheme) and every later decision reads it, so the two arms
+// cannot be confused with each other.
 //
 // NAME RECONCILIATION (the mapper, kolibri1.py:258-266): the HF layout puts
 // the router gate at `mlp.gate`, the routed experts at `mlp.experts.N`, the
@@ -37,9 +45,37 @@ namespace vllm {
 
 class LoadedModel;  // model_registry.h
 
+// The checkpoint's WEIGHT SCHEME, resolved once from the config (spec
+// .agents/specs/kolibri1-bf16-arm.md).
+//
+//   kFp8Block  the released checkpoint: F8_E4M3 weights on the [128, 128]
+//              block grid with an f32 `weight_scale_inv` sibling each. The
+//              weights stay compressed at load and are dequantized in the
+//              forward.
+//   kBf16      a plain bf16 checkpoint: BF16 weights, NO scale siblings, no
+//              dequant. The upstream `Aleph-Alpha/Kolibri-1-BF16` artifact
+//              carries no `quantization_config` at all.
+//
+// Every other scheme is refused BY NAME, with a message that names the arms
+// that do exist.
+enum class Kolibri1WeightScheme {
+  kFp8Block,
+  kBf16,
+};
+
+// The scheme's name, for the refusal messages and for the record.
+const char* Kolibri1WeightSchemeName(Kolibri1WeightScheme scheme);
+
+// Resolves the checkpoint's scheme from its config's raw JSON. A config with
+// no `quantization_config` is the plain bf16 arm; the fp8 block [128, 128]
+// dynamic config is the fp8 arm; anything else throws, naming the scheme it
+// found and the arms that exist.
+Kolibri1WeightScheme ResolveKolibri1WeightScheme(const nlohmann::json& raw);
+
 // One linear projection. Exactly one slot is populated: the fp8-block arm
-// (quantized checkpoint) or the bf16 arm (modules_to_not_convert modules:
-// the router gate).
+// (quantized checkpoint) or the bf16 arm (a plain bf16 checkpoint's
+// projections, and the fp8 arm's modules_to_not_convert modules: the router
+// gate).
 struct Kolibri1Projection {
   Fp8BlockWeight fp8_block;
   OwnedTensor bf16;
@@ -120,21 +156,26 @@ struct Kolibri1Tensor {
   std::string consumer;
 };
 
-// Enumerates every expected CHECKPOINT-side tensor name for `p`, in the
-// fp8-block layout (".weight" + ".weight_scale_inv" per linear projection,
-// bf16 ".weight" for the router gate, norms, embedding, lm_head). This is
-// the mlp.moe.* vs mlp.gate reconciliation: the checkpoint's own names.
-std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(const Kolibri1Params& p);
+// Enumerates every expected CHECKPOINT-side tensor name for `p` under
+// `scheme`: the fp8-block layout (".weight" + ".weight_scale_inv" per linear
+// projection, bf16 ".weight" for the router gate, norms, embedding,
+// lm_head) or the plain bf16 layout (".weight" only per linear projection —
+// a bf16 checkpoint has no scales). This is the mlp.moe.* vs mlp.gate
+// reconciliation: the checkpoint's own names.
+std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(
+    const Kolibri1Params& p, Kolibri1WeightScheme scheme);
 
 // Classifies every on-disk name against the expected set.
 Kolibri1Accounting AccountKolibri1Tensors(
-    const Kolibri1Params& p, const std::vector<std::string>& present);
+    const Kolibri1Params& p, Kolibri1WeightScheme scheme,
+    const std::vector<std::string>& present);
 
 // Loads all weights from the safetensors shards (the 32-shard index resolves
 // through the per-shard headers). Performs full accounting before
 // materialization; throws on missing/duplicated/unaccounted tensors, on a
-// quantization_config that is not fp8 block [128, 128] beside fp8 weights,
-// and on a router gate that is not bf16.
+// weight scheme that is neither fp8 block [128, 128] nor plain bf16, on a
+// projection whose dtype contradicts the resolved scheme, and on a router
+// gate that is not bf16.
 Kolibri1Weights LoadKolibri1Weights(
     const std::vector<SafetensorsFile>& shards, const HfConfig& config);
 

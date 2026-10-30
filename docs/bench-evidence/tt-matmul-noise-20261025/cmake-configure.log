@@ -1,0 +1,54 @@
+-- Found umd at /tmp/umdtrial-install/lib64/cmake/umd
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Found TT-Metalium at /tmp/umdtrial-install/lib64/cmake/tt-metalium
+-- Found umd at /tmp/umdtrial-install/lib64/cmake/umd
+-- Found TT-Metalium at /tmp/umdtrial-install/lib64/cmake/tt-metalium
+-- Performing Test arch_native_supported
+-- Performing Test arch_native_supported - Success
+-- Found TT-NN at /tmp/umdtrial-install/lib64/cmake/tt-nn
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- The ASM compiler identification is GNU
+-- Found assembler: /usr/bin/c++
+-- The C compiler identification is GNU 16.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- ccache found, compilation results will be cached. Disable with GGML_CCACHE=OFF.
+-- CMAKE_SYSTEM_PROCESSOR: aarch64
+-- GGML_SYSTEM_ARCH: ARM
+-- Found OpenMP_C: -fopenmp (found version "5.2")
+-- Found OpenMP_CXX: -fopenmp (found version "5.2")
+-- Found OpenMP: TRUE (found version "5.2")
+-- Including CPU backend
+-- ARM detected
+-- Performing Test GGML_COMPILER_SUPPORTS_FP16_FORMAT_I3E
+-- Performing Test GGML_COMPILER_SUPPORTS_FP16_FORMAT_I3E - Failed
+-- Checking for ARM features using flags:
+-- Performing Test HAVE_DOTPROD
+-- Performing Test HAVE_DOTPROD - Failed
+-- Performing Test HAVE_SVE
+-- Performing Test HAVE_SVE - Failed
+-- Performing Test HAVE_MATMUL_INT8
+-- Performing Test HAVE_MATMUL_INT8 - Failed
+-- Performing Test HAVE_FMA
+-- Performing Test HAVE_FMA - Success
+-- Performing Test HAVE_FP16_VECTOR_ARITHMETIC
+-- Performing Test HAVE_FP16_VECTOR_ARITHMETIC - Failed
+-- Performing Test HAVE_SME
+-- Performing Test HAVE_SME - Failed
+-- Adding CPU backend variant ggml-cpu:  
+-- ggml version: 0.13.0
+-- ggml commit:  e705c5fe
+-- Found OpenSSL: /usr/lib64/libcrypto.so (found version "3.6.2")
+-- Performing Test VLLM_CPP_OPENSSL_VERSION_SUPPORTED
+-- Performing Test VLLM_CPP_OPENSSL_VERSION_SUPPORTED - Success
+-- HuggingFace download: HTTPS through OpenSSL 3.6.2 (system, dynamic)
+-- Found Python3: /home/lu_zero/.local/bin/python3.13 (found version "3.13.13") found components: Interpreter
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (18.9s)
+-- Generating done (1.0s)
+-- Build files have been written to: /tmp/tt-matmul-w3-bld

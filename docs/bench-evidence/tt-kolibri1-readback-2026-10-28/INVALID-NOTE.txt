@@ -1,0 +1,1 @@
+The lever2.log leg measured the lever-1 binary by mistake: a 'git checkout' that reverted the reviewer mutation also wiped the uncommitted lever-2 edits in the same file. The leg was re-measured as lever12.log on the true lever-1+2 code.

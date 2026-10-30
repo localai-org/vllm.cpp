@@ -25,6 +25,14 @@
 //     allocations made before exec replay, which is precisely why the policy
 //     must be in-process.
 //
+//  3. DEGRADED MODE (FIX-TT-NUMA-DEGRADE, ISSUE-LOCAL-01M62YS0ZP0F5PC7YJFJ8CP91A):
+//     unset `VT_KOLIBRI1_NUMA_INTERLEAVE` is best-effort — on a host that
+//     refuses `set_mempolicy` the guard emits ONE named warning and continues
+//     with the default policy. Every interleave-only assertion here therefore
+//     SKIPs with a named message when the interleave is not actually engaged
+//     (InterleaveEngagedOrSkip below); the assertions that hold in both modes
+//     (the knob's off arm, single-node first-touch) stay unconditional.
+//
 // NON-GOAL (pinned elsewhere, unchanged): the decode's numeric identity.
 // Interleaving moves pages, never bytes; the W3 token gate
 // (anchor 109726, chain md5 8de1463a) covers numerics at the final config.
@@ -76,41 +84,73 @@ size_t Distinct(const std::vector<int>& v) {
   return std::set<int>(v.begin(), v.end()).size();
 }
 
+// SKIP gate for the interleave-only assertions (FIX-TT-NUMA-DEGRADE). On a
+// host that refuses `set_mempolicy` the guard continues with the default
+// policy, so those assertions are untestable there — skip with the reason,
+// never a vacuous pass. Returns whether the interleave is actually engaged.
+bool InterleaveEngagedOrSkip() {
+  if (vllm::kolibri1_numa::CurrentPolicyIsInterleave()) {
+    return true;
+  }
+  MESSAGE("SKIP: interleave refused by the host; the guard continues with "
+          "the default policy, so there is no interleave to pin");
+  return false;
+}
+
 }  // namespace
 
-TEST_CASE("kolibri1 NUMA interleave: policy engages and pages interleave") {
-  // 1. Default (knob unset == ENABLED): the guard sets MPOL_INTERLEAVE.
-  SUBCASE("guard sets MPOL_INTERLEAVE by default") {
-    REQUIRE(vllm::kolibri1_numa::Enabled());
-    vllm::kolibri1_numa::PolicyGuard guard;
-    CHECK(vllm::kolibri1_numa::CurrentPolicyIsInterleave());
+// Split into one TEST_CASE per assertion, NOT subcases: doctest 2.5.2
+// suppresses every sibling SUBCASE once one of them returns early, so a
+// subcase-level skip (FIX-TT-NUMA-DEGRADE) would silently drop the knob-off
+// and first-touch cases on a refusing host. A TEST_CASE-level return skips
+// only itself — the convention the loader case below already uses.
+
+// 1. Default (knob unset == best-effort): the guard sets MPOL_INTERLEAVE.
+//    Interleave-only: skips on a host that refuses set_mempolicy.
+TEST_CASE("kolibri1 NUMA interleave: the guard engages MPOL_INTERLEAVE") {
+  REQUIRE(vllm::kolibri1_numa::Enabled());
+  vllm::kolibri1_numa::PolicyGuard guard;
+  if (!InterleaveEngagedOrSkip()) {
+    return;
   }
-  // 1b. Knob off: the guard is inert.
-  SUBCASE("VT_KOLIBRI1_NUMA_INTERLEAVE=0 disables the guard") {
-    REQUIRE_EQ(setenv("VT_KOLIBRI1_NUMA_INTERLEAVE", "0", 1), 0);
+  CHECK(vllm::kolibri1_numa::CurrentPolicyIsInterleave());
+}
+
+// 1b. Knob off: the guard is inert. Holds in both modes: no skip.
+TEST_CASE("kolibri1 NUMA interleave: VT_KOLIBRI1_NUMA_INTERLEAVE=0 disables "
+          "the guard") {
+  REQUIRE_EQ(setenv("VT_KOLIBRI1_NUMA_INTERLEAVE", "0", 1), 0);
+  vllm::kolibri1_numa::PolicyGuard guard;
+  CHECK_FALSE(vllm::kolibri1_numa::CurrentPolicyIsInterleave());
+  REQUIRE_EQ(unsetenv("VT_KOLIBRI1_NUMA_INTERLEAVE"), 0);
+}
+
+// 2. The interleave actually scatters touched pages across nodes.
+//    Interleave-only: skips on a host that refuses set_mempolicy.
+TEST_CASE("kolibri1 NUMA interleave: touched allocation spans multiple nodes "
+          "under the guard") {
+  const size_t bytes = 128ull << 20;
+  std::vector<uint8_t> buf;
+  {
     vllm::kolibri1_numa::PolicyGuard guard;
-    CHECK_FALSE(vllm::kolibri1_numa::CurrentPolicyIsInterleave());
-    REQUIRE_EQ(unsetenv("VT_KOLIBRI1_NUMA_INTERLEAVE"), 0);
-  }
-  // 2. The interleave actually scatters touched pages across nodes.
-  SUBCASE("touched allocation spans multiple nodes under the guard") {
-    const size_t bytes = 128ull << 20;
-    std::vector<uint8_t> buf;
-    {
-      vllm::kolibri1_numa::PolicyGuard guard;
-      buf.resize(bytes);
-      for (size_t i = 0; i < bytes; i += 4096) buf[i] = 1;
+    if (!InterleaveEngagedOrSkip()) {
+      return;
     }
-    CHECK(Distinct(TouchedPageNodes(buf.data(), bytes)) > 1);
-  }
-  // 2b. Outside the guard, single-threaded first-touch keeps the pages on
-  // one node (the default-allocation shape that costs the +47%).
-  SUBCASE("touched allocation outside the guard stays on one node") {
-    const size_t bytes = 128ull << 20;
-    std::vector<uint8_t> buf(bytes);
+    buf.resize(bytes);
     for (size_t i = 0; i < bytes; i += 4096) buf[i] = 1;
-    CHECK(Distinct(TouchedPageNodes(buf.data(), bytes)) == 1);
   }
+  CHECK(Distinct(TouchedPageNodes(buf.data(), bytes)) > 1);
+}
+
+// 2b. Outside the guard, single-threaded first-touch keeps the pages on
+// one node (the default-allocation shape that costs the +47%). Holds in
+// both modes: no skip.
+TEST_CASE("kolibri1 NUMA interleave: touched allocation outside the guard "
+          "stays on one node") {
+  const size_t bytes = 128ull << 20;
+  std::vector<uint8_t> buf(bytes);
+  for (size_t i = 0; i < bytes; i += 4096) buf[i] = 1;
+  CHECK(Distinct(TouchedPageNodes(buf.data(), bytes)) == 1);
 }
 
 // The allocation SITE, not just the policy: a cache miss's decoded block —
@@ -119,6 +159,12 @@ TEST_CASE("kolibri1 NUMA interleave: policy engages and pages interleave") {
 // first-touches through the multi-threaded host pool, so even an inert
 // guard can scatter pages; the off leg is the A/B bench's check instead.)
 TEST_CASE("kolibri1 NUMA interleave: dequant-cache arena pages interleave") {
+  {  // The arena crossing nodes is interleave-only: skip on a refusing host.
+    vllm::kolibri1_numa::PolicyGuard probe;
+    if (!InterleaveEngagedOrSkip()) {
+      return;
+    }
+  }
   namespace kdc = vllm::kolibri1_dequant_cache;
   vllm::Fp8BlockWeight w;
   w.n = 8192;
@@ -163,6 +209,14 @@ TEST_CASE("kolibri1 NUMA interleave: the loader's weight pages span nodes") {
   if (!vllm::kolibri1_numa::Enabled()) {
     MESSAGE("SKIP: VT_KOLIBRI1_NUMA_INTERLEAVE=0 disables the loader guard");
     return;
+  }
+  {  // The loader pages crossing nodes is interleave-only: skip on a host
+     // that refuses set_mempolicy (the loader guard continues with the
+     // default policy, so the pages first-touch on one node).
+    vllm::kolibri1_numa::PolicyGuard probe;
+    if (!InterleaveEngagedOrSkip()) {
+      return;
+    }
   }
 
   const vllm::HfConfig config =

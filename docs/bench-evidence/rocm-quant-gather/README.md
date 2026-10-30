@@ -199,3 +199,12 @@ Run `primary.py capture`, `secondary.cpp`'s `gather` mode, and native `capture` 
 
 Exact argv, environment, source hashes, executable hashes, and operator receipts accompany each stage.
 Downloaded upstream GGUF fixtures and generated model weights are not committed here.
+
+> EVIDENCE-LOST (2026-10-30): `ambient-device-witness-v1.log`, `ambient-device-witness-v2.log`, `cpu-configure.log`,
+> `cpu-focused-green.log`, `cpu-runner-green.log`, `materializer-focused-green.log`, `materializer-second-red.log`,
+> `native-final-v4-focused-and-rocm-regressions.log`, `native-final-v4-required-ambient-device.log`,
+> `native-focused-v2.log`, `public-red.log`, `public-red-after-prerequisite.log`, `q8k-reader-red.log`,
+> `reader-regressions-green.log`
+> The raw logs named above are unrecoverable: the pre-2026-10-30 global `*.log` rule
+> dropped them at `git add` and the worktree removal took the untracked files; the reviews
+> verified them at review time. Recorded 2026-10-30 by FIX-EVIDENCE-LOG-GATE.

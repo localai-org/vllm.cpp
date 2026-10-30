@@ -1,0 +1,42 @@
+2026-10-25 07:56:36.901 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-25 07:56:36.901 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-25 07:56:36.901 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-25 07:56:36.901 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-25 07:56:36.905 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-25 07:56:36.905 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-25 07:56:36.938 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-25 07:56:36.938 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-25 07:56:36.938 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-25 07:56:36.938 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-25 07:56:36.938 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-25 07:56:36.956 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[flint-tt-w0] resident=3871748096 B (3.606 GiB) expert_tier=75698798592 B (70.500 GiB) streamed/layer=37748736 B dense=2 moe=47 sliding=35 tensors=485
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-25 08:09:20.882 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-25 08:09:20.882 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-25 08:09:20.882 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-25 08:09:20.882 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-25 08:09:20.882 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-25 08:09:21.587 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+[flint-tt-w0] dispatch: the kTENSTORRENT case was EXERCISED (counter 0 -> 1)
+===============================================================================
+./tests/vllm/models/test_flint_tt_w0.cpp:165:
+TEST CASE:  flint TT W0: the registry dispatch reaches the device forward and the device-vs-CPU baseline is recorded
+
+./tests/vllm/models/test_flint_tt_w0.cpp:200: ERROR: CHECK_NOTHROW( dev_first = vllm::ModelRegistry::Forward(*model, dev_step.input) ) THREW exception: "FlintForCausalLM: the Tenstorrent forward arm is not implemented (the W0 device forward is pending; spec .agents/specs/flint-tenstorrent.md)"
+
+./tests/vllm/models/test_flint_tt_w0.cpp:216: FATAL ERROR: REQUIRE( dev_first.host.size() == cpu_first.host.size() ) is NOT correct!
+  values: REQUIRE( 0 == 750720 )
+
+===============================================================================
+[doctest] test cases:  2 |  1 passed | 1 failed | 0 skipped
+[doctest] assertions: 15 | 13 passed | 2 failed |
+[doctest] Status: FAILURE!
+2026-10-25 08:09:26.508 | info     |    BuildKernels | JIT cache stats: 8/8 hits (100.0%) [8 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-25 08:09:26.508 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-25 08:09:26.511 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-25 08:09:26.511 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-25 08:09:26.523 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-25 08:09:26.523 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-25 08:09:26.523 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

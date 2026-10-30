@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-09
-Updated: 2026-10-09
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -82,3 +82,16 @@ Host Tenstorrent stack updated (tt-smi 6.7.0, tt-umd 0.9.12, KMD 2.11.1-pre, boa
   (V 109/128) and passed in isolation and on a full-suite re-run — a new
   intermittent, unowned. The decode bench anchor 109726 remains owed
   behind the token gate.
+
+2026-10-21: STILL TRUE. The port itself landed and is in this tree: the
+tensor-spec header shim is `src/vt/tenstorrent/tt_tensor_spec_compat.hpp`, the
+upstream `use_mcast` parameter is gone from the `chunk_gated_delta_rule` call,
+and the whole tree builds and links with `-DVLLM_CPP_TENSTORRENT=ON` against
+the updated tt-metal install. What this issue also asks for -- the device gates
+-- is not done, and the row's spec says so: `.agents/specs/kolibri-tt.md:503`
+lists the host-free device-handoff root cause, the `kGdnDecode` wide-range
+drift, the `kMatmulBTQuantGrouped` Q4_K decode envelope miss, the 141/145 pass,
+and the decode bench anchor 109726 as STILL OWED.
+
+What settles it: the B2b-ii device token gate on the new stack, which is a
+P150 measurement.

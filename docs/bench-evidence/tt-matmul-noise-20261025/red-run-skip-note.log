@@ -1,0 +1,35 @@
+2026-10-26 03:08:04.871 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-26 03:08:04.871 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-26 03:08:04.871 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-26 03:08:04.871 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-26 03:08:04.875 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-26 03:08:04.875 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-26 03:08:04.905 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-26 03:08:04.905 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-26 03:08:04.905 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-26 03:08:04.905 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-26 03:08:04.906 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-26 03:08:04.925 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:301:
+TEST CASE:  SCRATCH dbg W3 exactness check (dest-acc arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:304: MESSAGE: skipped: requires VT_TT_MATMUL_MATH_FIDELITY=hifi4 (the experimental exact arm; the shipped arm is red here BY the map, see docs/bench-evidence/tt-matmul-noise-20261025/)
+
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:374:
+TEST CASE:  SCRATCH dbg W3 exactness check (MatmulBT arm)
+
+./tests/vllm/models/test_flint_tt_w3_noise.cpp:377: MESSAGE: skipped: requires VT_TT_MATMUL_MATH_FIDELITY=hifi4
+
+===============================================================================
+[doctest] test cases: 2 | 2 passed | 0 failed | 7 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-26 03:08:04.984 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-26 03:08:04.984 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-26 03:08:05.041 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-26 03:08:05.041 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-26 03:08:05.041 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-15
-Updated: 2026-10-15
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -44,3 +44,39 @@ The #3454 readjudication attributes the kolibri1 P150 hard-flip count to device 
   (program-cache/config under the model call pattern), then fix tt-metal or
   force the clean config in-model. STAYS OPEN (the delta is not fixed; it is
   re-attributed).
+
+2026-10-21: STILL TRUE. The record's own 2026-10-15 entry stands: the arm delta
+REPRODUCES exactly (host-free ON 40 teacher-forced HARD flips against OFF 17),
+the shadow-reconciliation hypothesis is falsified, and the attribution is the
+tt-metal rms_norm bias on kolibri's activation distribution. Nothing since
+then removes the bias: the tt-metal upstream head probed on 2026-10-19
+(2500c1d8f63) reads 1.0072 -> 0.9809 on the largest-magnitude captured row,
+1.0077 -> 1.0033 on the next, and 0.9984 -> 0.9970 on the clean row, so the
+input-dependence is not improved upstream
+(`ISSUE-LOCAL-01M578VP02HPVBYSMRP32GWZGF`).
+
+What settles it: a host-free ON/OFF re-measurement after the tt-metal rms_norm
+substrate is fixed, which is a P150 measurement.
+
+## Addendum 2026-10-25: the upstream filing is tt-metal#62339
+
+The rms_norm compute-config finding has an OPEN upstream filing:
+https://github.com/tenstorrent/tt-metal/issues/62339 (filed 2026-10-22 —
+the selection site documents no accuracy contract; default 0.9809 vs host
+1.0 on the captured rows). The Flint TT W0 device-vs-CPU baseline
+(rel_rms 2.58e-01, docs/bench-evidence/flint-tt-w0-20261025/) attributes
+its divergence to this same ~1% systematic bias compounding over 49
+layers, with the matmul arms clean at 1.9e-3 — the filing now carries a
+second independent model witness. No response upstream yet.
+
+## Addendum 2026-10-25: the W1 A/B falsifies the rms_norm attribution
+
+The W1 repair (row/TT-RMSNORM-W1, commits 7305b695e + cf9af0791) makes the
+device rms_norm bit-exact per-op (3D-broadcast delivery of the composed f32
+chain; every captured in-model row ratio=1, max_abs=0) — and the
+MODEL-LEVEL numbers do not move: Flint W0 rel_rms 2.579e-1 -> 2.568e-1,
+kolibri device token gate 3/141 both arms (5/40 vs 6/42 hard/instr flips).
+The bias was real and is now fixed; it was NOT the driver of the model
+divergence. The named next suspect is the ttnn::matmul f32->tf32 operand
+truncation (the gdn record, b67b30fd). This issue stays open for the
+substrate norm record; the model-gap hunt moves to W2.

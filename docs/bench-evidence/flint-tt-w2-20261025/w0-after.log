@@ -1,0 +1,324 @@
+2026-10-25 20:43:40.719 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-25 20:43:40.719 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-25 20:43:40.719 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-25 20:43:40.719 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-25 20:43:40.723 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-25 20:43:40.723 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-25 20:43:40.766 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-25 20:43:40.766 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-25 20:43:40.766 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-25 20:43:40.766 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-25 20:43:40.766 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-25 20:43:40.818 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[flint-tt-w0] resident=3871748096 B (3.606 GiB) expert_tier=75698798592 B (70.500 GiB) streamed/layer=37748736 B dense=2 moe=47 sliding=35 tensors=485
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-25 20:57:32.481 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-25 20:57:32.481 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-25 20:57:32.481 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-25 20:57:32.481 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-25 20:57:32.481 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-25 20:57:33.158 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+[FLINT-TT] embed sum=3.409978
+2026-10-25 20:57:34.073 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.073 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.073 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.073 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.086 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.086 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.086 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.086 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.112 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.112 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.112 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:34.112 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      167.421791 sumsq=8.864578e+02
+[FLINT-TT] L0 k         sum=      -51.055453 sumsq=5.263565e+02
+[FLINT-TT] L0 v         sum=       45.839092 sumsq=3.431027e+03
+[FLINT-TT] L0 attn_out  sum=      207.347808 sumsq=3.950909e+03
+[FLINT-TT] L0 ao        sum=       10.057106 sumsq=7.359153e+01
+[FLINT-TT] layer 0 post-attn x sum=13.482791
+[FLINT-TT] L0 g         sum=   -14167.981301 sumsq=2.359007e+04
+[FLINT-TT] L0 u         sum=      113.721889 sumsq=5.062744e+04
+[FLINT-TT] L0 a         sum=       12.709410 sumsq=1.153170e+03
+[FLINT-TT] L0 ff        sum=      -11.715274 sumsq=2.659922e+01
+[FLINT-TT] layer 0 post-mlp x sum=1.769863
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[flint-tt-w0] dispatch: the kTENSTORRENT case was EXERCISED (counter 0 -> 1)
+[FLINT-CPU] embed sum=3.409978
+[FLINT-CPU] L0 q         sum=      161.476868 sumsq=8.873862e+02
+[FLINT-CPU] L0 k         sum=      -51.990269 sumsq=5.278208e+02
+[FLINT-CPU] L0 v         sum=       42.289509 sumsq=3.438036e+03
+[FLINT-CPU] L0 attn_out  sum=      201.478534 sumsq=3.954462e+03
+[FLINT-CPU] L0 ao        sum=        9.158903 sumsq=7.360179e+01
+[FLINT-CPU] layer 0 post-attn x sum=12.584867
+[FLINT-CPU] L0 g         sum=       15.263319 sumsq=1.162610e+03
+[FLINT-CPU] L0 u         sum=       89.419942 sumsq=5.085969e+04
+[FLINT-CPU] L0 a         sum=       15.263319 sumsq=1.162610e+03
+[FLINT-CPU] L0 ff        sum=      -11.759342 sumsq=2.676520e+01
+[FLINT-CPU] layer 0 post-mlp x sum=0.827251
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[flint-tt-w0] first-token logits: max_abs=3.200e+01 rms=5.930e+00 rel_rms=2.579e-01 (n=750720)
+[FLINT-TT] embed sum=3.409978
+[FLINT-TT] L0 q         sum=      167.421791 sumsq=8.864578e+02
+[FLINT-TT] L0 k         sum=      -51.055453 sumsq=5.263565e+02
+[FLINT-TT] L0 v         sum=       45.839092 sumsq=3.431027e+03
+[FLINT-TT] L0 attn_out  sum=      207.347808 sumsq=3.950909e+03
+[FLINT-TT] L0 ao        sum=       10.057106 sumsq=7.359153e+01
+[FLINT-TT] layer 0 post-attn x sum=13.482791
+[FLINT-TT] L0 g         sum=   -14167.981301 sumsq=2.359007e+04
+[FLINT-TT] L0 u         sum=      113.721889 sumsq=5.062744e+04
+[FLINT-TT] L0 a         sum=       12.709410 sumsq=1.153170e+03
+[FLINT-TT] L0 ff        sum=      -11.715274 sumsq=2.659922e+01
+[FLINT-TT] layer 0 post-mlp x sum=1.769863
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=3.409978
+[FLINT-CPU] L0 q         sum=      161.476868 sumsq=8.873862e+02
+[FLINT-CPU] L0 k         sum=      -51.990269 sumsq=5.278208e+02
+[FLINT-CPU] L0 v         sum=       42.289509 sumsq=3.438036e+03
+[FLINT-CPU] L0 attn_out  sum=      201.478534 sumsq=3.954462e+03
+[FLINT-CPU] L0 ao        sum=        9.158903 sumsq=7.360179e+01
+[FLINT-CPU] layer 0 post-attn x sum=12.584867
+[FLINT-CPU] L0 g         sum=       15.263319 sumsq=1.162610e+03
+[FLINT-CPU] L0 u         sum=       89.419942 sumsq=5.085969e+04
+[FLINT-CPU] L0 a         sum=       15.263319 sumsq=1.162610e+03
+[FLINT-CPU] L0 ff        sum=      -11.759342 sumsq=2.676520e+01
+[FLINT-CPU] layer 0 post-mlp x sum=0.827251
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=7.688625
+2026-10-25 20:57:50.791 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.791 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.791 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.791 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.796 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.796 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.796 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:50.796 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      217.817705 sumsq=1.078640e+03
+[FLINT-TT] L0 k         sum=      -70.457763 sumsq=6.364141e+02
+[FLINT-TT] L0 v         sum=       60.876400 sumsq=3.925935e+03
+[FLINT-TT] L0 attn_out  sum=      264.678494 sumsq=4.551221e+03
+[FLINT-TT] L0 ao        sum=        9.275938 sumsq=8.599681e+01
+[FLINT-TT] layer 0 post-attn x sum=16.984839
+[FLINT-TT] L0 g         sum=   -16144.772184 sumsq=2.616662e+04
+[FLINT-TT] L0 u         sum=      184.142125 sumsq=5.702686e+04
+[FLINT-TT] L0 a         sum=       12.845786 sumsq=1.268393e+03
+[FLINT-TT] L0 ff        sum=      -14.356549 sumsq=3.055254e+01
+[FLINT-TT] layer 0 post-mlp x sum=2.628510
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=-5.511683
+[FLINT-CPU] L0 q         sum=      185.792704 sumsq=1.055442e+03
+[FLINT-CPU] L0 k         sum=      -68.938915 sumsq=5.997637e+02
+[FLINT-CPU] L0 v         sum=       19.362141 sumsq=4.244303e+03
+[FLINT-CPU] L0 attn_out  sum=      202.930529 sumsq=4.958847e+03
+[FLINT-CPU] L0 ao        sum=       13.131053 sumsq=8.960879e+01
+[FLINT-CPU] layer 0 post-attn x sum=7.642770
+[FLINT-CPU] L0 g         sum=       39.878542 sumsq=1.560202e+03
+[FLINT-CPU] L0 u         sum=      114.628894 sumsq=6.441420e+04
+[FLINT-CPU] L0 a         sum=       39.878542 sumsq=1.560202e+03
+[FLINT-CPU] L0 ff        sum=       -7.665364 sumsq=3.289838e+01
+[FLINT-CPU] layer 0 post-mlp x sum=-0.023287
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=11.967273
+2026-10-25 20:57:59.887 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.887 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.887 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.887 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.892 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.892 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.892 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:57:59.892 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      268.213619 sumsq=1.270822e+03
+[FLINT-TT] L0 k         sum=      -89.860072 sumsq=7.464717e+02
+[FLINT-TT] L0 v         sum=       75.913708 sumsq=4.420844e+03
+[FLINT-TT] L0 attn_out  sum=      323.294056 sumsq=5.226546e+03
+[FLINT-TT] L0 ao        sum=        7.925015 sumsq=9.921926e+01
+[FLINT-TT] layer 0 post-attn x sum=19.915570
+[FLINT-TT] L0 g         sum=   -18173.205030 sumsq=2.877248e+04
+[FLINT-TT] L0 u         sum=      248.578239 sumsq=6.326798e+04
+[FLINT-TT] L0 a         sum=        6.656342 sumsq=1.364911e+03
+[FLINT-TT] L0 ff        sum=      -16.612632 sumsq=3.438126e+01
+[FLINT-TT] layer 0 post-mlp x sum=3.302174
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=-7.286459
+[FLINT-CPU] L0 q         sum=      213.725193 sumsq=1.235350e+03
+[FLINT-CPU] L0 k         sum=      -84.891441 sumsq=7.220974e+02
+[FLINT-CPU] L0 v         sum=       49.511433 sumsq=4.862125e+03
+[FLINT-CPU] L0 attn_out  sum=      285.697052 sumsq=5.664722e+03
+[FLINT-CPU] L0 ao        sum=       16.853737 sumsq=1.035243e+02
+[FLINT-CPU] layer 0 post-attn x sum=9.592820
+[FLINT-CPU] L0 g         sum=       19.662378 sumsq=1.683775e+03
+[FLINT-CPU] L0 u         sum=      173.057642 sumsq=7.291610e+04
+[FLINT-CPU] L0 a         sum=       19.662378 sumsq=1.683775e+03
+[FLINT-CPU] L0 ff        sum=       -9.434258 sumsq=3.775973e+01
+[FLINT-CPU] layer 0 post-mlp x sum=0.157196
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=16.245920
+2026-10-25 20:58:10.477 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.477 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.477 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.477 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.482 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.482 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.482 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:10.482 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      318.609532 sumsq=1.463004e+03
+[FLINT-TT] L0 k         sum=     -109.262382 sumsq=8.565294e+02
+[FLINT-TT] L0 v         sum=       90.951015 sumsq=4.915753e+03
+[FLINT-TT] L0 attn_out  sum=      382.688963 sumsq=5.963048e+03
+[FLINT-TT] L0 ao        sum=        6.258686 sumsq=1.129300e+02
+[FLINT-TT] layer 0 post-attn x sum=22.526013
+[FLINT-TT] L0 g         sum=   -20220.742224 sumsq=3.136453e+04
+[FLINT-TT] L0 u         sum=      309.193383 sumsq=6.932388e+04
+[FLINT-TT] L0 a         sum=       -2.292519 sumsq=1.455735e+03
+[FLINT-TT] L0 ff        sum=      -18.695517 sumsq=3.819060e+01
+[FLINT-TT] layer 0 post-mlp x sum=3.828192
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=-3.007812
+[FLINT-CPU] L0 q         sum=      262.933701 sumsq=1.427521e+03
+[FLINT-CPU] L0 k         sum=     -104.531227 sumsq=8.331368e+02
+[FLINT-CPU] L0 v         sum=       64.331501 sumsq=5.357954e+03
+[FLINT-CPU] L0 attn_out  sum=      352.551347 sumsq=6.300574e+03
+[FLINT-CPU] L0 ao        sum=       15.950227 sumsq=1.160466e+02
+[FLINT-CPU] layer 0 post-attn x sum=12.963433
+[FLINT-CPU] L0 g         sum=       19.563725 sumsq=1.802608e+03
+[FLINT-CPU] L0 u         sum=      244.351633 sumsq=7.949905e+04
+[FLINT-CPU] L0 a         sum=       19.563725 sumsq=1.802608e+03
+[FLINT-CPU] L0 ff        sum=      -12.057607 sumsq=4.183894e+01
+[FLINT-CPU] layer 0 post-mlp x sum=0.906047
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=20.524568
+2026-10-25 20:58:22.185 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.185 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.185 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.185 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.190 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.190 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.190 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:22.190 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      369.005446 sumsq=1.655185e+03
+[FLINT-TT] L0 k         sum=     -128.664691 sumsq=9.665870e+02
+[FLINT-TT] L0 v         sum=      105.988323 sumsq=5.410662e+03
+[FLINT-TT] L0 attn_out  sum=      442.811077 sumsq=6.752848e+03
+[FLINT-TT] L0 ao        sum=        4.437681 sumsq=1.270239e+02
+[FLINT-TT] layer 0 post-attn x sum=24.986268
+[FLINT-TT] L0 g         sum=   -22269.164456 sumsq=3.391817e+04
+[FLINT-TT] L0 u         sum=      369.055497 sumsq=7.519514e+04
+[FLINT-TT] L0 a         sum=      -13.988292 sumsq=1.543410e+03
+[FLINT-TT] L0 ff        sum=      -20.689894 sumsq=4.191976e+01
+[FLINT-TT] layer 0 post-mlp x sum=4.295452
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=1.879558
+[FLINT-CPU] L0 q         sum=      295.619898 sumsq=1.605565e+03
+[FLINT-CPU] L0 k         sum=     -111.263412 sumsq=9.067713e+02
+[FLINT-CPU] L0 v         sum=       29.995396 sumsq=5.862354e+03
+[FLINT-CPU] L0 attn_out  sum=      363.740613 sumsq=7.015098e+03
+[FLINT-CPU] L0 ao        sum=       13.858587 sumsq=1.309403e+02
+[FLINT-CPU] layer 0 post-attn x sum=15.758683
+[FLINT-CPU] L0 g         sum=        7.689550 sumsq=1.977190e+03
+[FLINT-CPU] L0 u         sum=      270.823584 sumsq=8.948294e+04
+[FLINT-CPU] L0 a         sum=        7.689550 sumsq=1.977190e+03
+[FLINT-CPU] L0 ff        sum=      -13.712616 sumsq=4.721226e+01
+[FLINT-CPU] layer 0 post-mlp x sum=2.046695
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=24.803215
+2026-10-25 20:58:35.284 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.284 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.284 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.284 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.289 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.289 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.289 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:35.289 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      419.401360 sumsq=1.847367e+03
+[FLINT-TT] L0 k         sum=      -51.055453 sumsq=5.263565e+02
+[FLINT-TT] L0 v         sum=       45.839092 sumsq=3.431027e+03
+[FLINT-TT] L0 attn_out  sum=      -47.961542 sumsq=1.749012e+03
+[FLINT-TT] L0 ao        sum=       20.797107 sumsq=1.174831e+01
+[FLINT-TT] layer 0 post-attn x sum=45.608292
+[FLINT-TT] L0 g         sum=    -3029.066921 sumsq=7.742032e+03
+[FLINT-TT] L0 u         sum=       79.901834 sumsq=2.686203e+04
+[FLINT-TT] L0 a         sum=      -23.234573 sumsq=7.127495e+03
+[FLINT-TT] L0 ff        sum=      -60.462297 sumsq=8.042780e+01
+[FLINT-TT] layer 0 post-mlp x sum=-14.880823
+[FLINT-TT] logits tok0 sum=-4759220.416180
+[FLINT-CPU] embed sum=6.243152
+[FLINT-CPU] L0 q         sum=      348.096335 sumsq=1.787895e+03
+[FLINT-CPU] L0 k         sum=     -122.085813 sumsq=1.015481e+03
+[FLINT-CPU] L0 v         sum=       19.215351 sumsq=6.492087e+03
+[FLINT-CPU] L0 attn_out  sum=      396.097565 sumsq=7.840808e+03
+[FLINT-CPU] L0 ao        sum=       11.711281 sumsq=1.461670e+02
+[FLINT-CPU] layer 0 post-attn x sum=17.974587
+[FLINT-CPU] L0 g         sum=        3.369298 sumsq=2.175454e+03
+[FLINT-CPU] L0 u         sum=      308.159341 sumsq=1.007168e+05
+[FLINT-CPU] L0 a         sum=        3.369298 sumsq=2.175454e+03
+[FLINT-CPU] L0 ff        sum=      -15.650889 sumsq=5.317824e+01
+[FLINT-CPU] layer 0 post-mlp x sum=2.324341
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=31.613708
+2026-10-25 20:58:49.958 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.958 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.958 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.958 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.964 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.964 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.964 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:58:49.964 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      457.581749 sumsq=2.061139e+03
+[FLINT-TT] L0 k         sum=     -140.600883 sumsq=1.125072e+03
+[FLINT-TT] L0 v         sum=      115.179312 sumsq=6.480921e+03
+[FLINT-TT] L0 attn_out  sum=      519.595693 sumsq=8.598220e+03
+[FLINT-TT] L0 ao        sum=        1.300909 sumsq=1.527870e+02
+[FLINT-TT] layer 0 post-attn x sum=32.934541
+[FLINT-TT] L0 g         sum=   -27512.297618 sumsq=4.331699e+04
+[FLINT-TT] L0 u         sum=      274.111637 sumsq=9.695821e+04
+[FLINT-TT] L0 a         sum=        9.629093 sumsq=2.141440e+03
+[FLINT-TT] L0 ff        sum=      -25.747436 sumsq=5.291804e+01
+[FLINT-TT] layer 0 post-mlp x sum=7.182328
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=11.491019
+[FLINT-CPU] L0 q         sum=      394.213770 sumsq=1.969638e+03
+[FLINT-CPU] L0 k         sum=     -136.833272 sumsq=1.090792e+03
+[FLINT-CPU] L0 v         sum=       31.305567 sumsq=6.816048e+03
+[FLINT-CPU] L0 attn_out  sum=      455.686008 sumsq=8.372747e+03
+[FLINT-CPU] L0 ao        sum=       10.498867 sumsq=1.572140e+02
+[FLINT-CPU] layer 0 post-attn x sum=22.009459
+[FLINT-CPU] L0 g         sum=        1.212835 sumsq=2.268426e+03
+[FLINT-CPU] L0 u         sum=      350.496279 sumsq=1.069469e+05
+[FLINT-CPU] L0 a         sum=        1.212835 sumsq=2.268426e+03
+[FLINT-CPU] L0 ff        sum=      -18.837867 sumsq=5.717483e+01
+[FLINT-CPU] layer 0 post-mlp x sum=3.170821
+[FLINT-CPU] logits tok0 sum=-1956081.934977
+[FLINT-TT] embed sum=35.892356
+2026-10-25 20:59:05.955 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.955 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.955 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.955 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.960 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.960 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.960 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-25 20:59:05.960 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT] L0 q         sum=      507.977663 sumsq=2.253321e+03
+[FLINT-TT] L0 k         sum=     -160.003192 sumsq=1.235130e+03
+[FLINT-TT] L0 v         sum=      130.216620 sumsq=6.975830e+03
+[FLINT-TT] L0 attn_out  sum=      579.489490 sumsq=9.447756e+03
+[FLINT-TT] L0 ao        sum=       -0.497591 sumsq=1.673532e+02
+[FLINT-TT] layer 0 post-attn x sum=35.414521
+[FLINT-TT] L0 g         sum=   -29547.870823 sumsq=4.583100e+04
+[FLINT-TT] L0 u         sum=      327.236036 sumsq=1.026991e+05
+[FLINT-TT] L0 a         sum=       -3.619395 sumsq=2.227556e+03
+[FLINT-TT] L0 ff        sum=      -27.758942 sumsq=5.665715e+01
+[FLINT-TT] layer 0 post-mlp x sum=7.650210
+[FLINT-TT] logits tok0 sum=-1942146.595514
+[FLINT-CPU] embed sum=16.059411
+[FLINT-CPU] L0 q         sum=      429.493005 sumsq=2.121827e+03
+[FLINT-CPU] L0 k         sum=     -134.293036 sumsq=1.174804e+03
+[FLINT-CPU] L0 v         sum=       16.282068 sumsq=7.584440e+03
+[FLINT-CPU] L0 attn_out  sum=      471.910559 sumsq=9.317694e+03
+[FLINT-CPU] L0 ao        sum=        7.786596 sumsq=1.738498e+02
+[FLINT-CPU] layer 0 post-attn x sum=23.866607
+[FLINT-CPU] L0 g         sum=      -19.215684 sumsq=2.568859e+03
+[FLINT-CPU] L0 u         sum=      406.685360 sumsq=1.202191e+05
+[FLINT-CPU] L0 a         sum=      -19.215684 sumsq=2.568859e+03
+[FLINT-CPU] L0 ff        sum=      -19.878606 sumsq=6.408682e+01
+[FLINT-CPU] layer 0 post-mlp x sum=3.987708

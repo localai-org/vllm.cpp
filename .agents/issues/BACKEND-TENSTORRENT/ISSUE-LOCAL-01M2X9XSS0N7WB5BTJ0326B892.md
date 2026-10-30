@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M2X9XSS0N7WB5BTJ0326B892
 Title: TT grouped keep-quant arm crashes at M>1 (MeshBuffer too small, infinite retry)
 Row: BACKEND-TENSTORRENT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-19
-Updated: 2026-09-19
-Closed: -
+Updated: 2026-10-21
+Closed: 2026-10-21
 
 ## Problem
 
@@ -31,3 +31,21 @@ Concurrency=2 (grouped keep-quant arm at M=2, leaving the f32-exact P==1 decode 
 - REMAINING (moved to ISSUE-LOCAL-01M2XSWCP507W0M18EXHGR5TGS): the prefill step
   still fatals in RmsNormGatedKernel's gate reshape, then SigmoidGateBf16 OOMs —
   the M=2 e2e does not produce tokens yet. Issue stays OPEN.
+
+- 2026-10-21 (CLOSED): FALSIFIED BY THE TREE. Both conditions this record
+  names are gone. The decode-stage MeshBuffer fatal is fixed by `3fca8e541`
+  ("fix(BACKEND-TENSTORRENT): the batched paged-attention decode MeshBuffer
+  view fatal", 2026-09-19), the squash that carries PR #3230 into `main`:
+  the batched eager path now materializes the Q 4D view and the sdpa-output
+  flatten through the free reshape's device program, and the red-first case
+  "kTENSTORRENT kPagedAttention pure-decode batched B=2 keeps the device
+  path" pins it. That commit's body names this record and hands its
+  REMAINING prefill lane to `ISSUE-LOCAL-01M2XSWCP507W0M18EXHGR5TGS`.
+  That lane closed on 2026-09-20 with a P150 A/B on the same repro: base
+  `main@1f46d44e1` enters the MeshBuffer retry loop with 247+ fatals, and the
+  tip completes the run clean three times (output-len 1, 8, and 32) with 0
+  fatals and 16/16/64 tokens. With the decode fix and the prefill fix both
+  in `main`, the subject of this issue -- the concurrency-2 grouped
+  keep-quant arm fataling on the MeshBuffer and producing no tokens -- no
+  longer exists.
+

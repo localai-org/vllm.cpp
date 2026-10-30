@@ -28,6 +28,23 @@
 #include "vt/dtype.h"
 #include "vt/ops.h"
 
+// PERF-CPU-ATTN-BFDOT (DRAFT, FMA-contract branch): native bf16 K-dot arm.
+// The kernel and its knob live in cpu_paged_attn_bfdot_arm.cpp (+bf16 TU);
+// non-Arm or no-bf16 builds link the stubs. RESTORED OPT-IN (row
+// FIX-PAGED-REGRESSION): Usable() is feature-gated AND requires an explicit
+// VT_CPU_PAGED_ATTN_BFDOT=1 — the kolibri1-bf16-dot-cpu default flip moved
+// the shared paged kernel onto a pair-dot DAG that is not bit-exact with the
+// pre-batch order (bisect: 3c4925def, ruled by b42c8f787). kolibri1's own
+// GEMV/forward bf16-dot arms keep their separate VT_CPU_KOLIBRI_BF16_DOT
+// ruling. This arm changes the reduction DAG (bf16 PAIR dots + no query
+// widen), so it is a THIRD mode measured beside the scalar and widen+vfma
+// NEON arms — never a silent replacement: the scalar-vs-NEON bit-identity the
+// FMA-contract draft rests on is untouched.
+namespace vt::cpu {
+bool PagedAttnBfDotUsable();
+float PagedAttnKDotBfDot(const uint16_t* q, const uint16_t* k, int64_t d);
+}  // namespace vt::cpu
+
 namespace vt::cpu {
 namespace {
 
@@ -122,6 +139,17 @@ void StoreRowF32(const Tensor& t, int64_t elem_offset, int64_t n, const float* s
 // (F16ToF32 / BF16ToF32 / LoadKvFp8E4M3), four elements at a time; the bf16
 // lane widens by a 16-bit shift into the high half, exactly BitsToF32 does.
 // ---------------------------------------------------------------------------
+// ROLLED BACK to the pre-batch arithmetic order (ISSUE-LOCAL-01M61X3Q5N51S2AGHB5N8SS3HH):
+// the 2cd6b8a14 draft FMA-contracted the scalar body (4-lane pairwise dot, fused V
+// accumulate), which changed the summation order and broke BOTH the hoisted dtype
+// dispatch bit-identity contract (test_ops_paged_attn_dtype) and the glm4-moe-lite
+// strict goldens (test_glm4_moe_lite_paged_engine). The pre-batch sequential body is
+// the default again; an explicit `=1` opts into the draft FMA arm for the perf hunt.
+bool PagedAttnScalarFmaActive() {
+  const char* e = std::getenv("VT_CPU_PAGED_ATTN_SCALAR_FMA");
+  return e != nullptr && e[0] == '1';
+}
+
 #if defined(__aarch64__)
 bool PagedAttnNeonActive() {
   // ROLLED BACK to opt-in (ISSUE-LOCAL-01M4J4QNTE166QFG5MN7V3H4DG): under
@@ -281,12 +309,31 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
   // flip raced under load; ISSUE-LOCAL-01M4J4QNTE166QFG5MN7V3H4DG): an
   // explicit `=1` selects the lane, anything else runs the scalar body.
   // The scalar body below stays the reference and the non-aarch64 path.
+using vt::cpu::PagedAttnBfDotUsable;
+using vt::cpu::PagedAttnKDotBfDot;
 #if defined(__aarch64__)
-  const bool neon_active = PagedAttnNeonActive();
+  const bool neon_knob = PagedAttnNeonActive();
+  // BFDOT is a sub-mode OF the NEON lane: it serves only bf16 keys with a
+  // bf16 query row (the kernel consumes bf16 PAIRS, so there is no widen
+  // step to reuse) at x8 widths. Resolved once per call.
+  // RESTORED OPT-IN (row FIX-PAGED-REGRESSION): the BFDOT K-dot serves only
+  // after an explicit VT_CPU_PAGED_ATTN_BFDOT=1 (bisect: the 3c4925def arm
+  // plus the default dispatch moved the shared paged kernel off the
+  // pre-batch order; ruled by b42c8f787). The lane body engages when EITHER
+  // the NEON knob opts in OR the BFDOT arm is opted in and eligible at an
+  // x8 width; a bf16 shape the BFDOT arm cannot serve (d % 8 != 0) keeps
+  // the scalar body — the knob never widens past the arm's own eligibility.
+  const bool bfdot_requested =
+      PagedAttnBfDotUsable() && kv_kind == KvKind::kBF16 &&
+      query.dtype == DType::kBF16 && d % 8 == 0;
+  const bool neon_active = neon_knob || bfdot_requested;
 #else
   const bool neon_active = false;
   (void)neon_active;
 #endif
+  // The draft FMA scalar body (2cd6b8a14): opt-in, it is NOT bit-identical to the
+  // pre-batch sequential order the reference and the strict goldens license.
+  const bool scalar_fma = PagedAttnScalarFmaActive();
 
   // The token loop, with the K and V element encodings bound at compile time.
   // Body text is unchanged from the per-element form apart from the two loads.
@@ -334,22 +381,42 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
           if (neon_active && d % 4 == 0 && d_v % 4 == 0) {
             // The NEON lane: same scores, same masking, same softmax passes.
             // Only the K reduction and the V accumulation run four lanes wide.
+            // The BFDOT arm (VT_CPU_PAGED_ATTN_BFDOT=1) replaces ONLY the K
+            // dot — 8 bf16 products per vbfdotq, native pair-dot over the
+            // UNWIDENED bf16 query; the V accumulation stays on the widen+
+            // vfma path below (no f32-accumulator BFMLA form matches the
+            // scalar fma DAG). It changes the DAG by design; the lane is
+            // already not bit-identical to the scalar body, and the BFDOT
+            // run is adjudicated by its own unit gate + the bench chain.
+            const bool bfdot_k = bfdot_requested;
+            const uint16_t* q_bf =
+                bfdot_k ? reinterpret_cast<const uint16_t*>(
+                              q_bytes + static_cast<size_t>(t * hq * d) * q_esize) +
+                              h * d
+                        : nullptr;
             for (int64_t j = jmin; j <= jmax; ++j) {
               const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
               const int64_t off = j % block_size;
               const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
+              float dot;
+              if (bfdot_k) {
+                dot = PagedAttnKDotBfDot(q_bf, reinterpret_cast<const uint16_t*>(k_base) + kbase, d);
+              } else {
               float32x4_t vacc = vdupq_n_f32(0.0f);
               for (int64_t e = 0; e < d; e += 4)
                 vacc = vfmaq_f32(vacc, vld1q_f32(q + e),
                                  KvElem4<decltype(kv_tag)::value>(k_base, kbase + e, k_scale));
               // Lane-serial-in-block, block-sequential: NOT the scalar order.
-              float dot = vaddvq_f32(vacc);
+              dot = vaddvq_f32(vacc);
+              }
               dot *= scale;
               if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
               probs[static_cast<size_t>(j - jmin)] = dot;
               if (dot > m) m = dot;
             }
-            float denom = sink_p != nullptr ? 1.0f : 0.0f;
+            // The exp(sink - m) sink seed; see the scalar pass 2 below for
+            // why it is not exp(0).
+            float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
             for (int64_t j = jmin; j <= jmax; ++j) {
               const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
               probs[static_cast<size_t>(j - jmin)] = e;
@@ -378,17 +445,40 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
             const int64_t off = j % block_size;
             const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
             float dot = 0.0f;
-            for (int64_t e = 0; e < d; ++e)
-              dot += q[e] *
-                     KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale);
+            if (scalar_fma && d % 4 == 0) {
+              float lane[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+              for (int64_t e = 0; e < d; e += 4)
+                for (int l = 0; l < 4; ++l)
+                  lane[l] = std::fma(
+                      q[e + l],
+                      KvElem<decltype(kv_tag)::value>(k_base, kbase + e + l, k_scale),
+                      lane[l]);
+              dot = (lane[0] + lane[1]) + (lane[2] + lane[3]);
+            } else {
+              // The pre-batch body: plain sequential dot, the reference order.
+              for (int64_t e = 0; e < d; ++e)
+                dot += q[e] *
+                       KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale);
+            }
             dot *= scale;
             if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
             probs[static_cast<size_t>(j - jmin)] = dot;
             if (dot > m) m = dot;
           }
-          // Pass 2: exp + denominator. Seeded at 1.0 when a sink is
-          // present (the sink's own exp(sink - m) contribution).
-          float denom = sink_p != nullptr ? 1.0f : 0.0f;
+          // Pass 2: exp + denominator. The sink's own contribution is
+          // exp(sink - m), NOT exp(0): m starts AT the sink but pass 1 then
+          // grows it past the sink whenever any score is larger, and an
+          // un-rescaled exp(0) seed silently turns the sink into exp(m - m)
+          // -- a LARGER term than the sink deserves, which shrinks every
+          // value weight (observed on Flint, whose per-head sinks are small:
+          // the attention output off by ~6%, the model logits off by ~2).
+          // Seeding at exp(sink - m_final) is bit-identical to the old seed
+          // whenever the sink IS the max (exp(0) == 1.0f, the MiMoV2
+          // large-sink regime this kernel was written for) and correct
+          // everywhere else. The online-softmax arms (`cpu_mla_attn.cpp`,
+          // `cuda_mla_attn.cu`) rescale their seed as m grows and never had
+          // the defect.
+          float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
             probs[static_cast<size_t>(j - jmin)] = e;
@@ -403,8 +493,13 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
             const int64_t off = j % block_size;
             const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
             for (int64_t e = 0; e < d_v; ++e)
-              acc[static_cast<size_t>(e)] +=
-                  pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
+              if (scalar_fma)
+                acc[static_cast<size_t>(e)] = std::fma(
+                    pw, KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale),
+                    acc[static_cast<size_t>(e)]);
+              else
+                acc[static_cast<size_t>(e)] +=
+                    pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
           }
           StoreRowF32(out, qoff, d_v, acc.data());
           }
