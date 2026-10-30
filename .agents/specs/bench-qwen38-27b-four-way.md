@@ -707,7 +707,8 @@ The append-only rule's own rationale is what settles it. `AGENTS.md` and
 the line to exist at the merge base. This one does not, and the checker measures
 exactly that, diffing the merge base against the head rather than reading the
 tree. It passes on the edit, and `scripts/check-agent-record.py` passes with it.
-The duplicate-row refusal at `check-agent-record.py:1437-1441` is real and was
+The duplicate-row refusal the record checker carried while the live index existed
+(retired with it by W6, `7dc2ef1ea`) is real and was
 correctly described, and it is simply the wrong instrument here, because this
 corrects the first row before it lands rather than appending a second.
 

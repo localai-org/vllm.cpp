@@ -165,3 +165,9 @@ Capping the decode batch trades throughput for ITL along the measured curve
   `build-cuda/examples/server … --max-num-seqs <B>`, drive
   `/tmp/itl_client.py --conc <B>`; nsys via `/tmp/nsys_driver.sh`. All under
   `flock $HOME/gpu.lock`.
+## Owed
+
+- **`ISSUE-GH-362` — the first VALID 27B per-kernel decode attribution**, a
+  whole-run trace windowed by the profiler's own `cudaProfilerStart`/`Stop`.
+  Section 5's verdict rests on batch composition and section 7 lists what is
+  still needed; the per-kernel arm is the measurement this pass did not take.
