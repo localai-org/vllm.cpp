@@ -1,0 +1,23 @@
+loading /mnt/models/flint-GGUF/flint-Q4_K_M.gguf (keep-quant, production loader)
+tree: 8448 -> 47621440 KiB RSS; first MoE layer 2, H=2048 E=256 topk=6 I=512
+
+== class (b) dequant cost ==
+one layer dequant: 5261.4 ms, RSS +1572992 KiB (packed layer ~432.0 MB, bf16 layer ~1617.4 MB)
+
+== routed-expert phase, batch 1 (3 reps, median) ==
+(a) CIQ per-expert dispatch :    1.758 ms  (median of 3)
+(b) dequant bf16 per-expert :    3.283 ms  (median of 3)
+profile split of (a):
+  activation quantize x6 rows (per-call cost, x3 projections x6 experts): 0.017 ms
+  scalar vec_dot, one gate tower (512 rows): 0.231 ms -> x3 towers x6 experts = 4.2 ms/token-layer
+  weight memcpy floor, one gate tower: 0.017 ms (0.6 MB)
+  bf16 GEMV one gate tower: 0.109 ms
+
+== routed-expert phase, batch 8 (3 reps, median) ==
+(a) CIQ per-expert dispatch :   18.915 ms  (median of 3)
+(b) dequant bf16 per-expert :   24.554 ms  (median of 3)
+profile split of (a):
+  activation quantize x48 rows (per-call cost, x3 projections x6 experts): 0.138 ms
+  scalar vec_dot, one gate tower (512 rows): 0.231 ms -> x3 towers x6 experts = 4.2 ms/token-layer
+  weight memcpy floor, one gate tower: 0.015 ms (0.6 MB)
+  bf16 GEMV one gate tower: 0.105 ms

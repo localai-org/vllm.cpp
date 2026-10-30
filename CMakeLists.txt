@@ -3057,6 +3057,27 @@ target_include_directories(vllm_ltx2_connector_gemm_probe SYSTEM PRIVATE
 target_compile_features(vllm_ltx2_connector_gemm_probe PRIVATE cxx_std_20)
 vllm_cpp_set_warnings(vllm_ltx2_connector_gemm_probe)
 
+# ── FLINT-KQ-CPU-PERF: the routed-expert compute-class A/B micro harness ─────
+# `tools/bench/flint_kq_moe_class_ab.cpp` is the instrument behind spec
+# stage 1 (.agents/specs/flint-kq-cpu-perf.md): the routed-expert phase of the
+# flint keep-quant paged arm timed for the CIQ per-expert dispatch and the
+# dequant-at-load bf16 classes at batch 1 and 8, plus the class (a) profile
+# split (activation quantize, scalar vec_dot, memcpy floor, one bf16 GEMV).
+#
+# CI COMPILES IT AND RUNS NOTHING, the same trade its siblings above record:
+# it loads the ~21 GB published container through the production loader and
+# spends seconds per leg. The build buys that the one file a reader has to
+# compile to re-derive the stage-1 table cannot rot behind an op-signature
+# change.
+add_executable(vllm_flint_kq_moe_class_ab tools/bench/flint_kq_moe_class_ab.cpp)
+target_link_libraries(vllm_flint_kq_moe_class_ab PRIVATE vllm)
+target_include_directories(vllm_flint_kq_moe_class_ab PRIVATE
+  ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/include)
+target_include_directories(vllm_flint_kq_moe_class_ab SYSTEM PRIVATE
+  ${CMAKE_SOURCE_DIR}/third_party)
+target_compile_features(vllm_flint_kq_moe_class_ab PRIVATE cxx_std_20)
+vllm_cpp_set_warnings(vllm_flint_kq_moe_class_ab)
+
 # ── BIT-ROT GUARD: the vt CPU per-element dispatch survey probe ──────────────
 # `tools/bench/vt_cpu_elem_survey_probe.cpp` is the artifact behind the ranking
 # in `.agents/specs/vt-cpu-elem-survey.md`: one `--op <name>` runs ONE CPU
