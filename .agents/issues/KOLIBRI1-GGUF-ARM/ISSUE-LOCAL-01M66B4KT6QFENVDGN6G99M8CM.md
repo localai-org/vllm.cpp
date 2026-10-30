@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M66B4KT6QFENVDGN6G99M8CM
 Title: Kolibri-1 GGUF (mudler APEX tiers) refused: no kolibri1 arch row, and CheckQuantConfig refuses k-quants
 Row: KOLIBRI1-GGUF-ARM
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-30
 Updated: 2026-10-30
-Closed: -
+Closed: 2026-10-30
 
 ## Problem
 
@@ -16,43 +16,4 @@ mudler/Kolibri-1-APEX-GGUF @ 55a4781439 (nine tiers, 22-56 GB, standard ggml typ
 
 ## Resolution
 
--
-
-## Findings (2026-10-30, implementer)
-
-- RECONCILED: both named blockers are stale against this branch — the arch
-  row landed at `src/vllm/entrypoints/model_loader.cpp:1277` and the GGUF
-  TU bypasses the fp8 checks by design (commits `71ee347e9` + `0350841b7`,
-  2026-10-23, spec `kolibri1-gguf-arch.md`). The remaining deliverable was
-  gating the mudler APEX artifact, which needed NO product-code change.
-- The APEX I-Micro file (sha256 `3edfaf09…c90e0e` verified) LOADS; its 903
-  tensors map onto the existing structs with zero unmapped/leftover
-  (evidence `docs/bench-evidence/kolibri1-gguf-arm-20261030/`).
-- STOP HIT (spec §Stop conditions): the fp8-vs-GGUF token cross-check is
-  BEYOND the W3 band — 37/44 golden greedy positions match, worst topk logit
-  diff 3.245 > 2.5, 2 hard flips (Hob-forge Q2_K adjudicated earlier: 5/13,
-  3.97, 3 hard). Fluency probe rules out a load defect (prompt-appropriate
-  looping, the bf16 goldens' own shape). Numerics adjudication — whether the
-  band is re-measured for quantized arms tier-by-tier or the tier is
-  accepted at the recorded envelope — is the developer's call, exactly as
-  the kolibri1-gguf-arch row left it. Throughput and public-doc weight pins
-  are NOT landed.
-
-## Adjudication + resume (2026-10-30, second session)
-
-- Developer adjudication, **Option A — the Hob-forge precedent applies**: the
-  quantized kolibri1 arms are adjudicated on their own measured record; APEX
-  I-Micro (37/44 exact, worst topk diff 3.245, 2 hard flips vs the fp8
-  goldens) is strictly better than the adjudicated Q2_K bar (5/13, 3.97,
-  3 hard) and therefore PASSES. The fp8 2.5 band governs same-weights kernel
-  comparisons only.
-- The gate (`test_kolibri1_gguf`) now pins the record when the container path
-  names an APEX tier (exact >= 37, worst topk <= 3.2452 measured, hard flips
-  <= 2, REQUIRE_MESSAGE citing the adjudication); the Hob-forge Q2_K default
-  is unchanged. I-Micro gate: GREEN (109/109 assertions).
-- FINDING: the tier sweep shows I-Mini (29 GB) measures FARTHER from the fp8
-  oracle than I-Micro (25/33 = 75.8% exact, worst topk 5.033, 0 hard flips) —
-  quantization aggressiveness is per-tensor, not monotone in container size.
-  Recorded, not hidden; I-Mini pinned at its own record, also green.
-- Throughput legs (16/32 threads, taskset -c 32-63, 3-rep medians,
-  idle-gated) vs the fp8 dir: see the evidence README.
+Landed 2026-10-30 as 42022facc (PR #3527, squash of row/KOLIBRI1-GGUF-ARM). The brief's two blockers were already gone (arch row landed 2026-10-23 as 71ee347e9; the GGUF loader fills the bf16 arm directly, fp8 requirement scoped to safetensors) -- the row became verification, gate, and a defect fix. Deliverables: 903/903 tensors mapped into the existing CPU kolibri1 forward; serving gate adjudicated per developer Option A (quantized arms on their own measured record; I-Micro pinned >=37/44 exact, <=3.2452 worst, <=2 hard; I-Mini pinned at its own WORSE record 25/33, 5.0327, 0 hard -- non-monotone quant aggressiveness, recorded); throughput GGUF I-Micro 4.97/6.55 tok/s at 16/32t BEATS the fp8 arm 4.46/5.77 (1.11x/1.14x, internal A/B); artifact pins in docs/USAGE.md; BENCHMARKS.md + detail file landed. Review MERGEABLE (6 claims; M1 per-tier pin RED; M3 segfault red reproduced; M5 wrong-oracle RED). Named follow-up: llama-cpp-kolibri1 floor pin advance (b10451 predates #30673/#30865).
