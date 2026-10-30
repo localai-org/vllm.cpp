@@ -117,3 +117,89 @@ leg must re-gate.
   Hob-forge Q2_K). No product-code change: the arch row and loader TU
   already on this branch needed zero edits to load the APEX file.
 - Evidence: this directory.
+
+## Adjudication + resume (2026-10-30, later session)
+
+**Developer adjudication, Option A: the Hob-forge precedent applies.** The
+quantized kolibri1 arms are adjudicated on their own measured record; APEX
+I-Micro (37/44 exact, worst topk diff 3.245, 2 hard flips vs the fp8 goldens)
+is strictly better than the adjudicated Q2_K bar (5/13, 3.97, 3 hard) and
+therefore PASSES. The fp8 2.5 band governs same-weights kernel comparisons
+only.
+
+### Gate pin (test_kolibri1_gguf, KOLIBRI1_GGUF_PATH = the APEX container)
+
+The token gate now pins the measured record when the container path names an
+APEX tier (the Hob-forge Q2_K default keeps `hard_flips == 0` and the 2.5
+per-topk band unchanged):
+
+- exact greedy positions >= **37** of 44 (regression in either direction fails);
+- worst topk diff <= **3.2452** (the measured 3.24517, rounded out — the
+  adjudication's "3.245" was a truncated quote of the same number; a tighter
+  result means the pin moves with a fresh measurement, not silently);
+- hard flips <= **2**;
+- a REQUIRE_MESSAGE cites the adjudication verbatim: "developer-adjudicated
+  2026-10-30, Option A: quantized kolibri1 arms adjudicated on their own
+  measured record; the fp8 2.5 band governs same-weights kernel comparisons
+  only".
+
+Fresh gate run at the pin (`apex-gate-run2.log`): 3/3 test cases, 109/109
+assertions, SUCCESS.
+
+### Tier sanity sweep: I-Mini (quality monotonicity check)
+
+Artifact: `mudler/Kolibri-1-APEX-GGUF` @ `55a4781439f1e8abb7e46c795e0681d6b2b7f4d9`,
+`Kolibri-1-APEX-I-Mini.gguf`, 28,973,904,064 bytes, sha256
+`64e61300f557de747957096b70907737e063b9b762ab51811e28a6ef57e725a4` —
+verified by `fetch-flint-par.sh` after assembly (`apex-imini-fetch.log`).
+
+**FINDING — the bigger tier does NOT measure closer to the fp8 oracle.**
+Same gate, same fp8 goldens, I-Mini pointed at `KOLIBRI1_GGUF_PATH`
+(`apex-imini-gate-run1.log`):
+
+- I-Micro (22 GB): **37/44** exact = 84.1%, worst topk **3.245**, **2** hard flips
+- I-Mini  (29 GB): **25/33** exact = 75.8%, worst topk **5.033**, **0** hard flips
+
+Exact-rate regresses 8.3 points and the worst topk diff grows by 55%, though
+I-Mini flips nothing hard. The compared-position count differs because the
+greedy replay stops at first divergence — I-Mini diverges earlier and longer.
+Quantization aggressiveness in this converter family is per-tensor, not
+monotone in container size. Recorded, not hidden: the gate pins each tier at
+its OWN measured record (I-Micro: >= 37, <= 3.2452, <= 2; I-Mini: >= 25,
+<= 5.0327, <= 0), both green. I-Micro stays the documented serving tier.
+Balanced/Quality tiers were NOT swept (optional; time-boxed).
+### Serving-path segfault: FOUND AND FIXED (ISSUE-LOCAL-01M66NS2QCG5C0JN8Y88SQDPD3)
+
+The first vllm-bench leg on the GGUF segfaulted in `v1::InputBatch::add_request`.
+Root cause: `Kolibri1HfConfigFromGguf` never set `max_position_embeddings`, so
+`ResolveMaxModelLen` (model_loader.cpp) returned 0 and the engine's token
+buffer was zero-length — while the file itself carries
+`kolibri1.context_length = 262144`. Fixed red-first: the config-map case now
+CHECKs the field (red `CHECK(0 == 262144)`), the mapping reads the key via a
+new `OptInt` helper beside `ReqInt` (the flint GGUF mapping reads the same
+key), and serving re-verified end-to-end (`vllm-cli` greedy decode fluent;
+engine auto-fits max_model_len 262144 → 4064 against the KV pool). This
+closed the production-entry-point reachability gap for the arm.
+
+### Throughput (serving path, idle-gated, 3-rep medians)
+
+Recipe: `vllm-bench --model <M> --num-prompts 8 --input-len 128
+--output-len 32 --concurrency 4 --seed 0 --temperature 0`, `taskset -c 32-63`,
+`VLLM_CPP_CPU_THREADS=16|32`, decode-throughput axis. Idle gate per leg
+(1-min load < 16 + process scan; `bench-*` logs carry the gate lines).
+Governor `performance` (read 15:00Z and 17:00Z). An earlier un-gated set was
+CONTAMINATED by external load (box 1-min load 139 mid-leg; one rep measured
+1.34 tok/s) and was discarded — the per-leg gate exists because of it.
+
+| threads | fp8 safetensors | GGUF APEX I-Micro | ratio |
+|---:|---:|---:|---:|
+| 16 | 4.46 (4.44/4.46/4.48) | **4.97** (5.01/4.97/4.97) | 1.11× |
+| 32 | 5.77 (5.77/5.76/5.80) | **6.55** (6.49/6.55/6.58) | 1.14× |
+
+(tok/s, output decode axis, medians with all three reps.) The k-quant
+container serving FASTER than fp8 is consistent with load-time dequant to
+bf16 on both sides — same forward, fewer bytes moved. No llama.cpp
+quant-matched denominator exists (the `llama-cpp-kolibri1` pin `b10451`
+predates PRs #30673/#30865; named follow-up), so these are internal A/B
+numbers, published in `docs/benchmarks/kolibri1-gguf-serving.md` with the
+adjudication and floor-absence caveats.

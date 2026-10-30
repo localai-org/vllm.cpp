@@ -13,6 +13,7 @@ to the file stem.
 | `memory` | Peak memory across the serving window. Each row names its own model, host and window | Results | [Detail](benchmarks/memory.md) |
 | `llama-cpp-cpu` | llama.cpp on CPU, including the RPi5/A76 gating arm that does not transfer | Results | [Detail](benchmarks/llama-cpp-cpu.md) |
 | `kolibri1-cpu-dequant-cache-default` | Kolibri-1 on CPU with the dequant cache on by default: decode, prefill and the n-gram spec-decode serving number | Results | [Detail](benchmarks/kolibri1-cpu-dequant-cache-default.md) |
+| `kolibri1-gguf-serving` | Kolibri-1 APEX I-Micro GGUF served on CPU vs the fp8 arm, under the developer-adjudicated quantized-arm gate | Results | [Detail](benchmarks/kolibri1-gguf-serving.md) |
 | `mlx-lm-apple-m4` | MLX-LM on Apple M4, warm, batch 1, 6 interleaved runs | Results | [Detail](benchmarks/mlx-lm-apple-m4.md) |
 | `flint-cpu-paged` | Flint (RecursiveSI) Q4_K_M on CPU through the paged engine: the first prefill/decode numbers | Results | [Detail](benchmarks/flint-cpu-paged.md) |
 | `flint-kq-cpu` | Flint Q4_K_M served PACKED on CPU (`VT_FLINT_KEEP_QUANT=1`) through the paged engine, against the llama.cpp floor | Results | [Detail](benchmarks/flint-kq-cpu.md) |

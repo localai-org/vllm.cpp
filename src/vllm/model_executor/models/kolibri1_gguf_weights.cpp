@@ -167,6 +167,11 @@ int64_t ReqInt(const GgufFile& g, const std::string& key) {
   return KvInt(*v, key);
 }
 
+int64_t OptInt(const GgufFile& g, const std::string& key, int64_t fallback) {
+  const GgufValue* v = g.FindKv(key);
+  return v == nullptr ? fallback : KvInt(*v, key);
+}
+
 double ReqFloat(const GgufFile& g, const std::string& key) {
   const GgufValue* v = g.FindKv(key);
   VT_CHECK(v != nullptr, "kolibri1 gguf: missing metadata key " + key);
@@ -226,6 +231,11 @@ HfConfig Kolibri1HfConfigFromGguf(const GgufFile& gguf) {
   c.num_key_value_heads =
       ReqInt(gguf, p + "attention.head_count_kv");
   c.vocab_size = gguf.Get("token_embd.weight").shape[0];
+  // The serving seam derives max_model_len from this (model_loader.cpp
+  // ResolveMaxModelLen); leaving it 0 segfaults the engine's first
+  // add_request (ISSUE-LOCAL-01M66NS2QCG5C0JN8Y88SQDPD3). Same key the flint
+  // GGUF mapping reads (flint_gguf_weights.cpp).
+  c.max_position_embeddings = OptInt(gguf, p + "context_length", 0);
 
   // --- architecture-specific numbers, under HF's OWN key names -------------
   // ParseKolibri1Params reads `raw`; the names are the checkpoint's

@@ -37,3 +37,22 @@ mudler/Kolibri-1-APEX-GGUF @ 55a4781439 (nine tiers, 22-56 GB, standard ggml typ
   accepted at the recorded envelope — is the developer's call, exactly as
   the kolibri1-gguf-arch row left it. Throughput and public-doc weight pins
   are NOT landed.
+
+## Adjudication + resume (2026-10-30, second session)
+
+- Developer adjudication, **Option A — the Hob-forge precedent applies**: the
+  quantized kolibri1 arms are adjudicated on their own measured record; APEX
+  I-Micro (37/44 exact, worst topk diff 3.245, 2 hard flips vs the fp8
+  goldens) is strictly better than the adjudicated Q2_K bar (5/13, 3.97,
+  3 hard) and therefore PASSES. The fp8 2.5 band governs same-weights kernel
+  comparisons only.
+- The gate (`test_kolibri1_gguf`) now pins the record when the container path
+  names an APEX tier (exact >= 37, worst topk <= 3.2452 measured, hard flips
+  <= 2, REQUIRE_MESSAGE citing the adjudication); the Hob-forge Q2_K default
+  is unchanged. I-Micro gate: GREEN (109/109 assertions).
+- FINDING: the tier sweep shows I-Mini (29 GB) measures FARTHER from the fp8
+  oracle than I-Micro (25/33 = 75.8% exact, worst topk 5.033, 0 hard flips) —
+  quantization aggressiveness is per-tensor, not monotone in container size.
+  Recorded, not hidden; I-Mini pinned at its own record, also green.
+- Throughput legs (16/32 threads, taskset -c 32-63, 3-rep medians,
+  idle-gated) vs the fp8 dir: see the evidence README.

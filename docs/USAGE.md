@@ -981,6 +981,40 @@ The [author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) runs on
 CPU with a BF16-converted reference checkpoint, but its outputs differ from the transcription.
 Full correctness and speed parity against the plugin remain unverified.
 
+### Kolibri-1 from a GGUF k-quant
+
+The `kolibri1` GGUF arm serves the mudler APEX k-quant conversion on CPU
+through the same path; point `--model` straight at the file (the config comes
+from the GGUF's own metadata):
+
+```sh
+./build/examples/vllm-bench --model /path/to/Kolibri-1-APEX-I-Micro.gguf \
+  --num-prompts 8 --input-len 128 --output-len 32 --concurrency 4 \
+  --seed 0 --temperature 0
+```
+
+Weights are the one part of a port a reader cannot infer: the gated artifact
+is `mudler/Kolibri-1-APEX-GGUF` @ `55a4781439f1e8abb7e46c795e0681d6b2b7f4d9`,
+file `Kolibri-1-APEX-I-Micro.gguf`, 22,173,110,464 bytes, sha256
+`3edfaf09aac60d60cde56744fe1e0a7e5362c5549d5eb12d97ec4a9c83c90e0e` (a repo id
+alone is not a pin; this converter re-quantizes tiers in place under unchanged
+names). The tier sweep also measured `Kolibri-1-APEX-I-Mini.gguf`
+(28,973,904,064 bytes, sha256
+`64e61300f557de747957096b70907737e063b9b762ab51811e28a6ef57e725a4`) — it
+measures FARTHER from the fp8 oracle than I-Micro despite the larger container
+(per-tensor quantization is not monotone in size); I-Micro is the documented
+tier. See the [arm record](../docs/bench-evidence/kolibri1-gguf-arm-20261030/README.md).
+
+Correctness: the token gate (`test_kolibri1_gguf`, `-DKOLIBRI1_GGUF_PATH=...`)
+replays the fp8 safetensors goldens under the developer-adjudicated
+quantized-arm record (2026-10-30, Option A — quantized arms are adjudicated on
+their own measured record; the fp8 2.5 band governs same-weights kernel
+comparisons only): I-Micro 37/44 golden greedy positions, worst topk diff
+3.245, 2 hard flips. **No quantization-matched llama.cpp floor exists**: the
+`llama-cpp-kolibri1` pin advance past `b10451` (which predates the kolibri1
+support in PRs #30673/#30865) is a named follow-up, so this arm has no
+quant-matched denominator yet.
+
 ## Flint (RecursiveSI) from a GGUF k-quant
 
 The `flint`-architecture container (hybrid FFSSSF sliding/full attention, no
