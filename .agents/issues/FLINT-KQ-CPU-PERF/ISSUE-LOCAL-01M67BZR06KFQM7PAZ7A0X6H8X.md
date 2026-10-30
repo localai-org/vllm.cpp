@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M67BZR06KFQM7PAZ7A0X6H8X
 Title: Flint CPU keep-quant serves at 1.20 tok/s vs the 26.29 floor -- the batch-1 quantized compute class is the wrong one
 Row: FLINT-KQ-CPU-PERF
-State: OPEN
+State: CLOSED
 Kind: perf
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-30
-Updated: 2026-10-30
-Closed: -
+Updated: 2026-10-31
+Closed: 2026-10-31
 
 ## Problem
 
@@ -16,4 +16,15 @@ The keep-quant paged arm (landed bbd769bf6-lineage) serves flint-Q4_K_M.gguf at 
 
 ## Resolution
 
--
+- 2026-10-31 (FLINT-KQ-CPU-PERF): the premise is FALSIFIED by measurement —
+  the CIQ class is the FASTEST available at decode batch sizes (stage-1 A/B:
+  0.458 ms/layer vs 1.535 dequant-at-load bf16 at batch 1; the "Q8_K block-dot
+  gathers" class is already what the CIQ kernel is). The 1.20 tok/s baseline
+  was CPU-threadpool oversubscription: the pool defaults to
+  `hardware_concurrency()` (128) while the serving legs ran under a 16-cpu
+  budget. With `VLLM_CPP_CPU_THREADS` matched to the cpus the same class, with
+  byte-identical tokens (gate re-run: 53/60, 0 hard, worst 2.486 — identical
+  to the committed pin), serves at 5.51 tok/s @16t / 5.75 @32t. Evidence:
+  `docs/bench-evidence/flint-kq-cpu-perf-20261030/README.md`; public record:
+  `docs/benchmarks/flint-kq-cpu.md`. Residual 4.8x gap to the floor stays
+  open; next levers named in the evidence. CLOSE with this evidence.

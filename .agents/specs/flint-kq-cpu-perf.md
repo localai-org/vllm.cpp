@@ -94,3 +94,36 @@ kMatmulBTQuant* suites.
 One pull request, `row/FLINT-KQ-CPU-PERF`, spec committed first. The
 stage-1 harness may land as a scratch/typed tool or test fixture — the
 measurement table it produces is the deliverable of stage 1.
+
+## Outcome
+
+Measured 2026-10-31 (evidence:
+`docs/bench-evidence/flint-kq-cpu-perf-20261030/README.md`):
+
+- The row's premise is falsified. The CIQ class is the fastest available at
+  decode batch sizes on the aarch64 box: routed-expert phase 0.458 ms/layer at
+  batch 1 vs 1.535 for dequant-at-load bf16 (4.394 vs 11.768 at batch 8). The
+  "Q8_K block-dot gathers" lever is not a separate class to adopt — the CIQ
+  kernel already quantizes the activation to Q8_K once per call and runs one
+  integer `vec_dot` per weight row; what it lacks is a NEON dot (m=1 decode
+  takes the scalar generic port), which is the named next lever, not a new
+  quant format.
+- The 1.20 tok/s baseline was threadpool oversubscription: the pool defaults
+  to `hardware_concurrency()` (128) under a 16-cpu serving budget. With
+  `VLLM_CPP_CPU_THREADS` matched to the cpus, the unchanged class serves
+  5.51 @16t / 5.75 @32t (from 1.20 / 2.46), floor 26.29 / 26.38 — residual
+  4.8x, open. Gate re-run byte-identical to the committed pin (53/60, 0 hard,
+  worst 2.486): no re-adjudication, because no compute-class change landed.
+- Rejected: dequant-at-load adoption — 3.3x slower at batch 1 AND +~71 GiB RSS
+  (measured per-layer dequant cost, not estimated).
+- Default: `VLLM_CPP_CPU_THREADS` keeps its documented
+  `hardware_concurrency()` default; docs now carry the matched-pool serving
+  recipe. Making the default affinity-aware owes its own spec and red-first
+  gate (a product decision, not this row).
+
+## Now
+
+Row `DONE`: the measurement landed, the public record carries the new numbers
+and class, the issue closed with the falsifying evidence. Next work is new
+rows: the NEON `vec_dot_q4_K_q8_K` port (llama-cpp oracle mirror), the
+non-routed 88% serving-time attribution, and the affinity-aware pool default.

@@ -1043,6 +1043,17 @@ VT_FLINT_KEEP_QUANT=1 ./build/vllm-server \
   --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
 ```
 
+Size the CPU threadpool to the cpu budget you give the process: the pool
+defaults to `hardware_concurrency()`, and a 128-thread pool pinned to a
+16-cpu `taskset` collapses on its own barrier (the flint keep-quant arm
+measured 1.20 tok/s that way and 5.51 tok/s with the pool matched — see
+`docs/benchmarks/flint-kq-cpu.md`):
+
+```sh
+VT_FLINT_KEEP_QUANT=1 VLLM_CPP_CPU_THREADS=16 taskset -c 32-47 \
+  ./build/vllm-server --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+```
+
 Correctness record for the keep-quant arm (`test_flint_gguf`, keep-quant
 paged gate): 53/60 greedy positions token-exact against the pinned
 llama-cpp-flint oracle goldens, 0 hard flips, every divergence inside the
