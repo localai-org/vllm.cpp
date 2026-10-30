@@ -3,7 +3,7 @@
 Row: `KOLIBRI1-GGUF-ARM`
 Spec: `.agents/specs/kolibri1-gguf-arm.md`
 Issue: `ISSUE-LOCAL-01M66B4KT6QFENVDGN6G99M8CM`
-Date: 2026-10-30. Host: the shared x86 128-core box (Ampere-1a, 4 NUMA nodes,
+Date: 2026-10-30. Host: the shared aarch64 128-core box (Ampere-1a, 4 NUMA nodes,
 255 GB RAM), governor `performance` on all CPUs (read 2026-10-30 12:07Z and
 14:10Z). Worktree `/tmp/kolibri-gguf` @ `7b3bbf092`, build
 `/tmp/build-kqgguf` (CPUs 64-127, Release, Ninja, 2351/2351 green).
@@ -143,7 +143,7 @@ per-topk band unchanged):
   measured record; the fp8 2.5 band governs same-weights kernel comparisons
   only".
 
-Fresh gate run at the pin (`apex-gate-run2.log`): 3/3 test cases, 109/109
+Fresh gate run at the pin (`apex-gate-run2.log`): 3/3 test cases, 110/110
 assertions, SUCCESS.
 
 ### Tier sanity sweep: I-Mini (quality monotonicity check)
@@ -181,6 +181,14 @@ key), and serving re-verified end-to-end (`vllm-cli` greedy decode fluent;
 engine auto-fits max_model_len 262144 → 4064 against the KV pool). This
 closed the production-entry-point reachability gap for the arm.
 
+Red-first capture, reproduced independently by the fresh reviewer
+(2026-10-30) after the fix landed:
+
+```text
+tests/vllm/models/test_kolibri1_gguf.cpp:227: ERROR: CHECK( config.max_position_embeddings == 262144 )
+values: CHECK( 0 == 262144 )
+```
+
 ### Throughput (serving path, idle-gated, 3-rep medians)
 
 Recipe: `vllm-bench --model <M> --num-prompts 8 --input-len 128
@@ -203,3 +211,10 @@ quant-matched denominator exists (the `llama-cpp-kolibri1` pin `b10451`
 predates PRs #30673/#30865; named follow-up), so these are internal A/B
 numbers, published in `docs/benchmarks/kolibri1-gguf-serving.md` with the
 adjudication and floor-absence caveats.
+
+The fresh review characterized two standing gaps that this record does not
+close. First (review M2), no checker validates the documentation sha256 pins
+against the artifacts on disk, so a corrupted `USAGE.md` hash is invisible to
+every gate. Second (review M4), the adjudication's REQUIRE_MESSAGE is
+message-only: no gate enforces that the verbatim adjudication string is
+present in the test.
