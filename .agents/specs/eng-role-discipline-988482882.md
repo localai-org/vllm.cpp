@@ -68,6 +68,11 @@ owns it.
   floor should advance for that reason -- which is a different argument from
   hiding the error, and must be made on its own merits (#3008).
 
+- Triaging `ISSUE-GH-250`: `a5b52047` reached `main` without a task branch and
+  `check-role-discipline` could not be waived for that landing. The record
+  predates the cutover and carries `Row: -`; the discipline floor it measures is
+  this row's own, so the identity is owned here rather than in `_intake`.
+
 ## Now
 
 `RECORDED`. No tree change. The gate is red at `988482882` and stays red.
