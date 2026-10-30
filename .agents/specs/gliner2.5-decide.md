@@ -11,11 +11,25 @@ and `vllm_decide` ABI from kev/laya. CPU + GPU (CUDA).
 
 ## Now
 
-`SPEC` — spec written, issue open
-(ISSUE-LOCAL-01M3APZC6GKX9ME6AE6336D3VY). Implementation not started. The gap
-is verified: no classification-head model exists behind `/v1/systemone` for
-DeBERTa-based encoders. The DeBERTa v2 encoder from MODEL-GLINER25 is already
-implemented and is the key reuse.
+`SPIKE` — spec written, issue open
+(ISSUE-LOCAL-01M3APZC6GKX9ME6AE6336D3VY), and the implementation is **in
+tree**, which this section previously denied. The earlier revision of these five
+lines read "Implementation not started" and was wrong at the time it was
+written: the same tree carries
+`src/vllm/model_executor/models/gliner25_decide_registry.cpp` and
+`gliner25_decide_head.cpp`, a suite registered at `tests/CMakeLists.txt:785`
+(`tests/vllm/models/test_gliner25_decide.cpp:1-181`), and a live C API path at
+`src/capi/vllm_c.cpp:2106-2160` routing `arch == "SpanExtractor"` to
+`Gliner25DecideInference` at ABI v29. The row was ALSO absent from every matrix
+while this spec's own heading named it, so `canonical_rows()` could not see it
+and its issue record failed validation; `MODEL-GLINER25-DECIDE` is now declared
+in `model-matrix.md` under `MODEL-TOKCLS`, beside the state the tree supports.
+
+The gap this spec opened is still the gap: no classification-head model existed
+behind `/v1/systemone` for DeBERTa-based encoders, and the DeBERTa v2 encoder
+from MODEL-GLINER25 remains the key reuse. What has changed is that this row is
+`SPIKE` rather than `SPEC` — code and a registered suite in tree, no measured
+end-to-end decision — and that the claim to the contrary is withdrawn.
 
 ## Scope
 
