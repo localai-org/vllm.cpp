@@ -997,6 +997,25 @@ build/examples/vllm-bench --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf \
   --seed 0 --temperature 0
 ```
 
+The default arm dequantizes the container to bf16 elementwise weights.
+`VT_FLINT_KEEP_QUANT=1` instead KEEPS the GGUF block tensors: the paged arm
+routes the linear layers and the `lm_head` through the per-dtype dispatch
+seam (`vt::MatmulBT` → the CPU compute-in-quant GEMM, `vt/ops.cpp`), so the
+k-quant container serves packed — no bf16 copy of the weights is ever
+materialized:
+
+```sh
+VT_FLINT_KEEP_QUANT=1 ./build/vllm-server \
+  --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+```
+
+Correctness record for the keep-quant arm (`test_flint_gguf`, keep-quant
+paged gate): 53/60 greedy positions token-exact against the pinned
+llama-cpp-flint oracle goldens, 0 hard flips, every divergence inside the
+house 2.5-nat near-tie band (llama.cpp uses integer block dots, so
+token-exactness is not expected; the band governs). The loader refuses an
+encoding the CPU cannot decode by name, before any forward runs.
+
 Published containers on the dev share: `flint-GGUF/flint-Q4_K_M.gguf`
 (sha256 `20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e`),
 plus the `unsloth-flint-GGUF/` and `flint-APEX-GGUF/` variants of the same

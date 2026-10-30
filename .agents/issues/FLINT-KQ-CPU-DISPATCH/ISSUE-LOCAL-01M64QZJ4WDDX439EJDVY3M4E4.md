@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M64QZJ4WDDX439EJDVY3M4E4
 Title: Flint CPU: the keep-quant tree is refused by the paged arm -- no CPU keep-quant serving arm exists
 Row: FLINT-KQ-CPU-DISPATCH
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-29
-Updated: 2026-10-29
-Closed: -
+Updated: 2026-10-30
+Closed: 2026-10-30
 
 ## Problem
 
@@ -16,4 +16,13 @@ FLINT-CPU-PARITY (landed 19979acf9) discovered the CPU paged serving arm has no 
 
 ## Resolution
 
--
+- 2026-10-30: closed as fixed on `row/FLINT-KQ-CPU-DISPATCH`. The paged arm
+  consumes the keep-quant tree through the per-dtype dispatch seam
+  (`FlintLinearMatmul` + the lm_head call site -> `vt::MatmulBT` -> the CPU
+  `kMatmulBTQuant` CIQ GEMM); the named refusal is gone. Serving gate:
+  `test_flint_gguf` keep-quant paged token gate, 53/60 exact / 7 near-tie /
+  0 hard flips, worst gap 2.486 < 2.5 nats against the llama.cpp goldens.
+  Throughput measured and open: 1.20 tok/s @16t, 2.46 @32t vs the 26.29
+  floor (CIQ per-expert path ~2.7x slower than the bf16-dequant arm at batch
+  1; levers named in the evidence report). Evidence:
+  docs/bench-evidence/flint-kq-cpu-20261030/report.md.

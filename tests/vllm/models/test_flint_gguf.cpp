@@ -237,3 +237,168 @@ TEST_CASE("flint gguf: the published Q4_K_M replays the oracle golden run") {
                          << " hard), worst gap " << worst_gap);
   CHECK(hard_flips == 0);
 }
+
+// THE KEEP-QUANT PAGED TOKEN GATE (FLINT-KQ-CPU-DISPATCH, spec
+// .agents/specs/flint-kq-cpu-dispatch.md). The same llama.cpp oracle goldens,
+// but the tree loads with VT_FLINT_KEEP_QUANT=1 and the step enters through
+// the PAGED arm (ModelRegistry::Forward with hand-built per-layer KV caches,
+// the tensors the LLMEngine runner hands the model) — the arm that refused
+// this tree by name before the row. Adjudication is the test_flint_gguf
+// contract shape verbatim: llama.cpp uses integer block dots and we may not,
+// so token-exactness is NOT expected — every divergence is adjudicated by OUR
+// second-best logit gap against the house 2.5-nat band, and the gate is
+// 0 hard flips.
+namespace {
+struct KeepQuantEnv {
+  KeepQuantEnv() { setenv("VT_FLINT_KEEP_QUANT", "1", 1); }
+  ~KeepQuantEnv() { unsetenv("VT_FLINT_KEEP_QUANT"); }
+};
+}  // namespace
+
+TEST_CASE("flint keepquant: the paged arm replays the oracle golden in-band") {
+  if (!std::filesystem::exists(kPublishedGguf)) {
+    MESSAGE("SKIP: " << kPublishedGguf << " not mounted");
+    return;
+  }
+  const nlohmann::json g = LoadGoldens();
+
+  KeepQuantEnv env;
+  vllm::GgufFile gguf = vllm::GgufFile::Open(kPublishedGguf);
+  const HfConfig config = vllm::FlintHfConfigFromGguf(gguf);
+  const vllm::FlintParams p = vllm::ParseFlintParams(config);
+  const vllm::ModelRegistration& reg = vllm::ModelRegistry::Resolve(config);
+  REQUIRE(reg.architecture == "FlintForCausalLM");
+  vllm::ModelSource source =
+      vllm::ModelSource::FromGguf(gguf, vt::DeviceType::kCPU);
+  std::unique_ptr<vllm::LoadedModel> model =
+      vllm::ModelRegistry::Load(config, source);
+  REQUIRE(model != nullptr);
+
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+
+  // One per-layer KV cache set: [num_blocks, 2, bs, hkv, dh] bf16 pages, the
+  // test_flint_paged.cpp KvSet shape at the published container's dims.
+  constexpr int64_t kBs = 16;
+  constexpr int64_t kNumBlocks = 64;
+  const int64_t page =
+      2 * kBs * p.num_key_value_heads * p.head_dim *
+      static_cast<int64_t>(sizeof(uint16_t));
+  std::vector<std::vector<uint8_t>> kv_storage;
+  std::vector<vllm::PagedKvCache> attn_kv;
+  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+    kv_storage.emplace_back(static_cast<size_t>(kNumBlocks * page), 0);
+    vllm::PagedKvCache kv;
+    kv.data = kv_storage.back().data();
+    kv.dtype = vt::DType::kBF16;
+    kv.num_blocks = kNumBlocks;
+    kv.block_size = kBs;
+    kv.num_kv_heads = p.num_key_value_heads;
+    kv.head_size = p.head_dim;
+    attn_kv.push_back(kv);
+  }
+
+  int64_t matches = 0;
+  int64_t total = 0;
+  int64_t near_ties = 0;
+  int64_t hard_flips = 0;
+  double worst_gap = 0.0;
+
+  for (const auto& pr : g.at("prompts")) {
+    const std::string prompt = pr.at("prompt").get<std::string>();
+    std::vector<int32_t> ids;
+    for (const auto& v : pr.at("input_ids")) ids.push_back(v.get<int32_t>());
+    std::vector<int32_t> golden;
+    for (const auto& v : pr.at("generated_ids"))
+      golden.push_back(v.get<int32_t>());
+
+    bool diverged = false;
+    double diverge_gap = 0.0;
+    for (int32_t step = 0;
+         step < static_cast<int32_t>(golden.size()) && !diverged; ++step) {
+      const int64_t t = static_cast<int64_t>(ids.size());
+      std::vector<int32_t> positions(static_cast<size_t>(t));
+      for (int64_t i = 0; i < t; ++i)
+        positions[static_cast<size_t>(i)] = static_cast<int32_t>(i);
+      vllm::v1::CommonAttentionMetadata meta;
+      meta.num_reqs = 1;
+      meta.num_actual_tokens = static_cast<int>(t);
+      meta.max_query_len = static_cast<int>(t);
+      meta.max_seq_len = static_cast<int>(t);
+      meta.seq_lens = {static_cast<int32_t>(t)};
+      meta.seq_lens_cpu = meta.seq_lens;
+      meta.num_computed_tokens_cpu = {0};
+      meta.query_start_loc = {0, static_cast<int32_t>(t)};
+      meta.query_start_loc_cpu = meta.query_start_loc;
+      meta.causal = true;
+      meta.block_table_num_cols = static_cast<int32_t>(kNumBlocks);
+      for (int32_t b = 0; b < static_cast<int32_t>(kNumBlocks); ++b)
+        meta.block_table_tensor.push_back(b);
+      meta.slot_mapping.reserve(static_cast<size_t>(t));
+      for (int64_t i = 0; i < t; ++i)
+        meta.slot_mapping.push_back(i);
+      vllm::v1::GDNAttentionMetadata gdn{};
+      std::vector<vllm::GdnStateCache> empty_gdn;
+      vllm::ModelForwardInput input{
+          .token_ids = ids,
+          .positions = positions,
+          .attn_meta = meta,
+          .gdn_meta = gdn,
+          .attn_kv = attn_kv,
+          .gdn_state = empty_gdn,
+          .config = config,
+          .queue = queue,
+          .logits_indices = {},
+          .num_reqs = 1,
+      };
+      vllm::ForwardLogits fl = vllm::ModelRegistry::Forward(*model, input);
+      // The paged arm returns DEVICE logits (the sampler contract); download.
+      std::vector<float> host(static_cast<size_t>(fl.rows * fl.vocab));
+      {
+        vt::Backend& be = vt::GetBackend(queue.device.type);
+        be.Synchronize(queue);
+        be.Copy(queue, host.data(), fl.device_tensor.data,
+                host.size() * sizeof(float));
+      }
+      const int64_t last = (fl.rows - 1) * fl.vocab;
+      const int32_t got = static_cast<int32_t>(
+          std::max_element(host.begin() + last, host.end()) -
+          (host.begin() + last));
+      const int32_t want = golden[static_cast<size_t>(step)];
+      ++total;
+      if (got == want) {
+        ++matches;
+      } else {
+        const float top1 = host[static_cast<size_t>(last + want)];
+        float second = -std::numeric_limits<float>::infinity();
+        for (int64_t n = last; n < last + fl.vocab; ++n)
+          if (host[static_cast<size_t>(n)] > second)
+            second = host[static_cast<size_t>(n)];
+        diverge_gap = static_cast<double>(second - top1);
+        worst_gap = std::max(worst_gap, diverge_gap);
+        diverged = true;
+        if (diverge_gap <= kLogitBand) {
+          ++near_ties;
+        } else {
+          ++hard_flips;
+          MESSAGE("HARD flip at prompt '" << prompt << "' step " << step
+                                          << ": got " << got << " want " << want
+                                          << " (gap " << diverge_gap
+                                          << " > band " << kLogitBand << ")");
+        }
+      }
+      ids.push_back(got);
+    }
+    if (diverged)
+      MESSAGE("chain '" << prompt << "' diverged with gap " << diverge_gap
+                        << " — adjudicated as "
+                        << (diverge_gap <= kLogitBand ? "NEAR-TIE"
+                                                      : "HARD MISMATCH"));
+  }
+
+  MESSAGE("keepquant paged token gate: " << matches << "/" << total
+                                         << " greedy tokens exact, "
+                                         << near_ties << " near-tie, "
+                                         << hard_flips << " hard, worst gap "
+                                         << worst_gap);
+  CHECK(hard_flips == 0);
+}

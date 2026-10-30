@@ -80,9 +80,12 @@ void ParseFlintConfig(const HfConfig& config);
 v1::KVCacheConfig MakeFlintKVCache(const HfConfig& config, int block_size,
                                    int num_blocks);
 
-// One linear projection, transposed to Matmul-B [K=in, N=out] bf16.
+// One linear projection. The bf16 arm transposes to Matmul-B [K=in, N=out]
+// bf16; the keep-quant arm stores the block tensor [N=out, K=in] nk (the
+// MatmulBTQuant orientation) and the forward's dispatch seam routes per
+// dtype (flint.cpp FlintLinearMatmul).
 struct FlintLinear {
-  OwnedTensor w;  // bf16 [K, N], nk == false
+  OwnedTensor w;  // bf16 [K, N] nk==false, or block [N, K] nk==true
 
   bool Empty() const { return w.rank == 0; }
 };

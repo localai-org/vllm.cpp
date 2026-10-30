@@ -725,9 +725,23 @@ void GatherRows(Dev d, void* dst, const Tensor& src,
 }
 
 // Matmul-B over a FlintLinear ([in, out] bf16) into an f32 or bf16 out.
+// THE PER-DTYPE DISPATCH SEAM (the flint_tt.cpp MatmulWeight shape): a
+// block-carrying keep-quant weight is [N, K] nk and routes through
+// vt::MatmulBT, whose IsBlockQuant hand-off (vt/ops.cpp) reaches the landed
+// CPU kMatmulBTQuant CIQ GEMM; a float weight keeps today's [K, N]
+// vt::Matmul path byte-for-byte. vt::Matmul hard-requires float weights —
+// handing it a block tensor throws, which is why the routing decision lives
+// here and not at the call sites.
 DBuf FlintLinearMatmul(Dev d, const Tensor& x, const FlintLinear& w,
                        DType out_dtype) {
   Tensor wt = ResidentWeight(d, w.w);
+  if (vt::IsBlockQuant(wt.dtype)) {
+    // The out dim of a [N, K] nk weight is shape[0] (the flint_tt.cpp:429
+    // read-off-the-orientation rule).
+    DBuf out(d, out_dtype, {x.shape[0], wt.shape[0]});
+    vt::MatmulBT(d.q, out.t(), x, wt);
+    return out;
+  }
   DBuf out(d, out_dtype, {x.shape[0], wt.shape[1]});
   vt::Matmul(d.q, out.t(), x, wt);  // the flint weights are [K, N] (x @ w), not the B-transposed layout
   return out;
@@ -867,20 +881,14 @@ ForwardLogits FlintForwardPaged(
     const MultiKvCacheIndex* multi_kv = nullptr) {
   const FlintParams& p = w.params;
   const int64_t t = static_cast<int64_t>(token_ids.size());
-  // THE CPU PAGED ARM IS ALSO BF16-OWNED (the same policy as the reference
-  // forward's audit above). The keep-quant loader arm stores block-carrying
-  // weights whose only consumer is the Tenstorrent device forward
-  // (flint_tt.cpp); a CPU consumer of that tree refuses BY NAME here instead
-  // of letting the packed bytes reach a bf16 matmul and die on an opaque
-  // inner-dims mismatch (the FLINT-CPU-PARITY finding).
-  for (const FlintLayerWeights& lw : w.layers) {
-    FLINT_CHECK(
-        !vt::IsBlockQuant(lw.attn.q_proj.w.dtype),
-        "flint CPU paged arm: the weight tree carries keep-quant block "
-        "tensors (VT_FLINT_KEEP_QUANT=1); this arm reads bf16 elementwise "
-        "weights only — reload the bf16 arm (VT_FLINT_KEEP_QUANT=0) or serve "
-        "the keep-quant tree on the Tenstorrent device arm");
-  }
+  // THE CPU PAGED ARM SERVES THE KEEP-QUANT TREE (FLINT-KQ-CPU-DISPATCH,
+  // spec .agents/specs/flint-kq-cpu-dispatch.md). The keep-quant loader's
+  // block-carrying weights reach the landed CPU kMatmulBTQuant CIQ GEMM
+  // through vt::MatmulBT — the same per-dtype dispatch seam the TT device
+  // forward uses (flint_tt.cpp MatmulWeight) — so this arm no longer refuses
+  // a keep-quant tree; it consumes it. The loader is the admission gate: an
+  // encoding the CPU cannot decode refuses BY NAME there, before any
+  // forward runs.
   const int64_t h = p.hidden_size;
   const int64_t hq = p.num_attention_heads;
   const int64_t hkv = p.num_key_value_heads;
@@ -1156,8 +1164,19 @@ ForwardLogits FlintForwardPaged(
   }
   const int64_t n_out = src.shape[0];
   DBuf logits(d, DType::kF32, {n_out, p.vocab_size});
-  vt::Matmul(d.q, logits.t(), src,
-               ResidentWeight(d, w.lm_head, {h, p.vocab_size}));
+  {
+    // The lm_head rides the same dispatch seam: a keep-quant lm_head is
+    // [V, H] nk (MatmulBT), the bf16 lm_head is [H, V] (Matmul) — read the
+    // orientation off the tensor, do not reshape a block weight.
+    Tensor lmw = ResidentWeight(d, w.lm_head);
+    if (vt::IsBlockQuant(lmw.dtype)) {
+      VT_CHECK(lmw.shape[0] == p.vocab_size,
+               "flint paged: block lm_head must be [V, H] nk");
+      vt::MatmulBT(d.q, logits.t(), src, lmw);
+    } else {
+      vt::Matmul(d.q, logits.t(), src, ResidentWeight(d, w.lm_head, {h, p.vocab_size}));
+    }
+  }
 
   if (cpu_dump) {
     d.b.Synchronize(d.q);
