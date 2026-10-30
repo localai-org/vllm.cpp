@@ -64,4 +64,12 @@ FlintWeights LoadFlintFromGguf(const GgufFile& gguf, const HfConfig& config);
 FlintWeights LoadFlintKeepQuantFromGguf(const GgufFile& gguf,
                                         const HfConfig& config);
 
+// The checked accessor over the registry's loaded flint model (the
+// kolibri1_registry.cpp seam): reads the weights back out of the LoadedModel
+// the production ModelRegistry::Load produced, so a gate can assert on the
+// TREE IDENTITY (which arm actually loaded) rather than only on its outputs.
+// Throws when `model` is not the flint family.
+class LoadedModel;
+const FlintWeights& FlintLoadedModelWeights(LoadedModel& model);
+
 }  // namespace vllm

@@ -274,6 +274,30 @@ TEST_CASE("flint keepquant: the paged arm replays the oracle golden in-band") {
       vllm::ModelRegistry::Load(config, source);
   REQUIRE(model != nullptr);
 
+  // REVIEW M5 REPAIR — the TREE-IDENTITY gate. The token gate below proves
+  // "the paged arm serves in-band", not "the keep-quant tree served": a
+  // loader that silently ignored VT_FLINT_KEEP_QUANT (the bf16 arm) would
+  // pass it unchanged. Assert on the loaded tree itself — dtype checks only,
+  // no data scan. A routed-expert gate tower and the head must carry block
+  // encodings, exactly what LoadFlintKeepQuantFromGguf keeps and
+  // LoadFlintFromGguf expands.
+  const vllm::FlintWeights& kq_tree = vllm::FlintLoadedModelWeights(*model);
+  REQUIRE(vt::IsBlockQuant(kq_tree.lm_head.dtype));
+  bool expert_block = false;
+  vt::DType expert_dtype = vt::DType::kBF16;
+  for (const auto& lw : kq_tree.layers) {
+    if (lw.moe.experts.empty()) continue;
+    expert_dtype = lw.moe.experts.front().gate_proj.w.dtype;
+    expert_block = vt::IsBlockQuant(expert_dtype);
+    if (expert_block) break;
+  }
+  REQUIRE_MESSAGE(expert_block,
+                  "keepquant tree identity: no routed-expert gate tower "
+                  "carries a block encoding — the loader served the bf16 arm");
+  MESSAGE("keepquant tree identity: expert gate_proj dtype "
+          << vt::Name(expert_dtype) << " (block), lm_head dtype "
+          << vt::Name(kq_tree.lm_head.dtype) << " (block)");
+
   vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
 
   // One per-layer KV cache set: [num_blocks, 2, bs, hkv, dh] bf16 pages, the
