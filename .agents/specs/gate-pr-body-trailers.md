@@ -242,8 +242,8 @@ dead" failure in its purest form. Filed as
 
 All in `tests/scripts/test_agent_pr_body.py`, before the `__main__` guard,
 registered in `scripts/agent-preflight.sh` `SUITES` and in the CI step that
-already runs `tests/scripts/test_agent_gates.py`. Nineteen cases, none of which
-reaches a network.
+already runs `tests/scripts/test_agent_gates.py`. Twenty-nine cases, none of
+which reaches a network.
 
 | Case | Proves |
 |---|---|
@@ -269,6 +269,13 @@ reaches a network.
 | `test_closing_an_issue_with_no_local_record_warns_but_is_accepted` | A missing record is migration debt rather than a contradiction: an authority that does not exist cannot disagree with the body, and this arm fired on 22 of 24 refusals across the open queue. |
 | `test_closing_an_issue_whose_record_reads_open_is_refused` | The arm that earns a refusal: the record exists and reads OPEN, so closing the mirror leaves the authoritative half saying OPEN. |
 | `test_a_bare_reference_without_a_closing_keyword_is_accepted` | The gate is narrow deliberately. Open pull requests carry six to ten bare `#N` citations each, most without a local record, and failing those would fire the gate on ordinary work rather than on the defect. |
+| `test_a_fork_checkout_reads_the_pull_request_from_upstream` | The defect in one case: `origin` is the fork and cannot answer, the run continues to `upstream`, and the exit is 0 rather than 3. Driven in process on stubbed `subprocess.run`, because the repository choice depends on this checkout's remotes and a `gh` stub on `PATH` cannot vary them. |
+| `test_the_fallback_names_the_repository_it_read` | A fallback is never silent: the `NOTE:` line names the repository whose bytes were judged, so a fork-local number cannot shadow the upstream one unannounced. |
+| `test_origin_answering_is_not_second_guessed` | A maintainer checkout keeps today's meaning and spends one call, because `upstream` may be somebody else's fork. |
+| `test_one_repository_listed_twice_is_asked_once` | Two remotes naming one repository are one candidate, not two calls. |
+| `test_no_repository_carrying_it_is_unverified_and_names_each_one` | Exit 3 rather than 1, and the refusal names every repository asked with its own failure, so "absent" is never inferred from a forge that did not answer. |
+| `test_an_explicit_repo_is_asked_exactly_once` | `--repo` replaces the candidate list rather than leading it. |
+| `test_a_checkout_without_origin_is_still_unverified` | The fallback does not invent a repository when `origin` is absent. |
 
 ## Gates
 

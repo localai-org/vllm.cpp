@@ -14,6 +14,9 @@ It CANNOT REACH THE FORGE from a test. Every case below drives the offline
 with no credentials and never depends on a live pull request.
 """
 
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -24,10 +27,27 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "scripts/agent-pr-body.py"
+
+
+def load(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# The tool as a module, for the one property that cannot be driven through a
+# process: which repository a pull request number is looked up in. That answer
+# depends on this checkout's own remotes, and a `gh` stub on PATH cannot vary
+# them.
+TOOL_MODULE = load("agent_pr_body_under_test", TOOL)
 
 # The value that actually landed as the message of 281b4bc76c0e: the grammar is
 # `AGENT:MODEL [TOOL]` and the bracketed tool is missing (#1262).
@@ -269,6 +289,172 @@ class FetchTests(ToolHarness):
         )
         self.assertEqual(result.returncode, EXIT_OK, result.stderr)
         self.assertFalse(self.gh_calls.exists(), "the offline door reached gh")
+
+
+class RepositoryChoiceTests(unittest.TestCase):
+    """`--pr N` means N in the repository that carries it, not N in `origin`.
+
+    A pull request number is unique inside one repository and collides freely
+    across repositories, so the repository is part of what `--pr` asks for. On a
+    fork checkout `origin` is the fork and carries none of the upstream numbers,
+    and the tool used to stop there and report an absent pull request that
+    exists one remote away.
+
+    Driven in process with `subprocess.run` replaced, because the repository
+    choice depends on this checkout's own remotes: a `gh` stub on `PATH` cannot
+    vary them, and on Windows it cannot even be reached (an extension-less shell
+    script never shadows `gh.exe`), which is why these cases do not use it.
+    """
+
+    FORK = "https://github.com/phantomic12/vllm.cpp.git"
+    CANONICAL = "https://github.com/localai-org/vllm.cpp.git"
+    FOREIGN = "https://github.com/someone/vllm.cpp.git"
+    FORK_SLUG = "phantomic12/vllm.cpp"
+    CANONICAL_SLUG = "localai-org/vllm.cpp"
+    FOREIGN_SLUG = "someone/vllm.cpp"
+
+    def run_tool(self, remotes, bodies, *args):
+        """`(exit code, repositories gh was asked about, stderr)`.
+
+        Every `gh` call is recorded, including the ones that fail, so "asked
+        once" and "asked twice" are distinguishable. Anything that is neither
+        `git` nor `gh` is the trailer checker and runs for real, so a verdict is
+        still the checker's own.
+        """
+
+        asked: list[str] = []
+        real_run = subprocess.run
+
+        def dispatcher(command, **kwargs):
+            argv = list(command)
+            if argv[:1] == ["git"]:
+                remote = argv[-1]
+                if remote not in remotes:
+                    return subprocess.CompletedProcess(
+                        argv, 2, stdout="", stderr=f"error: No such remote '{remote}'\n"
+                    )
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout=remotes[remote] + "\n", stderr=""
+                )
+            if argv[:1] == ["gh"]:
+                repo = argv[argv.index("--repo") + 1]
+                asked.append(repo)
+                if repo not in bodies:
+                    return subprocess.CompletedProcess(
+                        argv, 1, stdout="",
+                        stderr="GraphQL: Could not resolve to a PullRequest with the number of 1257.\n",
+                    )
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout=json.dumps({"body": bodies[repo]}), stderr=""
+                )
+            return real_run(command, **kwargs)
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(TOOL_MODULE.subprocess, "run", side_effect=dispatcher),
+            mock.patch.object(sys, "argv", ["agent-pr-body.py", *args]),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = TOOL_MODULE.main()
+        return code, asked, stderr.getvalue()
+
+    def test_a_fork_checkout_reads_the_pull_request_from_upstream(self) -> None:
+        """The defect: the fork carries no pull requests, the upstream does.
+
+        `origin` is asked and cannot answer, so the run must not end there with
+        exit 3 for a pull request that exists.
+        """
+
+        code, asked, stderr = self.run_tool(
+            {"origin": self.FORK, "upstream": self.CANONICAL},
+            {self.CANONICAL_SLUG: body(FILLED)},
+            "--pr", "1257",
+        )
+        self.assertEqual(code, EXIT_OK, stderr)
+        self.assertEqual(asked, [self.FORK_SLUG, self.CANONICAL_SLUG])
+
+    def test_the_fallback_names_the_repository_it_read(self) -> None:
+        """A fallback that is not the first candidate is stated, never silent.
+
+        A fork can carry pull requests of its own, so a number that answers
+        somewhere other than `origin` must say where the body came from, or the
+        operator cannot tell which repository's bytes were judged.
+        """
+
+        _, _, stderr = self.run_tool(
+            {"origin": self.FORK, "upstream": self.CANONICAL},
+            {self.CANONICAL_SLUG: body(FILLED)},
+            "--pr", "1257",
+        )
+        self.assertIn("NOTE", stderr)
+        self.assertIn(self.CANONICAL_SLUG, stderr)
+        self.assertIn(self.FORK_SLUG, stderr)
+
+    def test_origin_answering_is_not_second_guessed(self) -> None:
+        """A maintainer checkout keeps today's meaning and spends one call.
+
+        `upstream` may be somebody else's fork there, so it must never be asked
+        when `origin` already answered.
+        """
+
+        code, asked, stderr = self.run_tool(
+            {"origin": self.CANONICAL, "upstream": self.FOREIGN},
+            {self.CANONICAL_SLUG: body(FILLED)},
+            "--pr", "1257",
+        )
+        self.assertEqual(code, EXIT_OK, stderr)
+        self.assertEqual(asked, [self.CANONICAL_SLUG])
+        self.assertNotIn("NOTE", stderr)
+
+    def test_one_repository_listed_twice_is_asked_once(self) -> None:
+        """Two remotes naming one repository are one candidate, not two calls."""
+
+        code, asked, stderr = self.run_tool(
+            {"origin": self.CANONICAL, "upstream": self.CANONICAL},
+            {self.CANONICAL_SLUG: body(FILLED)},
+            "--pr", "1257",
+        )
+        self.assertEqual(code, EXIT_OK, stderr)
+        self.assertEqual(asked, [self.CANONICAL_SLUG])
+
+    def test_no_repository_carrying_it_is_unverified_and_names_each_one(self) -> None:
+        """Unknown stays unknown, and the refusal names what was asked.
+
+        Exit 3 rather than 1: nothing was read, so nothing is known about the
+        body this pull request would land.
+        """
+
+        code, asked, stderr = self.run_tool(
+            {"origin": self.FORK, "upstream": self.CANONICAL}, {}, "--pr", "1257"
+        )
+        self.assertEqual(code, EXIT_UNVERIFIED)
+        self.assertEqual(asked, [self.FORK_SLUG, self.CANONICAL_SLUG])
+        self.assertIn("REMOTE_UNVERIFIED", stderr)
+        self.assertIn(self.FORK_SLUG, stderr)
+        self.assertIn(self.CANONICAL_SLUG, stderr)
+
+    def test_an_explicit_repo_is_asked_exactly_once(self) -> None:
+        """`--repo` replaces the whole list; it is not a first candidate."""
+
+        code, asked, stderr = self.run_tool(
+            {"origin": self.FORK, "upstream": self.CANONICAL},
+            {},
+            "--pr", "1257", "--repo", self.CANONICAL_SLUG,
+        )
+        self.assertEqual(code, EXIT_UNVERIFIED)
+        self.assertEqual(asked, [self.CANONICAL_SLUG], stderr)
+
+    def test_a_checkout_without_origin_is_still_unverified(self) -> None:
+        """The fallback does not invent a repository when origin is absent."""
+
+        code, asked, stderr = self.run_tool(
+            {"upstream": self.CANONICAL},
+            {self.CANONICAL_SLUG: body(FILLED)},
+            "--pr", "1257",
+        )
+        self.assertEqual(code, EXIT_UNVERIFIED)
+        self.assertEqual(asked, [])
+        self.assertIn("REMOTE_UNVERIFIED", stderr)
 
 
 class DelegationTests(unittest.TestCase):
