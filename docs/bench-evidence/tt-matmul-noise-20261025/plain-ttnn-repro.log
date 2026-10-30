@@ -1,0 +1,44 @@
+2026-10-26 01:43:24.184 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-26 01:43:24.184 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-26 01:43:24.184 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-26 01:43:24.184 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-26 01:43:24.189 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-26 01:43:24.189 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-26 01:43:24.220 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-26 01:43:24.220 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-26 01:43:24.220 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-26 01:43:24.220 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-26 01:43:24.221 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-26 01:43:24.308 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-26 01:43:24.390 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-26 01:43:24.390 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-26 01:43:24.390 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-26 01:43:24.391 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-26 01:43:24.391 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+===============================================================================
+./tests/vllm/models/test_flint_tt_w3_plain.cpp:38:
+TEST CASE:  SCRATCH dbg W3 plain ttnn matmul repro
+
+./tests/vllm/models/test_flint_tt_w3_plain.cpp:96: MESSAGE: 1 max_abs=0.00121279 rel_rms=0.00404103 frac_bad=0.00390625
+
+./tests/vllm/models/test_flint_tt_w3_plain.cpp:96: MESSAGE: 1 max_abs=0.00796068 rel_rms=0.015009 frac_bad=0.0078125
+
+./tests/vllm/models/test_flint_tt_w3_plain.cpp:96: MESSAGE: 1 max_abs=0.000124771 rel_rms=0.000328025 frac_bad=0
+
+./tests/vllm/models/test_flint_tt_w3_plain.cpp:96: MESSAGE: 1 max_abs=0.00979557 rel_rms=0.027098 frac_bad=0.0175781
+
+./tests/vllm/models/test_flint_tt_w3_plain.cpp:96: MESSAGE: 1 max_abs=0.00121279 rel_rms=0.00404103 frac_bad=0.00390625
+
+===============================================================================
+[doctest] test cases: 1 | 1 passed | 0 failed | 0 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-26 01:43:25.262 | info     |    BuildKernels | JIT cache stats: 23/23 hits (100.0%) [23 cached, 9 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-26 01:43:25.262 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-26 01:43:25.266 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-26 01:43:25.266 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-26 01:43:25.335 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-26 01:43:25.335 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-26 01:43:25.335 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

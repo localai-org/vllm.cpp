@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M3918K0WTSCZ2X1S2WZA5NHW
 Title: 27B decode exhausts tt-metal DRAM after ~N requests per process (bank_manager OOM in the keepquant decode path)
 Row: BACKEND-TENSTORRENT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-09-24
-Updated: 2026-09-30
-Closed: -
+Updated: 2026-10-21
+Closed: 2026-10-21
 
 ## Problem
 
@@ -24,6 +24,25 @@ The APEX-I-Nano 27B decode path OOMs on tt-metal at bank_manager.cpp:495 (~268 M
 
 ## Resolution
 
--
+2026-10-21: FALSIFIED BY THE TREE, on the issue's own closure condition,
+which was "the upstream fix lands and our pin advances past it".
 
+Upstream: tenstorrent/tt-metal#57970 ("ttnn: to_layout/tilize transients
+retained by a live deferred reader after upload -- ~950 MB/request DRAM
+retention pattern in eager decode") is closed with state reason `completed`
+at 2026-10-01T08:55:50Z, the maintainer's note being that the tilize and
+untilize work fixed it.
+
+Our side: the retention does not reproduce on the pin we run. The re-check on
+`98134127a7b` (2026-09-30) settles the free DRAM exactly flat at 301,930,048
+B/bank across 26 consecutive forwards and 300,485,696 B/bank across 23 more,
+a per-new-request step of about 2.9 MiB instead of 948 MiB, with no
+bank_manager OOM and no request dying
+(`docs/bench-evidence/tt-retention-newpin-20260930.md`, verdict REFUTED). The
+failing pin was `9161e8fdb27`.
+
+The engine-side workaround this record records as falsified and reverted
+stays reverted: `TTReclaimPlanes` is called zero times in
+`src/vt/tenstorrent/tenstorrent_gdn.cpp`, because the retention owner is
+ttnn's deferred reader and the fix is upstream's.
 UPDATE 2026-09-30 (engine-side re-check on the NEW pin vllm-cpp-pin/20260923-adv @ 6449cf13f7b, eager arm VT_TT_DECODE_CAPTURE=0, 27B Q4_K_M, 8 prompts in 32, c=4, VT_TT_ALLOC_TRACE ledger): the 948 MiB/request staircase is REFUTED on this pin. Settled per-forward free DRAM (block/0/pre boundary) is EXACTLY flat at 301,930,048 B/bank for 26 consecutive forwards across wave 1 and 300,485,696 B/bank for 23 consecutive forwards across wave 2; the per-new-request step is ~2.9 MiB/request, not 948 MiB. No bank_manager OOM, no request died; both request joins fully observed (the 9000 s wrapper timeout cut only the final decode steps of requests 7/8). One of the ~576 commits between the old pin and this one drained the deferred-reader retention. Evidence: docs/bench-evidence/tt-retention-newpin-20260930.md. Upstream reply on tt-metal#57970 held pending this result; nothing posted.

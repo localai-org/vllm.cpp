@@ -48,9 +48,9 @@ def main() -> int:
     )
 
     greedy = SamplingParams(temperature=0.0, max_tokens=MAX_NEW)
-    # prompt_logprobs returns the distribution at every prompt position; index i of that list
-    # is the distribution that PREDICTED token i, so position len(prompt)-1 is the first
-    # generated token.
+    # prompt_logprobs returns the distribution at every prompt position; index i of that
+    # list is the predictive distribution OVER token i, so the distribution predicting the
+    # first generated token sits at index len(prompt).
     score = SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=TOPK)
 
     out = {"model": MODEL, "topk": TOPK, "max_new_tokens": MAX_NEW, "prompts": []}
@@ -63,15 +63,25 @@ def main() -> int:
 
         rows = []
         for k, gid in enumerate(gen):
-            pos = len(p_ids) - 1 + k          # position whose distribution predicted gen[k]
+            # prompt_logprobs[i] is the predictive distribution over full[i], so the
+            # distribution that PREDICTED gen[k] sits at index len(p_ids) + k. (The
+            # original len(p_ids) - 1 + k stored each position one step behind; see
+            # ISSUE-LOCAL-01M5CQ4GMFF9ZAYYMFYDV6WZ3Q.)
+            pos = len(p_ids) + k
             pl = res.prompt_logprobs[pos]
             if pl is None:
-                continue
+                raise RuntimeError(
+                    f"prompt {i!r}: no logprob distribution at pos {pos} for gen_index {k}")
             # pl is dict[int, Logprob] for that position (flat_logprobs defaults False).
             items = [(tid, lp.logprob) for tid, lp in pl.items() if lp is not None]
-            if not any(tid == gid for tid, _ in items):
-                continue
             items.sort(key=lambda t: -t[1])
+            # Under greedy decode gen[k] must be the argmax of the distribution that
+            # predicted it. The old code silently skipped positions where it was not
+            # in the (wrong) window; make that a loud failure instead.
+            if items[0][0] != gid:
+                raise RuntimeError(
+                    f"prompt {i!r} gen_index {k}: token {gid} is not the top-1 "
+                    f"(top-1 is {items[0][0]}); greedy chain and scored chain diverged")
             top = items[:TOPK]
             lp_of = dict(items)
             vals = [lp for _, lp in top]

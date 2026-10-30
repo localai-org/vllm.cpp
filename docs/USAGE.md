@@ -906,6 +906,25 @@ The existing record identifies revision `e52eb462` but lacks the full revision
 and shard SHA-256 hashes. This is incomplete artifact provenance, not a
 reproducible download pin. See the [checkpoint record](../.agents/specs/kolibri-1-cpu.md#the-checkpoint).
 
+The CPU path also loads a **plain BF16** Kolibri-1 checkpoint — one whose
+`config.json` carries no `quantization_config`. The upstream artifact is
+[`Aleph-Alpha/Kolibri-1-BF16`](https://huggingface.co/Aleph-Alpha/Kolibri-1-BF16)
+@ `cc6d729e6a024c1e59ad48887fdef95ff37b534d`: 32 safetensors shards, and a
+`model.safetensors.index.json` whose `metadata.total_size` is
+156,206,149,120 bytes. Shard 1 (`model-00001-of-00032.safetensors`,
+4,998,628,528 bytes) has SHA-256
+`e626660074fd9ed3e3644f1d62f23be6adad9437e876f5f9b18260d8382d260b`, which is
+the upstream LFS object id. A checkpoint whose `quantization_config` names
+any other scheme is refused by name, and the refusal names the arms that
+exist. See the [bf16 arm record](../.agents/specs/kolibri1-bf16-arm.md) and
+its [evidence](../docs/bench-evidence/kolibri1-bf16-arm-20261021.md).
+
+**The gate behind this arm ran on the LOCAL DEQUANTIZED copy, not on the
+upstream artifact.** The measured copy holds the FP8 checkpoint's
+dequantized values (measured, tensor by tensor), so it is a CONTROL of the
+numerics. The upstream artifact's own gate, and the decomposition it would
+produce, are OWED; the evidence note names both.
+
 Use an existing local checkpoint directory containing the index, its shards,
 `config.json`, `tokenizer.json`, and `tokenizer_config.json`. Allow host memory
 for the weights, temporary dequantized projections, activations, and the KV cache.
@@ -943,9 +962,11 @@ it takes precedence over `enable_thinking`. Only the value `"none"` disables thi
 The explicit context limit keeps this example separate from the author's
 unverified million-token serving recipe. It does not limit weight memory.
 
-The loader retains FP8 blocks and BF16 tensors. The CPU forward dequantizes FP8
-projections when needed. Its optional dequantization cache defaults to disabled
-(`VT_KOLIBRI1_DEQUANT_CACHE_MB=0`), so enabling it adds a memory budget.
+The loader retains FP8 blocks and BF16 tensors. The CPU forward caches
+dequantized weights by default when the host's memory report permits it.
+See the [cache memory policy](ENVIRONMENT.md#kolibri-1-cpu-dequant-cache)
+for budget limits and explicit overrides.
+Set `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` to disable caching and dequantize on each forward.
 The registry also dispatches to a Tenstorrent forward with streamed experts.
 See the [Tenstorrent measurements and remaining gaps](gap-kolibri1-tt-captured-decode.md).
 GGUF loading and other device forwards, including CUDA, are refused.
@@ -956,8 +977,100 @@ near-ties. Four of eight prompts matched token-for-token through the full
 continuation. This was not a native Transformers generation run.
 See the [CPU comparison](../.agents/specs/kolibri-1-cpu.md#now) and
 [serving validation](bench-evidence/kolibri1-serve-20261008.md).
-Full correctness and speed parity against the
-[author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) remain unverified.
+The [author's vLLM plugin](../.agents/oracles/aleph-alpha-inference.md) runs on
+CPU with a BF16-converted reference checkpoint, but its outputs differ from the transcription.
+Full correctness and speed parity against the plugin remain unverified.
+
+### Kolibri-1 from a GGUF k-quant
+
+The `kolibri1` GGUF arm serves the mudler APEX k-quant conversion on CPU
+through the same path; point `--model` straight at the file (the config comes
+from the GGUF's own metadata):
+
+```sh
+./build/examples/vllm-bench --model /path/to/Kolibri-1-APEX-I-Micro.gguf \
+  --num-prompts 8 --input-len 128 --output-len 32 --concurrency 4 \
+  --seed 0 --temperature 0
+```
+
+Weights are the one part of a port a reader cannot infer: the gated artifact
+is `mudler/Kolibri-1-APEX-GGUF` @ `55a4781439f1e8abb7e46c795e0681d6b2b7f4d9`,
+file `Kolibri-1-APEX-I-Micro.gguf`, 22,173,110,464 bytes, sha256
+`3edfaf09aac60d60cde56744fe1e0a7e5362c5549d5eb12d97ec4a9c83c90e0e` (a repo id
+alone is not a pin; this converter re-quantizes tiers in place under unchanged
+names). The tier sweep also measured `Kolibri-1-APEX-I-Mini.gguf`
+(28,973,904,064 bytes, sha256
+`64e61300f557de747957096b70907737e063b9b762ab51811e28a6ef57e725a4`) — it
+measures FARTHER from the fp8 oracle than I-Micro despite the larger container
+(per-tensor quantization is not monotone in size); I-Micro is the documented
+tier. See the [arm record](../docs/bench-evidence/kolibri1-gguf-arm-20261030/README.md).
+
+Correctness: the token gate (`test_kolibri1_gguf`, `-DKOLIBRI1_GGUF_PATH=...`)
+replays the fp8 safetensors goldens under the developer-adjudicated
+quantized-arm record (2026-10-30, Option A — quantized arms are adjudicated on
+their own measured record; the fp8 2.5 band governs same-weights kernel
+comparisons only): I-Micro 37/44 golden greedy positions, worst topk diff
+3.245, 2 hard flips. **No quantization-matched llama.cpp floor exists**: the
+`llama-cpp-kolibri1` pin advance past `b10451` (which predates the kolibri1
+support in PRs #30673/#30865) is a named follow-up, so this arm has no
+quant-matched denominator yet.
+
+## Flint (RecursiveSI) from a GGUF k-quant
+
+The `flint`-architecture container (hybrid FFSSSF sliding/full attention, no
+RoPE on the full layers, per-head attention sinks, sigmoid top-6 MoE with an
+ungated shared expert) serves on CPU through the shared paged engine with
+continuous batching. Point `--model` straight at the file; the config comes
+from the GGUF's own metadata:
+
+```sh
+./build/vllm-server --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+# or the benchmark harness:
+build/examples/vllm-bench --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf \
+  --num-prompts 8 --input-len 128 --output-len 32 --concurrency 4 \
+  --seed 0 --temperature 0
+```
+
+The default arm dequantizes the container to bf16 elementwise weights.
+`VT_FLINT_KEEP_QUANT=1` instead KEEPS the GGUF block tensors: the paged arm
+routes the linear layers and the `lm_head` through the per-dtype dispatch
+seam (`vt::MatmulBT` → the CPU compute-in-quant GEMM, `vt/ops.cpp`), so the
+k-quant container serves packed — no bf16 copy of the weights is ever
+materialized:
+
+```sh
+VT_FLINT_KEEP_QUANT=1 ./build/vllm-server \
+  --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+```
+
+Correctness record for the keep-quant arm (`test_flint_gguf`, keep-quant
+paged gate): 53/60 greedy positions token-exact against the pinned
+llama-cpp-flint oracle goldens, 0 hard flips, every divergence inside the
+house 2.5-nat near-tie band (llama.cpp uses integer block dots, so
+token-exactness is not expected; the band governs). The loader refuses an
+encoding the CPU cannot decode by name, before any forward runs.
+
+Published containers on the dev share: `flint-GGUF/flint-Q4_K_M.gguf`
+(sha256 `20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e`),
+plus the `unsloth-flint-GGUF/` and `flint-APEX-GGUF/` variants of the same
+converter family. Weights are the one part of a port a reader cannot infer:
+the gates were built and run against exactly these files.
+
+Correctness record, all on the published Q4_K_M container:
+
+- the reference-forward token gate (`test_flint_gguf`) replays the pinned
+  llama-cpp-flint oracle (PR #30928 head `1b44e307`, the sinks PR whose paged
+  sink handling this engine mirrors): 46/53 greedy positions token-exact,
+  0 hard flips, everything else inside the house 2.5-nat near-tie band;
+- the synthetic paged gate (`test_flint_paged`) gates the paged arm's
+  structure and the same band against the reference forward;
+- the real-weights paged-engine gate (`test_flint_paged_engine`) serves three
+  continuously-arriving requests through the full LLMEngine stack and
+  adjudicates each chain against the reference forward: measured divergence
+  margins 0.036–0.114 nats.
+
+CUDA/ROCm and safetensors arms are refused by name. The container's
+`flint.context_length` drives the engine context; the KV pool auto-fits it.
 
 ## Muse Glimmer 30B from a GGUF k-quant
 

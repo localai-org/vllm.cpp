@@ -1,0 +1,48 @@
+vllm-bench: /mnt/models/Aleph-Alpha/Kolibri-1 engine | num_prompts=8 input_len=128 output_len=32 concurrency=4 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit is on by default but cannot apply to a safetensors checkpoint (its weight footprint is not known where the placement must be installed); continuing with no placement
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+
+============= vllm.cpp Benchmark Result =============
+Engine frontend:                           AsyncLLM    
+Output wait:                               poll        
+Blocking wait calls:                       0           
+Async scheduling enabled:                  1           
+Pretokenized prompt admission:             1           
+KV cache dtype (requested):                auto
+KV cache dtype (resolved storage):         bf16
+Ignore EOS (requested):                    1           
+Ignore EOS (resolved sampling):            1           
+Chat template:                             skipped (raw prompt)
+Chat template kwargs:                      {}
+Maximum concurrent batches:                2           
+Successful requests:                       8           
+Maximum request concurrency:               4           
+Benchmark duration (s):                    57.46       
+Total input tokens:                        1026        
+Total generated tokens:                    256         
+Request throughput (req/s):                0.14        
+Output token throughput (tok/s):           4.46        
+Total token throughput (tok/s):            22.31       
+-------- Time to First Token --------
+Mean TTFT (ms):                            19417.37    
+Median TTFT (ms):                          19417.38    
+P99 TTFT (ms):                             20317.73    
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            300.35      
+Median TPOT (ms):                          300.35      
+P99 TPOT (ms):                             301.02      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             300.35      
+Median ITL (ms):                           306.29      
+P99 ITL (ms):                              374.57      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            28728.28    
+Median E2EL (ms):                          28728.28    
+P99 E2EL (ms):                             29607.95    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 17.86       
+Prefill token throughput (tok/s, in/TTFT): 6.60        
+Output (decode) token throughput (tok/s):  4.46        
+Mean per-stream decode rate (tok/s):       3.33        
+====================================================

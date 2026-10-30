@@ -1,0 +1,20 @@
+### LEG b2ii-golden-head-newpin-1 start=2026-10-30T14:55:25+01:00 load=14.61 121.17 135.91 gov=performance topcpu=[136 /home/lu_zero/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/rustc]
+### binary: /tmp/build-anchoring/tests/test_kolibri1_tt_b2ii 
+Found 1 chips to reset
+Resetting chips
+Waiting for reset to complete
+New chip! We now have 1 chips
+Chip initialization complete (found )
+Chip initializing complete...
+ ARC
+
+ [8/8] DRAM
+
+ [14/14] ETH
+
+ [4/4] CPU
+
+Chip detection complete (found )
+Failed to reset chips [0]
+/tmp/build-anchoring/tests/test_kolibri1_tt_b2ii: symbol lookup error: /tmp/build-anchoring/tests/test_kolibri1_tt_b2ii: undefined symbol: _ZN4ttnn11transformer41paged_scaled_dot_product_attention_decodeERKNS_6TensorES3_S3_S3_bRKSt8optionalIS2_ES7_S7_S4_IfES4_IjERKS4_IN2tt8tt_metal12MemoryConfigEES4_INS_10operations11transformer17SDPAProgramConfigEES4_INS_19ComputeKernelConfigEES4_INSH_26PagedCacheGeometryOverrideEES9_
+### END b2ii-golden-head-newpin-1 end=2026-10-30T14:55:42+01:00 load_after=11.37 113.53 133.09 gov_after=performance

@@ -164,12 +164,26 @@ id = llama-cpp
 role = secondary
 upstream = https://github.com/ggml-org/llama.cpp
 scope = CPU and GGUF k-quant speed and memory floors, quant-matched against the same weights
-pin = 11fe02151f79c41d0d4af7da708755d73b9c0da6
-pin_label = llama.cpp main, 2026-10-04
-pinned_on = 2026-10-03
+pin = 62318cd57dc63900ecb153272c0b10f78550855d
+pin_label = llama.cpp main, 2026-10-17 (kolibri-1 merge 62318cd57)
+pinned_on = 2026-10-20
 gateable = yes
-evidence = docs/bench-evidence/oracle-llamacpp-11fe0215-gateable-20261003.md
+evidence = docs/bench-evidence/kolibri1-llamacpp-crosscheck-20261020.md
 ```
+
+**Prior pin: `11fe02151f79c41d0d4af7da708755d73b9c0da6` (llama.cpp main,
+2026-10-04), pinned 2026-10-03, gateable evidence
+[oracle-llamacpp-11fe0215-gateable-20261003.md](../../docs/bench-evidence/oracle-llamacpp-11fe0215-gateable-20261003.md).**
+Every gate recorded against `11fe0215` stays attributed to it. The pin advanced
+on 2026-10-20 because `11fe0215` predates the Kolibri-1 (Aleph-Alpha) support
+merge `62318cd57` (#30673, 2026-10-17): the kolibri-1 three-way cross-check
+(row `MODEL-TEXT-kolibri-1`) needs a third independent reference and that
+revision is the first upstream object that loads the released checkpoint at
+all. `62318cd57` was verified gateable on the Aleph-Alpha/Kolibri-1 fp8
+checkpoint converted to bf16 GGUF through the upstream converter; identity,
+build, executed path and agreement numbers are in the evidence file above.
+Non-kolibri denominators recorded against `11fe0215` keep that revision in
+their own records; this advancement does not re-base them.
 
 **Prior pin: `10bf611e533d81f739128304991c5e133c6aebd8` (`b10451`),
 pinned 2026-08-16, gateable evidence

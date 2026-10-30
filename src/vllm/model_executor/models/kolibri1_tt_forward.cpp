@@ -26,6 +26,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <iterator>
 #include <map>
 #include <set>
 #include <mutex>
@@ -680,8 +682,24 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
            "kolibri1-tt B2b-ii: the per-step stream guard is missing");
   st.guard->Charge(layer, list.stream_bytes);
   vt::Backend& be = vt::GetBackend(d.q.device.type);
-  std::vector<uint8_t> slot_image(
-      static_cast<size_t>(st.pool.packed_bytes_per_slot));
+  // Lever 2 (TT-KOLIBRI1-READBACK): one buffer per fill, not one shared
+  // slot_image — the D2H readbacks now settle at the layer drain point, so
+  // a shared destination would be overwritten by the next fill's memcpy
+  // before the previous fill's device bytes land.
+  std::vector<std::vector<uint8_t>> fill_images;
+  // The fills whose device readback has not been verified yet: (slot,
+  // destination buffer). The drain below settles the queue and runs the
+  // byte-exact compares — the verification itself is unchanged, only its
+  // timing moves (per fill -> per layer).
+  std::vector<std::pair<int64_t, const uint8_t*>> pending_verify;
+  auto drain_readbacks = [&]() {
+    be.Synchronize(d.q);
+    for (const auto& pv : pending_verify) {
+      st.readback_verified_bytes += st.shadow->VerifyReadback(
+          layer, pv.first, pv.second, st.pool.packed_bytes_per_slot);
+    }
+    pending_verify.clear();
+  };
   // The same-step residents must not become eviction victims: refresh
   // their recency BEFORE the fetch loop, so a miss's LRU victim is never
   // an expert THIS step's route selected (observed on the production-shape
@@ -689,13 +707,19 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // step's 323 fetch, and the compute loop refused "no slot holds it" — a
   // self-inflicted miss-handle on a fully warm table). Touch on a resident
   // only refreshes the stamp; the table is unchanged.
-  for (const int64_t e : ld.resident_experts)
-    st.pool.policy.Touch(layer, e);
-  for (const Kolibri1TTSlotFetchJob& job : list.jobs) {
-    // Touch FIRST: the policy's slot is authoritative (the dispatch
+  for (const int64_t resident : ld.resident_experts)
+    st.pool.policy.Touch(layer, resident);
+  // Stage one expert into its slot. The SAME body serves the dispatch
+  // fetch loop and the compute loop's on-demand fallback: a multi-token
+  // forward can select more DISTINCT experts on one layer than the pool
+  // holds slots (t x top_k up to 48 distinct against a 12-slot layer
+  // pool), and the fetch loop then evicts a same-step expert it fetched
+  // earlier — the compute loop repairs that miss in place instead of
+  // refusing "no slot holds it".
+  auto stage_expert = [&](int64_t expert) -> int64_t {
     // plan's fetch_slots are advisory — SuggestSlotFor is read-only over
     // the tables, so a multi-miss dispatch repeats the first free slot).
-    const int64_t slot = st.pool.policy.Touch(layer, job.expert);
+    const int64_t slot = st.pool.policy.Touch(layer, expert);
     VT_CHECK(slot >= 0 && slot < st.pool.capacity_per_layer,
              "kolibri1-tt B2b-ii: the policy handed out slot " +
                  std::to_string(slot) + " outside the per-layer capacity");
@@ -704,39 +728,48 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     // concatenated (gate, up, down) — the layout the pool stages.
     const Kolibri1ExpertWeights& ew =
         weights.layers[static_cast<size_t>(layer)]
-            .moe.experts[static_cast<size_t>(job.expert)];
+            .moe.experts[static_cast<size_t>(expert)];
     const Kolibri1Projection* projs[3] = {&ew.gate_proj, &ew.up_proj,
                                           &ew.down_proj};
     int64_t off = 0;
     const bool was_swap = st.shadow->Has(layer, slot);
+    fill_images.emplace_back(
+        static_cast<size_t>(st.pool.packed_bytes_per_slot));
+    uint8_t* image = fill_images.back().data();
     for (const Kolibri1Projection* pr : projs) {
       const size_t nb = pr->fp8_block.packed.bytes.size();
       // H2D: the packed bytes VERBATIM, row-major, into the slot.
       d.b.Copy(d.q, static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
                         device_offset + off,
                pr->fp8_block.packed.bytes.data(), nb);
-      std::memcpy(slot_image.data() + off, pr->fp8_block.packed.bytes.data(),
-                  nb);
+      std::memcpy(image + off, pr->fp8_block.packed.bytes.data(), nb);
       // The f32 scale grids stay HOST-side (staged with the slot's shadow).
       off += static_cast<int64_t>(nb);
     }
     VT_CHECK(off == st.pool.packed_bytes_per_slot,
              "kolibri1-tt B2b-ii: slot payload byte math diverged");
-    // The readback pivot: D2H the staged slot and verify BYTE-EXACT
-    // against the shadow (no extract_shard on this tt-metal).
-    be.Copy(d.q, slot_image.data(),
+    // The shadow records the HOST image BEFORE the D2H enqueues, so the
+    // drain-point compare is device bytes vs host image — the H2D
+    // integrity gate itself (no extract_shard on this tt-metal). The D2H
+    // enqueues WITHOUT a blocking Synchronize: the copies settle at the
+    // layer's drain point, before any expert computes over the slot.
+    st.shadow->Record(layer, slot, image,
+                      st.pool.packed_bytes_per_slot);
+    be.Copy(d.q, image,
             static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
                 device_offset,
             static_cast<size_t>(st.pool.packed_bytes_per_slot));
-    be.Synchronize(d.q);
-    st.shadow->Record(layer, slot, slot_image.data(),
-                      st.pool.packed_bytes_per_slot);
-    st.readback_verified_bytes += st.shadow->VerifyReadback(
-        layer, slot, slot_image.data(), st.pool.packed_bytes_per_slot);
+    pending_verify.emplace_back(slot, image);
     ++st.slot_fills;
     st.staged_bytes += st.pool.packed_bytes_per_slot;
     if (was_swap) ++st.swap_fills;
-  }
+    return slot;
+  };
+  for (const Kolibri1TTSlotFetchJob& job : list.jobs) stage_expert(job.expert);
+  // THE DRAIN POINT (lever 2): one Synchronize per layer settles every
+  // fill's D2H readback BEFORE the compute loop runs — a corrupt stage is
+  // still caught before any expert computes over it, by construction.
+  drain_readbacks();
   // Re-record the epoch AFTER the fills so the next layer's check fires
   // only on a NEW content change (swaps it did not cause itself).
   st.epoch.Record(st.pool.policy);
@@ -779,7 +812,20 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     if (token_rows.empty()) continue;
     // The slot must hold this expert — a miss here is a miss-handle
     // refusal (the fetch above pinned every requested expert).
-    const int64_t slot = st.pool.policy.SlotFor(layer, ex);
+    int64_t slot = st.pool.policy.SlotFor(layer, ex);
+    if (slot < 0) {
+      // ON-DEMAND FALLBACK (the multi-token distinct-set overflow): the
+      // fetch loop's own Touches evicted a same-step selected expert
+      // because this layer's DISTINCT selected experts exceed the pool's
+      // slots. Stage it now — same body, same readback pivot — and charge
+      // the extra stream bytes so the B1 bound still sees the truth.
+      st.guard->Charge(layer, st.pool.packed_bytes_per_slot);
+      slot = stage_expert(ex);
+      // The on-demand fill's readback must be settled before anything
+      // computes over the slot: drain immediately (this is the compute
+      // loop, past the fetch-loop drain point).
+      drain_readbacks();
+    }
     VT_CHECK(slot >= 0,
              "kolibri1-tt B2b-ii: expert " + std::to_string(ex) +
                  " selected on layer " + std::to_string(layer) +
@@ -791,19 +837,18 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     auto it = st.memo.find(key);
     if (it != st.memo.end() && it->second.slot == slot) {
       ++st.memo_hits;
+      // LRU touch: refresh the entry's recency stamp.
+      it->second.stamp = ++st.memo_clock;
     } else {
-      // The slot bytes are authoritative ON DEVICE: read the slot back
-      // (the readback pivot) and verify byte-exact against the shadow
-      // before computing over its dequant.
-      std::vector<uint8_t> rb(
-          static_cast<size_t>(st.pool.packed_bytes_per_slot));
-      be.Copy(d.q, rb.data(),
-              static_cast<char*>(st.pool_base[static_cast<size_t>(layer)]) +
-                  slot * st.pool.packed_bytes_per_slot,
-              rb.size());
-      be.Synchronize(d.q);
-      st.readback_verified_bytes += st.shadow->VerifyReadback(
-          layer, slot, rb.data(), st.pool.packed_bytes_per_slot);
+      // Lever 1 (TT-KOLIBRI1-READBACK): the shadow already holds the
+      // authoritative slot bytes host-side — the fill-time readback
+      // verification proved device == shadow when the slot was staged,
+      // the eviction hook invalidates the shadow on every swap, and the
+      // slot-pool policy refuses a SlotFor on a slot the shadow does not
+      // hold. Dequant from those bytes instead of a second D2H re-read
+      // with its own blocking Synchronize on the decode critical path.
+      const std::vector<uint8_t>& rb =
+          st.shadow->Bytes(layer, slot);
       // ONE allocation per expert (all three projections are inter x h
       // up to transpose), carved into three views; freed through the
       // backend when the memo entry dies.
@@ -823,6 +868,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       void* bp = be.Alloc(nb_total);
       Kolibri1TTStreamingDeviceContext::SlotDequant dq;
       dq.slot = slot;
+      dq.stamp = ++st.memo_clock;
       dq.owner = std::shared_ptr<void>(bp, [&be](void* ptr) {
         be.Free(ptr);
       });
@@ -889,6 +935,15 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       // The cap was already enforced before the dequant allocation above
       // (the address-reuse discipline); this second call is the emplace
       // contract's belt — a no-op at <= cap - 1 entries.
+      //
+      // THE VICTIM IS THE LRU ENTRY, NOT THE SMALLEST KEY. The pre-LRU
+      // victim (erase begin()) was always the lowest (layer, expert): with
+      // the layers walked in ascending order every step, every layer's
+      // miss sacrificed a layer-0 entry, so layer 0 re-dequanted and
+      // re-staged 7.86 MB EVERY step while its entries never survived a
+      // full pass. The LRU stamp spreads the evictions over the entries
+      // the route actually touched longest ago (the #3452 dangling-
+      // iterator discipline — evict BEFORE emplace — is unchanged).
       Kolibri1TTMemoEvictForEmplace(st.memo, kMemoMaxEntries);
       it = st.memo.emplace(key, std::move(dq)).first;
     }
@@ -926,6 +981,27 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
     }
   }
   DBuf out(d, DType::kBF16, {t, h});
+  // The on-demand fallback stages changed the pool content INSIDE the
+  // compute loop; re-record so the next layer's reset-lane check fires
+  // only on content IT did not cause.
+  st.epoch.Record(st.pool.policy);
+  if (std::getenv("VT_KOLIBRI1_TT_MEMO_STATS") != nullptr) {
+    std::fprintf(stderr,
+                 "[MEMO][TT] L%lld hits=%lld misses=%lld fills=%lld "
+                 "slots=%lld memo=%zu delta=%lld/%lld/%lld\n",
+                 static_cast<long long>(layer),
+                 static_cast<long long>(st.memo_hits),
+                 static_cast<long long>(st.memo_misses),
+                 static_cast<long long>(st.slot_fills),
+                 static_cast<long long>(st.pool.capacity_per_layer),
+                 st.memo.size(),
+                 static_cast<long long>(st.memo_hits - st.memo_prev_hits),
+                 static_cast<long long>(st.memo_misses - st.memo_prev_misses),
+                 static_cast<long long>(st.slot_fills - st.memo_prev_fills));
+    st.memo_prev_hits = st.memo_hits;
+    st.memo_prev_misses = st.memo_misses;
+    st.memo_prev_fills = st.slot_fills;
+  }
   if (StageDumpOn()) {
     std::vector<float> wsum(route.weights.begin(), route.weights.end());
     double s = 0;
@@ -976,7 +1052,18 @@ Kolibri1DebugRouteDiff Kolibri1DebugRouteCompare(
 // See the header: evict BEFORE the caller's emplace so the just-emplaced
 // entry is never the victim.
 void Kolibri1TTMemoEvictForEmplace(Kolibri1TTMemo& memo, size_t cap) {
-  while (memo.size() >= cap) memo.erase(memo.begin());
+  while (memo.size() >= cap) {
+    // The victim is the LEAST RECENTLY USED entry (smallest stamp; ties
+    // break to the smallest key so the choice is deterministic). The old
+    // erase(begin()) always took the smallest key — with the layers walked
+    // in ascending order every step, that concentrated every eviction on
+    // the lowest layer and destroyed its hit pattern.
+    auto victim = memo.begin();
+    for (auto it = std::next(victim); it != memo.end(); ++it) {
+      if (it->second.stamp < victim->second.stamp) victim = it;
+    }
+    memo.erase(victim);
+  }
 }
 
 // ---- The routed-expert refusal (public contract) -----------------------------

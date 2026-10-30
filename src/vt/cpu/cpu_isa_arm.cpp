@@ -20,6 +20,9 @@
 #if defined(__linux__) && !defined(HWCAP2_I8MM)
 #define HWCAP2_I8MM (1UL << 13)
 #endif
+#if defined(__linux__) && !defined(HWCAP2_BF16)
+#define HWCAP2_BF16 (1UL << 14)
+#endif
 
 namespace vt::cpu {
 namespace {
@@ -55,6 +58,20 @@ const char* ArmIsaTierName(ArmIsaTier tier) {
     if (item.tier == tier) return item.name.data();
   }
   return "unknown";
+}
+
+// BFDOT (ARMv8.6 FEAT_BF16) probe, same shape as the i8mm one: AT_HWCAP2 on
+// Linux, the sysctl feature question on Darwin. Used by the paged-attention
+// BFDOT arm (cpu_paged_attn_bfdot_arm.cpp), which is handed out at runtime
+// only after this detector proves the hardware.
+bool DetectArmBf16() {
+#if defined(__aarch64__) && defined(__linux__)
+  return (getauxval(AT_HWCAP2) & HWCAP2_BF16) != 0;
+#elif defined(__aarch64__) && defined(__APPLE__)
+  return DarwinFeature("hw.optional.arm.FEAT_BF16");
+#else
+  return false;
+#endif
 }
 
 ArmIsaCaps DetectArmIsaCaps() {

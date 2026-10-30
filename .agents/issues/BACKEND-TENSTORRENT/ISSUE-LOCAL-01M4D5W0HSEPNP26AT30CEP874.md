@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-08
-Updated: 2026-10-08
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -16,4 +16,15 @@ Found during the kolibri-tt B2b-i bring-up (2026-10-08): in a VLLM_CPP_TENSTORRE
 
 ## Resolution
 
--
+2026-10-21: STILL TRUE. The crash chain is unchanged in the tree. The TT ops
+registrar's static initializer still probes the device at
+`src/vt/tenstorrent/tenstorrent_ops.cpp:1826` (`if (!DeviceAvailable()) return;`),
+and `DeviceAvailable()` is still `tt::tt_metal::GetNumAvailableDevices() > 0`
+(`src/vt/tenstorrent/tenstorrent_device.cpp:13`), which is the call this issue
+names as the path into `MetalContext::create_default_instance` and the "Root
+Directory is not set" fatal. The backend's own constructor keeps the same
+guard at `src/vt/tenstorrent/tenstorrent_backend.cpp:132`.
+
+What settles it: a TT build (`-DVLLM_CPP_TENSTORRENT=ON`) run under `env -i`
+on a host with the tt-metal runtime, which is where the exit 139 was seen. The
+CPU-only build is unaffected.

@@ -1,0 +1,58 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri1_gguf.cpp:236:
+TEST CASE:  kolibri1 gguf: greedy generation on probe prompts is fluent
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:238: MESSAGE: SKIP: set VT_KOLIBRI1_GGUF_GEN=1
+
+===============================================================================
+./tests/vllm/models/test_kolibri1_gguf.cpp:265:
+TEST CASE:  kolibri1 gguf: the published Q2_K replays the transformers golden run
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:274: MESSAGE: loading the published Q2_K container...
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:276: MESSAGE: weights loaded
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:332: MESSAGE: HARD flip at prompt 'alpha beta gamma delta epsilon zeta' step 1: got 116026 want 121598 (gap 2.53544 > band 2.5)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 1 with gap 2.53544 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'alpha beta gamma delta epsilon zeta': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 0 with gap 1.06471 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'der Mond scheint hell über den Bergen': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 2 with gap 0.057044 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'The capital of Australia is': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 0 with gap 0.138517 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'Wissen ist Macht, aber Zeit ist Geld': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 2 with gap 1.00373 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'x1 = 3, x2 = 7, x3 = 11, x4 =': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 0 with gap 0.441734 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'Translation to German: the weather is beautiful today': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:332: MESSAGE: HARD flip at prompt 'Ein gutes Buch liest man am besten' step 0: got 10304 want 30135 (gap 9.55884 > band 2.5)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:341: MESSAGE: chain diverged at step 0 with gap 9.55884 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'Ein gutes Buch liest man am besten': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:375: MESSAGE: 'counting: one two three four five six seven': worst topk diff so far 3.24517
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:378: MESSAGE: ARGMAX CHAIN: 37/44 compared positions match the golden greedy decode (7 flips: 5 near-tie, 2 hard)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:383: MESSAGE: FINAL-STEP FINGERPRINT (teacher-forced golden chains): worst topk logit diff 3.24517, worst sum diff 47242.8
+
+===============================================================================
+[doctest] test cases:   3 |   3 passed | 0 failed | 0 skipped
+[doctest] assertions: 109 | 109 passed | 0 failed |
+[doctest] Status: SUCCESS!

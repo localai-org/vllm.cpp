@@ -1412,8 +1412,15 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
         ttnn::Tensor wft = ttnn::to_layout(wf, ttnn::Layout::TILE);
         TTReclaimPlanes(device, {&wf});
         ttnn::Tensor prod = ttnn::multiply(wft, dev_a_f32exact);
+        // mean · K, not ttnn::sum: on the tt-metal pin this backend builds
+        // against, f32 sum lands on the tf32 FPU tile-reduce while mean's
+        // default selects the accurate full-fp32 SFPU path (see the header
+        // comment on generic_reductions.hpp mean and the GDN composed-step
+        // note in tenstorrent_gdn.cpp). Same reduction, exact accumulation.
         part = ttnn::permute(
-            ttnn::sum(prod, ttsl::SmallVector<int>{1}, /*keep_dim=*/true),
+            ttnn::multiply(ttnn::mean(prod, ttsl::SmallVector<int>{1},
+                                      /*keep_dim=*/true),
+                           static_cast<float>(K)),
             ttsl::SmallVector<int64_t>{1, 0});  // [rows,1] -> [1,rows]
         TTReclaimPlanes(device, {&wft, &prod});
       } else {
@@ -1480,8 +1487,11 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
         // bounded), so a forced double free of the shared storage cannot
         // happen.
         prod = ttnn::multiply(wft, dev_a_f32exact);
+        // mean · K, not ttnn::sum — same pin rationale as the fused arm above.
         part = ttnn::permute(
-            ttnn::sum(prod, ttsl::SmallVector<int>{1}, /*keep_dim=*/true),
+            ttnn::multiply(ttnn::mean(prod, ttsl::SmallVector<int>{1},
+                                      /*keep_dim=*/true),
+                           static_cast<float>(K)),
             ttsl::SmallVector<int64_t>{1, 0});  // [rows,1] -> [1,rows]
       } else {
         ttnn::Tensor wbf = ttnn::typecast(wf, ttnn::DataType::BFLOAT16);

@@ -12,13 +12,18 @@ to the file stem.
 | `vllm-online-serving` | The binding comparison. vLLM's production graphed config, never `--enforce-eager` | Results | [Detail](benchmarks/vllm-online-serving.md) |
 | `memory` | Peak memory across the serving window. Each row names its own model, host and window | Results | [Detail](benchmarks/memory.md) |
 | `llama-cpp-cpu` | llama.cpp on CPU, including the RPi5/A76 gating arm that does not transfer | Results | [Detail](benchmarks/llama-cpp-cpu.md) |
+| `kolibri1-cpu-dequant-cache-default` | Kolibri-1 on CPU with the dequant cache on by default: decode, prefill and the n-gram spec-decode serving number | Results | [Detail](benchmarks/kolibri1-cpu-dequant-cache-default.md) |
+| `kolibri1-gguf-serving` | Kolibri-1 APEX I-Micro GGUF served on CPU vs the fp8 arm, under the developer-adjudicated quantized-arm gate | Results | [Detail](benchmarks/kolibri1-gguf-serving.md) |
 | `mlx-lm-apple-m4` | MLX-LM on Apple M4, warm, batch 1, 6 interleaved runs | Results | [Detail](benchmarks/mlx-lm-apple-m4.md) |
+| `flint-cpu-paged` | Flint (RecursiveSI) Q4_K_M on CPU through the paged engine: the first prefill/decode numbers | Results | [Detail](benchmarks/flint-cpu-paged.md) |
+| `flint-kq-cpu` | Flint Q4_K_M served PACKED on CPU (`VT_FLINT_KEEP_QUANT=1`) through the paged engine, against the llama.cpp floor | Results | [Detail](benchmarks/flint-kq-cpu.md) |
 | `dwarfstar-gguf` | DwarfStar vs ds4 on DeepSeek-V4-Flash GGUF, GB10, byte-exact | Results | [Detail](benchmarks/dwarfstar-gguf.md) |
 | `speculative-decoding` | MTP / DFlash / n-gram / DSpark rows against vLLM | Results | [Detail](benchmarks/speculative-decoding.md) |
 | `tt-capture-default-decode` | Qwen3-0.6B decode on the P150 with captured decode as the shipped default | Results | [Detail](benchmarks/tt-capture-default-decode.md) |
 | `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150 | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
 | `qwen38-27b-exl3-gb10` | Qwen3.8-27B EXL3 3.5bpw on GB10, with and without its DFlash2 draft | Results | [Detail](benchmarks/qwen38-27b-exl3-gb10.md) |
 | `qwen38-27b-exl3-variadic-gb10` | The same pair under a mixed-length serving load, percentiles over concurrency | Results | [Detail](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
+| `qwen38-tensorfold-gap` | Qwen3.8 TensorFold gap: blocked, missing artifacts, no number | Blocked, no number | [Detail](benchmarks/qwen38-tensorfold-gap.md) |
 | `qwen38-27b-q4km-gfx1151` | Qwen3.8-27B Q4_K_M on Strix Halo, llama.cpp against pinned vLLM and vllm.cpp | Results | [Detail](benchmarks/qwen38-27b-q4km-gfx1151.md) |
 | `how-we-measure` | The measurement protocol, the oracle pin, and the disposition rules every number obeys | Method, no headline number | [Detail](benchmarks/how-we-measure.md) |
 | `variadic-load-methodology` | How the mixed-load serving benchmark works, and what the harness cannot see | Method, no result | [Detail](benchmarks/variadic-load-methodology.md) |
@@ -57,28 +62,7 @@ Reading the ratios: throughput is ours/reference, latency is reference/ours, so
 is measured on, and the per-architecture correctness gate behind it, is the
 registry-bound list in [FEATURES.md](FEATURES.md).
 
-## Benchmark detail index
-
-| Benchmark ID | Disposition | Detail |
-|---|---|---|
-| `qwen38-tensorfold-gap` | `BLOCKED_MISSING_ARTIFACTS`; no number | [Qwen3.8 TensorFold gap](benchmarks/qwen38-tensorfold-gap.md) |
-| `at-a-glance` | portfolio snapshot, current W5/W6 state | [At a glance](benchmarks/at-a-glance.md) |
-| `dwarfstar-gguf` | `DONE`: byte-exact decode, 1.144x vs DwarfStar `ds4` with `VT_V4_RESIDENT_W` | [DwarfStar, GGUF](benchmarks/dwarfstar-gguf.md) |
-| `how-we-measure` | methodology reference for every binding number | [How we measure](benchmarks/how-we-measure.md) |
-| `llama-cpp-cpu` | `DONE`: prefill 1.18x ahead, decode tie, memory parity (aarch64) | [llama.cpp, CPU](benchmarks/llama-cpp-cpu.md) |
-| `memory` | `PASS`: peak PSS/RSS/GPU-memory ratios vs vLLM, 27B NVFP4 GB10 | [Memory](benchmarks/memory.md) |
-| `mlx-lm-apple-m4` | INDICATIVE: 97.6% warm total vs MLX-LM, Qwen3-0.6B | [MLX-LM, Apple M4](benchmarks/mlx-lm-apple-m4.md) |
-| `open-gaps` | ledger of open performance gaps and their next gates | [Open gaps](benchmarks/open-gaps.md) |
-| `qwen38-27b-exl3-gb10` | EXL3 3.5bpw decode, with and without the DFlash2 draft | [Qwen3.8-27B EXL3 GB10](benchmarks/qwen38-27b-exl3-gb10.md) |
-| `qwen38-27b-exl3-variadic-gb10` | EXL3 under a mixed-length serving load | [Qwen3.8-27B EXL3 variadic GB10](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
-| `qwen38-27b-q4km-gfx1151` | Q4_K_M three-engine comparison on Strix Halo | [Qwen3.8-27B Q4_K_M gfx1151](benchmarks/qwen38-27b-q4km-gfx1151.md) |
-| `reproduce` | entry points and recipes to reproduce each benchmark | [Reproduce](benchmarks/reproduce.md) |
-| `speculative-decoding` | MTP/DFlash/n-gram/DSpark spec-decode rows vs vLLM | [Speculative decoding](benchmarks/speculative-decoding.md) |
-| `tt-capture-default-decode` | Tenstorrent capture-default decode rate | [Tenstorrent capture-default decode](benchmarks/tt-capture-default-decode.md) |
-| `tt-keepquant-27b-decode` | Tenstorrent keep-quant 27B decode, capture-default | [Tenstorrent keep-quant 27B decode](benchmarks/tt-keepquant-27b-decode.md) |
-| `variadic-load-methodology` | methodology of the mixed-load serving benchmark | [Variadic-load methodology](benchmarks/variadic-load-methodology.md) |
-| `vllm-online-serving` | the binding vLLM online-serving comparison grids | [vLLM, online serving](benchmarks/vllm-online-serving.md) |
-
+## vLLM, online serving
 ## vLLM, online serving
 
 The binding comparison. vLLM runs its **production graphed config**, never
@@ -313,6 +297,63 @@ it goes our way. Output tokens are **byte-identical** to llama.cpp's greedy
 decode and to our own CPU reference path. Single-stream only: we have not
 measured concurrent serving against llama.cpp's server.
 
+## Kolibri-1, CPU
+
+Aleph Alpha's mixture-of-experts text model on the CPU path, FP8
+block-quantized checkpoint. Node 3 of the shared aarch64 box (128 cores,
+255 GB RAM, governor `performance` at 3.4 GHz), 32 threads, one NUMA node,
+the file mutex held, the box quiet. Detail:
+[Kolibri-1 on CPU](benchmarks/kolibri1-cpu-dequant-cache-default.md).
+
+| Leg | Decode tok/s (the in-repo bench: 128 tokens in, 64 greedy out) | Prefill tok/s (p512, cache off) |
+|---|---|---|
+| cache OFF — the configuration `main` shipped before the default landed | 3.55 / 3.62 / 3.79 (median **3.62**) | 12.27-12.30 / 23.78-23.89 / **43.02-43.33** tok/s at 8 / 16 / 32 threads |
+| default, first implementation (8.25 GiB budget, 33% hit rate) | 3.84 (one run) | — |
+| **default, repaired (26.5 GiB budget, 80% hit rate)** | **7.39 / 7.45 / 7.47 (median 7.45)** | — |
+| explicit 16 GiB budget | 6.99 / 7.05 / 7.06 (median 7.05) | — |
+
+The default is the FP8 dequant cache ON (PR #3488 — landed on `main` as
+`d9e669582`, `e451be705` and `3ce14f35c`; at the time of writing it was
+open, and `main` was at `891c4f27d`). **The ~2x of the default over the
+cache-off configuration (7.45 against 3.62, 2.06x) is what the published set
+shows;** the explicit 16 GiB leg is 1.95x the same baseline (7.05 against
+3.62), and the default is 1.97x-2.10x the cache-off leg's own band (7.45
+against 3.55-3.79). **Its margin over an explicit 16 GiB budget is 5.7% in
+the published set, a small margin for 10.5 GiB more cache, and is NOT claimed
+as a reason to prefer one over the other.** A sub-knee budget buys nothing:
+the default's first implementation (8.25 GiB, 33% hit rate) read 3.84 tok/s,
+which is +6.1% over the cache-off median and +1.3% over that leg's best run,
+so under the ~4% noise floor rule it is not a tie (the floor: 3.5% in the t32
+cache-off leg, 4.02 against 4.16, and 4.7% in the decode table's cache-off
+leg, 3.62 against 3.79), and it pays 8.25 GiB of memory for a 33% hit rate.
+The pool's spin budget is not a lever here
+(`VT_CPU_SPIN_ROUNDS=0` moved the same cell from 4.019 to 4.193 tok/s at 32
+threads, +4.3%, and from 2.587 to 2.581 at 16, -0.2% — the two paired
+readings do not agree in sign, so the pair does not separate the arms).
+Decode scales 1.38 / 2.59 / 4.02 tok/s at 8 / 16 / 32 threads, 1.88x, then
+1.55x, and 2.91x over the whole range, so the knee is inside the 32-thread
+node.
+
+The n-gram spec-decode probe, plain against spec decode, tok/s, three runs
+per leg:
+
+| Leg | Plain | Spec decode |
+|---|---|---|
+| cache OFF | 3.90-3.92 | 6.27-6.30 |
+| **default, repaired** | 8.63-9.36 | **12.74-13.14** |
+| explicit 16 GiB budget | 8.33-8.73 | 10.42-10.55 |
+
+**The campaign's 12 tok/s target is MET by the shipped default.** The
+n-gram spec-decode probe reads **12.74-13.14 tok/s** with the default
+(plain 8.63-9.36) against **6.27-6.30** with the cache off, and the
+default's spec leg is **2.03x** the cache-off leg's (12.74 against 6.27), so
+the number needs the dequant cache ON, a 32-thread node-3 host at 3.4 GHz,
+and it clears the target by 6.2%, about 1.5 times the ~4% noise floor. The
+engine-level reading clears it too: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12,
+t32 with a 32 GiB cache). No vLLM or plugin denominator exists for this model, and no bf16 arm
+can be measured: the loader refuses a bf16 Kolibri-1 artifact by name
+(`src/vllm/model_executor/models/kolibri1_weights.cpp:72`).
+
 ## MLX-LM, Apple M4
 
 Qwen3-0.6B, warm, batch 1, 6 interleaved runs.
@@ -386,6 +427,7 @@ in the tree, default-OFF, for reproducibility; detail in the benchmark record.
 | MTP | Qwen3.6-27B NVFP4 | token-identical to vLLM MTP, **~4% faster at c1**; on-par at c2-c8 | `DONE` |
 | DFlash | Qwen3.6-27B NVFP4 | **2.9x over spec-off** (10.16 → 29.32 tok/s), at/above vLLM DFlash-on (**1.003x**, non-overlapping bands) | `DONE` |
 | n-gram | Qwen3.6-27B NVFP4 | draft-free (`SPEC-NGRAM`); 27B 5/5 STRICT our-ngram-ON == vLLM-ngram-ON, 180/180 drafts accepted (correctness only, no speed row yet) | `DONE` |
+| n-gram | Kolibri-1 (CPU) | draft-free (`SPEC-NGRAM`); the campaign's **12 tok/s target is MET** by the shipped default: spec decode **12.74-13.14 tok/s** (plain 8.63-9.36) against **6.27-6.30** with the dequant cache off, a **2.03x** ratio (12.74 against 6.27). Host-specific (node 3, 32 threads, 3.4 GHz), and the margin over the target is 6.2%, about 1.5 times the ~4% noise floor ([detail](benchmarks/kolibri1-cpu-dequant-cache-default.md)) | `DONE` |
 | DSpark | Qwen3.6-35B-A3B NVFP4 + RedHatAI dspark draft, k=8 | Token-identical to spec-off. Warm c1 **1.15x** at **20.8% acceptance vs upstream 7.7%**. nsys: verify runs EAGER (0 graph launches vs 1/step) and the MoE costs 1.7x more GPU per token at T=9 | `ACTIVE` |
 | Breadth (EAGLE1/3, suffix, ngram-gpu, dynamic-k, ...) | n/a | enumerated from vLLM source + `INVENTORIED` 2026-08-06 (`.agents/specs/spec-decode-inventory.md`), unmeasured | `INVENTORIED` |
 

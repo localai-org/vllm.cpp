@@ -32,6 +32,9 @@ a.out
 
 # Logs and local capture artifacts (demo recordings, screencasts)
 *.log
+# Whitelist bench evidence: raw logs are the measurement records the protocol
+# requires to be kept, not scratch output (FIX-EVIDENCE-LOG-GATE, 2026-10-30).
+!docs/bench-evidence/**/*.log
 *.mp4
 generated/
 

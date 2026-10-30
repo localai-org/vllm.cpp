@@ -1,0 +1,2 @@
+governor: schedutil (all cpus: schedutil )
+Fri Oct 30 00:43:00 CET 2026

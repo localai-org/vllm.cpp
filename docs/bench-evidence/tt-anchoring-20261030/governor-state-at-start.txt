@@ -1,0 +1,1 @@
+2026-10-30T12:01:07+01:00 found scaling_governor=schedutil on all cpus at session start (reset since 10-28 pin)

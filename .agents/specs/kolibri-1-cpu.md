@@ -405,6 +405,144 @@ than the harness's on the lowest-acceptance golden (verify T=1+kr for ~0.5
 emitted tokens/pass; aggregate still wins); batch>1 acceptance; real-traffic
 acceptance; serving-shaped k/window tuning (config, not code).
 
+DEQUANT CACHE DEFAULT FLIPPED ON (2026-10-20, branch
+`row/KOLIBRI1-DEQUANT-CACHE-DEFAULT`, issue
+ISSUE-LOCAL-01M5DMH6KQJSP9F8PFCQAAS4WH): the CPU fp8 decode path keeps its
+dequantised weights resident by default, because the shipped configuration was
+the slow one. The cache was OFF by default (budget 0), and the configuration
+is worth MORE THAN 2x on CPU decode: 4.02 tok/s with the cache off against
+9.07 tok/s with a 16 GiB budget (2026-10-20, node 3, aarch64, 3.4 GHz, 32
+threads, empty-prompt 32-token decode; prefill p512 43.33 tok/s with the
+cache off). The DEFAULT budget is DERIVED from the host's own memory report,
+read through the house helper `vllm::v1::host_available_memory_bytes()` (the
+same probe the DeepSeek-V4 EXL3 host-residency budget uses) — superseded by
+the correction below, which is where that policy landed.
+`VT_KOLIBRI1_DEQUANT_CACHE_MB=0` still disables the cache (the original
+threaded pool dequant, byte for byte) and an explicit value still sets the
+budget exactly (16 GiB is the shape the measurement above was taken in); an
+unparseable value falls back to the default policy rather than switching a
+default-ON lever off. The budget is a BOUND, not a reservation, and an
+allocation that cannot be satisfied degrades the process to the uncached path
+instead of failing the forward: the cache drops its entries, reports itself
+disabled, and counts the degradation. NO NUMERICS CHANGE: the cache stores
+the DECODED weights and serves them unchanged, and the gate pins the cached
+bytes against the PRODUCTION uncached dequant (`DequantFp8BlockUncached`) byte
+for byte, cold and hot. The consequence to record: the routed-expert GEMV's
+warm-bf16 residency precondition is now met by default, so the bf16-dot tier
+(already the default on a FEAT_BF16 host since 2026-10-19) also covers the
+routed experts without an environment variable.
+
+DEQUANT CACHE DEFAULT BUDGET, CORRECTED (2026-10-21, branch
+`row/KOLIBRI1-DEQUANT-CACHE-DEFAULT`, issue
+ISSUE-LOCAL-01M5DVY9ZWF1XXAM2HSHH5BDRK): the first form of the default
+budget, `clamp(MemAvailable / 8, 1 GiB, 32 GiB)` read at the plan time, was
+wrong in TWO ways with ONE root cause, and the row's own review measured it.
+The plan is taken on the FIRST USE of the process-wide cache, and the first
+use happens DURING the 74 GB checkpoint load: the page cache is full by then,
+so MemAvailable reads 66 GiB where the host's idle reading is ~212 GiB. The
+divisor then yields 8.25 GiB, and a budget that low buys nothing: on node 3
+(aarch64, 3.4 GHz, 32 threads, empty-prompt 32-token decode, 2026-10-21) the
+default leg measured `budget_mib=8454 budget_source_mib=67638 hits=9097
+misses=18349 evictions=16068` and 3.84 tok/s, against 6.38 tok/s for an
+explicit 16384 MiB budget (`hits=21553 misses=18393 evictions=12940`) and
+3.62 tok/s with the cache off. The hit rate at 8.25 GiB was 33%. So the
+policy could land BELOW the knee, and the sampling moment is part of the
+policy, not an implementation detail of it.
+
+THE KNEE is 16 GiB: the budget above which the cache stops thrashing, from
+the 2026-07-20 budget-sensitivity table (9.07 tok/s at 16 GiB) and the
+2026-10-21 measurement above (6.38 tok/s at an explicit 16 GiB against
+3.84 tok/s at 8.25 GiB and 3.62 tok/s with the cache off). A budget below
+the knee is worth little for the memory it takes, and the default must not
+serve one to a host that can afford the knee.
+
+THE CORRECTED POLICY:
+
+    honest_bytes = max(start_bytes, plan_bytes)
+    honest_bytes == 0              -> budget = 16 GiB   (UNKNOWN)
+    honest_bytes < 16 GiB + 8 GiB  -> budget = 0        (DISABLED)
+    otherwise                      -> budget = clamp(honest_bytes / 8,
+                                                        16 GiB, 32 GiB)
+
+  * `start_bytes` is MemAvailable read by a NAMESPACE-SCOPE initialiser
+    (a function-local static behind it), which runs before main and before
+    any model load: the host's own availability, not what our own load left
+    behind. `plan_bytes` is the reading at plan time. The MAXIMUM is the
+    honest one, and the process-start reading is what the checkpoint load
+    would otherwise have hidden.
+  * The KNEE is the FLOOR for every host that can afford it: a budget under
+    the knee is worth little for the memory it takes, so the policy never
+    serves one to a host that can afford the knee.
+  * The RESERVE is 8 GiB: the room the host must keep free BESIDE the knee
+    (the OS's working set and the decode's own transient allocations). A
+    host that reports less than the knee plus the reserve cannot afford the
+    knee at all, so the policy DISABLES the cache (budget 0) and the forward
+    runs the UNCACHED path, byte for byte. This is the explicit rule: a
+    sub-knee cache is WORSE than useless — it costs the memory and buys
+    nothing — so the cache either runs at or above the knee or it does not
+    run. The reserve is a stated policy number, not a measured constant,
+    and the gate pins it.
+  * The 32 GiB CAP bounds the footprint (the measured budget-sensitivity
+    table had its knee still open at 32 GiB, +5-6% over 16 GiB). An UNKNOWN
+    report (MemAvailable unreadable) uses the KNEE: an unknown budget is
+    not a reason to refuse (the house rule) and not a reason to hand out a
+    sub-knee budget; a host that cannot hold the knee degrades to the
+    uncached path through the allocation fallback.
+  * The env contract is unchanged: 0 disables, N sets exactly N MiB, and an
+    unparseable value falls back to this default policy, never to disabled.
+
+The pure policy stays a function of an input reading
+(`DefaultBudgetBytesFor(available_bytes)` for the honest reading,
+`HonestAvailableBytes(start_bytes, plan_bytes)` for the maximum of the two
+moments), so the gate pins it without reading the host and a policy change is
+a deterministic red. The profile report carries all three numbers
+(`budget_mib`, `budget_source_mib`, `budget_start_mib`, `budget_plan_mib`) so
+a reader can check the derivation after the fact.
+
+MEASURED AFTER THE REPAIR (2026-10-21, node 3, aarch64, 3.4 GHz, 32
+threads, empty-prompt 32-token decode, `VT_KOLIBRI1_PROFILE=1`, the file
+mutex held, the box quiet): the DEFAULT leg planned
+`budget_mib=27157 budget_source_mib=217262 budget_start_mib=217262
+budget_plan_mib=143920 enabled=1` and finished at hits=72190, misses=17756,
+evictions=7993, an 80% hit rate, with 7.44833 tok/s; the second and third
+runs planned 27096 MiB and 27199 MiB and delivered 7.39141 and 7.46827
+tok/s. The explicit 16384 MiB leg, in the same window and the same binary,
+delivered 7.05777, 7.05438 and 6.98659 tok/s, and the cache-off leg
+delivered 3.62428, 3.78799 and 3.54865 tok/s. The plan-time reading
+(143920 MiB) sat 72 GiB under the process-start reading (217262 MiB): that
+gap IS the checkpoint load, and the honest reading closes it.
+
+F32 RESIDUAL STREAM, MEASURED (2026-10-22, branch `row/KOLIBRI1-F32-RESIDUAL`,
+issue ISSUE-LOCAL-01M5HHGT86M8D1FDKMA20EX950, base `845b3c59d`): the residual
+stream's dtype is a MEASURED lever on our distance to the CPU references. In
+the ATTENTION quantities the layer-0 effect is invisible — but in the
+residual stream itself it is not. One teacher-forced 6-token prefill (the
+primary oracle's prompt-0 ids),
+the residual buffer's dtype the only difference between the arms, scored with
+the collaboration's metric (relative rms of the difference over the
+reference's rms) against llama.cpp's layer dump and the peer CPU path's:
+layer 0 `attn_out_pre_norm` is BIT-IDENTICAL between the arms (the layer-0
+residual IS the embedding, and bf16 values are exact in f32), but the
+residual add itself rounds differently, so layer 0 `l_out` MOVES — against
+llama.cpp, 2.0016e-03 → 1.5006e-03 (25 % of the distance closed) at position
+0 and 1.4344e-03 → 1.0981e-03 at position 5. From layer 1 the f32
+residual moves us toward llama.cpp (layer 1: 3.1794e-03 → 2.6284e-03), and
+from layer 11 the gap opens in the bf16 arm and not in the f32 one (layer 12:
+3.4822e-02 → 5.4126e-03); over layers 12-49 the mean rel rms against
+llama.cpp falls 1.3566e-01 → 1.9704e-02 (median 1.3229e-01 → 1.6361e-02) and
+the residual stream's own `l_out` falls 1.5981e-01 → 4.2759e-02. The lever
+is ONE line (`DBuf res(d, DType::kBF16, …)` → `kF32`): `vt::RmsNorm` already
+supports an f32 residual and keeps the full precision across layers. The
+baseline arm reproduces the row's recorded vllm.cpp dump BYTE FOR BYTE
+(sha256 `7e572ef4…`), and the peer CPU path's own recorded numbers for the
+same quantity come out of the same comparison to the digit (llama.cpp vs the
+peer CPU path at layer 0: `attn_out_pre_norm` 1.66e-03, `l_out` 2.00e-03).
+NO PRODUCT CODE LANDS WITH THE MEASUREMENT: the f32 residual DIVERGES from
+vLLM's one-model-dtype polarity (the primary oracle keeps the residual in the
+model dtype), so taking it is a product decision with a token-gate wave
+behind it, not a consequence of this number. Evidence:
+docs/bench-evidence/kolibri1-cpu-f32-residual-20261022.md.
+
 ## R7 resolution — the tokenizer engine accepts the Kolibri-1 split regex
 
 ### Scope — what is actually in the file
@@ -541,6 +679,96 @@ live-gated on the real model dir) into the R7 encode test:
   STOP: that would mean the scanner semantics differ, not just the
   recognition — report as NEEDS_DECISION rather than widening anything.
 
+## Outcome
+
+MEASURED (2026-10-20/21; node 3, aarch64, 128 cores, 255 GB RAM, governor
+`performance` at 3.4 GHz, 32 threads, one NUMA node, the file mutex held,
+the box quiet; the bench and the spec probe rebuilt from the committed
+head). The noise floor came from the repeated legs: two runs of the same
+cell (same binary, weights, configuration) differed by 3.5% in the t32
+cache-off leg (4.02 against 4.16) and by 4.7% in the decode table's
+cache-off leg (3.62 against 3.79), so no cell below is quoted more finely
+than that, and two legs that differ by less than 4% are a tie.
+
+| leg | decode tok/s (the in-repo bench: 128 tokens in, 64 greedy out) |
+|---|---|
+| cache OFF — the configuration `main` shipped before the default landed | 3.55 / 3.62 / 3.79 (median **3.62**) |
+| default, first implementation (8.25 GiB budget, 33% hit rate, 16068 evictions) | 3.84 (one run) |
+| **default, repaired** (26.5 GiB budget from a 212 GiB process-start reading; hits 72200, misses 17746, evictions 7967, 80% hit rate) | **7.39 / 7.45 / 7.47** |
+| explicit `VT_KOLIBRI1_DEQUANT_CACHE_MB=16384` | 6.99 / 7.05 / 7.06 |
+
+Prefill p512 with the cache off: t8 12.27-12.30, t16 23.78-23.89, t32
+43.02-43.33 tok/s. Decode thread scaling with the cache off, empty prompt:
+t8 1.38, t16 2.59, t32 4.02 tok/s, and the ratios that row derives are
+1.88x, then 1.55x, and 2.91x over the whole range. The n-gram spec-decode
+probe — the campaign's serving number — reads, cache OFF, plain 3.90-3.92
+and spec 6.27-6.30; with the **default** (repaired), plain 8.63-9.36 and
+spec **12.74-13.14**; with an explicit 16 GiB budget, plain 8.33-8.73 and
+spec 10.42-10.55.
+
+Every leg above is ONE measurement set. The evidence report names the file
+and the date of each one, and it lists the other sets the session took for
+the same cells instead of mixing them into the tables.
+
+WHAT THE DEFAULT NOW DELIVERS. The configuration that ships with the FP8
+dequant cache ON decodes at **7.45 tok/s** on the in-repo production shape
+(128 tokens in, 64 greedy out), **2.06x** the cache-off 3.62 and
+1.97x-2.10x the cache-off leg's own band (7.45 against 3.55-3.79), and its
+n-gram spec-decode leg reads **12.74-13.14 tok/s**, so the campaign's
+**12 tok/s target is MET**. The target is not met with the cache off
+(6.27-6.30), and the default's spec leg is **2.03x** the cache-off leg's
+(12.74 against 6.27): the number belongs to the default and to the default's
+host, not to the model in the abstract. The engine-level reading clears it
+as well: 4.53 -> 13.78 tok/s (3.04x, 2026-10-12, t32 with a 32 GiB cache,
+in `## Now` above). PR #3488 has **LANDED**: `d9e669582` (the flip),
+`e451be705` (the sampling-moment repair and the knee floor) and `3ce14f35c`
+(the knee refusal) are on `main`, so `main` now ships the **cache-ON**
+default and the row's numbers are the shipped configuration's numbers.
+
+REJECTED, each with the measurement that rejected it. The **sub-knee
+budget** (the default's first implementation: 8.25 GiB, 33% hit rate, 16068
+evictions) read 3.84 tok/s, which is +6.1% over the cache-off median
+(3.84/3.62) and +1.3% over the cache-off leg's best run (3.84/3.79), so
+under the 4% rule it is **not a tie** to the cache-off median. It is not a
+win either: the leg pays 8.25 GiB of memory for a 33% hit rate and leaves
+the 2x of the repaired default on the table, which is why the policy
+refuses a sub-knee budget outright and why the sampling moment is part of
+the policy rather than an implementation detail of it. The **explicit 16
+GiB budget** as the recommended setting read 6.99-7.06 tok/s in the
+published set against 7.39-7.47 for the derived default, a margin of 5.7%
+(7.45/7.05) that is above the noise floor and small for 10.5 GiB more cache,
+and 1.95x the cache-off median (7.05 against 3.62), so it is **not** claimed
+as a reason to prefer one over the other, and pinning 16 GiB by hand takes
+the host's own memory report out of a decision the report makes better.
+**Spin tuning** (`VT_CPU_SPIN_ROUNDS`) moved the same cell from 4.019 to
+4.193 tok/s at 32 threads (+4.3%) and from 2.587 to 2.581 at 16 (-0.2%), so
+the two paired readings do not agree in sign, the pair does not separate the
+arms, and no spin setting is recommended. One paired reading on one host is
+not a settled lever question.
+
+THE CAVEATS TRAVEL WITH EVERY NUMBER ABOVE. They are **host-specific**: 32
+threads on one NUMA node at 3.4 GHz, governor `performance`, aarch64, node 3
+of a shared box. They are **not** a vLLM comparison and not a parity claim:
+no vLLM or plugin denominator exists for this model, and the author's
+plugin is still unverified as a runnable oracle. They sit on a **~4% noise
+floor**, so the 12.74 against a target of 12 is a **+6.2% margin, about 1.5
+noise floors**: it clears the target as measured, and the margin is not
+wide. And the **16 GiB leg carries its own trade-off**: it is the shape the
+PR #3488 body quotes, and a reader who pins 16 GiB explicitly gets a number
+5.7% below the derived default for 10.5 GiB less cache. The derived default
+(26.5 GiB from a 212 GiB process-start reading) is the configuration this
+row's numbers were taken at, and the policy refuses a host that cannot
+afford the knee.
+
+THE RECORDS. The public page is
+`docs/benchmarks/kolibri1-cpu-dequant-cache-default.md`, with the index row
+in `docs/BENCHMARKS.md` and the dated evidence in
+`docs/bench-evidence/kolibri1-cpu-dequant-cache-default-20261021/report.md`.
+The public recipe still pins the short revision `e52eb462` for the
+checkpoint; the full revision of the artifact these numbers were measured
+on is recorded on the public page, and the bf16 sibling artifact is named
+there as **refused**, not shipped.
+
 ## Git integration
 
 ONE pull request (developer's standing choice for this row).
@@ -554,7 +782,23 @@ ONE pull request (developer's standing choice for this row).
   the pin `049a6a7bd2405b27d6d280d256bd3d585191c7ae`, `gateable = no`, and
   the issue that owns the GPU gateability measurement.
 - GPU gateability measurement for the aleph-alpha-inference oracle.
+- The decode and prefill benchmark rows for the DEFAULT dequant-cache
+  configuration (the derived budget), pending the node-3 window; the exact
+  commands are in the pull request body. The harness rows that mean
+  "cache off" must now pass `VT_KOLIBRI1_DEQUANT_CACHE_MB=0` explicitly:
+  an UNSET variable is the default-ON configuration, not the off switch.
 - GGUF arms (k-quants), CUDA arm, Tenstorrent arm — later rows.
+- The f32 RESIDUAL STREAM: the measured lever, and the decision it opens
+  (docs/bench-evidence/kolibri1-cpu-f32-residual-20261022.md, 2026-10-22).
+  The lever is one line in the CPU forward, the measurement says it is large
+  from layer 11 on, and NO PRODUCT CODE LANDS WITH THE MEASUREMENT. Taking
+  it is a PRODUCT decision, not a mirror decision: vLLM resolves one model
+  dtype and every layer inherits it, and the primary oracle keeps the
+  residual in the model dtype, so the f32 residual moves us toward
+  llama.cpp and away from the primary oracle's width. It also needs the
+  token-gate wave (W3's fingerprints, the decode-bench anchor, the spec-probe
+  anchor) before it can land, and the throughput cost of a doubled residual
+  buffer is not measured.
 - Reasoning parser / tool parser serving integration (plugin registers
   `kolibri1` reasoning + Hermes tool parsers).
 - The CPU forward wave also owns the R1 disposition record: packed

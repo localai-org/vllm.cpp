@@ -101,6 +101,10 @@ CHECKERS=(
   # wrote into a tracked file at all, and a reader who sees it fail knows to
   # stop reading the verdicts below.
   check-conflict-markers
+  # Evidence reports must not promise raw logs the tree does not carry. Three
+  # landed rows' evidence dirs lost their logs silently to the old global
+  # `*.log` ignore (FIX-EVIDENCE-LOG-GATE, 2026-10-30).
+  check-evidence-refs
   check-prompt-contract
   check-agent-record
   check-release-binary-contract
@@ -139,6 +143,7 @@ CHECKERS=(
 
 SUITES=(
   test_check_prompt_contract
+  test_check_evidence_refs
   test_agent_gates
   test_agent_record
   test_check_release_binary_contract
@@ -208,6 +213,13 @@ SUITES=(
   test_tokengate_buildreq
   test_check_conflict_markers
   test_check_tree_compiles
+  # The windows-msvc /WX classes (C4456 local shadow, C4101 unreferenced
+  # local of an empty class) on the host compiler. The lane builds with
+  # /W4 /WX, so both are a build failure there and a green build on every
+  # POSIX lane. The probe compiles the production units in the host shape
+  # and in the non-Linux shape the lane compiles, where the NUMA guard is
+  # the empty class that makes the C4101 class observable.
+  test_msvc_wx_diagnostics
   test_prepush_checker_names
   test_ab_arms_differ
   # The variadic-load harness's own controls (#2970). It measures two

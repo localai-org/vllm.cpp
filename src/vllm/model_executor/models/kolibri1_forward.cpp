@@ -45,6 +45,7 @@
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf, ResidentWeight
 #include "vllm/model_executor/models/kolibri1_fp8_dequant.h"
 #include "vllm/model_executor/models/kolibri1_dequant_cache.h"
+#include "vllm/model_executor/models/kolibri1_bfdot_gemv.h"
 #include "vllm/model_executor/models/kolibri1_shared.h"  // the routing + step inputs, shared with the TT row
 #include "vllm/model_executor/models/kv_cache_route.h"     // WriteKvCache
 #include "vllm/model_executor/models/host_parallel.h"  // the ONE pool (#1664)
@@ -91,6 +92,43 @@ double Now() {
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
 }
+// ── THE SPEC-VERIFY CLASS PIN (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) ──────
+// Greedy spec decode is EXACTNESS-PRESERVING only when the verify forward
+// computes every draft position in the SAME compute class plain greedy decode
+// uses at that position. Decode is t == 1, where the bf16-dot arms below
+// engage; a verify step forwards its 1+k query rows in ONE t > 1 call, and a
+// t-gated arm verified every position in the f32-widen class instead — the
+// verify then accepted drafts plain greedy would have rejected and the spec-ON
+// chain diverged from the spec-OFF chain. The runner declares a uniform
+// verify step (`uniform_query_len == 1 + k`) and the registry passes it down
+// here; for the duration of that ONE forward the class gates below treat
+// every row the way the t == 1 decode call is treated. Prefill and plain
+// decode keep their recorded numerics byte-for-byte: this flag moves NO
+// recorded chain, it only removes the decode-vs-verify class split.
+namespace {
+
+// See the comment above.
+thread_local bool g_verify_rows = false;
+
+}  // namespace
+
+bool VerifyRowsActive() { return g_verify_rows; }
+
+// RAII guard for the verify-step scope. The forward is synchronous host code
+// on the engine's queue, so the guard brackets exactly one call.
+class VerifyRowsScope {
+ public:
+  explicit VerifyRowsScope(bool on) : prev_(g_verify_rows) {
+    g_verify_rows = on;
+  }
+  ~VerifyRowsScope() { g_verify_rows = prev_; }
+  VerifyRowsScope(const VerifyRowsScope&) = delete;
+  VerifyRowsScope& operator=(const VerifyRowsScope&) = delete;
+
+ private:
+  bool prev_;
+};
+
 bool On() {
   static const bool on = std::getenv("VT_KOLIBRI1_PROFILE") != nullptr;
   return on;
@@ -109,13 +147,24 @@ void Report(int64_t calls) {
   for (const auto& [k, v] : Acc())
     std::fprintf(stderr, "[kolibri1-profile]   %-20s %10.2f s\n", k.c_str(), v);
   const auto& c = kolibri1_dequant_cache::Counters();
+  const auto& cache = kolibri1_dequant_cache::ProcessCache();
   std::fprintf(stderr,
                "[kolibri1-profile]   dequant_cache hits=%llu misses=%llu "
-               "evictions=%llu decode_calls=%llu\n",
+               "evictions=%llu decode_calls=%llu alloc_failures=%llu "
+               "budget_mib=%llu budget_source_mib=%llu budget_start_mib=%llu "
+               "budget_plan_mib=%llu enabled=%d\n",
                static_cast<unsigned long long>(c.hits),
                static_cast<unsigned long long>(c.misses),
                static_cast<unsigned long long>(c.evictions),
-               static_cast<unsigned long long>(c.decode_calls));
+               static_cast<unsigned long long>(c.decode_calls),
+               static_cast<unsigned long long>(c.alloc_failures),
+               static_cast<unsigned long long>(cache.budget_bytes() >> 20),
+               static_cast<unsigned long long>(cache.budget_source_bytes() >>
+                                              20),
+               static_cast<unsigned long long>(cache.budget_start_bytes() >>
+                                              20),
+               static_cast<unsigned long long>(cache.budget_plan_bytes() >> 20),
+               cache.enabled() ? 1 : 0);
 }
 
 }  // namespace prof
@@ -241,6 +290,23 @@ DBuf LinearBTRaw(Dev d, const Tensor& x, const OwnedTensor& wt_raw, int64_t t,
   Tensor wt = ResidentWeight(d, wt_raw);
   DBuf out(d, out_dtype, {t, wt.shape[0]});
   gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * wt.shape[0] * wt.shape[1]);
+  // BFDOT f32-out arm (same knob as the fp8-block arm below): covers the
+  // ROUTER GATE, the one bf16-native LinearBTRaw projection the t==1 LinearBT
+  // hook cannot reach. Rounding-policy change, identical to the arm's
+  // documented envelope; measured, not hidden. EVERY t (not decode-only): the
+  // spec-verify step forwards its 1+k rows in one call, and a class that
+  // depends on the batch shape breaks greedy spec decode's exactness
+  // preservation (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) — `GemvF32OutRows`
+  // keeps every row on the identical per-row instruction sequence.
+  if ((t == 1 || prof::VerifyRowsActive()) && out_dtype == DType::kF32 &&
+   wt.dtype == DType::kBF16 && kolibri1_bfdot_gemv::Bf16DotActive() &&
+   x.stride[0] == wt.shape[1]) {
+ kolibri1_bfdot_gemv::GemvF32OutRows(
+     static_cast<const uint16_t*>(wt.data),
+     static_cast<const uint16_t*>(x.data),
+     static_cast<float*>(out.ptr()), t, wt.shape[0], wt.shape[1]);
+ return out;
+  }
   vt::MatmulBT(d.q, out.t(), x, wt);
   return out;
 }
@@ -255,29 +321,97 @@ struct ResolvedBT {
   kolibri1_dequant_cache::Lease dequant_lease;
 };
 
-ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
+ResolvedBT ResolveBTWithCache(Dev d, const Kolibri1Projection& w,
+                               kolibri1_dequant_cache::Cache& cache) {
   ResolvedBT r;
   if (w.IsBf16()) {
+    // THE PLAIN BF16 ARM: the weight is already bf16 on disk, so there is
+    // nothing to dequant and the dequant cache does NOT engage — no entry,
+    // no lease, no decoded bytes. The resident bytes ride the SAME compute
+    // class as the fp8 arm's decoded bytes (the bf16-dot class, see
+    // LinearBT).
     r.wt = ResidentWeight(d, w.bf16);
     return r;
   }
-  if (kolibri1_dequant_cache::ProcessCache().enabled()) {
+  if (cache.enabled()) {
     prof::Scope prof("dequant_fp8_block");  // cache lookups + cold decodes
-    r.dequant_lease =
-        kolibri1_dequant_cache::ProcessCache().GetOrDequant(w.fp8_block);
+    r.dequant_lease = cache.GetOrDequant(w.fp8_block);
+  }
+  if (r.dequant_lease) {
     r.wt = dense_attn::MakeTensor(const_cast<uint16_t*>(r.dequant_lease.data()),
                                   DType::kBF16, d.q.device,
                                   {w.fp8_block.n, w.fp8_block.k});
-  } else {
-    r.wt_buf = DequantFp8Block(d, w.fp8_block);
-    r.wt = r.wt_buf.t();
+    return r;
   }
+  // THE FALLBACK: the cache is disabled, or it could not hold its bytes (an
+  // allocation failure: it degraded itself and handed back an EMPTY lease).
+  // The UNCACHED path below runs instead: the same decode, the same bytes,
+  // without the residency. A cache that cannot get memory must not take the
+  // forward down with it.
+  r.wt_buf = DequantFp8Block(d, w.fp8_block);
+  r.wt = r.wt_buf.t();
   return r;
 }
 
+// The production resolve: the process-wide dequant cache.
+ResolvedBT ResolveBT(Dev d, const Kolibri1Projection& w) {
+  return ResolveBTWithCache(d, w, kolibri1_dequant_cache::ProcessCache());
+}
+
+// ── The compute-class recorder ──────────────────────────────────────────────
+//
+// The ONE RULE lives in `SelectKolibri1ComputeClass` below, with the other
+// public entry points of this file. It is a pure function of the site's
+// facts, so the gate can assert the SELECTION directly: on a host where the
+// two classes produce the same bits, no number can see a class change at all.
+namespace {
+
+// The recorder. OFF by default: the decode path pays one branch per linear
+// call. The forward is single-threaded at this level (the pool is used INSIDE
+// the kernels), so the map needs no lock.
+bool g_record_classes = false;
+std::map<std::string, Kolibri1ClassRecord> g_class_records;
+
+// The recording is ON when the caller asked for it. The PRODUCTION switch is
+// the row's own profile instrument (`VT_KOLIBRI1_PROFILE=1`): the forward
+// turns the recording on once per forward when it is on, and the profile
+// report prints the class table. So the recorder is a PRODUCTION instrument
+// and not a driver that only the test turns on.
+bool RecordClasses() { return g_record_classes; }
+
+}  // namespace
+
+// ONE compute class, shared by the fp8 arm and the plain bf16 arm.
+//
+// The class is a property of the WEIGHT'S BYTES and of the HARDWARE: the fp8
+// arm's DECODED bytes and the bf16 arm's on-disk bytes are the same kind of
+// bytes (bf16), and the row requires the same class to multiply them (spec
+// .agents/specs/kolibri1-bf16-arm.md). So the rule is ONE rule, and both
+// arms read it:
+//
+//   bf16-dot class  <=>  the weight is bf16-resident
+//                   &&  the decode shape is t == 1
+//                   &&  the output is bf16
+//                   &&  DetectArmBf16() proved FEAT_BF16 (Bf16DotActive)
+//                   &&  the dequant cache is enabled
+//
+// and the f32-widen vt::MatmulBT is the fallback tier (x86, a non-bf16
+// aarch64 host, or the VT_CPU_KOLIBRI_BF16_DOT=0 escape hatch). The arm
+// feeds the bf16 bytes STRAIGHT into vbfdotq_f32 (bf16 in, f32 accumulate),
+// the class the primary oracle uses (BFMMLA).
+//
+// THE LAST CONJUNCT is the fp8 arm's recorded residency precondition: the
+// bf16-dot GEMV is the arm that multiplies the WARM bf16 bytes, and the
+// dequant cache is what makes the fp8 arm's bytes warm (its budget is
+// derived from the host's memory report, so the row's numerics are already
+// host-dependent — docs/ENVIRONMENT.md). The PLAIN BF16 ARM HAS NO CACHE OF
+// ITS OWN: there is nothing to decode, so the cache never holds or serves a
+// single one of its bytes (the resolve returns the resident tensor and no
+// lease). The conjunct is the ROW's rule, read by both arms, so the two
+// arms can never diverge on the same site: the same bytes always ride the
+// same class.
 DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              int64_t t, DType out_dtype = DType::kBF16,
               const char* gsite = "other") {
-  if (w.IsBf16()) return LinearBTRaw(d, x, w.bf16, t, out_dtype, gsite);
   // The dequant cache (ISSUE-LOCAL-01M4BEH8ZH59TF9E0A7YRNTJJ2 re-land, with
   // the 2026-10-08 review repair ISSUE-LOCAL-01M4CVDDHAFD7R1QCK9F493SWZ).
   // The cache is the fp8 decode path when enabled; the decoded block comes
@@ -287,14 +421,72 @@ DBuf LinearBT(Dev d, const Tensor& x, const Kolibri1Projection& w,              
   // returned (a concurrent caller could evict and reuse the bytes mid-GEMM,
   // maint-bot P1b on PR #3414). The entries OWN their bytes (independent
   // allocations, never pool blocks — that ownership defect was v1's
-  // corruption). Budget 0 (the default) DISABLES the cache and keeps the
-  // original threaded pool decode, so main-line behavior is byte-for-byte
-  // unchanged unless the env var is set.
+  // corruption). The cache is ON by DEFAULT (2026-10-20) with a budget
+  // derived from the host's available memory; `VT_KOLIBRI1_DEQUANT_CACHE_MB=0`
+  // disables it and keeps the original threaded pool decode, byte-for-byte.
+  // The PLAIN BF16 ARM never reaches the cache: there is nothing to decode.
   prof::Scope prof("linear_gemm");
   ResolvedBT r = ResolveBT(d, w);
-  DBuf out(d, out_dtype, {t, w.fp8_block.n});
-  gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * w.fp8_block.n *
-                               w.fp8_block.k);
+  // The site's facts, and the class the ONE rule selects from them. The
+  // resolved weight is bf16 in BOTH arms (the fp8 arm's decoded bytes, the
+  // bf16 arm's on-disk bytes), so the rule reads the bytes and not the arm.
+  const Kolibri1ClassFacts facts{
+      /*weight_is_bf16=*/r.wt.dtype == DType::kBF16,
+      t,
+      out_dtype,
+      kolibri1_bfdot_gemv::Bf16DotActive(),
+      kolibri1_dequant_cache::ProcessCache().enabled(),
+      /*verify_rows=*/prof::VerifyRowsActive()};
+  const Kolibri1ComputeClass compute_class = SelectKolibri1ComputeClass(facts);
+  if (RecordClasses()) {
+    Kolibri1ClassRecord& record = g_class_records[gsite];
+    if (record.calls == 0) record.facts = facts;
+    record.calls++;
+    if (compute_class == Kolibri1ComputeClass::kBf16Dot)
+      record.bf16_dot_calls++;
+  }
+  // BFDOT bf16 GEMV arm, DEFAULT on a FEAT_BF16 host (Bf16DotActive:
+  // feature-gated; VT_CPU_KOLIBRI_BF16_DOT=0 forces the f32 tier; the
+  // legacy VT_CPU_KOLIBRI_BFDOT_GEMV=1 opt-in keeps refusing by name).
+  // The resolved tensor is ALREADY bf16 [n, k] row-major in BOTH arms (the
+  // dequant cache decode rounds to bf16 on store, and the bf16 arm's bytes
+  // are bf16 on disk), so the arm feeds those bytes straight into
+  // vbfdotq_f32 (bf16 in, f32 accumulate) through `GemvRows`. This is a
+  // rounding-policy change versus the f32 widen+fma MatmulBT below — the
+  // chain WILL move under the knob; measured, not hidden. The class and the
+  // row-count tier both come from THE ONE RULE above (the selector reads
+  // `verify_rows` beside `t`): THE ROW-COUNT TIER IS THE EXACTNESS CONTRACT
+  // (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) — the ngram spec-verify step
+  // forwards its 1+k query rows in ONE t>1 call, and a t==1-only arm
+  // verified every draft position in the f32-widen class while plain greedy
+  // decode sampled the same position in the bf16-dot class — so the verify
+  // accepted drafts plain greedy would have rejected and greedy spec decode
+  // stopped being exactness-preserving. `GemvRows` keeps every row on the
+  // IDENTICAL per-row instruction sequence the t==1 call runs, so row i of
+  // a t-row call is bit-identical to the t==1 call on row i. Covers every
+  // projection that resolves here in BOTH arms: attention q/k/v/o and the
+  // routed-expert gate/up/down. The router gate (the bf16-native
+  // LinearBTRaw projection) and the lm_head keep their own f32-out arms
+  // below — they were never fp8 warm-cache tensors.
+  if (compute_class == Kolibri1ComputeClass::kBf16Dot &&
+      // GemvRows reads a contiguous [t, k] activation row block; a
+      // row-strided activation keeps the f32-widen MatmulBT below.
+      x.stride[0] == r.wt.shape[1]) {
+    // The arm's own scope, named apart from the function-scope
+    // profiler above: a same-named local here HIDES that local, which is
+    // MSVC C4456 and a build failure under the windows-msvc /WX lane.
+    // Same key, same scope boundaries, same accumulated time.
+    prof::Scope bfdot_prof("linear_gemm");
+    DBuf out(d, out_dtype, {t, r.wt.shape[0]});
+    kolibri1_bfdot_gemv::GemvRows(
+        static_cast<const uint16_t*>(r.wt.data),
+        static_cast<const uint16_t*>(x.data),
+        static_cast<uint16_t*>(out.ptr()), t, r.wt.shape[0], r.wt.shape[1]);
+    return out;
+  }
+  DBuf out(d, out_dtype, {t, r.wt.shape[0]});
+  gemvprof::Call gc(gsite, static_cast<uint64_t>(t) * r.wt.shape[0] *
+                               r.wt.shape[1]);
   vt::MatmulBT(d.q, out.t(), x, r.wt);
   return out;
 }
@@ -322,12 +514,14 @@ DBuf ExpertMlp(Dev d, const Kolibri1ExpertWeights& e, const Tensor& x,
                                       wg[0].wt.shape[1] * 2);
     vt::MatmulBTBatch(d.q, jobs.data(), static_cast<int64_t>(jobs.size()));
     DBuf a(d, DType::kBF16, {t, inter});
+    prof::Scope prof_silu("moe_silu_mul");
     vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
     return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());
   }
   DBuf g = LinearBT(d, x, e.gate_proj, t, DType::kBF16, sg.c_str());  // [t, I]
   DBuf u = LinearBT(d, x, e.up_proj, t, DType::kBF16, su.c_str());    // [t, I]
   DBuf a(d, DType::kBF16, {t, inter});
+  prof::Scope prof_silu("moe_silu_mul");
   vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
   return LinearBT(d, a.t(), e.down_proj, t, DType::kBF16, sd.c_str());  // [t, H]
 }
@@ -615,6 +809,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       {
         const size_t rb = static_cast<size_t>(h) * vt::SizeOf(DType::kBF16);
         auto* dp = static_cast<char*>(gathered.ptr());
+        prof::Scope prof_gather("moe_gather");  // the row-wise gather Copy below
         const auto* sp = static_cast<const char*>(dhn.data);
         for (size_t s = 0; s < token_rows.size(); ++s)
           d.b.Copy(d.q, dp + s * rb,
@@ -622,6 +817,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       }
       DBuf o = ExpertMlp(d, w.experts[static_cast<size_t>(ex)], gathered.t(),
                          ne, inter, "routed");
+      prof::Scope prof_scatter("moe_scatter");
       for (int64_t i = 0; i < ne; ++i) {
         d.b.Copy(d.q,
                  static_cast<char*>(expert_out.ptr()) +
@@ -743,6 +939,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
       Tensor ag = rows_view(gout.t(), run.row0, ne);
       Tensor au = rows_view(uout.t(), run.row0, ne);
       Tensor aa = rows_view(act.t(), run.row0, ne);
+      prof::Scope prof_silu("moe_silu_mul");
       vt::MoeSiluMul(d.q, aa, ag, au);
     }
 
@@ -768,6 +965,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
 
     // Scatter each run's rows to their (token, top-k) slots — unchanged.
     for (const RoutedRun& run : runs) {
+      prof::Scope prof_scatter("moe_scatter");
       for (int64_t i = 0; i < static_cast<int64_t>(run.slot_rows.size()); ++i) {
         d.b.Copy(d.q,
                  static_cast<char*>(expert_out.ptr()) +
@@ -786,6 +984,7 @@ DBuf MoeBlock(Dev d, const Kolibri1MoeWeights& w, const Kolibri1Params& p,
   // router weights ARE the mixture weights (no renormalisation, no scaling).
   DBuf out(d, DType::kBF16, {t, h});
   Tensor shared_t = shared.t();
+  prof::Scope prof_combine("moe_combine");
   vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared_t,
                  /*routed_scale=*/1.0f);
   return out;
@@ -858,16 +1057,149 @@ void RouteDump(int64_t layer, const std::vector<float>& logits,
   g_kolibri1_dbg_route_layer = layer;
 }
 
+// SCRATCH MEASUREMENT INSTRUMENT (the f32-residual A/B; NOT for main).
+// VT_KOLIBRI1_LAYER_DUMP=<file>: per-layer TSV of the four quantities the
+// mistral.rs collaboration compares elementwise:
+//   attn_out_pre_norm (the attention output, before the post-norm),
+//   attn_post_norm, ffn_post_norm, and l_out (the residual stream at the end
+//   of the block = res + moe_n), for positions {0, 5}, as
+//   layer<TAB>quantity<TAB>position<TAB>hidden_index<TAB>value.
+static void LayerDumpAll(Dev d, int64_t layer, DBuf& attn, DBuf& attn_n,
+                         DBuf& moe_n, DBuf& res, int64_t t, int64_t h) {
+  const char* path = std::getenv("VT_KOLIBRI1_LAYER_DUMP");
+  if (path == nullptr || path[0] == '\0') return;
+  const size_t n = static_cast<size_t>(t) * static_cast<size_t>(h);
+  auto widen = [](uint16_t bits) {
+    uint32_t u = static_cast<uint32_t>(bits) << 16;
+    float f;
+    std::memcpy(&f, &u, 4);
+    return f;
+  };
+  auto read = [&](DBuf& buf, std::vector<float>& out) {
+    const DType dt = buf.t().dtype;
+    std::vector<uint8_t> tmp(n * vt::SizeOf(dt));
+    buf.Download(d, tmp.data());
+    out.resize(n);
+    if (dt == DType::kBF16) {
+      const auto* bf = reinterpret_cast<const uint16_t*>(tmp.data());
+      for (size_t i = 0; i < n; ++i) out[i] = widen(bf[i]);
+    } else {
+      const auto* fp = reinterpret_cast<const float*>(tmp.data());
+      for (size_t i = 0; i < n; ++i) out[i] = fp[i];
+    }
+  };
+  std::vector<float> a, an, mn, r;
+  read(attn, a);
+  read(attn_n, an);
+  read(moe_n, mn);
+  read(res, r);
+  static FILE* out = nullptr;
+  static std::string open_path;
+  if (out == nullptr || open_path != path) {
+    if (out != nullptr) std::fclose(out);
+    open_path = path;
+    out = std::fopen(path, "w");
+    VT_CHECK(out != nullptr,
+             std::string("VT_KOLIBRI1_LAYER_DUMP: cannot open ") + path);
+  }
+  const int64_t ps[2] = {0, 5};
+  for (int pi = 0; pi < 2; ++pi) {
+    const int64_t pos = ps[pi];
+    if (pos >= t) continue;
+    const size_t off = static_cast<size_t>(pos) * static_cast<size_t>(h);
+    for (int64_t i = 0; i < h; ++i) {
+      const size_t k = off + static_cast<size_t>(i);
+      std::fprintf(out, "%lld\tattn_out_pre_norm\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)a[k]);
+      std::fprintf(out, "%lld\tattn_post_norm\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)an[k]);
+      std::fprintf(out, "%lld\tffn_post_norm\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)mn[k]);
+      std::fprintf(out, "%lld\tl_out\t%lld\t%lld\t%.9g\n",
+                   (long long)layer, (long long)pos, (long long)i,
+                   (double)(r[k] + mn[k]));
+    }
+  }
+  std::fflush(out);
+}
+
 
 }  // namespace
+
+// THE ONE COMPUTE-CLASS RULE (spec .agents/specs/kolibri1-bf16-arm.md §2).
+// The class a site's bytes ride is the bf16-dot class iff EVERY conjunct
+// holds:
+//
+//   * the RESOLVED weight is bf16-resident (the fp8 arm's DECODED bytes and
+//     the plain bf16 arm's on-disk bytes are both bf16),
+//   * the decode shape (t == 1),
+//   * the output is bf16,
+//   * the host proved FEAT_BF16 (the bf16-dot kernel exists), and
+//   * the dequant cache is enabled (the fp8 arm's residency precondition; the
+//     plain bf16 arm has no cache of its own and reads the SAME rule).
+//
+// It is a PURE function of those facts, so the gate can assert the SELECTION
+// directly: on a host where the two classes produce the same bits, no number
+// can see a class change at all.
+Kolibri1ComputeClass SelectKolibri1ComputeClass(
+    const Kolibri1ClassFacts& facts) {
+  if (facts.weight_is_bf16 && facts.out_dtype == DType::kBF16 &&
+      facts.bf16dot_available && facts.cache_enabled &&
+      (facts.t == 1 || facts.verify_rows)) {
+    return Kolibri1ComputeClass::kBf16Dot;
+  }
+  return Kolibri1ComputeClass::kF32Widen;
+}
+
+void SetKolibri1ComputeClassRecording(bool on) { g_record_classes = on; }
+void ResetKolibri1ComputeClassRecords() { g_class_records.clear(); }
+const std::map<std::string, Kolibri1ClassRecord>&
+Kolibri1ComputeClassRecords() {
+  return g_class_records;
+}
+
+// The class table, printed by the row's profile report (the PRODUCTION
+// consumer of the recorder: `VT_KOLIBRI1_PROFILE=1` turns the recording on
+// and this prints it). One line per site: the linear calls at that site and
+// the calls that selected the bf16-dot class.
+void ReportKolibri1ComputeClasses() {
+  for (const auto& [site, record] : Kolibri1ComputeClassRecords()) {
+    std::fprintf(stderr,
+                 "[kolibri1-class] %-16s %8llu calls %8llu bf16-dot\n",
+                 site.c_str(), static_cast<unsigned long long>(record.calls),
+                 static_cast<unsigned long long>(record.bf16_dot_calls));
+  }
+}
+
+DBuf DequantFp8BlockUncached(Dev d, const Fp8BlockWeight& w) {
+  return DequantFp8Block(d, w);
+}
+
+ResolvedFp8Projection ResolveFp8Projection(Dev d, const Fp8BlockWeight& w,
+                                          kolibri1_dequant_cache::Cache& cache) {
+  Kolibri1Projection proj;
+  proj.fp8_block = w;
+  ResolvedBT r = ResolveBTWithCache(d, proj, cache);
+  ResolvedFp8Projection out;
+  out.cached = static_cast<bool>(r.dequant_lease);
+  out.wt = r.wt;
+  out.buf = std::move(r.wt_buf);
+  return out;
+}
 
 ForwardLogits ForwardKolibri1Forward(
     const std::vector<int32_t>& token_ids, const std::vector<int32_t>& positions,
     const v1::CommonAttentionMetadata& attn_meta,
     const std::vector<PagedKvCache>& attn_kv, const Kolibri1Weights& weights,
     const MultiKvCacheIndex* multi_kv, vt::Queue& queue,
-    const std::vector<int32_t>& logits_indices) {
+    const std::vector<int32_t>& logits_indices, bool spec_verify_rows) {
   VT_CHECK(queue.device.type == vt::DeviceType::kCPU, kGpuRefusal);
+  // THE SPEC-VERIFY CLASS PIN (see VerifyRowsActive above): one uniform
+  // verify step, every row in the decode class.
+  const prof::VerifyRowsScope verify_scope{spec_verify_rows};
   const Kolibri1Params& p = weights.params;
   Dev d{vt::GetBackend(queue.device.type), queue};
   const int64_t t = static_cast<int64_t>(token_ids.size());
@@ -875,6 +1207,11 @@ ForwardLogits ForwardKolibri1Forward(
   const int64_t vocab = p.vocab_size;
 
   VT_CHECK(t > 0, "kolibri1: empty token batch");
+  // The row's PROFILE instrument turns the class recording on (once per
+  // forward, not per linear call), so the class table the profile report
+  // prints is a production reading of the compute-class rule and not a
+  // test-only seam.
+  if (prof::On()) SetKolibri1ComputeClassRecording(true);
   VT_CHECK(static_cast<int64_t>(positions.size()) == t,
            "kolibri1: positions size mismatch");
   VT_CHECK(static_cast<int64_t>(attn_meta.slot_mapping.size()) == t,
@@ -890,7 +1227,14 @@ ForwardLogits ForwardKolibri1Forward(
   }
   StageDump("emb", -2, hidden_buf, d);
   Tensor hidden = hidden_buf.t();
-  DBuf res(d, DType::kBF16, {t, h});
+  // SCRATCH MEASUREMENT ARM (the f32-residual A/B; NOT for main):
+  // VT_KOLIBRI1_F32_RESIDUAL=1 keeps the residual stream in f32 (the dtype
+  // llama.cpp and the HF reference keep it in) instead of the model dtype.
+  const bool f32_residual = [] {
+    const char* v = std::getenv("VT_KOLIBRI1_F32_RESIDUAL");
+    return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
+  }();
+  DBuf res(d, f32_residual ? DType::kF32 : DType::kBF16, {t, h});
   res.Zero(d);
 
   const float eps = static_cast<float>(p.rms_norm_eps);
@@ -1001,6 +1345,8 @@ ForwardLogits ForwardKolibri1Forward(
       vt::RmsNorm(d.q, moe_n.t(), moe.t(), w_pf, vt::RmsNormArgs{eps, false});
     }
     StageDump("moe_n", l, moe_n, d);
+    // SCRATCH MEASUREMENT INSTRUMENT (the f32-residual A/B; NOT for main).
+    LayerDumpAll(d, l, attn, attn_n, moe_n, res, t, h);
 
     auto* held = new DBuf(std::move(moe_n));
     hidden = held->t();
@@ -1046,7 +1392,26 @@ ForwardLogits ForwardKolibri1Forward(
   {
     prof::Scope prof("lm_head");
     gemvprof::Call gc("lm_head", static_cast<uint64_t>(n_out) * vocab * h);
-    vt::MatmulBT(d.q, logits.t(), src, lm);
+ // BFDOT f32-out arm, same knob as the LinearBT/LinearBTRaw arms: the
+ // lm_head weight is bf16 [vocab, H] row-major (the untied head, never an
+ // fp8 warm-cache tensor), the one remaining linear outside the LinearBT
+ // hook's coverage. Same rounding-policy envelope; measured, not hidden.
+ // EVERY row count, not n_out == 1 only: the exactness contract
+ // (ISSUE-LOCAL-01M5H6AE8666C5SPQ3GGCMTB1M) — the spec-verify step gathers
+ // its 1+k logits rows into ONE lm_head call, and a row-count-gated class
+ // verified every draft position in the f32-widen class while plain greedy
+ // decode sampled it in the bf16-dot class. `GemvF32OutRows` keeps every
+ // row on the t == 1 call's identical per-row instruction sequence.
+ if ((n_out == 1 || prof::VerifyRowsActive()) && lm.dtype == DType::kBF16 &&
+     kolibri1_bfdot_gemv::Bf16DotActive() &&
+     src.stride[0] == h) {
+   kolibri1_bfdot_gemv::GemvF32OutRows(
+       static_cast<const uint16_t*>(lm.data),
+       static_cast<const uint16_t*>(src.data),
+       static_cast<float*>(logits.ptr()), n_out, vocab, h);
+ } else {
+   vt::MatmulBT(d.q, logits.t(), src, lm);
+ }
   }
 
   ForwardLogits fl;
@@ -1073,7 +1438,14 @@ ForwardLogits ForwardKolibri1Forward(
   if (prof::On()) {
     prof::Acc()["total_forward"] += prof::Now() - prof_t0;
     static int64_t calls = 0;
-    if (++calls % 10 == 0) prof::Report(calls);
+    if (++calls % 10 == 0) {
+      // The class table beside the profile's own: which compute class each
+      // linear site selected, per arm. The window is then dropped, so the
+      // table is the last ten forwards' (the gemvprof window's own shape).
+      ReportKolibri1ComputeClasses();
+      ResetKolibri1ComputeClassRecords();
+      prof::Report(calls);
+    }
   }
   return fl;
 }

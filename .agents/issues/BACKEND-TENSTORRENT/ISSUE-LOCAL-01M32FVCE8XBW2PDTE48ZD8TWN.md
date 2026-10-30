@@ -7,7 +7,7 @@ GitHub: 3261
 Mirror: SYNCED
 Availability: FULL
 Created: 2026-09-21
-Updated: 2026-09-21
+Updated: 2026-10-21
 Closed: -
 
 ## Problem
@@ -16,4 +16,14 @@ The vllm-tt-plugin oracle record (.agents/oracles/vllm-tt-plugin.md, pin 7250ddf
 
 ## Resolution
 
--
+2026-10-21: NOT VERIFIABLE OFFLINE; the measurement is still owed. The oracle
+record is unchanged: `.agents/oracles/vllm-tt-plugin.md` still carries
+`gateable = no` on pin 7250ddfaa (2026-09-21), and it names this issue as the
+owing issue, which is what the registry checker requires of a gateable=no
+record.
+
+What settles it: the measurement this issue already specifies -- install vLLM
+0.26.0 (VLLM_TARGET_DEVICE=empty) plus the plugin at the pinned HEAD inside a
+tt-metal environment on the row's P150, serve one registered qwen35 checkpoint,
+and record the tokens emitted. It needs the device and the plugin install, so
+the tree cannot settle it.
