@@ -1,0 +1,85 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri1_gguf.cpp:236:
+TEST CASE:  kolibri1 gguf: greedy generation on probe prompts is fluent
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:238: MESSAGE: SKIP: set VT_KOLIBRI1_GGUF_GEN=1
+
+===============================================================================
+./tests/vllm/models/test_kolibri1_gguf.cpp:265:
+TEST CASE:  kolibri1 gguf: the published Q2_K replays the transformers golden run
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:274: MESSAGE: loading the published Q2_K container...
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:276: MESSAGE: weights loaded
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:327: MESSAGE: HARD flip at prompt 'alpha beta gamma delta epsilon zeta' step 1: got 116026 want 121598 (gap 3.74135 > band 2.5)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 1 with gap 3.74135 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:360: ERROR: CHECK( diff <= kLogitBand ) is NOT correct!
+  values: CHECK( 3.96888 <= 2.5 )
+  logged: topk logit 0 of 'alpha beta gamma delta epsilon zeta' off by 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:360: ERROR: CHECK( diff <= kLogitBand ) is NOT correct!
+  values: CHECK( 3.20087 <= 2.5 )
+  logged: topk logit 2 of 'alpha beta gamma delta epsilon zeta' off by 3.20087
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'alpha beta gamma delta epsilon zeta': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 0 with gap 1.9815 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'der Mond scheint hell über den Bergen': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:327: MESSAGE: HARD flip at prompt 'The capital of Australia is' step 0: got 5240 want 75361 (gap 7.7191 > band 2.5)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 0 with gap 7.7191 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'The capital of Australia is': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 1 with gap 0.0123415 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'Wissen ist Macht, aber Zeit ist Geld': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 2 with gap 1.32776 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'x1 = 3, x2 = 7, x3 = 11, x4 =': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 0 with gap 0.603208 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'Translation to German: the weather is beautiful today': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:327: MESSAGE: HARD flip at prompt 'Ein gutes Buch liest man am besten' step 0: got 10304 want 30135 (gap 10.2149 > band 2.5)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 0 with gap 10.2149 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:360: ERROR: CHECK( diff <= kLogitBand ) is NOT correct!
+  values: CHECK( 2.98486 <= 2.5 )
+  logged: topk logit 3 of 'Ein gutes Buch liest man am besten' off by 2.98486
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:360: ERROR: CHECK( diff <= kLogitBand ) is NOT correct!
+  values: CHECK( 3.52658 <= 2.5 )
+  logged: topk logit 6 of 'Ein gutes Buch liest man am besten' off by 3.52658
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'Ein gutes Buch liest man am besten': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:336: MESSAGE: chain diverged at step 1 with gap 0.168811 (band 2.5) — adjudicated as 1
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:360: ERROR: CHECK( diff <= kLogitBand ) is NOT correct!
+  values: CHECK( 3.93759 <= 2.5 )
+  logged: topk logit 1 of 'counting: one two three four five six seven' off by 3.93759
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:364: MESSAGE: 'counting: one two three four five six seven': worst topk diff so far 3.96888
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:367: MESSAGE: ARGMAX CHAIN: 5/13 compared positions match the golden greedy decode (8 flips: 5 near-tie, 3 hard)
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:372: MESSAGE: FINAL-STEP FINGERPRINT (teacher-forced golden chains): worst topk logit diff 3.96888, worst sum diff 57084.5
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:380: ERROR: CHECK( hard_flips == 0 ) is NOT correct!
+  values: CHECK( 3 == 0 )
+
+===============================================================================
+[doctest] test cases:   3 |   2 passed | 1 failed | 0 skipped
+[doctest] assertions: 142 | 136 passed | 6 failed |
+[doctest] Status: FAILURE!

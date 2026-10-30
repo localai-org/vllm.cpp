@@ -1,0 +1,14 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri1_gguf.cpp:236:
+TEST CASE:  kolibri1 gguf: greedy generation on probe prompts is fluent
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:260: MESSAGE: 'The capital of France is' -> 'The capital of France is Paris. The capital of France is Paris. The capital of France is Paris. The capital of France is Paris. The'
+
+./tests/vllm/models/test_kolibri1_gguf.cpp:260: MESSAGE: 'Ein gutes Buch liest man am besten' -> 'Ein gutes Buch liest man am besten am besten am besten am besten am besten am besten am besten am besten am besten am besten am besten am besten am besten'
+
+===============================================================================
+[doctest] test cases: 1 | 1 passed | 0 failed | 2 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: SUCCESS!

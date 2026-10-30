@@ -202,6 +202,15 @@ vllm_cpp_add_test(test_kolibri1_gguf vllm/models/test_kolibri1_gguf.cpp)
 target_include_directories(test_kolibri1_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_kolibri1_gguf PRIVATE
   KOLIBRI1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/vllm/models/kolibri1_goldens.json")
+# The container under test is a build choice, not a code choice: the gate is
+# the SAME harness against whichever kolibri1 GGUF is mounted (the Hob-forge
+# Q2_K by default; the mudler APEX tiers via -DKOLIBRI1_GGUF_PATH=...).
+set(KOLIBRI1_GGUF_PATH "" CACHE STRING
+    "Path to the kolibri1 GGUF container the gguf gate loads")
+if(KOLIBRI1_GGUF_PATH)
+  target_compile_definitions(test_kolibri1_gguf PRIVATE
+    KOLIBRI1_GGUF_PATH="${KOLIBRI1_GGUF_PATH}")
+endif()
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Kolibri-1 three-way numerics capture (row/kolibri-three-way): inert without

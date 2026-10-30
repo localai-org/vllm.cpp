@@ -17,3 +17,23 @@ mudler/Kolibri-1-APEX-GGUF @ 55a4781439 (nine tiers, 22-56 GB, standard ggml typ
 ## Resolution
 
 -
+
+## Findings (2026-10-30, implementer)
+
+- RECONCILED: both named blockers are stale against this branch — the arch
+  row landed at `src/vllm/entrypoints/model_loader.cpp:1277` and the GGUF
+  TU bypasses the fp8 checks by design (commits `71ee347e9` + `0350841b7`,
+  2026-10-23, spec `kolibri1-gguf-arch.md`). The remaining deliverable was
+  gating the mudler APEX artifact, which needed NO product-code change.
+- The APEX I-Micro file (sha256 `3edfaf09…c90e0e` verified) LOADS; its 903
+  tensors map onto the existing structs with zero unmapped/leftover
+  (evidence `docs/bench-evidence/kolibri1-gguf-arm-20261030/`).
+- STOP HIT (spec §Stop conditions): the fp8-vs-GGUF token cross-check is
+  BEYOND the W3 band — 37/44 golden greedy positions match, worst topk logit
+  diff 3.245 > 2.5, 2 hard flips (Hob-forge Q2_K adjudicated earlier: 5/13,
+  3.97, 3 hard). Fluency probe rules out a load defect (prompt-appropriate
+  looping, the bf16 goldens' own shape). Numerics adjudication — whether the
+  band is re-measured for quantized arms tier-by-tier or the tier is
+  accepted at the recorded envelope — is the developer's call, exactly as
+  the kolibri1-gguf-arch row left it. Throughput and public-doc weight pins
+  are NOT landed.

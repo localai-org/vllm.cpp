@@ -1,6 +1,9 @@
 # SPEC — `KOLIBRI1-GGUF-ARM` — the kolibri1 GGUF arch loads and serves on CPU; the mudler APEX tiers are the shipped artifacts
 
 - Owning row: `KOLIBRI1-GGUF-ARM`
+- Stable matrix row: `QUANT-KOLIBRI1-GGUF-ARM` (quantization-matrix, the
+  checker's row-ID namespace requires the `QUANT-` prefix; this spec is that
+  row's spec)
 - Kind: feature (model port coverage: the quantized arm the protocol requires)
 - Issue: created in the same flow (row-scoped local issue)
 
@@ -87,3 +90,57 @@ cross-check recorded under docs/bench-evidence/.
 ## Git integration
 
 One pull request, `row/KOLIBRI1-GGUF-ARM`, spec committed first.
+
+## Scope (structured record, added by the implementer 2026-10-30)
+
+Gate the mudler APEX I-Micro tier through the CPU kolibri1 GGUF arm; record
+the fp8-oracle cross-check, 16/32-thread throughput, evidence, and the
+weight pin. Out of scope: TT path, new dequant kernels, GPU arms.
+
+## Upstream chain
+
+`mudler/Kolibri-1-APEX-GGUF` @ `55a4781439f1e8abb7e46c795e0681d6b2b7f4d9`
+(quantized from `Aleph-Alpha/Kolibri-1-BF16`); primary oracle the fp8
+`Aleph-Alpha/Kolibri-1` safetensors arm via `kolibri1_goldens.json`.
+
+## Our baseline
+
+Both named blockers were already closed by commits `71ee347e9` +
+`0350841b7` (2026-10-23): the arch row at
+`src/vllm/entrypoints/model_loader.cpp:1277` and the
+`kolibri1_gguf_weights.cpp` TU, which keeps the fp8 checks scoped to the
+safetensors loader by construction.
+
+## Port map
+
+No product code. `tests/CMakeLists.txt` gained a `KOLIBRI1_GGUF_PATH` cache
+knob so the committed gate binary can point at any kolibri1 GGUF container
+(default unchanged: the Hob-forge Q2_K).
+
+## Tests to port
+
+None — the harness exists (`tests/vllm/models/test_kolibri1_gguf.cpp`, the
+W3 contract shape); this row points it at a new artifact.
+
+## Dependencies
+
+The I-Micro artifact (downloaded + sha256-verified 2026-10-30); the fp8
+oracle checkpoint mounted at `/mnt/models/Aleph-Alpha/Kolibri-1`.
+
+## Work breakdown
+
+1. Record reconciliation + red-first disposition (done: red state is
+   historical, pre-`39dadc637`).
+2. Artifact fetch + header census (done).
+3. Load + structural accounting (done: 903/903 mapped).
+4. Serving cross-check — STOP HIT (worst topk diff 3.245 > 2.5 band, 2 hard
+   flips; fluency clean; evidence
+   `docs/bench-evidence/kolibri1-gguf-arm-20261030/`).
+5. Throughput 16/32t + public-doc weight pin — WITHHELD pending the
+   developer's numerics adjudication.
+
+## Risks/decisions
+
+The band-vs-quantized-arm adjudication is deliberately left open (the
+kolibri1-gguf-arch row left the identical question open); this row does not
+widen a band to go green.
