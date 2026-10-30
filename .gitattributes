@@ -24,6 +24,16 @@ src/vt/cuda/triton_aot_vendored/** linguist-generated=true
 # directory-wide text rule is safe; and there are ZERO tracked text blobs
 # outside docs/bench-evidence that contain \r\n, so this policy normalises
 # nothing that exists today -- it only stops the class from arriving.
+#
+# Re-measured 2026-10-30 with `git ls-files --eol`, the form that asks git
+# itself instead of grepping working-tree bytes: of 8935 tracked paths, 7607
+# are `i/lf`, 1311 are `i/-text` (binary, untouched), 13 are `i/none`, and
+# **0 are `i/crlf`**. The only two mixed-ending blobs,
+# docs/bench-evidence/oracle-vllm-gfx1151-20260903/job-phase2.txt and
+# docs/bench-evidence/vllm-gguf-plugin-thor-20260903/gen-20260903T012806Z.log,
+# already carry `attr/-text` from the pinned rule below. So the wider scope the
+# review asked about does not exist: there is no committed CRLF blob for this
+# policy to rewrite, and the widening changes nothing that is already stored.
 * text=auto eol=lf
 
 # Captured bench evidence, where a CR is part of the recorded artifact and must
