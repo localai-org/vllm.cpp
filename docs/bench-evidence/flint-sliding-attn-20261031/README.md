@@ -123,23 +123,72 @@ Gates (all on the fixed head, build /tmp/build-sliding, CPUs 64-127):
 
 ## Before / after
 
-(16t = taskset -c 32-47, 32t = -c 32-63, 3-rep medians unless noted.)
+(16t = taskset -c 32-47, 32t = -c 32-63, 3-rep medians. After-legs gated per
+rep on 1-min load < 6 and no >80%-cpu foreign process inside the zone; one
+single-cpu foreign workload (`test_flint_tt_w`, the TT-ANCHORING claim's test
+loop) lives in the zone and migrates across cpus — documented, ~1 of 16-32
+cpus. Earlier post triples whose early-step median betrayed a burst are
+quarantined under `contaminated/`. The early-step median is the contention
+canary: the fix leaves the intercept untouched, so a clean rep reproduces it.)
 
-| metric | before | after |
+| metric | before (base-16-rep{1,2,3}) | after (post-16-rep{1,2,3}) |
 |---|---:|---:|
-| attn_sliding early med (16t) | 43.19 / 43.72 / 44.47 | TBD |
-| attn_sliding late med (16t) | 89.27 / 90.15 / 91.20 | TBD |
-| sliding growth ratio | 2.05–2.07 | TBD |
-| serving tok/s @16t | TBD | TBD |
-| serving tok/s @32t | TBD | TBD |
+| attn_sliding early med, ms | 43.19 / 43.72 / 44.47 | 38.99 / 39.00 / 38.11 |
+| attn_sliding late med, ms | 89.27 / 90.15 / 91.20 | 43.29 / 43.90 / 42.70 |
+| late/early growth ratio | 2.067 / 2.062 / 2.051 | 1.110 / 1.126 / 1.120 |
+| per-key slope, ms/step | 0.2634 / 0.2633 / 0.2630 | 0.0269 / 0.0284 / 0.0279 |
+| decode tok/s @16t | 5.50 / 5.48 / 5.29 (med 5.48) | 7.01 / 7.01 / 6.87 (med 7.01) |
+| attn_sliding early med (32t), ms | 41.05 / 42.25 / 43.46 | 35.16 / 36.02 / 35.97 |
+| attn_sliding late med (32t), ms | 86.20 / 87.47 / 89.88 | 39.59 / 39.52 / 40.37 |
+| late/early growth ratio (32t) | 2.100 / 2.070 / 2.068 | 1.126 / 1.097 / 1.122 |
+| decode tok/s @32t | 4.91 / 5.61 / 4.90 (med 4.91; prior clean record 5.60 — see note) | 6.98 / 6.83 / 6.42 (med 6.83) |
+
+32t note: the baseline 32t triple ran on the pre-fix binary
+(`/tmp/build-ttnr/examples/vllm-bench`, which carries the landed timers but
+not this row's fix) under today's bursty sharing; its decode rates are
+depressed by post-leg load bursts (18-21 one-minute load at leg end) while its
+SLIDING medians are internally consistent (early 41-43, late 86-90, ratio
+2.07-2.10 — the same curve as 16t). The prior row's clean same-recipe 32t
+record (5.60, `docs/bench-evidence/tt-nonrouted-attribution-20261031/`) is the
+calmer before-reference; after (6.83 median) clears both. The phase numbers,
+not the wall rates, are this row's primary evidence: they are within-run
+quantities and robust to the bursts.
+
+32t post baseline check: the sliding intercept DROPS 41-43 -> 35-36 at 32
+threads (the seq-independent GEMV content uses the wider pool), consistent
+with the 1t control's intercept behavior; the key term's late/early ratio
+collapses 2.07 -> 1.10-1.13 both widths.
+
+The intercept is unchanged (39-41 before, 38-39 after): the fix moved only the
+key term. The key term drops ~9.5x (32 heads over 16 threads; the ideal split
+is 16x — the residual is pool-kick overhead per 35 layer calls and the 2
+heads-per-thread quantization). The remaining growth (late/early 1.12) is the
+same unclipped-window key term at its parallel floor; it plateaus at seq 513
+by design.
 
 ## Raw logs
 
 - `base-16-rep{1,2,3}.log` — baseline 16t (pre-fix binary, clean).
 - `base-32-rep{1,2,3}.log` — baseline 32t, CONTAMINATED (foreign session on
   cpu 34); kept for the record, not used.
+- `base-32-clean-rep{1,2,3}.log` — baseline 32t on the pre-fix binary, clean
+  (canary-gated; burst tries quarantined under `contaminated/`).
 - `ctl-1t-rep1.log` — 1-thread control leg (pre-fix binary
   `/tmp/build-ttnr/examples/vllm-bench`, which carries the landed timers but
   not this row's fix).
 - `post-*-rep*.log` — after legs (this row's fix).
 - `host-state.txt`.
+
+## Preflight / record
+
+`agent-preflight.sh` on this host: green except the KNOWN host-specific
+failure `check-windows-portability.py` (dotnet is not installed on this Linux
+box; the injected fake-tool contract cannot run — the named-host exception).
+`check-agent-record` OK. Commit style + trailer gates green on
+`origin/main..HEAD`.
+
+## Governor
+
+performance (as found, unchanged). Idle gate per rep: 1-min load < 6 (16t/32t
+after-legs; < 16 for the first baseline triple) plus a no->80%-cpu-foreign-in
+-zone check; early-step-median canary on every kept leg.

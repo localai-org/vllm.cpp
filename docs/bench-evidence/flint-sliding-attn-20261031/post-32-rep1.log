@@ -1,0 +1,648 @@
+vllm-bench: /mnt/models/flint-GGUF/flint-Q4_K_M.gguf engine | num_prompts=1 input_len=8 output_len=200 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+[FLINT-PHASE] batch=9 embed=0.710 attn_sliding=94.303 attn_full=34.815 norms=4.798 dense_mlp=8.042 moe_router=46.914 moe_routed=414.374 moe_shared=42.194 lm_head=4.691 other=4.146 fwd_wall_ms=655.428
+[FLINT-STEP] batch=1 fwd_ms=655.492 step_wall_ms=0.000
+[FLINT-STEP] sample_ms=0.124
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.331 attn_full=11.137 norms=0.758 dense_mlp=1.224 moe_router=7.640 moe_routed=58.573 moe_shared=13.556 lm_head=4.499 other=2.396 fwd_wall_ms=136.372
+[FLINT-STEP] batch=1 fwd_ms=136.440 step_wall_ms=655.662
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.034 attn_full=12.095 norms=0.754 dense_mlp=1.228 moe_router=7.703 moe_routed=60.446 moe_shared=14.232 lm_head=4.697 other=2.407 fwd_wall_ms=139.858
+[FLINT-STEP] batch=1 fwd_ms=139.913 step_wall_ms=136.592
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.827 attn_full=12.323 norms=0.754 dense_mlp=1.198 moe_router=7.653 moe_routed=63.623 moe_shared=13.317 lm_head=4.464 other=2.384 fwd_wall_ms=141.839
+[FLINT-STEP] batch=1 fwd_ms=141.898 step_wall_ms=140.055
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.574 attn_full=12.029 norms=0.750 dense_mlp=1.276 moe_router=7.634 moe_routed=56.904 moe_shared=13.063 lm_head=5.141 other=2.397 fwd_wall_ms=135.064
+[FLINT-STEP] batch=1 fwd_ms=135.118 step_wall_ms=142.042
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.520 attn_full=12.273 norms=0.756 dense_mlp=1.265 moe_router=7.693 moe_routed=57.042 moe_shared=12.881 lm_head=5.001 other=2.383 fwd_wall_ms=136.087
+[FLINT-STEP] batch=1 fwd_ms=136.137 step_wall_ms=135.258
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.989 attn_full=11.616 norms=0.750 dense_mlp=1.293 moe_router=7.715 moe_routed=59.499 moe_shared=13.868 lm_head=4.542 other=2.361 fwd_wall_ms=137.878
+[FLINT-STEP] batch=1 fwd_ms=137.934 step_wall_ms=136.276
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.880 attn_full=12.868 norms=0.759 dense_mlp=1.299 moe_router=7.676 moe_routed=55.624 moe_shared=12.444 lm_head=4.856 other=2.382 fwd_wall_ms=134.050
+[FLINT-STEP] batch=1 fwd_ms=134.105 step_wall_ms=138.077
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.119 attn_full=12.066 norms=0.760 dense_mlp=1.268 moe_router=7.828 moe_routed=59.909 moe_shared=13.978 lm_head=4.933 other=2.358 fwd_wall_ms=139.484
+[FLINT-STEP] batch=1 fwd_ms=139.540 step_wall_ms=134.252
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.275 attn_full=12.027 norms=0.760 dense_mlp=1.201 moe_router=7.642 moe_routed=58.700 moe_shared=13.583 lm_head=4.774 other=2.386 fwd_wall_ms=137.606
+[FLINT-STEP] batch=1 fwd_ms=137.667 step_wall_ms=139.681
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=35.317 attn_full=12.189 norms=0.753 dense_mlp=1.214 moe_router=7.736 moe_routed=62.036 moe_shared=14.770 lm_head=4.777 other=2.339 fwd_wall_ms=141.390
+[FLINT-STEP] batch=1 fwd_ms=141.444 step_wall_ms=137.809
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.795 attn_full=11.876 norms=0.751 dense_mlp=1.246 moe_router=7.739 moe_routed=59.329 moe_shared=13.854 lm_head=4.999 other=2.401 fwd_wall_ms=138.232
+[FLINT-STEP] batch=1 fwd_ms=138.286 step_wall_ms=141.585
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.230 attn_full=11.970 norms=0.765 dense_mlp=1.272 moe_router=7.749 moe_routed=57.641 moe_shared=12.896 lm_head=4.979 other=2.384 fwd_wall_ms=137.173
+[FLINT-STEP] batch=1 fwd_ms=137.229 step_wall_ms=138.436
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.435 attn_full=11.587 norms=0.774 dense_mlp=1.237 moe_router=8.622 moe_routed=55.758 moe_shared=12.289 lm_head=9.743 other=2.370 fwd_wall_ms=137.088
+[FLINT-STEP] batch=1 fwd_ms=137.143 step_wall_ms=137.368
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.244 attn_full=11.442 norms=0.765 dense_mlp=1.391 moe_router=8.884 moe_routed=125.195 moe_shared=11.755 lm_head=5.163 other=2.411 fwd_wall_ms=201.570
+[FLINT-STEP] batch=1 fwd_ms=201.629 step_wall_ms=137.283
+[FLINT-STEP] sample_ms=0.117
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=33.760 attn_full=11.151 norms=0.768 dense_mlp=1.370 moe_router=8.141 moe_routed=52.667 moe_shared=11.324 lm_head=5.896 other=2.406 fwd_wall_ms=127.779
+[FLINT-STEP] batch=1 fwd_ms=127.832 step_wall_ms=201.783
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.418 attn_full=16.290 norms=0.766 dense_mlp=1.339 moe_router=8.441 moe_routed=53.555 moe_shared=11.365 lm_head=5.008 other=2.362 fwd_wall_ms=139.847
+[FLINT-STEP] batch=1 fwd_ms=139.903 step_wall_ms=127.975
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.811 attn_full=11.227 norms=0.799 dense_mlp=1.366 moe_router=8.508 moe_routed=53.183 moe_shared=11.384 lm_head=8.416 other=2.393 fwd_wall_ms=136.407
+[FLINT-STEP] batch=1 fwd_ms=136.464 step_wall_ms=140.046
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.017 attn_full=11.280 norms=0.766 dense_mlp=1.462 moe_router=8.436 moe_routed=52.908 moe_shared=11.467 lm_head=6.165 other=2.371 fwd_wall_ms=129.185
+[FLINT-STEP] batch=1 fwd_ms=129.241 step_wall_ms=136.608
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=35.163 attn_full=11.156 norms=0.766 dense_mlp=1.370 moe_router=8.473 moe_routed=53.350 moe_shared=11.453 lm_head=5.651 other=2.401 fwd_wall_ms=130.089
+[FLINT-STEP] batch=1 fwd_ms=130.144 step_wall_ms=129.383
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.218 attn_full=11.224 norms=0.768 dense_mlp=1.420 moe_router=8.542 moe_routed=55.550 moe_shared=13.825 lm_head=5.148 other=2.374 fwd_wall_ms=133.361
+[FLINT-STEP] batch=1 fwd_ms=133.418 step_wall_ms=130.284
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.107 attn_full=16.789 norms=0.764 dense_mlp=1.560 moe_router=8.430 moe_routed=54.243 moe_shared=11.311 lm_head=5.693 other=2.373 fwd_wall_ms=135.575
+[FLINT-STEP] batch=1 fwd_ms=135.634 step_wall_ms=133.563
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.099 attn_full=11.305 norms=0.768 dense_mlp=1.535 moe_router=8.503 moe_routed=54.403 moe_shared=11.338 lm_head=5.196 other=2.395 fwd_wall_ms=129.847
+[FLINT-STEP] batch=1 fwd_ms=129.906 step_wall_ms=135.775
+[FLINT-STEP] sample_ms=0.128
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=38.600 attn_full=11.512 norms=0.767 dense_mlp=1.368 moe_router=8.448 moe_routed=56.921 moe_shared=11.573 lm_head=5.533 other=2.391 fwd_wall_ms=137.406
+[FLINT-STEP] batch=1 fwd_ms=137.464 step_wall_ms=130.075
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.388 attn_full=11.254 norms=0.765 dense_mlp=1.419 moe_router=8.483 moe_routed=53.596 moe_shared=11.411 lm_head=9.393 other=2.387 fwd_wall_ms=133.373
+[FLINT-STEP] batch=1 fwd_ms=133.439 step_wall_ms=137.624
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.103 attn_full=12.652 norms=0.766 dense_mlp=1.426 moe_router=8.715 moe_routed=66.797 moe_shared=18.610 lm_head=4.819 other=2.390 fwd_wall_ms=153.574
+[FLINT-STEP] batch=1 fwd_ms=153.633 step_wall_ms=133.593
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.105 attn_full=12.583 norms=0.760 dense_mlp=1.262 moe_router=7.912 moe_routed=61.169 moe_shared=13.893 lm_head=4.737 other=2.408 fwd_wall_ms=142.101
+[FLINT-STEP] batch=1 fwd_ms=142.171 step_wall_ms=153.777
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.236 attn_full=12.370 norms=0.761 dense_mlp=1.253 moe_router=7.935 moe_routed=60.635 moe_shared=14.011 lm_head=4.656 other=2.366 fwd_wall_ms=140.489
+[FLINT-STEP] batch=1 fwd_ms=140.544 step_wall_ms=142.312
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=160.493 attn_full=56.575 norms=0.790 dense_mlp=1.270 moe_router=37.366 moe_routed=333.408 moe_shared=66.975 lm_head=5.649 other=2.396 fwd_wall_ms=665.244
+[FLINT-STEP] batch=1 fwd_ms=665.300 step_wall_ms=140.685
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.169 attn_full=11.552 norms=0.779 dense_mlp=1.658 moe_router=8.726 moe_routed=56.380 moe_shared=11.861 lm_head=6.162 other=2.398 fwd_wall_ms=139.003
+[FLINT-STEP] batch=1 fwd_ms=139.059 step_wall_ms=665.444
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.777 attn_full=17.467 norms=0.778 dense_mlp=1.440 moe_router=9.249 moe_routed=56.967 moe_shared=12.540 lm_head=5.670 other=2.407 fwd_wall_ms=142.618
+[FLINT-STEP] batch=1 fwd_ms=142.674 step_wall_ms=139.205
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.199 attn_full=11.741 norms=0.777 dense_mlp=1.673 moe_router=8.818 moe_routed=58.239 moe_shared=11.733 lm_head=5.338 other=2.419 fwd_wall_ms=136.261
+[FLINT-STEP] batch=1 fwd_ms=136.324 step_wall_ms=142.817
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.255 attn_full=11.639 norms=0.788 dense_mlp=1.482 moe_router=9.780 moe_routed=54.795 moe_shared=11.814 lm_head=6.027 other=2.468 fwd_wall_ms=137.356
+[FLINT-STEP] batch=1 fwd_ms=137.411 step_wall_ms=136.467
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.889 attn_full=12.099 norms=0.779 dense_mlp=3.427 moe_router=8.834 moe_routed=55.285 moe_shared=12.020 lm_head=5.360 other=2.418 fwd_wall_ms=135.466
+[FLINT-STEP] batch=1 fwd_ms=135.520 step_wall_ms=137.554
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.159 attn_full=11.709 norms=0.783 dense_mlp=2.999 moe_router=8.738 moe_routed=56.297 moe_shared=11.784 lm_head=5.564 other=2.449 fwd_wall_ms=135.788
+[FLINT-STEP] batch=1 fwd_ms=135.849 step_wall_ms=135.665
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.359 attn_full=11.705 norms=0.777 dense_mlp=1.465 moe_router=8.653 moe_routed=58.694 moe_shared=11.980 lm_head=6.460 other=2.417 fwd_wall_ms=137.831
+[FLINT-STEP] batch=1 fwd_ms=137.891 step_wall_ms=135.993
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.117 attn_full=11.888 norms=0.780 dense_mlp=1.448 moe_router=8.601 moe_routed=58.851 moe_shared=11.835 lm_head=5.350 other=2.417 fwd_wall_ms=136.601
+[FLINT-STEP] batch=1 fwd_ms=136.662 step_wall_ms=138.034
+[FLINT-STEP] sample_ms=0.112
+[FLINT-PHASE] batch=1 embed=0.010 attn_sliding=35.120 attn_full=19.312 norms=0.790 dense_mlp=1.675 moe_router=8.709 moe_routed=54.550 moe_shared=11.745 lm_head=5.643 other=2.417 fwd_wall_ms=140.299
+[FLINT-STEP] batch=1 fwd_ms=140.360 step_wall_ms=136.841
+[FLINT-STEP] sample_ms=0.111
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=35.313 attn_full=11.770 norms=0.772 dense_mlp=1.775 moe_router=8.203 moe_routed=55.223 moe_shared=11.754 lm_head=4.764 other=2.403 fwd_wall_ms=132.277
+[FLINT-STEP] batch=1 fwd_ms=132.332 step_wall_ms=140.536
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.690 attn_full=12.309 norms=0.758 dense_mlp=1.249 moe_router=7.657 moe_routed=57.747 moe_shared=13.216 lm_head=4.469 other=2.355 fwd_wall_ms=136.723
+[FLINT-STEP] batch=1 fwd_ms=136.781 step_wall_ms=132.499
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.859 attn_full=12.302 norms=0.759 dense_mlp=1.211 moe_router=7.712 moe_routed=58.685 moe_shared=13.529 lm_head=4.502 other=2.360 fwd_wall_ms=138.180
+[FLINT-STEP] batch=1 fwd_ms=138.248 step_wall_ms=136.953
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.235 attn_full=12.171 norms=0.761 dense_mlp=1.275 moe_router=7.687 moe_routed=58.400 moe_shared=13.172 lm_head=4.578 other=2.382 fwd_wall_ms=137.933
+[FLINT-STEP] batch=1 fwd_ms=137.988 step_wall_ms=138.420
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.388 attn_full=12.146 norms=0.772 dense_mlp=1.271 moe_router=7.801 moe_routed=57.714 moe_shared=13.016 lm_head=4.531 other=2.411 fwd_wall_ms=137.316
+[FLINT-STEP] batch=1 fwd_ms=137.371 step_wall_ms=138.157
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.054 attn_full=12.190 norms=0.759 dense_mlp=1.229 moe_router=7.746 moe_routed=60.424 moe_shared=13.774 lm_head=4.376 other=2.385 fwd_wall_ms=140.219
+[FLINT-STEP] batch=1 fwd_ms=140.277 step_wall_ms=137.542
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.098 attn_full=12.227 norms=0.758 dense_mlp=1.211 moe_router=7.697 moe_routed=59.414 moe_shared=13.615 lm_head=4.777 other=2.320 fwd_wall_ms=139.396
+[FLINT-STEP] batch=1 fwd_ms=139.455 step_wall_ms=140.447
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.499 attn_full=12.179 norms=0.763 dense_mlp=1.197 moe_router=7.703 moe_routed=59.152 moe_shared=13.437 lm_head=4.461 other=2.369 fwd_wall_ms=138.040
+[FLINT-STEP] batch=1 fwd_ms=138.099 step_wall_ms=139.623
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.273 attn_full=12.798 norms=0.775 dense_mlp=1.276 moe_router=7.893 moe_routed=62.435 moe_shared=14.130 lm_head=4.439 other=2.401 fwd_wall_ms=142.699
+[FLINT-STEP] batch=1 fwd_ms=142.761 step_wall_ms=138.271
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.986 attn_full=12.241 norms=0.761 dense_mlp=1.256 moe_router=7.753 moe_routed=59.767 moe_shared=13.575 lm_head=4.381 other=2.405 fwd_wall_ms=139.404
+[FLINT-STEP] batch=1 fwd_ms=139.463 step_wall_ms=142.932
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.094 attn_full=12.184 norms=0.767 dense_mlp=1.275 moe_router=7.810 moe_routed=61.337 moe_shared=13.821 lm_head=4.854 other=2.390 fwd_wall_ms=141.815
+[FLINT-STEP] batch=1 fwd_ms=141.884 step_wall_ms=139.629
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.745 attn_full=12.762 norms=0.762 dense_mlp=1.204 moe_router=7.728 moe_routed=59.045 moe_shared=13.387 lm_head=4.848 other=2.368 fwd_wall_ms=139.108
+[FLINT-STEP] batch=1 fwd_ms=139.166 step_wall_ms=142.054
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=38.058 attn_full=12.669 norms=0.776 dense_mlp=1.203 moe_router=7.702 moe_routed=57.642 moe_shared=12.934 lm_head=4.464 other=2.399 fwd_wall_ms=138.126
+[FLINT-STEP] batch=1 fwd_ms=138.187 step_wall_ms=139.337
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.902 attn_full=12.468 norms=0.767 dense_mlp=1.210 moe_router=7.755 moe_routed=59.007 moe_shared=13.199 lm_head=4.694 other=2.436 fwd_wall_ms=138.700
+[FLINT-STEP] batch=1 fwd_ms=138.758 step_wall_ms=138.361
+[FLINT-STEP] sample_ms=0.129
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.817 attn_full=12.274 norms=0.758 dense_mlp=1.193 moe_router=7.902 moe_routed=59.233 moe_shared=13.384 lm_head=4.424 other=2.384 fwd_wall_ms=138.640
+[FLINT-STEP] batch=1 fwd_ms=138.699 step_wall_ms=138.947
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.823 attn_full=11.991 norms=0.762 dense_mlp=1.267 moe_router=7.659 moe_routed=59.660 moe_shared=13.502 lm_head=4.547 other=2.386 fwd_wall_ms=139.857
+[FLINT-STEP] batch=1 fwd_ms=139.916 step_wall_ms=138.867
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.411 attn_full=12.159 norms=0.768 dense_mlp=1.175 moe_router=7.818 moe_routed=59.205 moe_shared=13.401 lm_head=4.414 other=2.378 fwd_wall_ms=139.012
+[FLINT-STEP] batch=1 fwd_ms=139.071 step_wall_ms=140.084
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.035 attn_full=13.668 norms=0.760 dense_mlp=1.151 moe_router=7.968 moe_routed=59.162 moe_shared=13.268 lm_head=4.381 other=2.396 fwd_wall_ms=140.058
+[FLINT-STEP] batch=1 fwd_ms=140.132 step_wall_ms=139.241
+[FLINT-STEP] sample_ms=0.110
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.339 attn_full=12.358 norms=0.759 dense_mlp=1.241 moe_router=7.809 moe_routed=60.292 moe_shared=13.769 lm_head=4.461 other=2.397 fwd_wall_ms=140.689
+[FLINT-STEP] batch=1 fwd_ms=140.748 step_wall_ms=140.326
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.284 attn_full=12.217 norms=0.751 dense_mlp=1.188 moe_router=7.796 moe_routed=58.763 moe_shared=13.243 lm_head=4.501 other=2.376 fwd_wall_ms=138.385
+[FLINT-STEP] batch=1 fwd_ms=138.444 step_wall_ms=140.918
+[FLINT-STEP] sample_ms=0.110
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.723 attn_full=12.564 norms=0.754 dense_mlp=1.187 moe_router=7.641 moe_routed=59.519 moe_shared=13.629 lm_head=4.586 other=2.388 fwd_wall_ms=139.246
+[FLINT-STEP] batch=1 fwd_ms=139.304 step_wall_ms=138.615
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.051 attn_full=12.336 norms=0.756 dense_mlp=1.186 moe_router=7.803 moe_routed=60.210 moe_shared=13.446 lm_head=4.796 other=2.372 fwd_wall_ms=140.209
+[FLINT-STEP] batch=1 fwd_ms=140.269 step_wall_ms=139.473
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.834 attn_full=12.330 norms=0.755 dense_mlp=1.186 moe_router=7.765 moe_routed=59.017 moe_shared=13.279 lm_head=4.520 other=2.391 fwd_wall_ms=139.336
+[FLINT-STEP] batch=1 fwd_ms=139.396 step_wall_ms=140.441
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.079 attn_full=12.085 norms=0.756 dense_mlp=1.209 moe_router=7.854 moe_routed=58.479 moe_shared=13.288 lm_head=4.645 other=2.363 fwd_wall_ms=138.015
+[FLINT-STEP] batch=1 fwd_ms=138.074 step_wall_ms=139.569
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.624 attn_full=12.127 norms=0.756 dense_mlp=1.186 moe_router=7.660 moe_routed=58.560 moe_shared=13.273 lm_head=4.465 other=2.403 fwd_wall_ms=138.315
+[FLINT-STEP] batch=1 fwd_ms=138.373 step_wall_ms=138.245
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.975 attn_full=12.432 norms=0.756 dense_mlp=1.203 moe_router=7.826 moe_routed=57.063 moe_shared=12.795 lm_head=4.370 other=2.361 fwd_wall_ms=136.045
+[FLINT-STEP] batch=1 fwd_ms=136.106 step_wall_ms=138.539
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.750 attn_full=12.567 norms=0.757 dense_mlp=1.187 moe_router=7.848 moe_routed=60.655 moe_shared=13.773 lm_head=4.905 other=2.376 fwd_wall_ms=142.079
+[FLINT-STEP] batch=1 fwd_ms=142.140 step_wall_ms=136.276
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.531 attn_full=12.385 norms=0.747 dense_mlp=1.187 moe_router=7.949 moe_routed=59.298 moe_shared=13.419 lm_head=4.518 other=2.408 fwd_wall_ms=139.694
+[FLINT-STEP] batch=1 fwd_ms=139.755 step_wall_ms=142.311
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.698 attn_full=12.704 norms=0.779 dense_mlp=1.177 moe_router=7.530 moe_routed=59.405 moe_shared=13.347 lm_head=4.692 other=2.386 fwd_wall_ms=138.976
+[FLINT-STEP] batch=1 fwd_ms=139.038 step_wall_ms=139.924
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=36.950 attn_full=12.375 norms=0.754 dense_mlp=1.266 moe_router=7.808 moe_routed=60.469 moe_shared=14.157 lm_head=4.763 other=2.426 fwd_wall_ms=141.234
+[FLINT-STEP] batch=1 fwd_ms=141.296 step_wall_ms=139.210
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=38.435 attn_full=12.852 norms=0.755 dense_mlp=1.243 moe_router=7.757 moe_routed=59.835 moe_shared=13.767 lm_head=4.412 other=2.388 fwd_wall_ms=141.699
+[FLINT-STEP] batch=1 fwd_ms=141.762 step_wall_ms=141.465
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.618 attn_full=12.723 norms=0.754 dense_mlp=1.289 moe_router=7.746 moe_routed=59.448 moe_shared=13.135 lm_head=4.554 other=2.414 fwd_wall_ms=139.938
+[FLINT-STEP] batch=1 fwd_ms=140.013 step_wall_ms=141.937
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.470 attn_full=12.177 norms=0.756 dense_mlp=1.253 moe_router=7.764 moe_routed=60.355 moe_shared=13.935 lm_head=4.710 other=2.399 fwd_wall_ms=141.083
+[FLINT-STEP] batch=1 fwd_ms=141.144 step_wall_ms=140.188
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.259 attn_full=13.076 norms=0.754 dense_mlp=1.272 moe_router=7.752 moe_routed=59.752 moe_shared=13.718 lm_head=4.344 other=2.383 fwd_wall_ms=140.581
+[FLINT-STEP] batch=1 fwd_ms=140.645 step_wall_ms=141.316
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.231 attn_full=12.786 norms=0.757 dense_mlp=1.176 moe_router=7.882 moe_routed=60.287 moe_shared=13.755 lm_head=4.521 other=2.391 fwd_wall_ms=141.051
+[FLINT-STEP] batch=1 fwd_ms=141.111 step_wall_ms=140.817
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.276 attn_full=12.636 norms=0.753 dense_mlp=1.250 moe_router=8.070 moe_routed=61.036 moe_shared=14.084 lm_head=4.472 other=2.393 fwd_wall_ms=142.253
+[FLINT-STEP] batch=1 fwd_ms=142.312 step_wall_ms=141.279
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.574 attn_full=12.895 norms=0.751 dense_mlp=1.168 moe_router=7.759 moe_routed=61.574 moe_shared=14.085 lm_head=4.486 other=2.397 fwd_wall_ms=142.944
+[FLINT-STEP] batch=1 fwd_ms=143.008 step_wall_ms=142.482
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.487 attn_full=12.597 norms=0.756 dense_mlp=1.180 moe_router=7.577 moe_routed=58.175 moe_shared=12.837 lm_head=4.337 other=2.386 fwd_wall_ms=137.600
+[FLINT-STEP] batch=1 fwd_ms=137.665 step_wall_ms=143.180
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.920 attn_full=12.399 norms=0.754 dense_mlp=1.185 moe_router=7.691 moe_routed=59.676 moe_shared=13.563 lm_head=4.378 other=2.405 fwd_wall_ms=140.223
+[FLINT-STEP] batch=1 fwd_ms=140.287 step_wall_ms=137.838
+[FLINT-STEP] sample_ms=0.109
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=38.721 attn_full=12.453 norms=0.749 dense_mlp=1.167 moe_router=7.861 moe_routed=60.207 moe_shared=13.535 lm_head=4.842 other=2.378 fwd_wall_ms=142.189
+[FLINT-STEP] batch=1 fwd_ms=142.253 step_wall_ms=140.460
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=38.153 attn_full=12.207 norms=0.772 dense_mlp=1.179 moe_router=7.926 moe_routed=59.927 moe_shared=13.604 lm_head=4.864 other=2.390 fwd_wall_ms=141.285
+[FLINT-STEP] batch=1 fwd_ms=141.345 step_wall_ms=142.421
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.644 attn_full=12.615 norms=0.761 dense_mlp=1.199 moe_router=7.657 moe_routed=59.328 moe_shared=13.641 lm_head=4.630 other=2.457 fwd_wall_ms=140.191
+[FLINT-STEP] batch=1 fwd_ms=140.255 step_wall_ms=141.516
+[FLINT-STEP] sample_ms=0.108
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.519 attn_full=12.746 norms=0.753 dense_mlp=1.188 moe_router=7.867 moe_routed=61.168 moe_shared=13.757 lm_head=4.442 other=2.367 fwd_wall_ms=142.064
+[FLINT-STEP] batch=1 fwd_ms=142.119 step_wall_ms=140.429
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.741 attn_full=12.592 norms=0.760 dense_mlp=1.192 moe_router=7.770 moe_routed=61.080 moe_shared=14.082 lm_head=4.695 other=2.403 fwd_wall_ms=142.569
+[FLINT-STEP] batch=1 fwd_ms=142.626 step_wall_ms=142.259
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.329 attn_full=12.496 norms=0.765 dense_mlp=1.189 moe_router=7.766 moe_routed=60.128 moe_shared=13.488 lm_head=4.552 other=2.337 fwd_wall_ms=141.298
+[FLINT-STEP] batch=1 fwd_ms=141.353 step_wall_ms=142.767
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.770 attn_full=12.310 norms=0.755 dense_mlp=1.223 moe_router=7.836 moe_routed=60.753 moe_shared=13.907 lm_head=4.459 other=2.389 fwd_wall_ms=141.664
+[FLINT-STEP] batch=1 fwd_ms=141.716 step_wall_ms=141.495
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.624 attn_full=12.839 norms=0.754 dense_mlp=1.172 moe_router=7.709 moe_routed=58.572 moe_shared=12.997 lm_head=4.399 other=2.396 fwd_wall_ms=138.711
+[FLINT-STEP] batch=1 fwd_ms=138.766 step_wall_ms=141.869
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.390 attn_full=12.051 norms=0.754 dense_mlp=1.191 moe_router=7.857 moe_routed=61.076 moe_shared=14.086 lm_head=4.410 other=2.385 fwd_wall_ms=142.466
+[FLINT-STEP] batch=1 fwd_ms=142.520 step_wall_ms=138.910
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.881 attn_full=12.734 norms=0.755 dense_mlp=1.130 moe_router=7.890 moe_routed=60.956 moe_shared=13.770 lm_head=4.534 other=2.318 fwd_wall_ms=143.224
+[FLINT-STEP] batch=1 fwd_ms=143.278 step_wall_ms=142.659
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.080 attn_full=12.641 norms=0.757 dense_mlp=1.267 moe_router=7.730 moe_routed=58.413 moe_shared=13.008 lm_head=4.391 other=2.374 fwd_wall_ms=138.919
+[FLINT-STEP] batch=1 fwd_ms=138.972 step_wall_ms=143.420
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.589 attn_full=12.925 norms=0.754 dense_mlp=1.247 moe_router=7.740 moe_routed=57.375 moe_shared=12.576 lm_head=4.471 other=2.373 fwd_wall_ms=137.310
+[FLINT-STEP] batch=1 fwd_ms=137.363 step_wall_ms=139.146
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.009 attn_full=12.883 norms=0.756 dense_mlp=1.187 moe_router=8.004 moe_routed=61.293 moe_shared=13.868 lm_head=4.497 other=2.378 fwd_wall_ms=143.134
+[FLINT-STEP] batch=1 fwd_ms=143.188 step_wall_ms=137.505
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.220 attn_full=12.618 norms=0.758 dense_mlp=1.194 moe_router=7.585 moe_routed=58.250 moe_shared=12.853 lm_head=4.317 other=2.411 fwd_wall_ms=138.439
+[FLINT-STEP] batch=1 fwd_ms=138.493 step_wall_ms=143.328
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.116 attn_full=12.808 norms=0.759 dense_mlp=1.195 moe_router=8.638 moe_routed=58.772 moe_shared=13.327 lm_head=4.709 other=2.379 fwd_wall_ms=140.958
+[FLINT-STEP] batch=1 fwd_ms=141.013 step_wall_ms=138.633
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.009 attn_sliding=37.771 attn_full=12.817 norms=0.755 dense_mlp=1.172 moe_router=8.132 moe_routed=59.574 moe_shared=13.446 lm_head=4.314 other=2.382 fwd_wall_ms=140.631
+[FLINT-STEP] batch=1 fwd_ms=140.678 step_wall_ms=141.152
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.713 attn_full=13.011 norms=0.757 dense_mlp=1.191 moe_router=7.729 moe_routed=58.281 moe_shared=13.062 lm_head=4.557 other=2.384 fwd_wall_ms=138.940
+[FLINT-STEP] batch=1 fwd_ms=138.995 step_wall_ms=140.820
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.128 attn_full=12.849 norms=0.754 dense_mlp=1.260 moe_router=7.712 moe_routed=57.525 moe_shared=12.908 lm_head=4.651 other=2.366 fwd_wall_ms=138.410
+[FLINT-STEP] batch=1 fwd_ms=138.463 step_wall_ms=139.135
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.905 attn_full=13.700 norms=0.755 dense_mlp=1.176 moe_router=7.842 moe_routed=59.030 moe_shared=13.391 lm_head=4.409 other=2.402 fwd_wall_ms=141.869
+[FLINT-STEP] batch=1 fwd_ms=141.925 step_wall_ms=138.606
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.133 attn_full=12.764 norms=0.762 dense_mlp=1.171 moe_router=7.770 moe_routed=60.044 moe_shared=13.650 lm_head=4.496 other=2.373 fwd_wall_ms=141.413
+[FLINT-STEP] batch=1 fwd_ms=141.465 step_wall_ms=142.066
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.694 attn_full=12.751 norms=0.776 dense_mlp=1.226 moe_router=7.661 moe_routed=59.822 moe_shared=13.644 lm_head=4.540 other=2.387 fwd_wall_ms=140.753
+[FLINT-STEP] batch=1 fwd_ms=140.807 step_wall_ms=141.607
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.299 attn_full=12.950 norms=0.752 dense_mlp=1.294 moe_router=8.466 moe_routed=64.594 moe_shared=14.979 lm_head=4.735 other=2.384 fwd_wall_ms=149.708
+[FLINT-STEP] batch=1 fwd_ms=149.776 step_wall_ms=140.945
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.744 attn_full=12.437 norms=0.760 dense_mlp=1.276 moe_router=7.758 moe_routed=58.595 moe_shared=13.142 lm_head=4.517 other=2.383 fwd_wall_ms=138.849
+[FLINT-STEP] batch=1 fwd_ms=138.904 step_wall_ms=149.916
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.877 attn_full=12.894 norms=0.757 dense_mlp=1.207 moe_router=7.931 moe_routed=61.927 moe_shared=14.013 lm_head=4.409 other=2.397 fwd_wall_ms=144.687
+[FLINT-STEP] batch=1 fwd_ms=144.742 step_wall_ms=139.046
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.101 attn_full=12.524 norms=0.755 dense_mlp=1.271 moe_router=7.694 moe_routed=58.004 moe_shared=13.082 lm_head=4.818 other=2.383 fwd_wall_ms=138.887
+[FLINT-STEP] batch=1 fwd_ms=138.940 step_wall_ms=144.882
+[FLINT-STEP] sample_ms=0.114
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.835 attn_full=12.776 norms=0.756 dense_mlp=1.577 moe_router=7.705 moe_routed=58.218 moe_shared=12.634 lm_head=4.653 other=2.367 fwd_wall_ms=139.780
+[FLINT-STEP] batch=1 fwd_ms=139.836 step_wall_ms=139.092
+[FLINT-STEP] sample_ms=0.120
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.671 attn_full=12.990 norms=0.763 dense_mlp=1.181 moe_router=8.021 moe_routed=59.631 moe_shared=13.593 lm_head=4.595 other=2.393 fwd_wall_ms=141.093
+[FLINT-STEP] batch=1 fwd_ms=141.148 step_wall_ms=139.993
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.421 attn_full=12.868 norms=0.756 dense_mlp=1.224 moe_router=8.012 moe_routed=60.947 moe_shared=13.607 lm_head=4.624 other=2.376 fwd_wall_ms=143.092
+[FLINT-STEP] batch=1 fwd_ms=143.148 step_wall_ms=141.290
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.369 attn_full=12.169 norms=0.754 dense_mlp=1.287 moe_router=7.799 moe_routed=61.530 moe_shared=14.062 lm_head=4.519 other=2.367 fwd_wall_ms=143.115
+[FLINT-STEP] batch=1 fwd_ms=143.172 step_wall_ms=143.291
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.322 attn_full=12.641 norms=0.763 dense_mlp=1.165 moe_router=7.628 moe_routed=60.362 moe_shared=13.878 lm_head=4.451 other=2.368 fwd_wall_ms=141.836
+[FLINT-STEP] batch=1 fwd_ms=141.891 step_wall_ms=143.311
+[FLINT-STEP] sample_ms=0.120
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.166 attn_full=13.034 norms=0.762 dense_mlp=1.225 moe_router=7.757 moe_routed=57.885 moe_shared=12.858 lm_head=4.489 other=2.379 fwd_wall_ms=138.819
+[FLINT-STEP] batch=1 fwd_ms=138.874 step_wall_ms=142.048
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=37.926 attn_full=13.134 norms=0.762 dense_mlp=1.212 moe_router=7.679 moe_routed=58.934 moe_shared=13.159 lm_head=4.499 other=2.398 fwd_wall_ms=139.965
+[FLINT-STEP] batch=1 fwd_ms=140.021 step_wall_ms=139.015
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.335 attn_full=12.510 norms=0.758 dense_mlp=1.228 moe_router=8.419 moe_routed=60.258 moe_shared=14.355 lm_head=4.876 other=2.387 fwd_wall_ms=143.384
+[FLINT-STEP] batch=1 fwd_ms=143.442 step_wall_ms=140.162
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.112 attn_full=12.886 norms=0.759 dense_mlp=1.230 moe_router=8.023 moe_routed=61.032 moe_shared=14.019 lm_head=4.584 other=2.396 fwd_wall_ms=143.298
+[FLINT-STEP] batch=1 fwd_ms=143.354 step_wall_ms=143.582
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.671 attn_full=12.612 norms=0.763 dense_mlp=1.256 moe_router=7.726 moe_routed=60.196 moe_shared=13.327 lm_head=4.631 other=2.390 fwd_wall_ms=141.827
+[FLINT-STEP] batch=1 fwd_ms=141.885 step_wall_ms=143.495
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.810 attn_full=13.290 norms=0.760 dense_mlp=1.326 moe_router=8.431 moe_routed=61.959 moe_shared=13.648 lm_head=4.526 other=2.398 fwd_wall_ms=145.407
+[FLINT-STEP] batch=1 fwd_ms=145.463 step_wall_ms=142.028
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.767 attn_full=12.742 norms=0.760 dense_mlp=1.181 moe_router=7.987 moe_routed=62.508 moe_shared=14.008 lm_head=4.446 other=2.385 fwd_wall_ms=145.043
+[FLINT-STEP] batch=1 fwd_ms=145.103 step_wall_ms=145.614
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.085 attn_full=12.894 norms=0.761 dense_mlp=1.273 moe_router=7.749 moe_routed=58.628 moe_shared=13.104 lm_head=4.429 other=2.398 fwd_wall_ms=140.579
+[FLINT-STEP] batch=1 fwd_ms=140.637 step_wall_ms=145.245
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.130 attn_full=12.897 norms=0.760 dense_mlp=1.237 moe_router=7.918 moe_routed=60.859 moe_shared=14.022 lm_head=4.456 other=2.448 fwd_wall_ms=142.981
+[FLINT-STEP] batch=1 fwd_ms=143.040 step_wall_ms=140.780
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.279 attn_full=12.656 norms=0.758 dense_mlp=1.284 moe_router=7.693 moe_routed=59.342 moe_shared=13.259 lm_head=4.631 other=2.393 fwd_wall_ms=140.549
+[FLINT-STEP] batch=1 fwd_ms=140.603 step_wall_ms=143.180
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.575 attn_full=13.207 norms=0.763 dense_mlp=1.227 moe_router=7.997 moe_routed=62.598 moe_shared=14.103 lm_head=4.646 other=2.371 fwd_wall_ms=145.748
+[FLINT-STEP] batch=1 fwd_ms=145.805 step_wall_ms=140.742
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.299 attn_full=12.601 norms=0.760 dense_mlp=1.238 moe_router=7.782 moe_routed=60.536 moe_shared=13.803 lm_head=4.974 other=2.403 fwd_wall_ms=142.651
+[FLINT-STEP] batch=1 fwd_ms=142.708 step_wall_ms=145.949
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.844 attn_full=13.176 norms=0.760 dense_mlp=1.320 moe_router=7.871 moe_routed=58.714 moe_shared=13.143 lm_head=4.527 other=2.438 fwd_wall_ms=141.057
+[FLINT-STEP] batch=1 fwd_ms=141.114 step_wall_ms=142.850
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.485 attn_full=12.867 norms=0.785 dense_mlp=1.271 moe_router=7.685 moe_routed=58.557 moe_shared=12.771 lm_head=4.790 other=2.379 fwd_wall_ms=139.830
+[FLINT-STEP] batch=1 fwd_ms=139.890 step_wall_ms=141.270
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.430 attn_full=12.982 norms=0.755 dense_mlp=1.250 moe_router=7.749 moe_routed=58.725 moe_shared=13.278 lm_head=4.505 other=2.365 fwd_wall_ms=140.292
+[FLINT-STEP] batch=1 fwd_ms=140.349 step_wall_ms=140.031
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.964 attn_full=12.759 norms=0.766 dense_mlp=1.254 moe_router=7.884 moe_routed=59.808 moe_shared=13.550 lm_head=4.667 other=2.363 fwd_wall_ms=143.277
+[FLINT-STEP] batch=1 fwd_ms=143.333 step_wall_ms=140.490
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.432 attn_full=12.960 norms=0.756 dense_mlp=1.176 moe_router=7.803 moe_routed=60.159 moe_shared=13.754 lm_head=4.596 other=2.358 fwd_wall_ms=142.256
+[FLINT-STEP] batch=1 fwd_ms=142.313 step_wall_ms=143.477
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.961 attn_full=12.489 norms=0.768 dense_mlp=1.234 moe_router=7.814 moe_routed=58.629 moe_shared=12.822 lm_head=4.465 other=2.361 fwd_wall_ms=139.804
+[FLINT-STEP] batch=1 fwd_ms=139.862 step_wall_ms=142.454
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.808 attn_full=12.797 norms=0.755 dense_mlp=1.202 moe_router=7.574 moe_routed=57.529 moe_shared=12.746 lm_head=4.419 other=2.389 fwd_wall_ms=138.472
+[FLINT-STEP] batch=1 fwd_ms=138.531 step_wall_ms=140.002
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.116 attn_full=13.188 norms=0.754 dense_mlp=1.225 moe_router=7.636 moe_routed=59.297 moe_shared=12.921 lm_head=4.890 other=2.371 fwd_wall_ms=140.663
+[FLINT-STEP] batch=1 fwd_ms=140.720 step_wall_ms=138.671
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.825 attn_full=13.172 norms=0.765 dense_mlp=1.211 moe_router=7.879 moe_routed=61.797 moe_shared=13.728 lm_head=4.363 other=2.422 fwd_wall_ms=144.414
+[FLINT-STEP] batch=1 fwd_ms=144.484 step_wall_ms=140.858
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.068 attn_full=12.318 norms=0.754 dense_mlp=1.259 moe_router=7.579 moe_routed=58.400 moe_shared=12.269 lm_head=4.844 other=2.364 fwd_wall_ms=139.101
+[FLINT-STEP] batch=1 fwd_ms=139.159 step_wall_ms=144.625
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.951 attn_full=12.623 norms=0.754 dense_mlp=1.199 moe_router=7.585 moe_routed=57.614 moe_shared=12.511 lm_head=4.827 other=2.368 fwd_wall_ms=138.690
+[FLINT-STEP] batch=1 fwd_ms=138.749 step_wall_ms=139.298
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.638 attn_full=13.253 norms=0.755 dense_mlp=1.199 moe_router=7.802 moe_routed=61.675 moe_shared=13.600 lm_head=4.713 other=2.395 fwd_wall_ms=144.283
+[FLINT-STEP] batch=1 fwd_ms=144.342 step_wall_ms=138.891
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.905 attn_full=12.864 norms=0.768 dense_mlp=1.237 moe_router=7.896 moe_routed=60.480 moe_shared=13.171 lm_head=4.630 other=2.368 fwd_wall_ms=143.578
+[FLINT-STEP] batch=1 fwd_ms=143.637 step_wall_ms=144.486
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.696 attn_full=13.121 norms=0.755 dense_mlp=1.254 moe_router=7.735 moe_routed=61.044 moe_shared=13.321 lm_head=4.625 other=2.367 fwd_wall_ms=143.171
+[FLINT-STEP] batch=1 fwd_ms=143.234 step_wall_ms=143.780
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.437 attn_full=12.998 norms=0.754 dense_mlp=1.175 moe_router=7.821 moe_routed=60.069 moe_shared=13.390 lm_head=4.482 other=2.317 fwd_wall_ms=141.695
+[FLINT-STEP] batch=1 fwd_ms=141.751 step_wall_ms=143.375
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.508 attn_full=13.086 norms=0.756 dense_mlp=1.169 moe_router=7.894 moe_routed=60.857 moe_shared=13.529 lm_head=4.521 other=2.388 fwd_wall_ms=142.966
+[FLINT-STEP] batch=1 fwd_ms=143.019 step_wall_ms=141.889
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.017 attn_full=13.265 norms=0.778 dense_mlp=1.145 moe_router=7.694 moe_routed=61.877 moe_shared=13.671 lm_head=4.609 other=2.361 fwd_wall_ms=144.672
+[FLINT-STEP] batch=1 fwd_ms=144.726 step_wall_ms=143.159
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.103 attn_full=13.016 norms=0.763 dense_mlp=1.216 moe_router=7.873 moe_routed=59.935 moe_shared=13.410 lm_head=4.556 other=2.375 fwd_wall_ms=142.502
+[FLINT-STEP] batch=1 fwd_ms=142.556 step_wall_ms=144.866
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.161 attn_full=13.162 norms=0.760 dense_mlp=1.216 moe_router=7.677 moe_routed=58.535 moe_shared=13.016 lm_head=4.588 other=2.416 fwd_wall_ms=140.784
+[FLINT-STEP] batch=1 fwd_ms=140.838 step_wall_ms=142.695
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.539 attn_full=13.283 norms=0.754 dense_mlp=1.278 moe_router=7.595 moe_routed=56.657 moe_shared=12.260 lm_head=4.442 other=2.367 fwd_wall_ms=137.437
+[FLINT-STEP] batch=1 fwd_ms=137.492 step_wall_ms=140.978
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.402 attn_full=13.531 norms=0.756 dense_mlp=1.221 moe_router=7.597 moe_routed=58.987 moe_shared=13.148 lm_head=4.511 other=2.391 fwd_wall_ms=140.802
+[FLINT-STEP] batch=1 fwd_ms=140.858 step_wall_ms=137.633
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.894 attn_full=12.838 norms=0.755 dense_mlp=1.232 moe_router=7.904 moe_routed=62.212 moe_shared=13.619 lm_head=4.590 other=2.363 fwd_wall_ms=145.661
+[FLINT-STEP] batch=1 fwd_ms=145.718 step_wall_ms=140.999
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.208 attn_full=12.624 norms=0.755 dense_mlp=1.286 moe_router=7.737 moe_routed=58.562 moe_shared=12.857 lm_head=4.463 other=2.455 fwd_wall_ms=140.199
+[FLINT-STEP] batch=1 fwd_ms=140.265 step_wall_ms=145.858
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.186 attn_full=12.947 norms=0.757 dense_mlp=1.280 moe_router=7.710 moe_routed=58.262 moe_shared=12.876 lm_head=4.499 other=2.354 fwd_wall_ms=140.128
+[FLINT-STEP] batch=1 fwd_ms=140.182 step_wall_ms=140.407
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.369 attn_full=12.684 norms=0.755 dense_mlp=1.287 moe_router=7.562 moe_routed=57.400 moe_shared=12.729 lm_head=4.461 other=2.403 fwd_wall_ms=138.906
+[FLINT-STEP] batch=1 fwd_ms=138.960 step_wall_ms=140.322
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.613 attn_full=12.391 norms=0.765 dense_mlp=1.183 moe_router=7.718 moe_routed=58.163 moe_shared=12.872 lm_head=4.641 other=2.399 fwd_wall_ms=141.002
+[FLINT-STEP] batch=1 fwd_ms=141.070 step_wall_ms=139.101
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.273 attn_full=12.933 norms=0.755 dense_mlp=1.226 moe_router=7.836 moe_routed=58.993 moe_shared=13.045 lm_head=4.432 other=2.397 fwd_wall_ms=141.156
+[FLINT-STEP] batch=1 fwd_ms=141.213 step_wall_ms=141.211
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.341 attn_full=12.901 norms=0.761 dense_mlp=1.218 moe_router=7.653 moe_routed=57.777 moe_shared=12.402 lm_head=4.707 other=2.412 fwd_wall_ms=139.401
+[FLINT-STEP] batch=1 fwd_ms=139.463 step_wall_ms=141.351
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.856 attn_full=12.824 norms=0.762 dense_mlp=1.257 moe_router=7.574 moe_routed=58.602 moe_shared=12.860 lm_head=4.612 other=2.366 fwd_wall_ms=139.978
+[FLINT-STEP] batch=1 fwd_ms=140.040 step_wall_ms=139.603
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.665 attn_full=12.746 norms=0.757 dense_mlp=1.270 moe_router=7.663 moe_routed=60.173 moe_shared=13.312 lm_head=4.720 other=2.359 fwd_wall_ms=142.920
+[FLINT-STEP] batch=1 fwd_ms=142.980 step_wall_ms=140.184
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.694 attn_full=13.043 norms=0.754 dense_mlp=1.192 moe_router=7.996 moe_routed=60.839 moe_shared=13.458 lm_head=5.035 other=2.392 fwd_wall_ms=144.655
+[FLINT-STEP] batch=1 fwd_ms=144.716 step_wall_ms=143.118
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.848 attn_full=13.085 norms=0.777 dense_mlp=1.273 moe_router=7.614 moe_routed=59.973 moe_shared=13.301 lm_head=4.359 other=2.375 fwd_wall_ms=141.866
+[FLINT-STEP] batch=1 fwd_ms=141.924 step_wall_ms=144.854
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.418 attn_full=13.145 norms=0.759 dense_mlp=1.231 moe_router=7.831 moe_routed=60.396 moe_shared=13.207 lm_head=4.643 other=2.356 fwd_wall_ms=143.243
+[FLINT-STEP] batch=1 fwd_ms=143.303 step_wall_ms=142.065
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.649 attn_full=13.467 norms=0.769 dense_mlp=1.242 moe_router=8.180 moe_routed=61.213 moe_shared=13.878 lm_head=4.414 other=2.397 fwd_wall_ms=145.456
+[FLINT-STEP] batch=1 fwd_ms=145.513 step_wall_ms=143.462
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.293 attn_full=13.216 norms=0.756 dense_mlp=1.258 moe_router=7.693 moe_routed=57.941 moe_shared=13.293 lm_head=4.589 other=2.387 fwd_wall_ms=140.686
+[FLINT-STEP] batch=1 fwd_ms=140.745 step_wall_ms=145.653
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.805 attn_full=13.125 norms=0.762 dense_mlp=1.199 moe_router=7.544 moe_routed=59.802 moe_shared=13.443 lm_head=4.432 other=2.361 fwd_wall_ms=142.719
+[FLINT-STEP] batch=1 fwd_ms=142.776 step_wall_ms=140.886
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.530 attn_full=13.122 norms=0.760 dense_mlp=1.195 moe_router=7.759 moe_routed=59.093 moe_shared=13.204 lm_head=4.736 other=2.360 fwd_wall_ms=142.009
+[FLINT-STEP] batch=1 fwd_ms=142.071 step_wall_ms=142.915
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.790 attn_full=12.805 norms=0.763 dense_mlp=1.278 moe_router=7.798 moe_routed=62.393 moe_shared=13.804 lm_head=4.631 other=2.391 fwd_wall_ms=144.904
+[FLINT-STEP] batch=1 fwd_ms=144.976 step_wall_ms=142.210
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.393 attn_full=13.298 norms=0.761 dense_mlp=1.293 moe_router=7.660 moe_routed=60.834 moe_shared=13.372 lm_head=4.820 other=2.389 fwd_wall_ms=144.067
+[FLINT-STEP] batch=1 fwd_ms=144.129 step_wall_ms=145.116
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.707 attn_full=13.827 norms=0.762 dense_mlp=1.276 moe_router=7.855 moe_routed=57.809 moe_shared=12.643 lm_head=4.852 other=2.410 fwd_wall_ms=141.396
+[FLINT-STEP] batch=1 fwd_ms=141.457 step_wall_ms=144.269
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.323 attn_full=13.033 norms=0.760 dense_mlp=1.221 moe_router=7.713 moe_routed=60.797 moe_shared=13.065 lm_head=4.870 other=2.366 fwd_wall_ms=143.411
+[FLINT-STEP] batch=1 fwd_ms=143.471 step_wall_ms=141.598
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.488 attn_full=13.576 norms=0.772 dense_mlp=1.319 moe_router=8.023 moe_routed=59.912 moe_shared=13.390 lm_head=4.505 other=2.379 fwd_wall_ms=143.618
+[FLINT-STEP] batch=1 fwd_ms=143.678 step_wall_ms=143.610
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.111 attn_full=12.889 norms=0.761 dense_mlp=1.178 moe_router=7.805 moe_routed=59.593 moe_shared=13.413 lm_head=4.468 other=2.408 fwd_wall_ms=141.886
+[FLINT-STEP] batch=1 fwd_ms=141.947 step_wall_ms=143.819
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.788 attn_full=12.509 norms=0.762 dense_mlp=1.175 moe_router=7.719 moe_routed=59.769 moe_shared=13.283 lm_head=4.487 other=2.455 fwd_wall_ms=142.208
+[FLINT-STEP] batch=1 fwd_ms=142.270 step_wall_ms=142.087
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.151 attn_full=13.235 norms=0.772 dense_mlp=1.250 moe_router=7.648 moe_routed=60.815 moe_shared=13.984 lm_head=4.915 other=2.378 fwd_wall_ms=144.401
+[FLINT-STEP] batch=1 fwd_ms=144.463 step_wall_ms=142.411
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.635 attn_full=13.234 norms=0.760 dense_mlp=1.192 moe_router=7.636 moe_routed=60.416 moe_shared=13.519 lm_head=4.760 other=2.383 fwd_wall_ms=143.795
+[FLINT-STEP] batch=1 fwd_ms=143.855 step_wall_ms=144.602
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.023 attn_full=13.002 norms=0.761 dense_mlp=1.316 moe_router=7.613 moe_routed=58.613 moe_shared=13.083 lm_head=4.593 other=2.390 fwd_wall_ms=140.650
+[FLINT-STEP] batch=1 fwd_ms=140.711 step_wall_ms=143.997
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.051 attn_full=13.352 norms=0.762 dense_mlp=1.265 moe_router=7.654 moe_routed=58.925 moe_shared=12.962 lm_head=4.550 other=2.410 fwd_wall_ms=141.183
+[FLINT-STEP] batch=1 fwd_ms=141.243 step_wall_ms=140.851
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.444 attn_full=13.409 norms=0.758 dense_mlp=1.250 moe_router=7.689 moe_routed=59.288 moe_shared=13.258 lm_head=4.693 other=2.369 fwd_wall_ms=142.410
+[FLINT-STEP] batch=1 fwd_ms=142.470 step_wall_ms=141.383
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.495 attn_full=13.362 norms=0.760 dense_mlp=1.281 moe_router=8.212 moe_routed=62.580 moe_shared=13.749 lm_head=4.612 other=2.380 fwd_wall_ms=147.701
+[FLINT-STEP] batch=1 fwd_ms=147.759 step_wall_ms=142.609
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.328 attn_full=13.472 norms=0.761 dense_mlp=1.245 moe_router=7.612 moe_routed=58.589 moe_shared=13.008 lm_head=4.545 other=2.376 fwd_wall_ms=141.191
+[FLINT-STEP] batch=1 fwd_ms=141.253 step_wall_ms=147.899
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.215 attn_full=13.151 norms=0.770 dense_mlp=1.223 moe_router=7.495 moe_routed=58.952 moe_shared=12.598 lm_head=4.715 other=2.399 fwd_wall_ms=140.771
+[FLINT-STEP] batch=1 fwd_ms=140.842 step_wall_ms=141.393
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.452 attn_full=13.654 norms=0.761 dense_mlp=1.266 moe_router=7.796 moe_routed=61.813 moe_shared=13.593 lm_head=4.879 other=2.403 fwd_wall_ms=145.872
+[FLINT-STEP] batch=1 fwd_ms=145.933 step_wall_ms=140.982
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.115 attn_full=12.911 norms=0.772 dense_mlp=1.205 moe_router=7.553 moe_routed=59.588 moe_shared=13.463 lm_head=4.604 other=2.364 fwd_wall_ms=141.830
+[FLINT-STEP] batch=1 fwd_ms=141.886 step_wall_ms=146.075
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.565 attn_full=13.406 norms=0.762 dense_mlp=1.293 moe_router=7.632 moe_routed=57.694 moe_shared=12.701 lm_head=4.645 other=2.365 fwd_wall_ms=140.326
+[FLINT-STEP] batch=1 fwd_ms=140.384 step_wall_ms=142.028
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.327 attn_full=13.287 norms=0.759 dense_mlp=1.223 moe_router=7.767 moe_routed=59.931 moe_shared=13.239 lm_head=4.428 other=2.413 fwd_wall_ms=142.631
+[FLINT-STEP] batch=1 fwd_ms=142.683 step_wall_ms=140.526
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.525 attn_full=13.228 norms=0.763 dense_mlp=1.212 moe_router=7.743 moe_routed=59.738 moe_shared=13.388 lm_head=4.548 other=2.365 fwd_wall_ms=143.765
+[FLINT-STEP] batch=1 fwd_ms=143.822 step_wall_ms=142.822
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.237 attn_full=13.059 norms=0.785 dense_mlp=1.334 moe_router=7.607 moe_routed=61.005 moe_shared=13.839 lm_head=4.610 other=2.403 fwd_wall_ms=144.140
+[FLINT-STEP] batch=1 fwd_ms=144.197 step_wall_ms=143.963
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.768 attn_full=13.205 norms=0.762 dense_mlp=1.251 moe_router=7.778 moe_routed=60.418 moe_shared=13.314 lm_head=4.490 other=2.383 fwd_wall_ms=143.630
+[FLINT-STEP] batch=1 fwd_ms=143.686 step_wall_ms=144.337
+[FLINT-STEP] sample_ms=0.118
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.447 attn_full=13.281 norms=0.776 dense_mlp=1.263 moe_router=7.834 moe_routed=60.947 moe_shared=13.794 lm_head=4.506 other=2.395 fwd_wall_ms=144.500
+[FLINT-STEP] batch=1 fwd_ms=144.554 step_wall_ms=143.839
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.086 attn_full=13.500 norms=0.757 dense_mlp=1.172 moe_router=7.810 moe_routed=61.123 moe_shared=14.113 lm_head=4.506 other=2.383 fwd_wall_ms=144.701
+[FLINT-STEP] batch=1 fwd_ms=144.755 step_wall_ms=144.696
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.689 attn_full=13.197 norms=0.772 dense_mlp=1.244 moe_router=7.754 moe_routed=61.143 moe_shared=13.645 lm_head=4.448 other=2.391 fwd_wall_ms=145.535
+[FLINT-STEP] batch=1 fwd_ms=145.593 step_wall_ms=144.893
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.396 attn_full=13.674 norms=0.761 dense_mlp=1.219 moe_router=7.666 moe_routed=60.395 moe_shared=13.442 lm_head=4.564 other=2.409 fwd_wall_ms=144.782
+[FLINT-STEP] batch=1 fwd_ms=144.835 step_wall_ms=145.735
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.697 attn_full=12.965 norms=0.766 dense_mlp=1.249 moe_router=7.487 moe_routed=59.438 moe_shared=12.955 lm_head=4.785 other=2.376 fwd_wall_ms=141.966
+[FLINT-STEP] batch=1 fwd_ms=142.020 step_wall_ms=144.972
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.382 attn_full=12.985 norms=0.760 dense_mlp=1.259 moe_router=7.699 moe_routed=60.589 moe_shared=13.737 lm_head=4.477 other=2.393 fwd_wall_ms=143.536
+[FLINT-STEP] batch=1 fwd_ms=143.592 step_wall_ms=142.160
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.165 attn_full=12.871 norms=0.759 dense_mlp=1.284 moe_router=8.637 moe_routed=60.183 moe_shared=13.261 lm_head=4.450 other=2.380 fwd_wall_ms=144.226
+[FLINT-STEP] batch=1 fwd_ms=144.283 step_wall_ms=143.748
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.251 attn_full=13.588 norms=0.759 dense_mlp=1.235 moe_router=7.607 moe_routed=58.513 moe_shared=12.491 lm_head=4.486 other=2.364 fwd_wall_ms=140.548
+[FLINT-STEP] batch=1 fwd_ms=140.603 step_wall_ms=144.435
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.096 attn_full=13.327 norms=0.764 dense_mlp=1.195 moe_router=7.915 moe_routed=61.081 moe_shared=13.837 lm_head=4.474 other=2.445 fwd_wall_ms=145.396
+[FLINT-STEP] batch=1 fwd_ms=145.450 step_wall_ms=140.742
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.064 attn_full=13.166 norms=0.770 dense_mlp=1.278 moe_router=7.635 moe_routed=58.077 moe_shared=12.763 lm_head=4.490 other=2.385 fwd_wall_ms=140.870
+[FLINT-STEP] batch=1 fwd_ms=140.930 step_wall_ms=145.592
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.696 attn_full=13.839 norms=0.756 dense_mlp=1.273 moe_router=7.461 moe_routed=57.764 moe_shared=12.640 lm_head=4.665 other=2.319 fwd_wall_ms=139.665
+[FLINT-STEP] batch=1 fwd_ms=139.721 step_wall_ms=141.073
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=38.962 attn_full=13.888 norms=0.760 dense_mlp=1.234 moe_router=8.922 moe_routed=62.395 moe_shared=14.419 lm_head=4.665 other=2.365 fwd_wall_ms=147.869
+[FLINT-STEP] batch=1 fwd_ms=147.925 step_wall_ms=139.863
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.613 attn_full=13.510 norms=0.760 dense_mlp=1.226 moe_router=7.770 moe_routed=60.966 moe_shared=13.747 lm_head=4.561 other=2.371 fwd_wall_ms=144.779
+[FLINT-STEP] batch=1 fwd_ms=144.835 step_wall_ms=148.066
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.388 attn_full=13.287 norms=0.761 dense_mlp=1.193 moe_router=7.526 moe_routed=59.597 moe_shared=13.189 lm_head=4.556 other=2.370 fwd_wall_ms=142.115
+[FLINT-STEP] batch=1 fwd_ms=142.170 step_wall_ms=144.975
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.303 attn_full=13.323 norms=0.761 dense_mlp=1.197 moe_router=7.867 moe_routed=57.873 moe_shared=12.826 lm_head=4.452 other=2.397 fwd_wall_ms=141.253
+[FLINT-STEP] batch=1 fwd_ms=141.308 step_wall_ms=142.309
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.336 attn_full=13.534 norms=0.770 dense_mlp=1.171 moe_router=7.716 moe_routed=61.868 moe_shared=13.820 lm_head=4.651 other=2.457 fwd_wall_ms=145.560
+[FLINT-STEP] batch=1 fwd_ms=145.618 step_wall_ms=141.448
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.817 attn_full=13.420 norms=0.782 dense_mlp=1.264 moe_router=7.580 moe_routed=59.373 moe_shared=13.195 lm_head=4.500 other=2.360 fwd_wall_ms=142.547
+[FLINT-STEP] batch=1 fwd_ms=142.604 step_wall_ms=145.757
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.287 attn_full=13.516 norms=0.757 dense_mlp=1.219 moe_router=7.807 moe_routed=59.942 moe_shared=13.408 lm_head=4.779 other=2.400 fwd_wall_ms=144.371
+[FLINT-STEP] batch=1 fwd_ms=144.425 step_wall_ms=142.742
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=40.223 attn_full=13.004 norms=0.757 dense_mlp=1.173 moe_router=7.591 moe_routed=61.950 moe_shared=12.995 lm_head=4.756 other=2.367 fwd_wall_ms=145.054
+[FLINT-STEP] batch=1 fwd_ms=145.111 step_wall_ms=144.564
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.565 attn_full=13.555 norms=0.757 dense_mlp=1.218 moe_router=7.628 moe_routed=60.599 moe_shared=13.658 lm_head=4.626 other=2.384 fwd_wall_ms=144.260
+[FLINT-STEP] batch=1 fwd_ms=144.317 step_wall_ms=145.250
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.373 attn_full=13.511 norms=0.756 dense_mlp=1.258 moe_router=7.581 moe_routed=59.105 moe_shared=13.053 lm_head=4.533 other=2.441 fwd_wall_ms=141.870
+[FLINT-STEP] batch=1 fwd_ms=141.927 step_wall_ms=144.457
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=39.885 attn_full=13.402 norms=0.756 dense_mlp=1.210 moe_router=7.628 moe_routed=61.996 moe_shared=13.959 lm_head=4.645 other=2.384 fwd_wall_ms=146.117
+[FLINT-STEP] batch=1 fwd_ms=146.185 step_wall_ms=142.066
+[FLINT-STEP] sample_ms=0.103
+
+============= vllm.cpp Benchmark Result =============
+Engine frontend:                           AsyncLLM    
+Output wait:                               poll        
+Blocking wait calls:                       0           
+Async scheduling enabled:                  1           
+Pretokenized prompt admission:             1           
+KV cache dtype (requested):                auto
+KV cache dtype (resolved storage):         bf16
+Ignore EOS (requested):                    1           
+Ignore EOS (resolved sampling):            1           
+Chat template:                             skipped (raw prompt)
+Chat template kwargs:                      {}
+Maximum concurrent batches:                2           
+Successful requests:                       1           
+Maximum request concurrency:               1           
+Benchmark duration (s):                    29.30       
+Total input tokens:                        9           
+Total generated tokens:                    200         
+Request throughput (req/s):                0.03        
+Output token throughput (tok/s):           6.83        
+Total token throughput (tok/s):            7.13        
+-------- Time to First Token --------
+Mean TTFT (ms):                            792.46      
+Median TTFT (ms):                          792.46      
+P99 TTFT (ms):                             792.46      
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            143.24      
+Median TPOT (ms):                          143.24      
+P99 TPOT (ms):                             143.24      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             143.24      
+Median ITL (ms):                           141.21      
+P99 ITL (ms):                              154.75      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            29298.14    
+Median E2EL (ms):                          29298.14    
+P99 E2EL (ms):                             29298.14    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 0.31        
+Prefill token throughput (tok/s, in/TTFT): 11.36       
+Output (decode) token throughput (tok/s):  6.83        
+Mean per-stream decode rate (tok/s):       6.98        
+====================================================
