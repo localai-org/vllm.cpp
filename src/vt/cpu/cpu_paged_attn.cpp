@@ -335,18 +335,29 @@ using vt::cpu::PagedAttnKDotBfDot;
   // pre-batch sequential order the reference and the strict goldens license.
   const bool scalar_fma = PagedAttnScalarFmaActive();
 
-  // The token loop, with the K and V element encodings bound at compile time.
-  // Body text is unchanged from the per-element form apart from the two loads.
+  // The work decomposition: one unit per (query token, q head). The token-only
+  // split (`ParallelForRows` over total_q) left batch-1 decode — the serving
+  // regime — entirely on ONE thread: one token row means one unit, and the
+  // 32 heads x window keys x head dim of that row ran serially while the pool
+  // idled (row FLINT-SLIDING-ATTN: the sliding phase grew 0.263 ms per extra
+  // key, 16t and 1t indistinguishable). Splitting on (token, head) gives the
+  // pool hq units per token; every unit still walks its keys in the SAME
+  // jmin..jmax order with the same per-element math, so each output row is
+  // computed by exactly one thread exactly as the serial code computed it —
+  // bit-identical by construction (the parallel axis crosses heads, never a
+  // head's key loop).
   auto run = [&](auto kv_tag) {
-    ParallelForRows(CurrentThreadpool(), total_q, [&](int64_t t0, int64_t t1) {
+    ParallelForRows(CurrentThreadpool(), total_q * hq, [&](int64_t u0, int64_t u1) {
       std::vector<float> probs;
-      std::vector<float> acc(static_cast<size_t>(d));
-      // The token's whole query row (hq*d contiguous elements), widened once and
-      // reused by every q-head and every key of that token. Unused (and unsized)
-      // when the query is already f32.
+      std::vector<float> acc(static_cast<size_t>(d_v));
+      // This unit's (token, head) query row, widened once per unit. Sized d —
+      // the QK dot width — because only this head's slice of the token row is
+      // read. Unused (and unsized) when the query is already f32.
       std::vector<float> qrow;
-      if (q_f32 == nullptr) qrow.resize(static_cast<size_t>(hq * d));
-      for (int64_t t = t0; t < t1; ++t) {
+      if (q_f32 == nullptr) qrow.resize(static_cast<size_t>(d));
+      for (int64_t u = u0; u < u1; ++u) {
+        const int64_t t = u / hq;
+        const int64_t h = u - t * hq;
         const int64_t r = tok_req[static_cast<size_t>(t)];
         const int64_t p = tok_pos[static_cast<size_t>(t)];  // absolute position
         const int64_t seqlen = tok_slen[static_cast<size_t>(t)];
@@ -356,18 +367,17 @@ using vt::cpu::PagedAttnKDotBfDot;
         jmax = std::min(jmax, seqlen - 1);
         if (jmax < jmin) continue;
         probs.assign(static_cast<size_t>(jmax - jmin + 1), 0.0f);
-        const float* qtok;
+        const int64_t g = h / qpk;
+        const int64_t qoff = (t * hq + h) * d_v;
+        const float* q;
         if (q_f32 != nullptr) {
-          qtok = q_f32 + t * hq * d;
+          q = q_f32 + (t * hq + h) * d;
         } else {
-          WidenRowToF32(query.dtype, q_bytes + static_cast<size_t>(t * hq * d) * q_esize, hq * d,
+          WidenRowToF32(query.dtype,
+                        q_bytes + static_cast<size_t>((t * hq + h) * d) * q_esize, d,
                         qrow.data());
-          qtok = qrow.data();
+          q = qrow.data();
         }
-        for (int64_t h = 0; h < hq; ++h) {
-          const int64_t g = h / qpk;
-          const int64_t qoff = (t * hq + h) * d_v;
-          const float* q = qtok + h * d;  // == &query[(t*hq+h)*d], as f32
           // Pass 1: scores + running max.
           // SEEDED BY THE PER-Q-HEAD ATTENTION SINK when one is present.
           // A sink is one extra logit that joins the DENOMINATOR and
@@ -504,7 +514,6 @@ using vt::cpu::PagedAttnKDotBfDot;
           StoreRowF32(out, qoff, d_v, acc.data());
           }
         }
-      }
     });
   };
 
