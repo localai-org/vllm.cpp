@@ -724,6 +724,17 @@ jobs:
           python3 scripts/check-evidence-pin-sha.py
           python3 scripts/check-evidence-pin-sha.py --self-test
           python3 tests/scripts/test_check_evidence_pin_sha.py
+      - name: A documented artifact sha256 agrees with the file on disk (CHECKER-HARDENING-2)
+        # Registered in TWO places, like the suites above: here and in the
+        # `CHECKERS`/`SUITES` arrays of `scripts/agent-preflight.sh`. The
+        # trigger is deliberately narrow: a line is read only when it carries
+        # BOTH a 64-hex sha256 AND a relative path with a measured-artifact
+        # extension (.gguf/.safetensors/.pt/.bin/.ckpt) that resolves on disk —
+        # a sha beside a document path or with no path names nothing hashable.
+        run: |
+          python3 scripts/check-doc-sha-pins.py
+          python3 scripts/check-doc-sha-pins.py --self-test
+          python3 tests/scripts/test_check_doc_sha_pins.py
       - name: ROCm cooperative tests follow production toggle values (#3063)
         run: python3 tests/scripts/test_rocm_cooperative_toggles.py
       - name: The staged gfx1151 paired measurement still refuses to run (#2497)

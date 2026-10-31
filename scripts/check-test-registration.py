@@ -99,6 +99,7 @@ AGENT_RECORD_CHECKER_STEPS: frozenset[str] = frozenset({
     "check-cuda-op-arch-gate.py",
     "check-deepseek-v4-vision-manifests.py",
     "check-env-doc.py",
+    "check-doc-sha-pins.py",
     "check-evidence-pin-sha.py",
     "check-evidence-refs.py",
     "check-fp4-resident-consistency.py",

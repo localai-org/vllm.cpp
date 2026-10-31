@@ -56,6 +56,7 @@ jobs:
           python3 scripts/check-cuda-op-arch-gate.py
           python3 scripts/check-deepseek-v4-vision-manifests.py
           python3 scripts/check-env-doc.py
+          python3 scripts/check-doc-sha-pins.py
           python3 scripts/check-evidence-pin-sha.py
           python3 scripts/check-evidence-refs.py
           python3 scripts/check-fp4-resident-consistency.py
