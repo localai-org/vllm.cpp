@@ -40,6 +40,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -97,6 +98,14 @@ int64_t Bf16Numel(const OwnedTensor& t) {
 }
 
 bool DumpOn() { return std::getenv("FLINT_TT_W0_DUMP") != nullptr; }
+
+// FLINT-P150-ATTENTION: the device-attention switch. Default OFF — the host
+// `SinksAttention` stays the shadow and the fallback; stage 3's serving trace
+// decides whether the default flips (the spec forces no adoption verdict).
+bool DeviceAttnEnabled() {
+  const char* e = std::getenv("VT_FLINT_TT_DEVICE_ATTN");
+  return e != nullptr && e[0] == '1';
+}
 
 // NeoX-style (rotate_half) RoPE over full head_dim — the CPU reference's own
 // RopeNeoxHalfSplit body (flint.cpp:292), a host leg at W0.
@@ -323,6 +332,10 @@ struct TtLayerWeights {
   };
   std::vector<TtExpertWeights> experts;
   DBuf ln1{}, ln2{};
+  // The device-attention legs' per-layer scalars (FLINT-P150-ATTENTION):
+  // q/k head-norm gammas bf16 [dh], the per-head sinks f32 [hq] (the
+  // PagedAttention sink contract). Staged once at build.
+  DBuf q_norm_dev{}, k_norm_dev{}, sinks_dev{};
   int64_t dense_inter = 0, shared_inter = 0;
   bool has_rope = false, is_dense = false, is_sliding = false;
   std::vector<float> q_norm, k_norm, sinks;  // widened host copies
@@ -462,10 +475,19 @@ std::unique_ptr<FlintTTDeviceContext> BuildFlintTTDeviceContext(
         }
       }
     }
-    // The host attention leg's widened scalars.
+    // The host attention leg's widened scalars, and the device legs' staged
+    // scalars (norms at their bf16 model values, sinks widened to the f32
+    // the PagedAttention sink contract carries).
     tl.q_norm = Widen(lw.attn.q_norm);
     tl.k_norm = Widen(lw.attn.k_norm);
     tl.sinks = Widen(lw.attn.sinks);
+    // The device-attention scalars stage lazily on the first device-attention
+    // forward (ForwardFlintTT's VT_FLINT_TT_DEVICE_ATTN block), never on the
+    // default arm: an always-on staging shifted the pool/slot sequence and
+    // perturbed the host-shadow arm's band (measured 2.683e-1 -> 7.224e-1 with
+    // the build-time staging, back with it removed). The default arm stays
+    // byte-identical — see the allocation-order hazard note in the row
+    // evidence.
     c.layers.push_back(std::move(tl));
   }
 
@@ -548,7 +570,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
           "flint TT forward: the W0 arm serves ONE contiguous sequence "
           "(the CPU reference arm's same contract)");
 
-  const FlintTTDeviceContext::Impl& c = *ctx.impl_;
+  FlintTTDeviceContext::Impl& c = *ctx.impl_;
   const Dev d = c.d;
   const int64_t h = p.hidden_size;
   const int64_t hq = p.num_attention_heads;
@@ -576,6 +598,48 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
   std::vector<uint16_t> x_bits;
   std::vector<float> q, k, v, attn_out(static_cast<size_t>(t) * hq * dh), ao,
       ff, normed2_host;
+
+  // THE DEVICE-ATTENTION SCRATCH (FLINT-P150-ATTENTION, VT_FLINT_TT_DEVICE_
+  // ATTN=1): the per-forward paged KV page and the step metadata, built once
+  // and reused by every layer — the arm serves ONE contiguous sequence, so
+  // slots are 0..t-1, the block table is the identity, and seq_lens is t.
+  const int64_t attn_bs = 32;
+  const int64_t attn_nblk = (t + attn_bs - 1) / attn_bs;
+  std::optional<PagedKvCache> dev_kv;
+  DBuf cache_dev{}, pos_dev{}, slot_dev{}, bt_dev{}, sl_dev{}, qsl_dev{};
+  if (DeviceAttnEnabled()) {
+    dev_kv.emplace();
+    dev_kv->dtype = vt::DType::kBF16;
+    dev_kv->num_blocks = attn_nblk;
+    dev_kv->block_size = attn_bs;
+    dev_kv->num_kv_heads = hkv;
+    dev_kv->head_size = dh;
+    cache_dev = DBuf(d, vt::DType::kBF16,
+                     {2 * attn_nblk * attn_bs * hkv * dh});
+    dev_kv->data = cache_dev.ptr();
+    pos_dev = DBuf(d, vt::DType::kI32, {t}, positions.data());
+    std::vector<int64_t> slots(static_cast<size_t>(t));
+    for (int64_t i = 0; i < t; ++i) slots[static_cast<size_t>(i)] = i;
+    slot_dev = DBuf(d, vt::DType::kI64, {t}, slots.data());
+    std::vector<int32_t> btab(static_cast<size_t>(attn_nblk));
+    for (int64_t b = 0; b < attn_nblk; ++b)
+      btab[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+    bt_dev = DBuf(d, vt::DType::kI32, {1, attn_nblk}, btab.data());
+    const int32_t slens = static_cast<int32_t>(t);
+    sl_dev = DBuf(d, vt::DType::kI32, {1}, &slens);
+    const int32_t qsl[2] = {0, static_cast<int32_t>(t)};
+    qsl_dev = DBuf(d, vt::DType::kI32, {2}, qsl);
+    for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+      TtLayerWeights& tl2 = c.layers[static_cast<size_t>(l)];
+      const FlintLayerWeights& lw2 = w.layers[static_cast<size_t>(l)];
+      tl2.q_norm_dev = DBuf(d, vt::DType::kBF16, {Bf16Numel(lw2.attn.q_norm)},
+                            Bf16Data(lw2.attn.q_norm));
+      tl2.k_norm_dev = DBuf(d, vt::DType::kBF16, {Bf16Numel(lw2.attn.k_norm)},
+                            Bf16Data(lw2.attn.k_norm));
+      tl2.sinks_dev = DBuf(d, vt::DType::kF32, {Bf16Numel(lw2.attn.sinks)},
+                           tl2.sinks.data());
+    }
+  }
 
   for (int64_t layer = 0; layer < p.num_hidden_layers; ++layer) {
     const FlintLayerWeights& lw = w.layers[static_cast<size_t>(layer)];
@@ -616,6 +680,59 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       stage("v", v);
     }
 
+    // The o_proj operands, declared at the LAYER scope so the pool-block
+    // lifetimes match the pre-wiring host arm exactly (scoping them to the
+    // else block released the blocks before the MLP section, shifted the
+    // pool-reuse sequence, and moved the default arm's W0 band
+    // 2.683e-1 -> 7.224e-1 — allocation-order-dependent numerics, a latent
+    // default-arm hazard recorded in the row evidence, not reintroduced here).
+    DBuf ao_dev{}, aoout_dev{};
+    if (DeviceAttnEnabled()) {
+      // THE DEVICE ATTENTION LEG (FLINT-P150-ATTENTION): per-head QK RMSNorm
+      // (vt::RmsNorm over [T*H, Dh] — the W1 device-norm arm's shape),
+      // RoPE-as-configured, the cache write, and vt::PagedAttention with the
+      // sliding window and the layer's per-head sink. The composition is the
+      // kolibri1 TT AttentionBlock's, plus the sink.
+      vt::Tensor q2 = dense_attn::Reshape(q_dev.t(), {t * hq, dh});
+      vt::Tensor k2 = dense_attn::Reshape(k_dev.t(), {t * hkv, dh});
+      DBuf qn(d, vt::DType::kBF16, {t * hq, dh});
+      DBuf kn(d, vt::DType::kBF16, {t * hkv, dh});
+      vt::RmsNorm(d.q, qn.t(), q2, tl.q_norm_dev.t(),
+                  vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
+      vt::RmsNorm(d.q, kn.t(), k2, tl.k_norm_dev.t(),
+                  vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
+      vt::Tensor q3 = dense_attn::Reshape(qn.t(), {t, hq, dh});
+      vt::Tensor k3 = dense_attn::Reshape(kn.t(), {t, hkv, dh});
+      vt::Tensor v3 = dense_attn::Reshape(v_dev.t(), {t, hkv, dh});
+      if (tl.has_rope) {
+        vt::RopeArgs ra{};
+        ra.base = static_cast<float>(p.rope_theta);
+        ra.rotary_dim = static_cast<int>(dh);
+        ra.is_neox_style = true;
+        vt::RopeNeox(d.q, q3, k3, pos_dev.t(), ra);
+      }
+      vt::Tensor k_cache = dense_attn::KvSlice(*dev_kv, d.q.device, 0);
+      vt::Tensor v_cache = dense_attn::KvSlice(*dev_kv, d.q.device, 1);
+      dense_attn::WriteKvCache(d.q, *dev_kv, k3, v3, k_cache, v_cache,
+                               slot_dev.t());
+      DBuf attn(d, vt::DType::kBF16, {t, hq, dh});
+      vt::Tensor sinks_t = tl.sinks_dev.t();
+      vt::PagedAttentionArgs pa{};
+      pa.scale = scale;
+      pa.causal = true;
+      if (tl.is_sliding)
+        pa.window_size = vt::AttentionWindow{
+            static_cast<int32_t>(p.sliding_window - 1), 0};
+      pa.attn_sink = &sinks_t;
+      vt::PagedAttention(d.q, attn.t(), q3, k_cache, v_cache, bt_dev.t(),
+                         sl_dev.t(), qsl_dev.t(), pa);
+      // o_proj consumes the attention output IN PLACE on device (bf16, the
+      // CPU reference rounds its attn_out to bf16 too) — no host round trip.
+      vt::Tensor o_in = dense_attn::Reshape(attn.t(), {t, hq * dh});
+      aoout_dev = DBuf(d, vt::DType::kBF16, {t, h});
+      MatmulWeight(d.q, aoout_dev.t(), o_in, tl.ow);
+      ao = DownloadBf16AsF32(d, aoout_dev);
+    } else {
     // Host leg: per-head q/k RMSNorm BEFORE RoPE (the CPU reference's own
     // head_norm body, flint.cpp:381-392).
     {
@@ -638,8 +755,9 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     SinksAttention(q.data(), k.data(), v.data(), tl.sinks.data(), t, hq, hkv,
                    dh, tl.is_sliding, p.sliding_window, scale,
                    attn_out.data());
+    }
 
-    if (DumpOn() && layer == 0) {
+    if (!DeviceAttnEnabled() && DumpOn() && layer == 0) {
       auto stage = [](const char* tag, const std::vector<float>& z) {
         double s = 0.0, sq = 0.0;
         for (float w2 : z) {
@@ -651,15 +769,21 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       };
       stage("attn_out", attn_out);
     }
+    if (DeviceAttnEnabled()) {
+      // The device leg already ran o_proj on device (its `ao` is set); the
+      // host shadow's o_proj block below consumes the host attn_out and must
+      // NOT run here.
+    } else {
     // o_proj on device: attn_out is bf16 (the CPU reference rounds it too),
     // output f32.
     std::vector<uint16_t> ao_bits(static_cast<size_t>(t) * hq * dh);
     for (int64_t i = 0; i < t * hq * dh; ++i)
       ao_bits[static_cast<size_t>(i)] = ToBf16(attn_out[static_cast<size_t>(i)]);
-    DBuf ao_dev(d, vt::DType::kBF16, {t, hq * dh}, ao_bits.data());
-    DBuf aoout_dev(d, vt::DType::kBF16, {t, h});
+    ao_dev = DBuf(d, vt::DType::kBF16, {t, hq * dh}, ao_bits.data());
+    aoout_dev = DBuf(d, vt::DType::kBF16, {t, h});
     MatmulWeight(d.q, aoout_dev.t(), ao_dev.t(), tl.ow);
     ao = DownloadBf16AsF32(d, aoout_dev);
+    }
     if (DumpOn() && layer == 0) {
       auto stage = [](const char* tag, const std::vector<float>& z) {
         double s = 0.0, sq = 0.0;
@@ -675,11 +799,6 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     for (int64_t i = 0; i < t * h; ++i)
       x[static_cast<size_t>(i)] =
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ao[static_cast<size_t>(i)]));
-    if (DumpOn() && layer == 0) {
-      double s = 0.0;
-      for (float v2 : x) s += v2;
-      std::fprintf(stderr, "[FLINT-TT] layer 0 post-attn x sum=%.6f\n", s);
-    }
 
     // Re-upload the residual stream: ln2 normalises the POST-attention x.
     for (int64_t i = 0; i < t * h; ++i)

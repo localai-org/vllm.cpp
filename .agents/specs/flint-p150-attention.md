@@ -143,3 +143,18 @@ keep-quant band gate; the existing flint_tt suites green.
 
 One pull request, `row/FLINT-P150-ATTENTION`, spec committed first,
 stage-scoped commits.
+
+## Owed
+
+- Stage-2 adoption: the device-attention wiring is landed default-OFF as a
+  staged slice; the full-model band gate does not hold yet (the row-local
+  issue records the blocker — the W2 dense-MLP allocation-order outlier
+  defect, which also moves the default arm's W0 band 2.683e-1 -> 7.224e-1
+  under neutral DBuf-lifetime changes). The row keeps owning the wiring.
+
+## Outcome
+
+Stage 1 green (probe band 1/10 on 64/64 per-head slices, both window modes);
+stage 3 recorded (attention a minor share of the MoE-dominated ~50 s step;
+wiring stays env-gated). Stage 2 STOPPED at the model gate per the spec's
+stop condition — see `docs/bench-evidence/flint-p150-attention-20261031/report.md`.
