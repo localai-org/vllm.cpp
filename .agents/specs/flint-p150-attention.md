@@ -1,6 +1,6 @@
 # SPEC — `FLINT-P150-ATTENTION` — Flint attention on the Tenstorrent device: sinks, RoPE, sliding window through the AttnBlock seam
 
-- Owning row: `FLINT-P150-ATTENTION`
+- Owning row: `FLINT-P150-ATTENTION` (matrix record ID `BACKEND-TENSTORRENT-FLINT-P150-ATTN`)
 - Kind: feature (the last big port of the Flint P150 campaign)
 - Issue: created in the same flow (row-scoped local issue)
 
@@ -22,6 +22,65 @@ through the shared `dense_attn::AttnBlock` seam, completing the port.
 - **Hybrid window**: 35 sliding layers (window 513, WITH RoPE) + 14 full
   layers (NO RoPE — `no_rope_layer_indices`), the ISWA split.
 - Head dim 128, 32 heads / 4 KV, GQA.
+
+## Scope
+
+Move Flint attention (per-head learnable sinks, head-dim QK RMSNorm,
+RoPE-as-configured, the 513-token sliding window) from the host
+`SinksAttention` leg onto the device attention path of the TT arm, in three
+gated stages: single-layer probe, all-layers wiring, perf trace. Non-goals:
+no CPU-path change, no CUDA arm, no new tt-metal kernels, no perf adoption
+without the trace.
+
+## Upstream chain
+
+vLLM implements no Flint arm. The host reference is this tree's own
+`flint.cpp` chain (`head_norm`, `RopeNeoxHalfSplit`, `SinksAttention`),
+mirrored by `flint_tt.cpp`'s host legs. Device ops come from the pinned
+tt-metal/ttnn library through `vt::` (`RmsNorm`, `RopeNeox`,
+`ReshapeAndCache`, `PagedAttention`), the same composition kolibri1's TT
+`AttentionBlock` drives.
+
+## Our baseline
+
+Today the TT arm runs attention HOST-side (`flint_tt.cpp:126`): q/k/v come
+down, sinks+norm+RoPE+window run on CPU, attn_out goes back up around the
+device norms and matmuls. The non-routed-attribution row's table prices this
+crossing; the W0 gate (rel_rms 2.579e-1, greedy 1/8) is the honest model
+baseline.
+
+## Port map
+
+- `src/vt/tenstorrent/tenstorrent_paged.cpp`: per-head `attn_sink`
+  denominator seeding (mirrors cpu_paged_attn.cpp:218-225) + device SDPA
+  arms decline a sink by name.
+- `src/vllm/model_executor/models/flint_tt.cpp`: device attention legs
+  (stage 2 wiring, env-gated), host shadow retained.
+- `tests/vllm/models/test_flint_tt_attention_probe.cpp`: stage 1.
+
+## Tests to port
+
+No upstream tests exist (vLLM has no Flint). The gate is the stage-1 probe
+(both window modes, 32 per-head slices, W2-derived band) and the full-model
+keep-quant band gate (`test_flint_tt_w0` contract shape against the CPU
+reference and the recorded W0 baseline).
+
+## Dependencies
+
+Base has W0/W1/W2 landed. Device recipe: the standing P150 mutex/reset/env
+discipline. Claims file `.agents/claims/CLAIM-FLINT-P150-ATTENTION.md`.
+
+## Work breakdown
+
+Stage 1 probe -> stage 2 wiring + model gate -> stage 3 perf trace, one
+commit series each, stage-scoped.
+
+## Risks/decisions
+
+Band gate, never bit-exact (the W2 record); per-head slices AND a model-level
+gate both required (the SDPA-2-heads and PA-correct-but-output-wrong scars);
+STOP conditions in the issue if the seam lacks a primitive or divergence is
+structural.
 
 ## Known hazards from campaign history (each a prior session's scar)
 

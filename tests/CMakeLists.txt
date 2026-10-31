@@ -283,6 +283,13 @@ if(VLLM_CPP_TENSTORRENT)
   vllm_cpp_add_test(test_flint_keepquant vllm/models/test_flint_keepquant.cpp)
   target_include_directories(test_flint_keepquant PRIVATE ${CMAKE_SOURCE_DIR}/src
                            ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
+  # FLINT-P150-ATTENTION stage 1 (spec .agents/specs/flint-p150-attention.md,
+  # issue ISSUE-LOCAL-01M687MYRKDS21SBESBG012KN7): the single-layer device
+  # attention probe — sinks + head-dim QK-norm + RoPE-as-configured + the 513
+  # window, both window modes, per-head slices against the W2-derived band.
+  # Card + operator-run under the gpu.lock mutex.
+  vllm_cpp_add_test(test_flint_tt_attention_probe vllm/models/test_flint_tt_attention_probe.cpp)
+  target_include_directories(test_flint_tt_attention_probe PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # SCRATCH W2 diagnostic (operator-run under the gpu.lock mutex, evidence in
   # docs/bench-evidence/flint-tt-w2-20261025/): the ttnn::matmul f32-to-tf32
   # operand micro-probe.

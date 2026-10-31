@@ -1,0 +1,207 @@
+2026-10-31 07:25:05.222 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-31 07:25:05.222 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-31 07:25:05.222 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-31 07:25:05.222 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-31 07:25:05.225 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-31 07:25:05.225 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-31 07:25:05.264 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-31 07:25:05.264 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-31 07:25:05.264 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-31 07:25:05.264 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-31 07:25:05.265 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-31 07:25:05.337 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-31 07:25:06.872 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-31 07:25:06.872 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-31 07:25:06.873 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-31 07:25:06.873 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-31 07:25:06.873 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-10-31 07:25:07.544 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+2026-10-31 07:25:07.555 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.555 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.555 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.555 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.566 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.566 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.566 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.566 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.837 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.837 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.837 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.837 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.849 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.849 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.849 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.849 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.898 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.898 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.898 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:07.898 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+===============================================================================
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:344:
+TEST CASE:  flint tt attention probe: sliding layer with RoPE vs the host shadow
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 0: rel_rms=0.00460191 max_abs=0.0078125
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 1: rel_rms=0.00503398 max_abs=0.00292969
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 2: rel_rms=0.00478962 max_abs=0.00585938
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 3: rel_rms=0.00467562 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 4: rel_rms=0.00479368 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 5: rel_rms=0.00445937 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 6: rel_rms=0.00534814 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 7: rel_rms=0.00428195 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 8: rel_rms=0.00447678 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 9: rel_rms=0.00483572 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 10: rel_rms=0.00456923 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 11: rel_rms=0.00424342 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 12: rel_rms=0.0044368 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 13: rel_rms=0.00489055 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 14: rel_rms=0.00482458 max_abs=0.00292969
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 15: rel_rms=0.00434753 max_abs=0.0078125
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 16: rel_rms=0.00444799 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 17: rel_rms=0.00419703 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 18: rel_rms=0.00505352 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 19: rel_rms=0.00442364 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 20: rel_rms=0.00520115 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 21: rel_rms=0.00455414 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 22: rel_rms=0.00435392 max_abs=0.0078125
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 23: rel_rms=0.00441407 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 24: rel_rms=0.00459933 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 25: rel_rms=0.00442529 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 26: rel_rms=0.0043901 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 27: rel_rms=0.00430813 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 28: rel_rms=0.00463935 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 29: rel_rms=0.00462908 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 30: rel_rms=0.00478637 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 31: rel_rms=0.00416701 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:333: MESSAGE: 1 t=600: worst head 6 rel_rms=0.00534814, mean 0.00459997 (band 0.0792)
+
+2026-10-31 07:25:08.173 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.173 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.173 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.173 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.221 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.221 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.221 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.221 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.227 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.227 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.227 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.227 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.241 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.241 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.241 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-10-31 07:25:08.241 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+===============================================================================
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:356:
+TEST CASE:  flint tt attention probe: full layer without RoPE vs the host shadow
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 0: rel_rms=0.00281072 max_abs=0.0078125
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 1: rel_rms=0.00287118 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 2: rel_rms=0.00269633 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 3: rel_rms=0.00299893 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 4: rel_rms=0.0028711 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 5: rel_rms=0.00291827 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 6: rel_rms=0.00288972 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 7: rel_rms=0.00281732 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 8: rel_rms=0.00257657 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 9: rel_rms=0.00277022 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 10: rel_rms=0.0027659 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 11: rel_rms=0.00306757 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 12: rel_rms=0.00291857 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 13: rel_rms=0.00288223 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 14: rel_rms=0.0029619 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 15: rel_rms=0.00274741 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 16: rel_rms=0.00283086 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 17: rel_rms=0.00330908 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 18: rel_rms=0.00283472 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 19: rel_rms=0.00292199 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 20: rel_rms=0.00271043 max_abs=0.0078125
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 21: rel_rms=0.00283394 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 22: rel_rms=0.00277177 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 23: rel_rms=0.0025949 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 24: rel_rms=0.00294851 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 25: rel_rms=0.00306492 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 26: rel_rms=0.00287139 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 27: rel_rms=0.00302122 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 28: rel_rms=0.00297057 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 29: rel_rms=0.00303297 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 30: rel_rms=0.00311469 max_abs=0.00390625
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:324: MESSAGE: head 31: rel_rms=0.00297721 max_abs=0.00195312
+
+./tests/vllm/models/test_flint_tt_attention_probe.cpp:333: MESSAGE: 1 t=96: worst head 17 rel_rms=0.00330908, mean 0.00288666 (band 0.0792)
+
+===============================================================================
+[doctest] test cases: 2 | 2 passed | 0 failed | 0 skipped
+[doctest] assertions: 4 | 4 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-31 07:25:08.255 | info     |    BuildKernels | JIT cache stats: 128/128 hits (100.0%) [128 cached, 69 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-31 07:25:08.255 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-31 07:25:08.260 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-31 07:25:08.260 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-31 07:25:08.347 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-31 07:25:08.347 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-31 07:25:08.347 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)
