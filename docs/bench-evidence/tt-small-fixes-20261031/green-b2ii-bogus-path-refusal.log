@@ -1,0 +1,39 @@
+2026-10-31 07:35:35.867 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-10-31 07:35:35.867 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-10-31 07:35:35.867 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-10-31 07:35:35.867 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-10-31 07:35:35.871 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-10-31 07:35:35.871 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-10-31 07:35:35.909 | warning  |             UMD | Sysmem (0x40000000 bytes) using regular pages; pre-allocate hugepages for better DMA performance (e.g. 1 × 1GB or 512 × 2MB; on AArch64 also 2 × 512MB). (silicon_sysmem_manager.cpp:99)
+2026-10-31 07:35:35.910 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-10-31 07:35:35.910 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-10-31 07:35:35.910 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-10-31 07:35:35.910 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-10-31 07:35:35.911 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-10-31 07:35:36.012 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-10-31 07:35:36.076 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-10-31 07:35:36.076 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-10-31 07:35:36.076 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-10-31 07:35:36.076 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-10-31 07:35:36.076 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+Kolibri1ForCausalLM Tenstorrent B2b-i: layer 0 router selected routed experts [0,1,0,1] but the routed-expert path is NOT IMPLEMENTED in this slice — the resident set excludes the routed tier by design. The routed experts arrive in slice B2b-ii (streaming MoE, spec .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum), row MODEL-TEXT-kolibri-1-tenstorrent, issue ISSUE-LOCAL-01M4E22DM790W0E69M07D5XA9D. Proceeding with the shared expert only (the routed contribution is absent).
+Kolibri1ForCausalLM Tenstorrent B2b-i: layer 0 router selected routed experts [0,1] but the routed-expert path is NOT IMPLEMENTED in this slice — the resident set excludes the routed tier by design. The routed experts arrive in slice B2b-ii (streaming MoE, spec .agents/specs/kolibri-tt.md ### B2 scope — B2b addendum), row MODEL-TEXT-kolibri-1-tenstorrent, issue ISSUE-LOCAL-01M4E22DM790W0E69M07D5XA9D. Proceeding with the shared expert only (the routed contribution is absent).
+===============================================================================
+./tests/vllm/models/test_kolibri1_tt_b2bi.cpp:1015:
+TEST CASE:  kolibri1 TT B2b-i: device leg — resident context, embedding bit-exact, ONE greedy decode of a golden prompt on the card
+
+./tests/vllm/models/test_kolibri1_tt_b2bi.cpp:1037: MESSAGE: SKIPPED: /nonexistent/bogus-checkpoint is not a Kolibri-1 checkpoint
+
+===============================================================================
+[doctest] test cases:  10 |  10 passed | 0 failed | 0 skipped
+[doctest] assertions: 184 | 184 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-10-31 07:35:36.740 | info     |    BuildKernels | JIT cache stats: 8/8 hits (100.0%) [8 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-10-31 07:35:36.740 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-10-31 07:35:36.743 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-10-31 07:35:36.743 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-10-31 07:35:36.830 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-10-31 07:35:36.830 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-10-31 07:35:36.830 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

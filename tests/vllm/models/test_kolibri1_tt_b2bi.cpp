@@ -1018,9 +1018,17 @@ TEST_CASE("kolibri1 TT B2b-i: device leg — resident context, embedding "
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
     return;
   }
-  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2BI_MODEL");
+  // TT-ANCHORING: the documented env is VT_KOLIBRI1_TT_B2II_MODEL (every
+  // doc, spec, and operator instruction); a silent skip under the documented
+  // spelling read as "10/10 SUCCESS" while the device leg never ran.
+  // B2BI is kept as a fallback for operator scripts written against the old
+  // name.
+  const char* model_dir = std::getenv("VT_KOLIBRI1_TT_B2II_MODEL");
+  if (model_dir == nullptr || *model_dir == '\0')
+    model_dir = std::getenv("VT_KOLIBRI1_TT_B2BI_MODEL");
   if (model_dir == nullptr || *model_dir == '\0') {
-    MESSAGE("SKIPPED: VT_KOLIBRI1_TT_B2BI_MODEL not set (no real checkpoint "
+    MESSAGE("SKIPPED: VT_KOLIBRI1_TT_B2II_MODEL (or VT_KOLIBRI1_TT_B2BI_MODEL) "
+            "not set (no real checkpoint "
             "requested)");
     return;
   }
