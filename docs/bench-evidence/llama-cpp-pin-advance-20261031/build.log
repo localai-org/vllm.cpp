@@ -1,0 +1,905 @@
+ninja: Entering directory `/tmp/build-lc-pin'
+[1/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/hbm.cpp.o
+[2/336] Building CXX object ggml/src/CMakeFiles/ggml.dir/ggml-backend-dl.cpp.o
+[3/336] Building CXX object src/CMakeFiles/llama.dir/llama-io.cpp.o
+[4/336] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-threading.cpp.o
+[5/336] Building CXX object src/CMakeFiles/llama.dir/llama-cparams.cpp.o
+[6/336] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml.cpp.o
+[7/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/traits.cpp.o
+[8/336] Building CXX object src/CMakeFiles/llama.dir/unicode-data.cpp.o
+[9/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/amx.cpp.o
+[10/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/mmq.cpp.o
+[11/336] Building CXX object src/CMakeFiles/llama.dir/llama-hparams.cpp.o
+[12/336] Building CXX object vendor/hash/CMakeFiles/vendor-hash.dir/hash.cpp.o
+[13/336] Building CXX object vendor/hash/CMakeFiles/vendor-hash.dir/sha1/sha1.c.o
+[14/336] Building C object vendor/hash/CMakeFiles/vendor-hash.dir/xxhash/xxhash.c.o
+[15/336] Building C object vendor/hash/CMakeFiles/vendor-hash.dir/sha256/sha256.c.o
+[16/336] Building CXX object vendor/cpp-httplib/CMakeFiles/cpp-httplib.dir/httplib.cpp.o
+[17/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/vec.cpp.o
+[18/336] Building C object ggml/src/CMakeFiles/ggml-base.dir/ggml-alloc.c.o
+[19/336] Linking CXX static library vendor/hash/libvendor-hash.a
+[20/336] Linking CXX static library vendor/cpp-httplib/libcpp-httplib.a
+[21/336] Building CXX object src/CMakeFiles/llama.dir/llama-arch.cpp.o
+[22/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/tiled/tiled-kernel.cpp.o
+[23/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.cpp.o
+[24/336] Building CXX object src/CMakeFiles/llama.dir/llama-memory.cpp.o
+[25/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/tiled/tiled.cpp.o
+[26/336] Building CXX object common/CMakeFiles/llama-common-base.dir/build-info.cpp.o
+[27/336] Building CXX object src/CMakeFiles/llama.dir/llama-impl.cpp.o
+[28/336] Building C object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/arm/quants.c.o
+[29/336] Linking CXX static library common/libllama-common-base.a
+[30/336] Building C object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.c.o
+[31/336] Building C object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/quants.c.o
+[32/336] Building CXX object src/CMakeFiles/llama.dir/llama-mmap.cpp.o
+[33/336] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-opt.cpp.o
+[34/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_10_cxx.cxx.o
+[35/336] Building CXX object src/CMakeFiles/llama.dir/llama-kv-cache-dsa.cpp.o
+[36/336] Building CXX object ggml/src/CMakeFiles/ggml.dir/ggml-backend-reg.cpp.o
+[37/336] Building CXX object src/CMakeFiles/llama.dir/llama-memory-hybrid.cpp.o
+[38/336] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-backend.cpp.o
+[39/336] Building CXX object src/CMakeFiles/llama.dir/llama-model-saver.cpp.o
+[40/336] Building CXX object src/CMakeFiles/llama.dir/llama-kv-cache-msa.cpp.o
+[41/336] Building CXX object src/CMakeFiles/llama.dir/llama.cpp.o
+[42/336] Building CXX object src/CMakeFiles/llama.dir/llama-memory-hybrid-iswa.cpp.o
+[43/336] Building CXX object src/CMakeFiles/llama.dir/llama-kv-cache-iswa.cpp.o
+[44/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/binary-ops.cpp.o
+[45/336] Building CXX object src/CMakeFiles/llama.dir/llama-kv-cache-dsa-iswa.cpp.o
+[46/336] Building CXX object src/CMakeFiles/llama.dir/llama-adapter.cpp.o
+[47/336] Building CXX object src/CMakeFiles/llama.dir/llama-memory-recurrent.cpp.o
+[48/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/arm/repack.cpp.o
+[49/336] Building CXX object src/CMakeFiles/llama.dir/llama-moe-cache.cpp.o
+[50/336] Building C object ggml/src/CMakeFiles/ggml-base.dir/ggml.c.o
+[51/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_7_cxx.cxx.o
+[52/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/unary-ops.cpp.o
+[53/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_9_cxx.cxx.o
+[54/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/llamafile/sgemm.cpp.o
+[55/336] Building CXX object src/CMakeFiles/llama.dir/llama-memory-hybrid-idx.cpp.o
+[56/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/parsers.cpp.o
+[57/336] Building CXX object src/CMakeFiles/llama.dir/llama-chat.cpp.o
+[58/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_2_cxx.cxx.o
+[59/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_4_cxx.cxx.o
+[60/336] Building CXX object common/CMakeFiles/llama-common.dir/ngram-mod.cpp.o
+[61/336] Building CXX object src/CMakeFiles/llama.dir/llama-batch.cpp.o
+[62/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_6_cxx.cxx.o
+[63/336] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/gguf.cpp.o
+[64/336] Building CXX object common/CMakeFiles/llama-common.dir/llguidance.cpp.o
+[65/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/functionary-v3-2.cpp.o
+[66/336] Building CXX object common/CMakeFiles/llama-common.dir/subproc.cpp.o
+[67/336] Building CXX object common/CMakeFiles/llama-common.dir/trie.cpp.o
+[68/336] Building CXX object common/CMakeFiles/llama-common.dir/unicode.cpp.o
+[69/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_5_cxx.cxx.o
+[70/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/gigachat-v3.cpp.o
+[71/336] Building CXX object common/CMakeFiles/llama-common.dir/imatrix-loader.cpp.o
+[72/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/cohere2moe.cpp.o
+[73/336] Building CXX object common/CMakeFiles/llama-common.dir/console.cpp.o
+[74/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_0_cxx.cxx.o
+[75/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_8_cxx.cxx.o
+[76/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/kimi-k2.cpp.o
+[77/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/lfm2.cpp.o
+[78/336] Building CXX object common/CMakeFiles/llama-common.dir/ngram-cache.cpp.o
+[79/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/gpt-oss.cpp.o
+[80/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/gemma4.cpp.o
+[81/336] Building CXX object common/CMakeFiles/llama-common.dir/ngram-map.cpp.o
+[82/336] Building CXX object common/CMakeFiles/llama-common.dir/log.cpp.o
+[83/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/minicpm5.cpp.o
+[84/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/translate-gemma.cpp.o
+[85/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/llm-jp-harmony.cpp.o
+[86/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/kimi-k3.cpp.o
+[87/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/ling3.cpp.o
+[88/336] Building CXX object common/CMakeFiles/llama-common.dir/reasoning-budget.cpp.o
+[89/336] Building CXX object src/CMakeFiles/llama.dir/llama-graph.cpp.o
+[90/336] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-backend-meta.cpp.o
+[91/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/ministral3.cpp.o
+[92/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/harmony-xml.cpp.o
+[93/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/deepseek.cpp.o
+[94/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/k2-horizon.cpp.o
+[95/336] Building CXX object common/CMakeFiles/llama-common.dir/chat-auto-parser-helpers.cpp.o
+[96/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/muse-glimmer.cpp.o
+[97/336] Building CXX object common/CMakeFiles/llama-common.dir/jinja/string.cpp.o
+[98/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_1_cxx.cxx.o
+[99/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/minimax-m3.cpp.o
+[100/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/muse-spark.cpp.o
+[101/336] Building CXX object src/CMakeFiles/llama.dir/llama-kv-cache-dsv4.cpp.o
+[102/336] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_3_cxx.cxx.o
+[103/336] Building CXX object common/CMakeFiles/llama-common.dir/parsers/qwen3-coder.cpp.o
+[104/336] Building C object ggml/src/CMakeFiles/ggml-base.dir/ggml-quants.c.o
+[105/336] Linking CXX shared library bin/libggml-base.so.0.27.0
+[106/336] Creating library symlink bin/libggml-base.so.0 bin/libggml-base.so
+[107/336] Building CXX object common/CMakeFiles/llama-common.dir/chat-auto-parser-generator.cpp.o
+[108/336] Building CXX object src/CMakeFiles/llama.dir/llama-context.cpp.o
+[109/336] Building CXX object common/CMakeFiles/llama-common.dir/json-schema.cpp.o
+[110/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/cogvlm.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/cogvlm.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[111/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/conformer.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/conformer.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[112/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/deepseek4v.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/deepseek4v.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[113/336] Building CXX object common/CMakeFiles/llama-common.dir/jinja/lexer.cpp.o
+[114/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/dots3note.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/dots3note.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[115/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/dotsocr.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/dotsocr.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[116/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/exaone4_5.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/exaone4_5.cpp:2:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[117/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/gemma4uv.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/gemma4uv.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[118/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/gemma4ua.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/gemma4ua.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[119/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/gemma4v.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/gemma4v.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[120/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/hunyuanvl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/hunyuanvl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[121/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/glm4v.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/glm4v.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[122/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/gemma4a.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/gemma4a.cpp:8:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[123/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/internvl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/internvl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[124/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/granite-speech.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/granite-speech.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[125/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/kimivl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/kimivl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[126/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/nemotron-v2-vl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/nemotron-v2-vl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[127/336] Building CXX object src/CMakeFiles/llama.dir/llama-grammar.cpp.o
+[128/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/nemotron-omni.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/nemotron-omni.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[129/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/kimik25.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/kimik25.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[130/336] Building CXX object src/CMakeFiles/llama.dir/llama-kv-cache.cpp.o
+[131/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/muse-spark-audio.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/muse-spark-audio.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[132/336] Building CXX object common/CMakeFiles/llama-common.dir/fit.cpp.o
+[133/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/llama4.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/llama4.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[134/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/muse-glimmer.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/muse-glimmer.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[135/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/granite4-vision.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/granite4-vision.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[136/336] Building CXX object common/CMakeFiles/llama-common.dir/debug.cpp.o
+[137/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/llava.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/llava.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[138/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/minicpmv.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/minicpmv.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[139/336] Building CXX object common/CMakeFiles/llama-common.dir/hf-cache.cpp.o
+/tmp/lc-v080-src/common/hf-cache.cpp: In function ‘std::string hf_cache::get_repo_commit(const std::string&, const std::string&)’:
+/tmp/lc-v080-src/common/hf-cache.cpp:236:50: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  236 |             const fs::path candidate = fs::u8path(_name);
+      |                                        ~~~~~~~~~~^~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/common.h:20,
+                 from /tmp/lc-v080-src/common/hf-cache.cpp:4:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/common/hf-cache.cpp: In function ‘hf_cache::hf_files hf_cache::get_repo_files(const std::string&, const std::string&)’:
+/tmp/lc-v080-src/common/hf-cache.cpp:311:48: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  311 |             const fs::path subpath = fs::u8path(file.path);
+      |                                      ~~~~~~~~~~^~~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/common/hf-cache.cpp: In function ‘std::string hf_cache::finalize_file(const hf_file&)’:
+/tmp/lc-v080-src/common/hf-cache.cpp:444:37: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  444 |     fs::path local_path = fs::u8path(file.local_path);
+      |                           ~~~~~~~~~~^~~~~~~~~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/common/hf-cache.cpp:445:37: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  445 |     fs::path final_path = fs::u8path(file.final_path);
+      |                           ~~~~~~~~~~^~~~~~~~~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[140/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/paddleocr.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/paddleocr.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[141/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/pixtral.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/pixtral.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[142/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/minimax-m3.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/minimax-m3.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[143/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/qwen3vl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/qwen3vl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/qwen3vl.cpp: In member function ‘virtual ggml_cgraph* clip_graph_qwen3vl::build()’:
+/tmp/lc-v080-src/tools/mtmd/models/qwen3vl.cpp:40:90: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   40 |     ggml_tensor * learned_pos_embd = resize_position_embeddings(GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ALIGN_CORNERS);
+      |                                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[144/336] Building CXX object common/CMakeFiles/llama-common.dir/chat-peg-parser.cpp.o
+[145/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/qwen2vl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/qwen2vl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[146/336] Building CXX object src/CMakeFiles/llama.dir/llama-quant.cpp.o
+[147/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/ling3vl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/ling3vl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/ling3vl.cpp: In member function ‘virtual ggml_cgraph* clip_graph_ling3vl::build()’:
+/tmp/lc-v080-src/tools/mtmd/models/ling3vl.cpp:41:90: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   41 |     ggml_tensor * learned_pos_embd = resize_position_embeddings(GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ALIGN_CORNERS);
+      |                                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[148/336] Building CXX object common/CMakeFiles/llama-common.dir/sampling.cpp.o
+[149/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/qwen3a.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/qwen3a.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[150/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/mimovl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/mimovl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[151/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/repack.cpp.o
+[152/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/qwen3tts-spkenc.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/qwen3tts-spkenc.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[153/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/mimo-audio.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/mimo-audio.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[154/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/pockettts-spkenc.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/pockettts-spkenc.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[155/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/siglip.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/siglip.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[156/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/whisper-enc.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/whisper-enc.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[157/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/step3vl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/step3vl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[158/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/voxtral-rt.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/voxtral-rt.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[159/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/pockettts-seanet.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/pockettts-seanet.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[160/336] Building CXX object common/CMakeFiles/llama-common.dir/jinja/caps.cpp.o
+[161/336] Building CXX object common/CMakeFiles/llama-common.dir/jinja/parser.cpp.o
+[162/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/deepseekocr.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/deepseekocr.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[163/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/mtmd-audio.cpp.o
+[164/336] Building CXX object src/CMakeFiles/llama.dir/llama-sampler.cpp.o
+[165/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/mtmd-helper-gen.cpp.o
+[166/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/deepseekocr2.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/deepseekocr2.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[167/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/yasa2.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/yasa2.cpp:4:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[168/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/youtuvl.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/youtuvl.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[169/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/mobilenetv5.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/mobilenetv5.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[170/336] Building CXX object examples/gguf/CMakeFiles/llama-gguf.dir/gguf.cpp.o
+[171/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/mtmd-image.cpp.o
+[172/336] Building CXX object src/CMakeFiles/llama.dir/llama-vocab.cpp.o
+[173/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/parakeet.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/parakeet.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[174/336] Building CXX object tools/batched-bench/CMakeFiles/llama-batched-bench.dir/main.cpp.o
+[175/336] Building CXX object examples/gguf-hash/CMakeFiles/llama-gguf-hash.dir/gguf-hash.cpp.o
+[176/336] Building CXX object examples/simple/CMakeFiles/llama-simple.dir/simple.cpp.o
+[177/336] Building CXX object tools/llama-bench/CMakeFiles/llama-bench.dir/main.cpp.o
+[178/336] Building CXX object tools/completion/CMakeFiles/llama-completion.dir/main.cpp.o
+[179/336] Building CXX object tools/perplexity/CMakeFiles/llama-perplexity.dir/main.cpp.o
+[180/336] Building CXX object tools/quantize/CMakeFiles/llama-quantize.dir/main.cpp.o
+[181/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/pockettts-gen.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/pockettts-gen.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[182/336] Building CXX object examples/lookup/CMakeFiles/llama-lookup-merge.dir/lookup-merge.cpp.o
+[183/336] Building CXX object tools/mtmd/CMakeFiles/llama-llava-cli.dir/deprecation-warning.cpp.o
+[184/336] Building CXX object tools/mtmd/CMakeFiles/llama-gemma3-cli.dir/deprecation-warning.cpp.o
+[185/336] Building CXX object tools/mtmd/CMakeFiles/llama-minicpmv-cli.dir/deprecation-warning.cpp.o
+[186/336] Building CXX object tools/mtmd/CMakeFiles/llama-qwen2vl-cli.dir/deprecation-warning.cpp.o
+[187/336] Building CXX object examples/simple-chat/CMakeFiles/llama-simple-chat.dir/simple-chat.cpp.o
+[188/336] Building CXX object examples/diffusion/CMakeFiles/llama-diffusion.dir/diffusion.cpp.o
+[189/336] Building CXX object tools/fit-params/CMakeFiles/llama-fit-params-impl.dir/fit-params.cpp.o
+[190/336] Building CXX object tools/batched-bench/CMakeFiles/llama-batched-bench-impl.dir/batched-bench.cpp.o
+[191/336] Building CXX object tools/fit-params/CMakeFiles/llama-fit-params.dir/main.cpp.o
+[192/336] Building CXX object examples/eval-callback/CMakeFiles/llama-eval-callback.dir/eval-callback.cpp.o
+[193/336] Linking CXX executable bin/llama-llava-cli
+[194/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/models/qwen3tts-gen.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/models/models.h:3,
+                 from /tmp/lc-v080-src/tools/mtmd/models/qwen3tts-gen.cpp:1:
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/models/../clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[195/336] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ops.cpp.o
+[196/336] Linking CXX executable bin/llama-gemma3-cli
+[197/336] Linking CXX executable bin/llama-minicpmv-cli
+[198/336] Building CXX object src/CMakeFiles/llama.dir/llama-model-loader.cpp.o
+[199/336] Linking CXX executable bin/llama-qwen2vl-cli
+[200/336] Linking CXX shared library bin/libggml-cpu.so.0.27.0
+[201/336] Creating library symlink bin/libggml-cpu.so.0 bin/libggml-cpu.so
+[202/336] Building CXX object examples/batched/CMakeFiles/llama-batched.dir/batched.cpp.o
+[203/336] Linking CXX shared library bin/libggml.so.0.27.0
+[204/336] Creating library symlink bin/libggml.so.0 bin/libggml.so
+[205/336] Linking CXX executable bin/llama-gguf
+[206/336] Linking CXX executable bin/llama-gguf-hash
+[207/336] Building CXX object examples/idle/CMakeFiles/llama-idle.dir/idle.cpp.o
+[208/336] Building CXX object examples/lookup/CMakeFiles/llama-lookup-create.dir/lookup-create.cpp.o
+[209/336] Building CXX object pocs/vdot/CMakeFiles/llama-vdot.dir/vdot.cpp.o
+[210/336] Building CXX object examples/lookup/CMakeFiles/llama-lookup-stats.dir/lookup-stats.cpp.o
+[211/336] Building CXX object examples/lookup/CMakeFiles/llama-lookup.dir/lookup.cpp.o
+[212/336] Building CXX object pocs/vdot/CMakeFiles/llama-q8dot.dir/q8dot.cpp.o
+[213/336] Building CXX object common/CMakeFiles/llama-common.dir/chat-diff-analyzer.cpp.o
+[214/336] Building CXX object tools/gguf-split/CMakeFiles/llama-gguf-split.dir/gguf-split.cpp.o
+[215/336] Building CXX object examples/embedding/CMakeFiles/llama-embedding.dir/embedding.cpp.o
+[216/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/mtmd.cpp.o
+[217/336] Building CXX object common/CMakeFiles/llama-common.dir/jinja/runtime.cpp.o
+[218/336] Building CXX object examples/lookahead/CMakeFiles/llama-lookahead.dir/lookahead.cpp.o
+[219/336] Building CXX object examples/passkey/CMakeFiles/llama-passkey.dir/passkey.cpp.o
+[220/336] Building CXX object examples/training/CMakeFiles/llama-finetune.dir/finetune.cpp.o
+[221/336] Building CXX object examples/speculative-simple/CMakeFiles/llama-speculative-simple.dir/speculative-simple.cpp.o
+[222/336] Building CXX object tools/quantize/CMakeFiles/llama-quantize-impl.dir/quantize.cpp.o
+[223/336] Building CXX object common/CMakeFiles/llama-common.dir/common.cpp.o
+/tmp/lc-v080-src/common/common.cpp: In function ‘std::filesystem::__cxx11::path fs_get_cache_file(const std::string&)’:
+/tmp/lc-v080-src/common/common.cpp:1034:53: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+ 1034 |     return cache_directory / std::filesystem::u8path(filename);
+      |                              ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/common.h:20,
+                 from /tmp/lc-v080-src/common/common.cpp:6:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[224/336] Building CXX object common/CMakeFiles/llama-common.dir/chat.cpp.o
+[225/336] Building CXX object examples/gen-docs/CMakeFiles/llama-gen-docs.dir/gen-docs.cpp.o
+[226/336] Building CXX object tools/tokenize/CMakeFiles/llama-tokenize.dir/tokenize.cpp.o
+[227/336] Building CXX object examples/parallel/CMakeFiles/llama-parallel.dir/parallel.cpp.o
+[228/336] Building CXX object tools/tts/CMakeFiles/llama-tts.dir/tts.cpp.o
+[229/336] Building CXX object common/CMakeFiles/llama-common.dir/speculative.cpp.o
+[230/336] Building CXX object examples/retrieval/CMakeFiles/llama-retrieval.dir/retrieval.cpp.o
+[231/336] Building CXX object examples/convert-llama2c-to-ggml/CMakeFiles/llama-convert-llama2c-to-ggml.dir/convert-llama2c-to-ggml.cpp.o
+[232/336] Building CXX object common/CMakeFiles/llama-common.dir/json.cpp.o
+[233/336] Building CXX object common/CMakeFiles/llama-common.dir/json-schema-to-grammar.cpp.o
+[234/336] Building CXX object tools/results/CMakeFiles/llama-results.dir/results.cpp.o
+[235/336] Building CXX object tools/mtmd/CMakeFiles/llama-mtmd-debug.dir/debug/mtmd-debug.cpp.o
+[236/336] Building CXX object src/CMakeFiles/llama.dir/unicode.cpp.o
+[237/336] Building CXX object common/CMakeFiles/llama-common.dir/preset.cpp.o
+/tmp/lc-v080-src/common/preset.cpp: In member function ‘common_presets common_preset_context::load_from_models_dir(const std::string&) const’:
+/tmp/lc-v080-src/common/preset.cpp:388:62: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  388 |     const std::filesystem::path dir = std::filesystem::u8path(models_dir);
+      |                                       ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/common.h:20,
+                 from /tmp/lc-v080-src/common/arg.h:3,
+                 from /tmp/lc-v080-src/common/preset.cpp:1:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[238/336] Building CXX object common/CMakeFiles/llama-common.dir/download.cpp.o
+/tmp/lc-v080-src/common/download.cpp: In function ‘void write_etag(const std::string&, const std::string&)’:
+/tmp/lc-v080-src/common/download.cpp:47:44: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+   47 |     fs_write_atomic(std::filesystem::u8path(etag_path), etag);
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/common.h:20,
+                 from /tmp/lc-v080-src/common/arg.h:3,
+                 from /tmp/lc-v080-src/common/download.cpp:1:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/common/download.cpp: In function ‘int common_download_file_single_online(const std::string&, const std::string&, const common_download_opts&, bool)’:
+/tmp/lc-v080-src/common/download.cpp:264:77: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  264 |     const bool file_exists = std::filesystem::exists(std::filesystem::u8path(path));
+      |                                                      ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/common/download.cpp: In function ‘int common_download_file_single(const std::string&, const std::string&, const common_download_opts&, bool)’:
+/tmp/lc-v080-src/common/download.cpp:465:57: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  465 |     if (!std::filesystem::exists(std::filesystem::u8path(path))) {
+      |                                  ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/common/download.cpp: In function ‘bool common_download_remove_sidecars(const std::string&, const common_download_opts&)’:
+/tmp/lc-v080-src/common/download.cpp:1165:59: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+ 1165 |             to_remove.emplace_back(std::filesystem::u8path(f.local_path));
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[239/336] Building CXX object examples/speculative/CMakeFiles/llama-speculative.dir/speculative.cpp.o
+[240/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-stream.cpp.o
+[241/336] Building CXX object tools/export-lora/CMakeFiles/llama-export-lora.dir/export-lora.cpp.o
+[242/336] Building CXX object common/CMakeFiles/llama-common.dir/jinja/value.cpp.o
+[243/336] Building CXX object tools/cvector-generator/CMakeFiles/llama-cvector-generator.dir/cvector-generator.cpp.o
+[244/336] Building CXX object examples/diffusion/CMakeFiles/llama-diffusion-cli.dir/diffusion-cli.cpp.o
+[245/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-mcp.cpp.o
+/tmp/lc-v080-src/tools/server/server-mcp.cpp: In member function ‘void server_mcp::start(const common_params&)’:
+/tmp/lc-v080-src/tools/server/server-mcp.cpp:692:48: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  692 |         std::ifstream f(std::filesystem::u8path(params.mcp_servers_config), std::ios::in);
+      |                         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/./common.h:20,
+                 from /tmp/lc-v080-src/tools/server/server-common.h:3,
+                 from /tmp/lc-v080-src/tools/server/server-mcp.h:3,
+                 from /tmp/lc-v080-src/tools/server/server-mcp.cpp:1:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[246/336] Provisioning UI assets
+-- UI: downloading from b1: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b1/dist.tar.gz
+-- UI: download dist.tar.gz.sha256 from b1 failed: "HTTP response code said error"
+-- UI: downloading from latest: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/latest/dist.tar.gz
+-- UI: archive verified and extracted
+-- UI: HF download succeeded, stamp updated (ggml-org/llama-ui|b1, resolved: latest)
+-- UI: gzip compression applied (/tmp/build-lc-pin/tools/ui/ui-gzip/_gzip)
+-- UI: embedded 70 assets
+[247/336] Building CXX object tools/cli/CMakeFiles/llama-cli.dir/main.cpp.o
+[248/336] Building CXX object tools/server/CMakeFiles/llama-server.dir/main.cpp.o
+[249/336] Building CXX object app/CMakeFiles/llama-app.dir/__/license.cpp.o
+[250/336] Building CXX object tools/ui/CMakeFiles/llama-ui.dir/ui.cpp.o
+[251/336] Linking CXX static library tools/ui/libllama-ui.a
+[252/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-schema.cpp.o
+[253/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-chat.cpp.o
+[254/336] Building CXX object tools/completion/CMakeFiles/llama-completion-impl.dir/completion.cpp.o
+[255/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-queue.cpp.o
+[256/336] Building CXX object src/CMakeFiles/llama.dir/llama-model.cpp.o
+[257/336] Building CXX object app/CMakeFiles/llama-app.dir/llama.cpp.o
+[258/336] Linking CXX shared library bin/libllama.so.0.7.0
+[259/336] Creating library symlink bin/libllama.so.0 bin/libllama.so
+[260/336] Linking CXX executable bin/llama-simple
+[261/336] Linking CXX executable bin/llama-simple-chat
+[262/336] Building CXX object tools/perplexity/CMakeFiles/llama-perplexity-impl.dir/perplexity.cpp.o
+/tmp/lc-v080-src/tools/perplexity/perplexity.cpp: In lambda function:
+/tmp/lc-v080-src/tools/perplexity/perplexity.cpp:1752:41: note: parameter passing for argument of type ‘std::pair<double, double>’ when C++17 is enabled changed to match C++14 in GCC 10.1
+ 1752 |             return std::make_pair(0., 0.);
+      |                                         ^
+[263/336] Building CXX object common/CMakeFiles/llama-common.dir/peg-parser.cpp.o
+[264/336] Building CXX object tools/mtmd/CMakeFiles/llama-mtmd-cli.dir/mtmd-cli.cpp.o
+[265/336] Building CXX object examples/debug/CMakeFiles/llama-debug.dir/debug.cpp.o
+[266/336] Building CXX object app/CMakeFiles/llama-app.dir/download.cpp.o
+[267/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-decision.cpp.o
+[268/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-common.cpp.o
+[269/336] Building CXX object tools/server/CMakeFiles/llama-server-impl.dir/server-connect.cpp.o
+[270/336] Building CXX object tools/imatrix/CMakeFiles/llama-imatrix.dir/imatrix.cpp.o
+[271/336] Building CXX object tools/cli/CMakeFiles/llama-cli-impl.dir/cli.cpp.o
+[272/336] Building CXX object tools/cli/CMakeFiles/llama-cli-impl.dir/cli-client.cpp.o
+[273/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-task.cpp.o
+[274/336] Building CXX object tools/cli/CMakeFiles/llama-cli-impl.dir/cli-context.cpp.o
+[275/336] Building CXX object tools/server/CMakeFiles/llama-server-impl.dir/server.cpp.o
+[276/336] Building CXX object tools/server/CMakeFiles/llama-server-impl.dir/server-http.cpp.o
+[277/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-tools.cpp.o
+/tmp/lc-v080-src/tools/server/server-tools.cpp: In function ‘std::filesystem::__cxx11::path path_from_utf8(const std::string&)’:
+/tmp/lc-v080-src/tools/server/server-tools.cpp:102:22: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  102 |     return fs::u8path(s);
+      |            ~~~~~~~~~~^~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/./common.h:20,
+                 from /tmp/lc-v080-src/tools/server/server-common.h:3,
+                 from /tmp/lc-v080-src/tools/server/server-tools.h:3,
+                 from /tmp/lc-v080-src/tools/server/server-tools.cpp:1:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[278/336] Building CXX object tools/llama-bench/CMakeFiles/llama-bench-impl.dir/llama-bench.cpp.o
+[279/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/mtmd-helper.cpp.o
+[280/336] Building CXX object tools/server/CMakeFiles/server-context.dir/server-context.cpp.o
+/tmp/lc-v080-src/tools/server/server-context.cpp: In member function ‘bool server_context_impl::save_slot_checkpoints(const std::string&, const server_slot&, size_t&) const’:
+/tmp/lc-v080-src/tools/server/server-context.cpp:2651:50: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+ 2651 |         std::ofstream ofs(std::filesystem::u8path(filepath), std::ios::binary | std::ios::app);
+      |                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/./common.h:20,
+                 from /tmp/lc-v080-src/tools/server/server-task.h:3,
+                 from /tmp/lc-v080-src/tools/server/server-context.h:4,
+                 from /tmp/lc-v080-src/tools/server/server-context.cpp:1:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/tools/server/server-context.cpp: In member function ‘size_t server_context_impl::load_slot_checkpoints(const std::string&, size_t, server_slot&) const’:
+/tmp/lc-v080-src/tools/server/server-context.cpp:2682:50: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+ 2682 |         std::ifstream ifs(std::filesystem::u8path(filepath), std::ios::binary | std::ios::ate);
+      |                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/tools/server/server-context.cpp: In member function ‘bool server_context_impl::save_slot_draft(const std::string&, const server_slot&, size_t&) const’:
+/tmp/lc-v080-src/tools/server/server-context.cpp:2757:50: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+ 2757 |         std::ofstream ofs(std::filesystem::u8path(filepath), std::ios::binary | std::ios::app);
+      |                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/tools/server/server-context.cpp: In member function ‘size_t server_context_impl::load_slot_draft(const std::string&, size_t, server_slot&) const’:
+/tmp/lc-v080-src/tools/server/server-context.cpp:2783:50: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+ 2783 |         std::ifstream ifs(std::filesystem::u8path(filepath), std::ios::binary | std::ios::ate);
+      |                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[281/336] Building CXX object common/CMakeFiles/llama-common.dir/arg.cpp.o
+[282/336] Linking CXX shared library bin/libllama-common.so.0.7.0
+[283/336] Creating library symlink bin/libllama-common.so.0 bin/libllama-common.so
+[284/336] Linking CXX static library examples/diffusion/libllama-diffusion.a
+[285/336] Linking CXX shared library bin/libllama-batched-bench-impl.so
+[286/336] Linking CXX shared library bin/libllama-completion-impl.so
+[287/336] Linking CXX shared library bin/libllama-fit-params-impl.so
+[288/336] Linking CXX shared library bin/libllama-perplexity-impl.so
+[289/336] Linking CXX shared library bin/libllama-quantize-impl.so
+[290/336] Linking CXX shared library bin/libllama-bench-impl.so
+[291/336] Linking CXX executable bin/llama-lookup
+[292/336] Linking CXX executable bin/llama-lookahead
+[293/336] Linking CXX executable bin/llama-vdot
+[294/336] Linking CXX executable bin/llama-speculative-simple
+[295/336] Linking CXX executable bin/llama-gguf-split
+[296/336] Linking CXX executable bin/llama-idle
+[297/336] Linking CXX executable bin/llama-cvector-generator
+[298/336] Linking CXX executable bin/llama-eval-callback
+[299/336] Linking CXX executable bin/llama-retrieval
+[300/336] Linking CXX executable bin/llama-speculative
+[301/336] Linking CXX executable bin/llama-q8dot
+[302/336] Linking CXX executable bin/llama-finetune
+[303/336] Linking CXX executable bin/llama-batched
+[304/336] Linking CXX executable bin/llama-lookup-merge
+[305/336] Linking CXX executable bin/llama-passkey
+[306/336] Linking CXX executable bin/llama-convert-llama2c-to-ggml
+[307/336] Linking CXX executable bin/llama-embedding
+[308/336] Linking CXX executable bin/llama-lookup-stats
+[309/336] Linking CXX executable bin/llama-lookup-create
+[310/336] Linking CXX executable bin/llama-export-lora
+[311/336] Linking CXX executable bin/llama-imatrix
+[312/336] Linking CXX executable bin/llama-debug
+[313/336] Linking CXX executable bin/llama-tokenize
+[314/336] Linking CXX executable bin/llama-parallel
+[315/336] Linking CXX executable bin/llama-gen-docs
+[316/336] Linking CXX executable bin/llama-results
+[317/336] Linking CXX executable bin/llama-diffusion-cli
+[318/336] Linking CXX executable bin/llama-completion
+[319/336] Linking CXX executable bin/llama-batched-bench
+[320/336] Linking CXX executable bin/llama-fit-params
+[321/336] Linking CXX executable bin/llama-perplexity
+[322/336] Linking CXX executable bin/llama-quantize
+[323/336] Linking CXX executable bin/llama-bench
+[324/336] Building CXX object tools/mtmd/CMakeFiles/mtmd.dir/clip.cpp.o
+In file included from /tmp/lc-v080-src/tools/mtmd/clip.cpp:4:
+/tmp/lc-v080-src/tools/mtmd/clip-graph.h:12:62: warning: bitwise operation between different enumeration types ‘ggml_scale_mode’ and ‘ggml_scale_flag’ is deprecated [-Wdeprecated-enum-enum-conversion]
+   12 | #define DEFAULT_INTERPOLATION_MODE (GGML_SCALE_MODE_BILINEAR | GGML_SCALE_FLAG_ANTIALIAS)
+      |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/tmp/lc-v080-src/tools/mtmd/clip-graph.h:84:76: note: in expansion of macro ‘DEFAULT_INTERPOLATION_MODE’
+   84 |     ggml_tensor * resize_position_embeddings(uint32_t interpolation_mode = DEFAULT_INTERPOLATION_MODE);
+      |                                                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[325/336] Linking CXX shared library bin/libmtmd.so.0.7.0
+[326/336] Creating library symlink bin/libmtmd.so.0 bin/libmtmd.so
+[327/336] Linking CXX executable bin/llama-mtmd-cli
+[328/336] Linking CXX static library tools/server/libserver-context.a
+[329/336] Linking CXX executable bin/llama-tts
+[330/336] Linking CXX executable bin/llama-mtmd-debug
+[331/336] Building CXX object tools/server/CMakeFiles/llama-server-impl.dir/server-models.cpp.o
+/tmp/lc-v080-src/tools/server/server-models.cpp: In member function ‘void server_unfinished_downloads::save()’:
+/tmp/lc-v080-src/tools/server/server-models.cpp:759:48: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  759 |         fs_write_atomic(std::filesystem::u8path(unfinished_downloads_path()), data.dump());
+      |                         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/filesystem:55,
+                 from /tmp/lc-v080-src/common/./common.h:20,
+                 from /tmp/lc-v080-src/tools/server/server-common.h:3,
+                 from /tmp/lc-v080-src/tools/server/server-models.cpp:1:
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+/tmp/lc-v080-src/tools/server/server-models.cpp: In member function ‘void server_unfinished_downloads::delete_partials(const std::vector<common_download_partial>&)’:
+/tmp/lc-v080-src/tools/server/server-models.cpp:776:56: warning: ‘std::filesystem::__cxx11::path std::filesystem::__cxx11::u8path(const _Source&) [with _Source = std::__cxx11::basic_string<char>; _Require = path; _CharT = char]’ is deprecated: use 'path((const char8_t*)&*source)' instead [-Wdeprecated-declarations]
+  776 |         std::filesystem::remove(std::filesystem::u8path(p.path), ec);
+      |                                 ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+/usr/lib/gcc/aarch64-unknown-linux-gnu/16/include/g++-v16/bits/fs_path.h:847:5: note: declared here
+  847 |     u8path(const _Source& __source)
+      |     ^~~~~~
+[332/336] Linking CXX shared library bin/libllama-server-impl.so
+[333/336] Linking CXX shared library bin/libllama-cli-impl.so
+[334/336] Linking CXX executable bin/llama-server
+[335/336] Linking CXX executable bin/llama
+[336/336] Linking CXX executable bin/llama-cli

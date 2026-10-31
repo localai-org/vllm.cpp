@@ -1,0 +1,16 @@
+== governor performance 2026-10-31T06:23:34Z
+== I-Micro t16 2026-10-31T06:23:55Z load-before=13
+| model                          |       size |     params | backend    | threads |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | --------------: | -------------------: |
+| kolibri1 78B.A3.5B IQ1_M - 1.75 bpw |  20.65 GiB |    78.10 B | CPU        |      16 |           tg128 |         17.98 ± 0.12 |
+
+build: 9df0b73 (1)
+== load-after=17
+== I-Micro t32 2026-10-31T06:24:51Z load-before=15
+| model                          |       size |     params | backend    | threads |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | --------------: | -------------------: |
+| kolibri1 78B.A3.5B IQ1_M - 1.75 bpw |  20.65 GiB |    78.10 B | CPU        |      32 |           tg128 |         20.18 ± 0.61 |
+
+build: 9df0b73 (1)
+== load-after=24
+== done 2026-10-31T06:25:24Z
