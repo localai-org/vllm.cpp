@@ -84,3 +84,24 @@ narrower rule (same sha AND same upstream, for instance) also loses its
 red-first, because `llama-cpp-flint` shares that upstream too. Reported, not
 grown; the intended red-first (copy the flint pin sha into a second oracle
 file) was NOT captured for the same reason as item 2.
+
+## 4. Inline `run:` steps escape the AGENT_RECORD_CHECKER_STEPS pin (`check-test-registration`)
+
+Mutation: an unpinned INLINE checker step added to the `agent-record` job of
+`.github/workflows/ci.yml` (single-line
+`run: python3 scripts/check-doc-sha-pins-probe.py`), checker run against the
+mutated tree:
+
+```text
+$ python3 scripts/check-test-registration.py; echo rc=$?
+ERROR: check-doc-sha-pins-probe.py runs in the agent-record job but is not in AGENT_RECORD_CHECKER_STEPS -- record it in the pin or move the step
+rc=1
+```
+
+Green after restore (the step removed; item 1's real `check-doc-sha-pins.py`
+is the only addition this row records, and it is recorded in the pin and the
+CI step): rc=0. The literal-block per-line shell-continuation scanning is
+untouched; `tests/scripts/test_check_test_registration.py` is green before
+and after, four fixtures richer (unrecorded inline fails, pinned inline
+passes, the collector sees an inline step, a conditional inline step is not a
+registration).

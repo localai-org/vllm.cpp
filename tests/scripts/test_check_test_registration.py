@@ -383,6 +383,51 @@ class WiringMutationTests(unittest.TestCase):
             self.preflight, mutated, "check-some-new-checker.py runs in"
         )
 
+    # The inline `run:` steps (CHECKER-HARDENING-2 F1). Before it, a checker
+    # invoked on the `run:` line itself — no literal block — escaped the pin
+    # entirely: the job ran it, the pin never saw it, and both deleting the
+    # pin entry and adding an unrecorded inline step stayed at rc 0.
+    def test_an_unrecorded_inline_checker_step_fails(self) -> None:
+        step = (
+            "      - name: An unpinned inline checker step\n"
+            "        run: python3 scripts/check-some-new-checker.py\n"
+        )
+        mutated = self.ci.replace("  checks:\n", step + "  checks:\n", 1)
+        self.assert_wiring_error(
+            self.preflight, mutated, "check-some-new-checker.py runs in"
+        )
+
+    def test_an_inline_step_invoking_a_pinned_checker_passes(self) -> None:
+        step = (
+            "      - name: An inline step of a pinned checker\n"
+            "        run: python3 scripts/check-evidence-refs.py\n"
+        )
+        mutated = self.ci.replace("  checks:\n", step + "  checks:\n", 1)
+        self.assertEqual(mod.wiring_errors(self.preflight, mutated), [])
+
+    def test_an_inline_step_is_seen_by_the_collector(self) -> None:
+        ci = (
+            "jobs:\n"
+            "  agent-record:\n"
+            "    steps:\n"
+            "      - name: Inline\n"
+            "        run: python3 scripts/check-env-doc.py\n"
+        )
+        self.assertEqual(
+            mod._agent_record_checker_scripts(ci), {"check-env-doc.py"}
+        )
+
+    def test_a_conditional_inline_step_is_not_a_registration(self) -> None:
+        ci = (
+            "jobs:\n"
+            "  agent-record:\n"
+            "    steps:\n"
+            "      - name: Conditional inline\n"
+            "        if: always()\n"
+            "        run: python3 scripts/check-env-doc.py\n"
+        )
+        self.assertEqual(mod._agent_record_checker_scripts(ci), set())
+
     def test_a_job_level_if_on_agent_record_fails(self) -> None:
         mutated = self.ci.replace(
             "  agent-record:\n", "  agent-record:\n    if: always()\n", 1
