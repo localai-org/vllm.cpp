@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M67SA3DSA6J0JNKWRFSFY4XD
 Title: windows-msvc-vulkan is RED on every PR: flint.cpp shadows 'v' and /WX makes it an error
 Row: ENG-RELEASE-WINDOWS
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-30
 Updated: 2026-10-30
-Closed: -
+Closed: 2026-10-30
 
 ## Problem
 
@@ -31,7 +31,7 @@ plus the first device-vs-CPU baseline`). Present at `main` `c6c0d8674`.
 
 ## Measured evidence
 
-2026-10-31, run [41145791168](https://github.com/localai-org/vllm.cpp/actions/runs/41145791168),
+2026-10-30, run [41145791168](https://github.com/localai-org/vllm.cpp/actions/runs/41145791168),
 job [124370468409](https://github.com/localai-org/vllm.cpp/actions/runs/41145791168/job/124370468409),
 observed on pull request #3529, whose diff touches no C++, no CMake and no
 PowerShell:
@@ -60,10 +60,30 @@ to whichever innocent branch runs CI next.
 
 ## Fix
 
-Rename the two loop variables (`v_x`), behaviour-preserving. Not applied here:
-this record was filed from the run log, and the repair belongs in its own
-change that references this ID.
+Rename the two loop variables, behaviour-preserving. They are now `xv` rather
+than the `v_x` named when this record was filed: `xv` is the spelling this file
+already uses for an element of `x` (`const float xv = normed[...]` in the router
+and lm_head loops), so the three checksum loops read as one idiom.
+
+The repair rides with this record in one change, because it was filed from the
+run log by the session that could reproduce it under `cl`.
 
 ## Resolution
 
--
+2026-10-30: fixed. The two `cpu_dump` checksum loops at `flint.cpp` 529 and 653 renamed their induction variable from `v` to `xv`, so neither hides the attention value buffer declared at 402. The loop `v` at 385 is outside the layer scope and was already unambiguous, so it is untouched.
+
+Measured with the lane's own warning settings, `cl /Zs /W4 /WX /permissive-` (VS 2022 17.x, MSVC 14.44.35207), against both trees:
+
+```
+BEFORE (main c6c0d8674 -> this record's HEAD)
+flint.cpp(529): warning C4456: declaration of 'v' hides previous local declaration
+flint.cpp(402): note: see declaration of 'v'
+flint.cpp(653): warning C4456: declaration of 'v' hides previous local declaration
+flint.cpp(529): error C2220: the following warning is treated as an error
+rc=2
+
+AFTER (this change)
+rc=0, no diagnostics
+```
+
+The rename is behaviour-preserving: both sites are float sums of `x` for a stderr checksum under `cpu_dump`.
