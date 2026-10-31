@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M68S34FDEF6M6CARKGQFEP0V
 Title: Sliding attention is 37% of the Flint serving step and grows 1.94x with sequence length despite the bounded window
 Row: FLINT-SLIDING-ATTN
-State: OPEN
+State: CLOSED
 Kind: perf
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-31
 Updated: 2026-10-31
-Closed: -
+Closed: 2026-10-31
 
 ## Problem
 
@@ -16,4 +16,4 @@ TT-NONROUTED-ATTRIBUTION (landed lineage) measured attention-sliding at 37% of t
 
 ## Resolution
 
--
+Fixed on row/FLINT-SLIDING-ATTN: the (token, head) parallel split in cpu_paged_attn.cpp (5f3202c12) removes the serial amplification of the unclipped-window keys=p+1 growth; full dated evidence in the Resolution above and docs/bench-evidence/flint-sliding-attn-20261031/.
