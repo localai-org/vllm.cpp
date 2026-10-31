@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M686P391579S3SRN675V2XT7
 Title: Two named small defects: the B2BI/B2II env silent-skip, and the preflight --staged SyntaxError
 Row: TT-SMALL-FIXES
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-31
 Updated: 2026-10-31
-Closed: -
+Closed: 2026-10-31
 
 ## Problem
 
@@ -16,4 +16,21 @@ Closed: -
 
 ## Resolution
 
--
+- Fix 1 (2026-10-31, `aa1f79f6`): the leg reads `VT_KOLIBRI1_TT_B2II_MODEL`
+  first and falls back to `VT_KOLIBRI1_TT_B2BI_MODEL`. RED on the card at
+  `762098300` (documented env only → silent skip + green banner), GREEN leg run
+  and bogus-path refusal-by-name, in
+  `docs/bench-evidence/tt-small-fixes-20261031/`.
+- Fix 2 (2026-10-31): the reported "inline python SyntaxError" diagnosis is
+  FALSIFIED by the tree — `agent-preflight.sh` carries no inline python. The
+  crash reproduces exactly as reported (`SyntaxError: unmatched ')'` at line 86,
+  the `--staged)` case label) but only under a `python3` invocation of the bash
+  script (`python3 scripts/agent-preflight.sh --staged`); the documented
+  `bash scripts/agent-preflight.sh --staged` runs clean, verified at HEAD by a
+  full `--staged` preflight in this worktree and in a scratch repo (only the
+  named host failure `check-windows-portability.py` / dotnet). A bash file
+  cannot defend itself against a python3 parse, so the repair is the regression
+  test `StagedInvocationTests` in `tests/scripts/test_agent_preflight_skip_report.py`
+  (executes the documented `--staged` invocation in the scratch repo; asserts no
+  `SyntaxError`/`Traceback`, the `Staged change:` gate reached, documented exit
+  status; mutation-verified red on a mangled case label).
