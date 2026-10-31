@@ -128,3 +128,30 @@ microseconds at batch 1 — separating it needs a timer inside
 
 `kq-16-rep{1,2,3}.log`, `kq-32-rep{1,2,3}.log` (complete vllm-bench stderr +
 stdout incl. every `[FLINT-PHASE]` / `[FLINT-STEP]` line), `host-state.txt`.
+
+## Review repair: default-off pinned (MB)
+
+The fresh review flagged that nothing pinned the default-off contract of
+`VT_FLINT_PHASE_TIMING` at runtime. `tests/scripts/test_flint_phase_timing_default_off.py`
+now does: the smallest binary that passes through the instrumented forward,
+`test_flint_paged`, runs once with the env unset (asserts ZERO `[FLINT-PHASE]`
+/ `FLINT-STEP` lines on stderr) and once with `=1` (asserts the lines appear).
+It is skipped by name when the box has no built binary.
+
+RED-first, per the review's mutation approach: flip the default at
+`flint.cpp:150` (`!= nullptr` → `== nullptr`), rebuild, run — the unset-env
+case FAILS with 12 `[FLINT-PHASE]` lines on stderr and the test reports
+`FAILED (failures=2)`. Restored byte-for-byte, rebuilt, re-run — `OK (2
+tests)`, and `test_flint_paged` itself exits 0 at the restored head.
+
+## Review corrections recorded
+
+- The landing commit's stat for `src/vllm/v1/worker/gpu/runner.cpp` is
+  **+60/−0**; any "+59 lines" figure quoted for it in this row's review notes
+  is off by one and superseded here. The commit bodies and evidence logs are
+  already pushed and are not amended.
+- Characterization (MA): the sum-vs-wall closure above can only catch a
+  MISSING timer — a phase absent from the table shows up as unexplained wall
+  (as the 56.7% unattributed remainder did before this row); a MIS-ROUTED
+  timer that captures the wrong work under a correct-looking total is caught
+  only by per-phase review of the call sites, not by the closure.
