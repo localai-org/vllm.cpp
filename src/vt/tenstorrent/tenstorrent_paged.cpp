@@ -1603,6 +1603,9 @@ bool TryPagedAttentionDevicePrefill(Tensor& out, const Tensor& query, const Tens
                                     const Tensor& seq_lens, const Tensor& query_start_loc,
                                     const PagedAttentionArgs& args) {
   if (!args.causal || args.logits_soft_cap > 0.0f) return false;
+  // Same sink refusal as the decode arm above: no sink hook in the ttnn
+  // chunked SDPA prefill.
+  if (args.attn_sink != nullptr) return false;
   if (args.window_size.has_value()) return false;
   if (args.kv_cache_dtype != Fp8KVCacheDataType::kAuto) return false;
   if (query.rank != 3 || out.rank != 3 || k_cache.rank != 4 || v_cache.rank != 4) return false;
@@ -1854,6 +1857,21 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
   const int64_t window_left = args.window_size.has_value() ? args.window_size->left : -1;
   const int64_t window_right = args.window_size.has_value() ? args.window_size->right : -1;
 
+  // FLINT-P150-ATTENTION: the per-head attention sink, the same seeding the
+  // CPU oracle carries (cpu_paged_attn.cpp:218-225, :373-381, :481). The sink
+  // joins the softmax DENOMINATOR and contributes NO value: the running max
+  // starts AT the sink and the denominator at exp(sink - m). Absent (nullptr,
+  // every caller before this row) the seeds stay -inf and 0 and the kernel is
+  // bit-identical to the pre-sink body.
+  if (args.attn_sink != nullptr) {
+    EnsureHost(*args.attn_sink);
+    VT_CHECK(args.attn_sink->dtype == DType::kF32 && args.attn_sink->rank == 1 &&
+                 args.attn_sink->shape[0] == hq,
+             "tenstorrent kPagedAttention: attn_sink must be f32 [num_q_heads]");
+  }
+  const float* sink_p =
+      args.attn_sink != nullptr ? args.attn_sink->Ptr<float>() : nullptr;
+
   const int64_t num_reqs = seq_lens.shape[0];
   const int32_t* qsl = query_start_loc.Ptr<int32_t>();
   const int32_t* slens = seq_lens.Ptr<int32_t>();
@@ -2016,7 +2034,9 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
       }
 
       probs.assign(static_cast<size_t>(jmax - jmin + 1), 0.0f);
-      float m = -std::numeric_limits<float>::infinity();
+      // The sink seed (see sink_p above): max starts AT the sink.
+      float m = sink_p != nullptr ? sink_p[h]
+                                  : -std::numeric_limits<float>::infinity();
       for (int64_t j = jmin; j <= jmax; ++j) {
         float dot;
         if (k_dense_p != nullptr) {
@@ -2039,7 +2059,7 @@ void PagedAttentionKernel(Queue&, Tensor& out, const Tensor& query, const Tensor
         probs[static_cast<size_t>(j - jmin)] = dot;
         if (dot > m) m = dot;
       }
-      float denom = 0.0f;
+      float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
       for (int64_t j = jmin; j <= jmax; ++j) {
         const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
         probs[static_cast<size_t>(j - jmin)] = e;
