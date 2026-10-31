@@ -128,7 +128,7 @@ rep on 1-min load < 6 and no >80%-cpu foreign process inside the zone; one
 single-cpu foreign workload (`test_flint_tt_w`, the TT-ANCHORING claim's test
 loop) lives in the zone and migrates across cpus — documented, ~1 of 16-32
 cpus. Earlier post triples whose early-step median betrayed a burst are
-quarantined under `contaminated/`. The early-step median is the contention
+quarantined under the `contaminated-` filename prefix (a nested subdir would fail check-pr-size's per-run evidence pattern). The early-step median is the contention
 canary: the fix leaves the intercept untouched, so a clean rep reproduces it.)
 
 | metric | before (base-16-rep{1,2,3}) | after (post-16-rep{1,2,3}) |
@@ -172,7 +172,7 @@ by design.
 - `base-32-rep{1,2,3}.log` — baseline 32t, CONTAMINATED (foreign session on
   cpu 34); kept for the record, not used.
 - `base-32-clean-rep{1,2,3}.log` — baseline 32t on the pre-fix binary, clean
-  (canary-gated; burst tries quarantined under `contaminated/`).
+  (canary-gated; burst tries quarantined under the `contaminated-` filename prefix (a nested subdir would fail check-pr-size's per-run evidence pattern)).
 - `ctl-1t-rep1.log` — 1-thread control leg (pre-fix binary
   `/tmp/build-ttnr/examples/vllm-bench`, which carries the landed timers but
   not this row's fix).
