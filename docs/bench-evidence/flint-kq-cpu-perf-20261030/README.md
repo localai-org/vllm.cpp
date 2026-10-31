@@ -33,12 +33,14 @@ the SAME CIQ class, byte-identical tokens, serves at **5.51 tok/s @16t (5.75
 | class | batch 1 (ms) | batch 8 (ms) | notes |
 |---|---:|---:|---|
 | (a) CIQ per-expert dispatch, pool=128 (the serving default under the 16t taskset) | 8.584 | 72.146 | the baseline configuration |
-| (a) CIQ per-expert dispatch, pool=16 | **0.458** | **4.394** | same kernel, same bytes |
-| (b) dequant-at-load bf16 per-expert, pool=16 | 1.535 | 11.768 | +5.5 s dequant and +1.5 GiB RSS PER LAYER |
+| (a) CIQ per-expert dispatch, pool=16 | **0.478** | **4.405** | same kernel, same bytes |
+| (b) dequant-at-load bf16 per-expert, pool=16 | 1.568 | 11.754 | +5.5 s dequant and +1.5 GiB RSS PER LAYER |
 | (c) Q8_K block-dot gathers as a separate kernel | — | — | NOT REUSABLE AS DISTINCT: the existing CIQ kernel already IS this class |
 
+Cell values transcribed from the committed sweep logs (review reconciliation 2026-10-31); the reviewer's independent rerun (0.471/1.745/4.394/11.877 ms) lands in the same cluster — run-to-run spread ≤4.2%, conclusions unaffected.
+
 Pool sweep at batch 1, 16 cpus (logs `pool-sweep-16cpu-t{4,8,16,32}.log`):
-4→1.362 ms, 8→0.773 ms, 16→0.458 ms, 32→1.789 ms. The knee is pool == cpus.
+4→1.348 ms, 8→0.772 ms, 16→0.478 ms, 32→1.758 ms. The knee is pool == cpus.
 
 ### Why (c) is recorded not-reusable
 
@@ -73,7 +75,7 @@ refused on both axes (speed and memory); nothing to adjudicate.
 | everything else: 18 dispatch/threadpool fan-outs, gather, SiLU, scatter | ~0.19 | ~41% |
 
 At serving level the split is different: matched-pool routed phase is
-47 × 0.458 ≈ 21.5 ms/token, while serving runs 181 ms/token (5.51 tok/s) — so
+47 × 0.478 ≈ 22.5 ms/token, while serving runs 181 ms/token (5.51 tok/s) — so
 ~88% of serving decode time is OUTSIDE the routed-expert phase (attention
 tail, shared expert, dense layers, lm_head, engine). That split is the next
 attribution, unmeasured here.

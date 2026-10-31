@@ -19,8 +19,8 @@ identically at the PERF configuration
 Compute class: the packed CIQ dispatch is the MEASURED WINNER at decode batch
 sizes — the stage-1 A/B
 ([flint-kq-cpu-perf-20261030](../bench-evidence/flint-kq-cpu-perf-20261030/README.md))
-times it 0.458 ms/layer against 1.535 ms for dequant-at-load bf16 at batch 1
-(4.394 vs 11.768 at batch 8), and the class (c) "Q8_K block-dot gathers" is
+times it 0.478 ms/layer against 1.568 ms for dequant-at-load bf16 at batch 1
+(4.405 vs 11.754 at batch 8), and the class (c) "Q8_K block-dot gathers" is
 already what the CIQ kernel does. The dequant-at-load trade was refused on
 both axes: 3.3x slower here and +~71 GiB RSS.
 
