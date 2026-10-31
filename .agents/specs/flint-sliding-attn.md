@@ -80,3 +80,30 @@ file, governor logged.
 
 One pull request, `row/FLINT-SLIDING-ATTN`, spec committed first,
 diagnose-stage commit before any fix commit.
+
+## Outcome
+
+2026-10-31. Attribution: the growth is the UNCLIPPED-WINDOW keys=p+1 term
+(window left 512 never clips below p=513, so keys grow 17 -> 208 over the
+measured run) executed on ONE thread — the named fourth, amplified by H3.
+H1 refuted (timer intercept constant 39.3-41.0 ms across reps; append/slot
+map are O(1 token)); H2 refuted (key count not constant in range; slope stays
+linear to +/-0.15% while pages touched grow 2 -> 14 blocks). Decisive H3
+evidence: the 1-thread control reproduces the slope within 2% (0.2574 vs
+0.2630 ms/step) with a 4x larger intercept (GEMVs parallelize, the kernel
+does not), and the 35/14 sliding-to-full slope ratio is 2.506 vs 2.50.
+
+Fix: the paged CPU kernel's parallel axis moved from token rows to
+(token, head) units (cpu_paged_attn.cpp); per-head key order untouched —
+bit-identical by construction, no gate re-pinned. Per-key slope 0.263 ->
+0.027 ms/step @16t; sliding late/early ratio 2.06 -> 1.11 @16t and 2.07 ->
+1.10 @32t; decode 5.48 -> 7.01 tok/s @16t and 4.91 -> 6.83 tok/s @32t
+(3-rep medians, docs/bench-evidence/flint-sliding-attn-20261031/). Gates:
+test_flint_paged 208/208, dtype bit-identity 172, test_flint_gguf 184,
+MiMoV2 sink gates 178/51/67 — all PASS. Rejected: any timer-scope change
+(H1 refuted), any arena/page-locality change (H2 unproven in range; a
+follow-up row may measure it past seq 513 where the window binds). The
+residual growth is the same key term at its parallel floor; it plateaus at
+seq 513 by design. Evidence-dir contamination record: thalia carries a
+resident foreign single-cpu test loop inside bench zone 32-63; every kept
+leg is canary-gated (early-step median reproduces the untouched intercept).
