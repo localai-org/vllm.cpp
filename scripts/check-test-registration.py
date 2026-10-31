@@ -980,6 +980,7 @@ def _agent_record_job_blocks(ci_text: str) -> tuple[list[list[str]], list[str]]:
         if _indent(lines[i]) == 6 and lines[i][6:].startswith("-")
     ]
     blocks: list[list[str]] = []
+    inline_runs: list[str] = []
     for step_pos, step_start in enumerate(step_starts):
         step_end = (
             step_starts[step_pos + 1]
@@ -997,9 +998,13 @@ def _agent_record_job_blocks(ci_text: str) -> tuple[list[list[str]], list[str]]:
         if {"if", "continue-on-error", "shell"} & step_fields.keys():
             continue
         run = step_fields.get("run")
-        if run is not None and re.fullmatch(r"\|[-+]?", run[0]):
+        if run is None:
+            continue
+        if re.fullmatch(r"\|[-+]?", run[0]):
             blocks.append(_literal_block(lines, run[1]))
-    return blocks, defects
+        else:
+            inline_runs.append(run[0])
+    return blocks, defects, inline_runs
 
 
 # One `python3 scripts/check-<name>.py` invocation line inside a run block.
@@ -1013,12 +1018,20 @@ _CHECKER_INVOCATION = re.compile(
 
 
 def _agent_record_checker_scripts(ci_text: str) -> set[str]:
-    """The `scripts/check-*.py` names the agent-record job invokes."""
+    """The `scripts/check-*.py` names the agent-record job invokes.
+
+    Literal blocks AND inline single-line ``run:`` steps both count
+    (CHECKER-HARDENING-2 F1): the pin binds what the job RUNS, not the shape
+    the step happened to be written in.
+    """
+    blocks, _defects, inline_runs = _agent_record_job_blocks(ci_text)
     scripts: set[str] = set()
-    for block in _agent_record_job_blocks(ci_text)[0]:
+    for block in blocks:
         scripts.update(
             Path(name).name for name in _CHECKER_INVOCATION.findall("\n".join(block))
         )
+    for run in inline_runs:
+        scripts.update(Path(name).name for name in _CHECKER_INVOCATION.findall(run))
     return scripts
 
 
