@@ -526,7 +526,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ao[static_cast<size_t>(i)]));
     if (cpu_dump && layer == 0) {
       double s = 0.0;
-      for (float v : x) s += v;
+      for (float xv : x) s += xv;
       std::fprintf(stderr, "[FLINT-CPU] layer 0 post-attn x sum=%.6f\n", s);
     }
 
@@ -650,7 +650,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ff[static_cast<size_t>(i)]));
     if (cpu_dump && layer == 0) {
       double s = 0.0;
-      for (float v : x) s += v;
+      for (float xv : x) s += xv;
       std::fprintf(stderr, "[FLINT-CPU] layer 0 post-mlp x sum=%.6f\n", s);
     }
   }
