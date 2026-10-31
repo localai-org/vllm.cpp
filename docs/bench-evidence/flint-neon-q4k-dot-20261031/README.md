@@ -92,7 +92,7 @@ untouched; this row only adds a quant-dot TU and its dispatch arm.
 
 `tools/bench/flint_kq_moe_class_ab.cpp` profile-split leg, 3-rep medians,
 batch 1, Q4_K_M keep-quant, one gate tower = 512 rows
-(logs: `harness/kq-moe-class-ab-{portable,neon}.log`):
+(logs: `harness-kq-moe-class-ab-{portable,neon}.log`):
 
 | leg | `VT_CPU_Q4K_DOT=portable` | `=neon` | delta |
 |---|---:|---:|---:|
