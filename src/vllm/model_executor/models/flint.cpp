@@ -33,6 +33,7 @@
 #include "vllm/model_executor/models/flint_gguf_weights.h"  // the GGUF arm
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -97,6 +98,69 @@ std::vector<std::string> GetStringArray(const nlohmann::json& j,
     if (!(cond))                                                          \
       throw std::runtime_error(std::string("flint: ") + (msg));           \
   } while (0)
+
+// ---- TT-NONROUTED-ATTRIBUTION (VT_FLINT_PHASE_TIMING): the serving decode
+// phase clock. A READ-ONLY instrument (spec
+// .agents/specs/tt-nonrouted-attribution.md): scoped timers around the
+// production call sites of FlintForwardPaged / FlintMoeBlock, one summary
+// line per forward on stderr. Zero cost when the env is unset — every
+// scope's destination pointer is null and its destructor adds nothing. The
+// CPU backend runs each op inline (its Synchronize is a no-op), so the
+// scopes need no extra synchronization and production timing is untouched.
+struct FlintPhaseTotals {
+  double embed = 0;        // embedding lookup
+  double attn_sliding = 0; // qkv..o_proj+residual on sliding layers
+  double attn_full = 0;    // qkv..o_proj+residual on full-attention layers
+  double norms = 0;        // input/post-attention/final RmsNorm
+  double dense_mlp = 0;    // the dense layers' MLP + residual
+  double moe_router = 0;   // router matmul + host top-k
+  double moe_routed = 0;   // the per-expert gather/SiLU-mul/scatter loop
+  double moe_shared = 0;   // shared expert + MoeCombine
+  double lm_head = 0;      // logits gather + untied head matmul
+  double other = 0;        // sink casts, per-layer slot mapping, post-MoE residual
+};
+thread_local FlintPhaseTotals* g_flint_phase = nullptr;
+
+double FlintPhaseMs(std::chrono::steady_clock::time_point a,
+                    std::chrono::steady_clock::time_point b) {
+  return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+// Adds its elapsed ms into `dst` on scope exit. A null dst (the default when
+// VT_FLINT_PHASE_TIMING is unset) makes this a single null check.
+struct FlintPhaseScope {
+  double* dst;
+  std::chrono::steady_clock::time_point t0;
+  explicit FlintPhaseScope(double* d)
+      : dst(d), t0(std::chrono::steady_clock::now()) {}
+  void Stop() {  // idempotent: an explicit early close, safe before the dtor
+    if (dst != nullptr) {
+      *dst += FlintPhaseMs(t0, std::chrono::steady_clock::now());
+      dst = nullptr;
+    }
+  }
+  ~FlintPhaseScope() { Stop(); }
+};
+
+inline double* FlintPhaseDst(double* bucket) {
+  return g_flint_phase != nullptr ? bucket : nullptr;
+}
+
+inline bool FlintPhaseOn() {
+  static const bool on = std::getenv("VT_FLINT_PHASE_TIMING") != nullptr;
+  return on;
+}
+
+void FlintPhasePrint(int64_t batch, const FlintPhaseTotals& t, double wall_ms) {
+  std::fprintf(stderr,
+               "[FLINT-PHASE] batch=%lld embed=%.3f attn_sliding=%.3f "
+               "attn_full=%.3f norms=%.3f dense_mlp=%.3f moe_router=%.3f "
+               "moe_routed=%.3f moe_shared=%.3f lm_head=%.3f other=%.3f "
+               "fwd_wall_ms=%.3f\n",
+               static_cast<long long>(batch), t.embed, t.attn_sliding,
+               t.attn_full, t.norms, t.dense_mlp, t.moe_router, t.moe_routed,
+               t.moe_shared, t.lm_head, t.other, wall_ms);
+}
 
 }  // namespace
 
@@ -776,6 +840,9 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
 
   // Router: bf16 x bf16 accumulating straight into f32 — the architecture's
   // own f32 score path, no intermediate bf16 rounding.
+  // TT-NONROUTED-ATTRIBUTION: router + host top-k vs the routed expert loop
+  // vs the shared expert (null buckets when the phase clock is off).
+  FlintPhaseScope ph_router(FlintPhaseDst(&g_flint_phase->moe_router));
   DBuf dlog(d, DType::kF32, {t, e});
   vt::Matmul(d.q, dlog.t(), x, dense_attn::ResidentWeight(d, w.router_gate));
 
@@ -812,6 +879,8 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
 
   // Routed experts (CPU reference path): download routing, per-expert
   // gather -> gate/up -> SiLU-mul -> down -> scatter.
+  ph_router.Stop();
+  FlintPhaseScope ph_routed(FlintPhaseDst(&g_flint_phase->moe_routed));
   DBuf expert_out(d, DType::kBF16, {t, top_k, p.hidden_size});
   expert_out.Zero(d);
   std::vector<int32_t> hid(static_cast<size_t>(t * top_k));
@@ -857,6 +926,8 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
     }
   }
 
+  ph_routed.Stop();
+  FlintPhaseScope ph_shared(FlintPhaseDst(&g_flint_phase->moe_shared));
   DBuf shared = FlintSharedExpert(d, w.shared_expert, x);
   DBuf out(d, DType::kBF16, {t, p.hidden_size});
   vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared.t());
@@ -905,6 +976,12 @@ ForwardLogits FlintForwardPaged(
 
   Dev d{vt::GetBackend(queue.device.type), queue};
   const float eps = static_cast<float>(p.rms_norm_eps);
+  // TT-NONROUTED-ATTRIBUTION: open this forward's phase clock. One line per
+  // forward lands on stderr just before the return; inert by default.
+  FlintPhaseTotals phase_totals;
+  const bool phase_on = FlintPhaseOn();
+  const auto phase_wall_t0 = std::chrono::steady_clock::now();
+  if (phase_on) g_flint_phase = &phase_totals;
   // The paged-vs-reference stage dump, the same tags the reference prints
   // behind FLINT_CPU_DUMP ([FLINT-CPU] L0 <stage>), so the like-for-like
   // distance is readable per stage.
@@ -929,9 +1006,12 @@ ForwardLogits FlintForwardPaged(
   // id out of range" on garbage ids).
   DBuf hidden(d, DType::kBF16, {t, h});
   DBuf ids(d, DType::kI32, {t}, token_ids.data());
-  vt::Embedding(d.q, hidden.t(),
-                ResidentWeight(d, w.embed_tokens, {p.vocab_size, h}), ids.t());
-  d.b.Synchronize(d.q);
+  {
+    FlintPhaseScope ph_embed(FlintPhaseDst(&g_flint_phase->embed));
+    vt::Embedding(d.q, hidden.t(),
+                  ResidentWeight(d, w.embed_tokens, {p.vocab_size, h}), ids.t());
+    d.b.Synchronize(d.q);
+  }
   if (cpu_dump) {
     double s = 0.0;
     const auto* p16 = hidden.t().Ptr<uint16_t>();
@@ -945,11 +1025,14 @@ ForwardLogits FlintForwardPaged(
   // and the weights are bf16.
   std::vector<DBuf> sink_f32;
   sink_f32.reserve(static_cast<size_t>(p.num_hidden_layers));
-  for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
-    DBuf s(d, DType::kF32, {hq});
-    vt::CastF32(d.q, s.t(),
-                ResidentWeight(d, w.layers[static_cast<size_t>(l)].attn.sinks, {hq}));
-    sink_f32.push_back(std::move(s));
+  {
+    FlintPhaseScope ph_other(FlintPhaseDst(&g_flint_phase->other));
+    for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+      DBuf s(d, DType::kF32, {hq});
+      vt::CastF32(d.q, s.t(),
+                  ResidentWeight(d, w.layers[static_cast<size_t>(l)].attn.sinks, {hq}));
+      sink_f32.push_back(std::move(s));
+    }
   }
 
   for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
@@ -964,13 +1047,21 @@ ForwardLogits FlintForwardPaged(
     // rmsnorm(2x) after the first attention.
     DBuf dhn(d, DType::kBF16, {t, h});
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
-    vt::RmsNorm(d.q, dhn.t(), hidden.t(), w_in, vt::RmsNormArgs{eps, false});
+    {
+      FlintPhaseScope ph_norms(FlintPhaseDst(&g_flint_phase->norms));
+      vt::RmsNorm(d.q, dhn.t(), hidden.t(), w_in, vt::RmsNormArgs{eps, false});
+    }
 
     // q/k/v projections. vt::Matmul accumulates f32; the reference's
     // MatmulBf16 ROUNDS each projection output to bf16 before anything else
     // reads it (flint.cpp MatmulBf16's final store), so the arm rounds here
     // once and every later stage — head norm, RoPE, cache, kernel — consumes
     // the same bf16 stream the reference does.
+    // TT-NONROUTED-ATTRIBUTION: the attention half of the layer (qkv
+    // projections, head norms, RoPE, cache write, paged attention, o_proj,
+    // residual), attributed to the layer's attention group.
+    FlintPhaseScope ph_attn(FlintPhaseDst(is_sliding ? &g_flint_phase->attn_sliding
+                                                     : &g_flint_phase->attn_full));
     DBuf q32 = FlintLinearMatmul(d, dhn.t(), lw.attn.q_proj, DType::kF32);
     DBuf k32 = FlintLinearMatmul(d, dhn.t(), lw.attn.k_proj, DType::kF32);
     DBuf v32 = FlintLinearMatmul(d, dhn.t(), lw.attn.v_proj, DType::kF32);
@@ -1127,19 +1218,33 @@ ForwardLogits FlintForwardPaged(
       dump_bf16("post_attn_x", post_attn.t(), l);
     }
     hidden = std::move(post_attn);
+    ph_attn.Stop();
 
     // post_attention_layernorm + residual add.
     DBuf dh2(d, DType::kBF16, {t, h});
     Tensor w_post = ResidentWeight(d, lw.post_attention_layernorm, {h});
-    vt::RmsNorm(d.q, dh2.t(), hidden.t(), w_post, vt::RmsNormArgs{eps, false});
+    {
+      FlintPhaseScope ph_norms(FlintPhaseDst(&g_flint_phase->norms));
+      vt::RmsNorm(d.q, dh2.t(), hidden.t(), w_post, vt::RmsNormArgs{eps, false});
+    }
 
     // Dense MLP or MoE, then the residual add the next layer's input norm
-    // consumes.
-    DBuf ff = p.IsDenseLayer(l)
-                  ? FlintDenseMlp(d, lw.dense_mlp, dh2.t())
-                  : FlintMoeBlock(d, lw.moe, p, dh2.t());
+    // consumes. The MoE block sub-clocks router / routed / shared itself.
+    const bool is_dense = p.IsDenseLayer(l);
+    DBuf ff = [&]() -> DBuf {
+      if (is_dense) {
+        FlintPhaseScope ph_dense(FlintPhaseDst(&g_flint_phase->dense_mlp));
+        return FlintDenseMlp(d, lw.dense_mlp, dh2.t());
+      }
+      return FlintMoeBlock(d, lw.moe, p, dh2.t());
+    }();
     DBuf next(d, DType::kBF16, {t, h});
-    vt::Add(d.q, next.t(), hidden.t(), ff.t());
+    {
+      FlintPhaseScope ph_add(
+          FlintPhaseDst(is_dense ? &g_flint_phase->dense_mlp
+                                 : &g_flint_phase->other));
+      vt::Add(d.q, next.t(), hidden.t(), ff.t());
+    }
     if (cpu_dump) {
       dump_bf16("ff", ff.t(), l);
       dump_bf16("post_mlp_x", next.t(), l);
@@ -1149,8 +1254,11 @@ ForwardLogits FlintForwardPaged(
 
   // Final norm + untied lm_head, f32 logits (the sampler contract).
   DBuf dnorm(d, DType::kBF16, {t, h});
-  vt::RmsNorm(d.q, dnorm.t(), hidden.t(), ResidentWeight(d, w.final_norm, {h}),
-              vt::RmsNormArgs{eps, false});
+  {
+    FlintPhaseScope ph_norms(FlintPhaseDst(&g_flint_phase->norms));
+    vt::RmsNorm(d.q, dnorm.t(), hidden.t(), ResidentWeight(d, w.final_norm, {h}),
+                vt::RmsNormArgs{eps, false});
+  }
 
   const bool do_gather =
       !logits_indices.empty() &&
@@ -1165,6 +1273,7 @@ ForwardLogits FlintForwardPaged(
   const int64_t n_out = src.shape[0];
   DBuf logits(d, DType::kF32, {n_out, p.vocab_size});
   {
+    FlintPhaseScope ph_head(FlintPhaseDst(&g_flint_phase->lm_head));
     // The lm_head rides the same dispatch seam: a keep-quant lm_head is
     // [V, H] nk (MatmulBT), the bf16 lm_head is [H, V] (Matmul) — read the
     // orientation off the tensor, do not reshape a block weight.
@@ -1185,6 +1294,11 @@ ForwardLogits FlintForwardPaged(
     for (int64_t v = 0; v < p.vocab_size; ++v) s0 += p32[v];
     std::fprintf(stderr, "[FLINT-PAGED] logits row0 sum=%.6f argmax=%d max=%.6f\n",
                  s0, static_cast<int>(ArgmaxRow(p32, p.vocab_size)), p32[0]);
+  }
+  if (phase_on) {
+    g_flint_phase = nullptr;  // every scope is closed by here
+    FlintPhasePrint(t, phase_totals,
+                    FlintPhaseMs(phase_wall_t0, std::chrono::steady_clock::now()));
   }
   ForwardLogits fl;
   fl.rows = n_out;

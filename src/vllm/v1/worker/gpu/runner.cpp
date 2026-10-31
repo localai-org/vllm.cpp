@@ -2339,8 +2339,31 @@ std::vector<int32_t> GPUModelRunner::calc_mrope_positions(
   return out;
 }
 
+// TT-NONROUTED-ATTRIBUTION (VT_FLINT_PHASE_TIMING): the step-side wall
+// clocks the model forward cannot see - the sampler call and the inter-step
+// gap the engine's orchestration (scheduler, bookkeeping) leaves around the
+// forward. Read-only, one line per step on stderr, inert unless the env is
+// set. Pairs with the [FLINT-PHASE] line flint.cpp prints per forward.
+namespace {
+
+bool RunnerPhaseTimingOn() {
+  static const bool on = std::getenv("VT_FLINT_PHASE_TIMING") != nullptr;
+  return on;
+}
+
+double RunnerPhaseMs(std::chrono::steady_clock::time_point a,
+                     std::chrono::steady_clock::time_point b) {
+  return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+}  // namespace
+
 std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
     const SchedulerOutput& scheduler_output) {
+  // TT-NONROUTED-ATTRIBUTION (VT_FLINT_PHASE_TIMING): inter-step clocks.
+  static const bool step_phase_on = RunnerPhaseTimingOn();
+  static std::chrono::steady_clock::time_point prev_step_entry{};
+  static bool have_prev_step_entry = false;
   // ENG-ASYNC-SCHED depth-2 LIFETIME GUARD. Under async scheduling the previous
   // step went through sample_tokens_async, which DEFERS the main queue's D2H to
   // the consuming step's get_output() (one step_with_batch_queue call later). So
@@ -3270,7 +3293,25 @@ std::optional<ModelRunnerOutput> GPUModelRunner::execute_model(
     ConnectorLoadExternalKv();
   }
 
+  // TT-NONROUTED-ATTRIBUTION (VT_FLINT_PHASE_TIMING): bracket the forward and
+  // measure the inter-step wall from the previous execute_model entry - the
+  // gap is engine orchestration the forward's own phase line cannot cover.
+  const auto step_entry = std::chrono::steady_clock::now();
+  double step_wall_ms = 0.0;
+  if (step_phase_on) {
+    if (have_prev_step_entry)
+      step_wall_ms = RunnerPhaseMs(prev_step_entry, step_entry);
+    prev_step_entry = step_entry;
+    have_prev_step_entry = true;
+  }
+  const auto fwd_t0 = std::chrono::steady_clock::now();
   ForwardLogits logits = ModelRegistry::Forward(*model_, forward_input);
+  if (step_phase_on)
+    std::fprintf(stderr,
+                 "[FLINT-STEP] batch=%lld fwd_ms=%.3f step_wall_ms=%.3f\n",
+                 static_cast<long long>(num_reqs),
+                 RunnerPhaseMs(fwd_t0, std::chrono::steady_clock::now()),
+                 step_wall_ms);
 
   // KV-EXTERNAL-CACHE (LMCache): after the forward has written this step's KV,
   // STORE every newly-complete prompt block to the external cache (the worker
@@ -4081,9 +4122,27 @@ void GPUModelRunner::dump_step_logits(const vt::Tensor& logits) {
   }
 }
 
+// TT-NONROUTED-ATTRIBUTION (VT_FLINT_PHASE_TIMING): prints sample_ms when the
+// guarded region exits by any path (the 0-token flush included).
+namespace {
+struct RunnerSampleTimer {
+  bool on;
+  std::chrono::steady_clock::time_point t0;
+  RunnerSampleTimer()
+      : on(RunnerPhaseTimingOn()), t0(std::chrono::steady_clock::now()) {}
+  ~RunnerSampleTimer() {
+    if (on)
+      std::fprintf(stderr, "[FLINT-STEP] sample_ms=%.3f\n",
+                   RunnerPhaseMs(t0, std::chrono::steady_clock::now()));
+  }
+};
+
+}  // namespace
+
 ModelRunnerOutput GPUModelRunner::sample_tokens(
     const std::optional<GrammarOutput>& grammar_output) {
   ModelRunnerOutput out;
+  RunnerSampleTimer sample_timer;
   const int num_reqs = exec_state_.num_reqs;
   if (num_reqs == 0) {
     return out;  // 0-token flush step (nothing sampled).
@@ -5574,6 +5633,7 @@ void GPUModelRunner::replay_last_sampled_ops(AsyncDeviceInputs& dev) {
 
 std::unique_ptr<AsyncModelRunnerOutput> GPUModelRunner::sample_tokens_async(
     const std::optional<GrammarOutput>& grammar_output) {
+  RunnerSampleTimer async_sample_timer;
   // ARCH-ONE-SURFACE ROW 6: pooling models resolve async scheduling OFF
   // (config/vllm.py:1068-1073 mirror in LoadedEngine::ResolveAsyncEnabled), so
   // the depth-2 async sampler must never see one — refuse loudly rather than
