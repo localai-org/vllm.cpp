@@ -288,8 +288,6 @@ if(VLLM_CPP_TENSTORRENT)
   # attention probe — sinks + head-dim QK-norm + RoPE-as-configured + the 513
   # window, both window modes, per-head slices against the W2-derived band.
   # Card + operator-run under the gpu.lock mutex.
-  vllm_cpp_add_test(scratch_flint_attn_perf vllm/models/scratch_flint_attn_perf.cpp)
-  target_include_directories(scratch_flint_attn_perf PRIVATE ${CMAKE_SOURCE_DIR}/src)
   vllm_cpp_add_test(test_flint_tt_attention_probe vllm/models/test_flint_tt_attention_probe.cpp)
   target_include_directories(test_flint_tt_attention_probe PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # SCRATCH W2 diagnostic (operator-run under the gpu.lock mutex, evidence in
