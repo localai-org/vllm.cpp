@@ -105,3 +105,57 @@ untouched; `tests/scripts/test_check_test_registration.py` is green before
 and after, four fixtures richer (unrecorded inline fails, pinned inline
 passes, the collector sees an inline step, a conditional inline step is not a
 registration).
+
+## Creation-mutation measurement (pr-size contract)
+
+CI reported `scripts/check-doc-sha-pins.py is absent at BASE and has no closed
+creation mutation`. The creation contract in `scripts/check-pr-size.py` needs,
+for every checker created in-range, a `DISABLED_CREATION_CHECKER` entry whose
+comment records the measured stub run: the suite executed against a disabled
+stub of the checker, with real counts, proving the checker's tests are
+load-bearing. Both new checkers in this range were measured on 2026-10-31
+against the empty stub (`exits 0, prints nothing, defines nothing`); the stubs
+are disposable instruments and the real checkers are restored before anything
+lands.
+
+`scripts/check-doc-sha-pins.py` (created in f801d860b; suite
+`tests/scripts/test_check_doc_sha_pins.py`):
+
+```
+$ python3 -m unittest discover -s tests/scripts -p test_check_doc_sha_pins.py
+Ran 11 tests in 0.007s
+FAILED (errors=11)
+```
+
+Eleven of eleven red, ZERO cases surviving. Every case calls into the module
+(`self_test` or `run`), which the stub does not define, so each raises
+AttributeError rather than passing a reduced set. The red-first -- corrupting a
+recorded sha in `docs/USAGE.md` (README §1) -- is a case among these eleven, so
+the suite detects the checker's absence rather than silently shrinking.
+
+`scripts/check-evidence-pin-sha.py` (created in a51d28ab4; absent at BASE
+because the v1 batch never landed; suite
+`tests/scripts/test_check_evidence_pin_sha.py`):
+
+```
+$ python3 -m unittest discover -s tests/scripts -p test_check_evidence_pin_sha.py
+Ran 9 tests in 0.004s
+FAILED (errors=9)
+```
+
+Nine of nine red, ZERO cases surviving. Every case calls `distinct_shas`,
+`check_pair`, or `run` on the module, all undefined on the stub. The red-first
+-- corrupting the recorded sha in
+`docs/bench-evidence/flint-cpu-parity-20261029/report.md` -- fails loudly on
+the stub.
+
+`scripts/check-evidence-refs.py` is not a creation case: it exists at BASE, so
+the normal deletion mutation path applies to it and no stub measurement is
+owed. The pr-size contract also requires semantic mutation evidence in the
+checker's own suite for any change to `scripts/check-pr-size.py` itself, so
+`tests/scripts/test_check_pr_size.py::test_every_created_checker_has_closed_bootstrap_evidence`
+now pins both new paths in the expected `CREATION_MUTATIONS` set, with the
+same measured counts. That suite runs 58 tests green, and the executable
+evidence run proves it red against the BASE checker (which lacks the two
+dict entries). The pr-size gate (`--base` at localai-org main FETCH_HEAD)
+is green after the entries and the suite pin land together.
