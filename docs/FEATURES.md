@@ -12,7 +12,7 @@ the agent-facing parity inventory with upstream file references see
 n/a means the feature does not apply to that engine's design.
 
 Reference versions: vLLM <!--pin:label-->0.3.0.dev267<!--/pin--> (<!--pin:commit-->`a7c23ac96d`<!--/pin-->, the parity pin since
-2026-09-26), SGLang v0.5.15, llama.cpp `b10451`, MLX-LM as of 2026-07. Rows
+2026-09-26), SGLang v0.5.15, llama.cpp `b11765`, MLX-LM as of 2026-07. Rows
 describing what vLLM has were read at the PRIOR pin `555967922` unless they say
 otherwise; the 290-commit-range PORT-NOW queue for the advance is classified and
 unworked (#2611). Competitor columns describe what those projects ship, and

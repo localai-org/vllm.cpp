@@ -73,6 +73,32 @@ of it lands in docs/bench-evidence/llama-cpp-pin-advance-20261031/.
   advances do); if a move invalidates a landed row's claim, STOP and
   adjudicate before landing.
 
+## Outcome
+
+(added 2026-10-31, row landed on `row/LLAMA-CPP-PIN-ADVANCE`)
+
+- **Tag**: `b11765` (`9df0b73c707900b7277a46b5ae52ff7e7e567d13`, 2026-10-20) —
+  the #30865 merge commit itself; the first release tag carrying both #30673
+  and #30865 (verified through the compare API and a fresh clone; the repo's
+  newer semver series starts later, `v0.8.0` 2026-10-28, and also carries both —
+  recorded as the fallback).
+- **Gateability**: release build (GGML_NATIVE=ON, aarch64) on this host serves
+  the kolibri1 APEX I-Micro and the Qwen3.8-27B Q4_K_M floor artifact; the
+  flint artifact refuses at the stock pin, correctly (separate PR-head oracle).
+- **Pin**: `llama-cpp` advanced `62318cd57`/`b11709` → `9df0b73c`/`b11765`,
+  `pinned_on = 2026-10-31`, `gateable = yes`. The scoped `llama-cpp-kolibri1`
+  record already pinned `b11765` and keeps its own file with a dated note.
+- **Comparison (the payoff)**: on the same `Kolibri-1-APEX-I-Micro.gguf`, bench
+  zone and thread counts, llama.cpp measures 17.98 ± 0.12 tok/s (16t) and
+  20.18 ± 0.61 tok/s (32t) against our arm's 4.97 / 6.55 — the floor is
+  3.62x / 3.08x ahead. The gap is recorded, not adjudicated.
+- **Rejected alternative**: advancing to `v0.8.0` instead of `b11765` — the
+  spec names the FIRST release tag after the merges, and `b11765` is it;
+  `v0.8.0` would add eight days of unrelated commits to the floor without
+  answering the row's question any better.
+- No floor moved: no recorded llama.cpp number in the tree was measured at the
+  retired live pin, so neither stop condition fired.
+
 ## Git integration
 
 One pull request, `row/LLAMA-CPP-PIN-ADVANCE`, spec committed first.

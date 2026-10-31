@@ -164,11 +164,11 @@ id = llama-cpp
 role = secondary
 upstream = https://github.com/ggml-org/llama.cpp
 scope = CPU and GGUF k-quant speed and memory floors, quant-matched against the same weights
-pin = 62318cd57dc63900ecb153272c0b10f78550855d
-pin_label = llama.cpp main, 2026-10-17 (kolibri-1 merge 62318cd57)
-pinned_on = 2026-10-20
+pin = 9df0b73c707900b7277a46b5ae52ff7e7e567d13
+pin_label = llama.cpp release b11765, 2026-10-20 (first release carrying kolibri-1 #30673 and the router-precision removal #30865)
+pinned_on = 2026-10-31
 gateable = yes
-evidence = docs/bench-evidence/kolibri1-llamacpp-crosscheck-20261020.md
+evidence = docs/bench-evidence/llama-cpp-pin-advance-20261031
 ```
 
 **Prior pin: `11fe02151f79c41d0d4af7da708755d73b9c0da6` (llama.cpp main,
@@ -184,6 +184,22 @@ checkpoint converted to bf16 GGUF through the upstream converter; identity,
 build, executed path and agreement numbers are in the evidence file above.
 Non-kolibri denominators recorded against `11fe0215` keep that revision in
 their own records; this advancement does not re-base them.
+
+**Prior pin: `62318cd57dc63900ecb153272c0b10f78550855d` (llama.cpp main, the
+Kolibri-1 merge `62318cd57`, tagged upstream as release `b11709`), pinned
+2026-10-20, gateable evidence
+[kolibri1-llamacpp-crosscheck-20261020.md](../../docs/bench-evidence/kolibri1-llamacpp-crosscheck-20261020.md).**
+Every gate recorded against `62318cd57` stays attributed to it. The pin
+advanced on 2026-10-31 because that revision predates the router-precision
+removal `9df0b73c` (#30865, 2026-10-20, numerics-relevant for the kolibri1 MoE
+router) and was labeled `main` rather than a release; the spec requires the
+floor to be a release. `b11765` is the first release tag carrying both #30673
+and #30865 — it IS the #30865 merge commit. Gateability on this host (aarch64,
+clean clone, CPU release build) and the reconciliation table are in
+[`../../docs/bench-evidence/llama-cpp-pin-advance-20261031/`](../../docs/bench-evidence/llama-cpp-pin-advance-20261031/).
+The scoped [`llama-cpp-kolibri1`](llama-cpp-kolibri1.md) record already pinned
+`b11765` for the one-architecture scope, so this advance makes the two pins the
+same object; the scoped record stays for its one-file-per-pin framing.
 
 **Prior pin: `10bf611e533d81f739128304991c5e133c6aebd8` (`b10451`),
 pinned 2026-08-16, gateable evidence

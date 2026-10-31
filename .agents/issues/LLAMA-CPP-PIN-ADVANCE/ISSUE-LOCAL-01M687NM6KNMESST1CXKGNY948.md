@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M687NM6KNMESST1CXKGNY948
 Title: Advance the stock llama-cpp oracle pin past the Kolibri-1 support merge, reconciling every b10451 consumer
 Row: LLAMA-CPP-PIN-ADVANCE
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-31
 Updated: 2026-10-31
-Closed: -
+Closed: 2026-10-31
 
 ## Problem
 
@@ -16,4 +16,17 @@ The llama-cpp oracle pins stock release b10451, which predates Kolibri-1 support
 
 ## Resolution
 
--
+- 2026-10-31, closed by the row's implementation on `row/LLAMA-CPP-PIN-ADVANCE`.
+  Tag identified: release `b11765` = `9df0b73c707900b7277a46b5ae52ff7e7e567d13`
+  (the #30865 merge commit; carries #30673; compare-API + fresh-clone verified,
+  `docs/bench-evidence/llama-cpp-pin-advance-20261031/tag-identification.md`).
+  Built clean on this aarch64 host (336 targets, GGML_NATIVE=ON, binary sha256
+  recorded); gateability legs: kolibri1 APEX I-Micro loads and generates
+  greedily, Qwen3.8-27B Q4_K_M loads and generates, flint correctly refuses at
+  the stock pin. Pin advanced in `.agents/oracles/llama-cpp.md` with every
+  consumer dispositioned (`reconciliation.md`): stale current-state surfaces
+  re-stated, attribution-only surfaces kept, scoped `llama-cpp-kolibri1`
+  re-anchored with a dated note. Quant-matched comparison taken: llama.cpp
+  17.98/20.18 tok/s (16/32t) vs our arm 4.97/6.55 on the same I-Micro artifact,
+  zone and threads - the floor is ~3x ahead, recorded not adjudicated. Neither
+  stop condition fired.

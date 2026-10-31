@@ -2327,8 +2327,9 @@ inner 4096, state 128; context 262144.
   `matrix cores: NV_coopmat2` before trusting any number.** llama.cpp is
   unpacked at `~/lcpp-vk` with `build-vk/bin/llama-bench` built, **and that tree
   is the SUPERSEDED fork `237ad9b96`, not the pin.** Do not reuse it. The
-  llama.cpp oracle is stock `b10451` since 2026-08-16
-  ([`oracles/llama-cpp.md`](oracles/llama-cpp.md)). `237ad9b96` is a local-only
+  llama.cpp oracle is stock release `b11765` (`9df0b73c`) since 2026-10-31
+  ([`oracles/llama-cpp.md`](oracles/llama-cpp.md)); earlier stock pins `b10451`
+  (to 2026-10-20) and `62318cd57`/`b11709` (to 2026-10-31). `237ad9b96` is a local-only
   commit on the developer's `localai-paged` branch, 65 of our own performance
   commits past upstream `b9827`, built from a working tree with 27 uncommitted
   entries. `~/lcpp-vk` therefore reproduces neither the pin nor any identifiable

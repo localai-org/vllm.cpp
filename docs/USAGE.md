@@ -447,7 +447,7 @@ and up rows into one owner, so plan for the whole checkpoint in host memory.
 
 Refused arms:
 
-- **GGUF.** llama.cpp `b10451` defines `cohere2moe`; the loader arm is owed.
+- **GGUF.** llama.cpp `b11765` (the stock release pin since 2026-10-31; `b10451` first defined the architecture) defines `cohere2moe`; the loader arm is owed.
 - **Quantized siblings** (FP8, W4A16, NVFP4, anything with a
   `quantization_config`). Load the bf16 checkpoint.
 - **`use_qk_norm: true`.** The pinned vLLM `cohere2_moe.py` has no q/k norm.
@@ -1010,10 +1010,15 @@ replays the fp8 safetensors goldens under the developer-adjudicated
 quantized-arm record (2026-10-30, Option A — quantized arms are adjudicated on
 their own measured record; the fp8 2.5 band governs same-weights kernel
 comparisons only): I-Micro 37/44 golden greedy positions, worst topk diff
-3.245, 2 hard flips. **No quantization-matched llama.cpp floor exists**: the
-`llama-cpp-kolibri1` pin advance past `b10451` (which predates the kolibri1
-support in PRs #30673/#30865) is a named follow-up, so this arm has no
-quant-matched denominator yet.
+3.245, 2 hard flips. **The quantization-matched llama.cpp floor now EXISTS**
+(row `LLAMA-CPP-PIN-ADVANCE`, 2026-10-31): the stock pin advanced to release
+`b11765` (`9df0b73c`), which loads this artifact, and on the same file, bench
+zone and thread counts it measures **17.98 ± 0.12 tok/s (16t)** and
+**20.18 ± 0.61 tok/s (32t)** against our arm's 4.97 / 6.55 — llama.cpp is
+3.62x / 3.08x ahead
+([evidence](bench-evidence/llama-cpp-pin-advance-20261031/README.md)). The
+gap is recorded, not adjudicated: closing it belongs to the kolibri1 CPU
+performance rows, not the GGUF-arm record.
 
 ## Flint (RecursiveSI) from a GGUF k-quant
 

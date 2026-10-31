@@ -37,8 +37,7 @@ run at the new pin: the declared token-exact gate is owed by
 golden predates the advance. Speed figures labelled 0.25.0 ran the ROLLBACK the
 harness enforced until 2026-08-12 and are SUPERSEDED, never binding (#520).
 Correctness re-validated bit-identical across the advance, zero golden drift.
-The llama.cpp oracle is stock `b10451` since 2026-08-16, `gateable = no` until
-someone builds it (#857). Every llama.cpp figure here is SUPERSEDED and owed a
+The llama.cpp oracle is stock release `b11765` (`9df0b73c`) since 2026-10-31, `gateable = yes` (built and run on this host; [`../../docs/bench-evidence/llama-cpp-pin-advance-20261031/`](../../docs/bench-evidence/llama-cpp-pin-advance-20261031/)). Earlier stock pins: `62318cd57`/`b11709` (2026-10-20 to 2026-10-30), `b10451` (2026-08-16 to 2026-10-20, then `gateable = no` until #857 built it). Every llama.cpp figure here is SUPERSEDED and owed a
 re-take (#1003), and a sweep finds it ran one of **three** revisions, none of
 them the pin. The Reproduce table names all three.
 
