@@ -107,3 +107,5 @@ residual growth is the same key term at its parallel floor; it plateaus at
 seq 513 by design. Evidence-dir contamination record: thalia carries a
 resident foreign single-cpu test loop inside bench zone 32-63; every kept
 leg is canary-gated (early-step median reproduces the untouched intercept).
+
+Incidental repair: the old code sized its accumulator `acc(d)` where the output width is `d_v` — a latent defect the (token, head)-unit rewrite's per-unit scratch silently fixes; flagged by the fresh review (2026-10-31).
