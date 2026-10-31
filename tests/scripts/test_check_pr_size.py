@@ -835,6 +835,22 @@ class BudgetEnforcement(unittest.TestCase):
             # asserted: "Ran 28 tests" then "FAILED (failures=19, errors=19)",
             # with no case surviving on a reduced contract.
             "scripts/check-deepseek-v4-vision-manifests.py",
+            # 2026-10-31: the documented sha-pin gate (CHECKER-HARDENING-2).
+            # Created in the same range, so it has no BASE version to mutate.
+            # Its suite loads the checker as a module and every case calls
+            # self_test or run, none of which the stub defines, so all 11 cases
+            # go red on AttributeError. Measured with the stub in place, not
+            # asserted: "Ran 11 tests" then "FAILED (errors=11)", ZERO cases
+            # surviving.
+            "scripts/check-doc-sha-pins.py",
+            # 2026-10-31: the evidence-report sha256 gate (CHECKER-HARDENING-2).
+            # Created in the same range (the v1 batch never landed at BASE), so
+            # it has no BASE version to mutate. Its suite loads the checker as a
+            # module and every case calls distinct_shas, check_pair or run,
+            # none of which the stub defines, so all 9 cases go red on
+            # AttributeError. Measured with the stub in place, not asserted:
+            # "Ran 9 tests" then "FAILED (errors=9)", ZERO cases surviving.
+            "scripts/check-evidence-pin-sha.py",
         }
         self.assertEqual(set(checker.CREATION_MUTATIONS), expected)
         for path, mutation in checker.CREATION_MUTATIONS.items():
