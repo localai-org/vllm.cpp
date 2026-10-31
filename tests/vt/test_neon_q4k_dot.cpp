@@ -20,6 +20,7 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -227,14 +228,24 @@ TEST_CASE("FLINT-NEON-Q4K-DOT: per-sub-block scale extremes") {
 }
 
 TEST_CASE("FLINT-NEON-Q4K-DOT: dispatch agrees with the tier") {
-  // On a DotProd host the traits-selected kernel IS the NEON kernel; the
-  // portable pointer stays scalar. Verify both facts through the same public
+  // The dispatched kernel must equal whatever SelectQuantQ4KVecDot resolves
+  // under the CURRENT VT_CPU_Q4K_DOT value, so a legitimate `portable` override
+  // on a DotProd host stays green. Verify both facts through the same public
   // surface the GEMM path consumes.
-  if (!vt::cpu::QuantQ4KNeonActive()) {
-    CHECK(vt::cpu::BlockVecDot(vt::DType::kQ4_K) == vt::cpu::QuantQ4KPortableVecDot());
-    return;
+  const vt::cpu::VecDotFn portable = vt::cpu::QuantQ4KPortableVecDot();
+  CHECK(vt::cpu::BlockVecDot(vt::DType::kQ4_K) ==
+        vt::cpu::SelectQuantQ4KVecDot(portable));
+  // Separately: in auto mode the dispatch IS the NEON kernel exactly when the
+  // HWCAP dotprod probe is live (QuantQ4KNeonVecDot() is that probe). A
+  // `portable` env override legitimately suppresses it, so this arm only runs
+  // when the env does not force the scalar tier.
+  const char* dot_env = std::getenv("VT_CPU_Q4K_DOT");
+  const bool forced_portable =
+      dot_env != nullptr && std::strcmp(dot_env, "portable") == 0;
+  if (!forced_portable) {
+    CHECK(vt::cpu::SelectQuantQ4KVecDot(portable) ==
+          vt::cpu::QuantQ4KNeonVecDot());
   }
-  CHECK(vt::cpu::BlockVecDot(vt::DType::kQ4_K) == vt::cpu::QuantQ4KNeonVecDot());
   // End-to-end through the traits table: the dispatched kernel must still be
   // bit-identical to the portable reference on a randomized corpus.
   uint32_t rng = 0xABCDEF01U;

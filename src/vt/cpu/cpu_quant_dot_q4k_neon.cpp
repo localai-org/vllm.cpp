@@ -11,6 +11,16 @@
 // `VT_CPU_Q4K_DOT=auto|portable|neon` switch, with the portable kernel as the
 // universal fallback.
 //
+// FAILED DRAFTS. A third draft read the nibble plane as one 16-byte sub-block
+// read — the nibble plane desynced from the 8x4 transpose contract.
+//
+// HWCAP HARDENING NOTE. This TU compiles -march=armv8.2-a+dotprod+fp16
+// unconditionally on aarch64; auto mode is safe only because
+// SelectQuantQ4KVecDot consults CpuHasDotProd (HWCAP). Bypassing the HWCAP
+// gate on a non-dotprod host would SIGILL at the first dispatched dot
+// (SDOT/UDOT with no fallback). A one-time SDOT probe hardening is a named
+// candidate, not in this row.
+//
 // BIT-IDENTITY CONTRACT. The row's gate is bit-identity with the scalar
 // `VecDotQ4_KQ8_K` on EVERY input, and the integer core alone does not buy it:
 // the scalar's `aux32[l]` accumulates a STRIDED partition — within each
