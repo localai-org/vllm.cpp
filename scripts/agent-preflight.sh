@@ -109,6 +109,10 @@ CHECKERS=(
   # with the oracle pin that names it as evidence (FLINT-CPU-PARITY M3,
   # CHECKER-HARDENING).
   check-evidence-pin-sha
+  # A 64-hex sha256 recorded beside an artifact path in USAGE.md or a bench
+  # evidence README/report must match the file's content hash on disk
+  # (FLINT-KQ-CPU-PARITY M3, kolibri1-GGUF M2, CHECKER-HARDENING-2).
+  check-doc-sha-pins
   check-prompt-contract
   check-agent-record
   check-release-binary-contract
@@ -149,6 +153,7 @@ SUITES=(
   test_check_prompt_contract
   test_check_evidence_refs
   test_check_evidence_pin_sha
+  test_check_doc_sha_pins
   test_agent_gates
   test_agent_record
   test_check_release_binary_contract
