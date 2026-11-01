@@ -1535,13 +1535,21 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_sources(vllm PRIVATE
     src/vt/cpu/cpu_matmul_elem_f16c.cpp
     src/vt/cpu/cpu_matmul_elem_avx2.cpp
-    src/vt/cpu/cpu_matmul_elem_avx512.cpp)
+    src/vt/cpu/cpu_matmul_elem_avx512.cpp
+    src/vt/cpu/cpu_quant_dot_avx2.cpp)
   set_source_files_properties(
     src/vt/cpu/cpu_matmul_elem_f16c.cpp PROPERTIES
     COMPILE_OPTIONS
       "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/arch:AVX>;$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-mf16c>")
   set_source_files_properties(
     src/vt/cpu/cpu_matmul_elem_avx2.cpp PROPERTIES
+    COMPILE_OPTIONS
+      "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/arch:AVX2>;$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-mavx2;-mf16c>")
+  # QUANT-GGUF-CIQ-GEMM G5: the AVX2 K-quant vec_dot tier. Same surgical
+  # shape: only this TU is compiled wide, and entry is runtime-gated on
+  # DetectX86IsaCaps().avx2 with VT_CPU_QUANT_AVX2 as the defeat seam.
+  set_source_files_properties(
+    src/vt/cpu/cpu_quant_dot_avx2.cpp PROPERTIES
     COMPILE_OPTIONS
       "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/arch:AVX2>;$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-mavx2;-mf16c>")
   set_source_files_properties(

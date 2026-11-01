@@ -27,6 +27,7 @@ def valid_commands() -> list[dict[str, str]]:
         entry("src/vt/cpu/cpu_isa_x86.cpp"),
         entry("src/vt/cpu/cpu_matmul_elem.cpp"),
         entry("src/vt/cpu/cpu_matmul_elem_avx2.cpp", "-mavx2 -mf16c"),
+        entry("src/vt/cpu/cpu_quant_dot_avx2.cpp", "-mavx2 -mf16c"),
         entry(
             "src/vt/cpu/cpu_matmul_elem_avx512.cpp",
             "-mavx512f -mavx512bw -mavx512vl -mf16c",
@@ -78,9 +79,16 @@ class CpuIsaBuildContract(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("-mf16c", result.stdout + result.stderr)
 
+    def test_quant_dot_avx2_source_requires_f16c(self) -> None:
+        entries = valid_commands()
+        entries[3] = entry("src/vt/cpu/cpu_quant_dot_avx2.cpp", "-mavx2")
+        result = self.run_checker(entries)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-mf16c", result.stdout + result.stderr)
+
     def test_avx512_source_requires_exact_feature_set(self) -> None:
         entries = valid_commands()
-        entries[3] = entry(
+        entries[4] = entry(
             "src/vt/cpu/cpu_matmul_elem_avx512.cpp", "-mavx512f -mf16c"
         )
         result = self.run_checker(entries)

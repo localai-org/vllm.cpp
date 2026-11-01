@@ -73,6 +73,28 @@ FromFloatFn BlockFromFloat(DType dtype);
 // cpu_quant_dot.cpp.
 VecDotFn BlockVecDot(DType dtype);
 
+// The TRUE portable K-quant `vec_dot` for a dtype, never the runtime-selected
+// tier. QUANT-GGUF-CIQ-GEMM G5: on AVX2 x86 `BlockVecDot` returns the wide
+// kernel, so a comparison that used it as its portable reference would compare
+// the selected kernel against itself (the same trap QuantQ8PortableVecDot
+// exists to avoid). Returns nullptr for dtypes outside the three-encoding AVX2
+// tier.
+VecDotFn QuantKPortableVecDot(DType dtype);
+
+// QUANT-GGUF-CIQ-GEMM G5 — the x86 AVX2 K-quant `vec_dot` tier for Q4_K,
+// Q6_K and IQ3_S, implemented in cpu_quant_dot_avx2.cpp. CMake links that
+// translation unit only on x86-64, so a non-x86 caller must not reference
+// these two symbols; BlockVecDot guards the call at compile time.
+//
+// `portable` is returned unchanged when the host lacks AVX2 or when
+// VT_CPU_QUANT_AVX2=portable. VT_CPU_QUANT_AVX2=avx2 forces the wide tier and
+// fails closed when the CPU cannot run it; `auto` is the default.
+VecDotFn SelectQuantKVecDot(DType dtype, VecDotFn portable);
+
+// True when the AVX2 K-quant tier would be selected by `auto`: an AVX2 host
+// and no VT_CPU_QUANT_AVX2=portable defeat.
+bool QuantKAvx2Active();
+
 // Q8_0 x Q8_0 DotProd variants for KERNEL-CPU-A76-Q8-DOT. The explicit
 // getters are test/benchmark seams; SelectQuantQ8VecDot applies
 // VT_CPU_Q8_DOT=auto|portable|sdot|a76-asm while retaining `portable` as the

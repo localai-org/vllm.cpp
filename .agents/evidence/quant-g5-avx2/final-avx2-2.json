@@ -1,0 +1,47 @@
+{
+  "server": "/tmp/g5-obj/lumenengine-server",
+  "command": [
+    "/tmp/g5-obj/lumenengine-server",
+    "--model",
+    "/mnt/openwebui/AIKAR/Lumen-3.8-Flare/models/Nemotron-3.5-Bolt-E4B-GSQ-RCO-IQ3_M.gguf",
+    "--served-model-name",
+    "Lumen-3.8-Flare",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "11604",
+    "--device",
+    "cpu",
+    "--max-model-len",
+    "8192",
+    "--block-size",
+    "16",
+    "--num-blocks",
+    "513",
+    "--max-num-seqs",
+    "1",
+    "--max-num-batched-tokens",
+    "512",
+    "--enable-thinking",
+    "--enable-radix-attention",
+    "--enable-metrics",
+    "--language-model-only",
+    "--disable-log-requests"
+  ],
+  "threads": 18,
+  "startup_s": 27.030299186706543,
+  "prompt": "Continue the sequence: 1, 2, 3, 4, 5,",
+  "runs": [
+    {
+      "elapsed_s": 6.157832145690918,
+      "completion_tokens": 32,
+      "text": " 6, 7, 8, 9, 10, ...\n\n**Explanation:** This is a simple sequence of consecutive integers, where each"
+    },
+    {
+      "elapsed_s": 6.188446283340454,
+      "completion_tokens": 32,
+      "text": " 6, 7, 8, 9, 10, ...\n\n**Explanation:** This is a simple sequence of consecutive integers, where each"
+    }
+  ],
+  "loadavg": "17.51 13.19 11.89 19/1984 208087"
+}

@@ -16,6 +16,7 @@ BASELINE_SOURCES = (
 )
 TIER_FLAGS = {
     "src/vt/cpu/cpu_matmul_elem_avx2.cpp": frozenset(("-mavx2", "-mf16c")),
+    "src/vt/cpu/cpu_quant_dot_avx2.cpp": frozenset(("-mavx2", "-mf16c")),
     "src/vt/cpu/cpu_matmul_elem_avx512.cpp": frozenset(
         ("-mavx512f", "-mavx512bw", "-mavx512vl", "-mf16c")
     ),

@@ -1,0 +1,12 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_ops_quant_dot.cpp:1549:
+TEST CASE:  G6 mmla tier availability is coherent
+
+./tests/vt/test_ops_quant_dot.cpp:1560: MESSAGE: i8mm mmla tier not live on this host; G6 numeric checks skipped
+
+===============================================================================
+[doctest] test cases:     35 |     35 passed | 0 failed | 0 skipped
+[doctest] assertions: 285691 | 285691 passed | 0 failed |
+[doctest] Status: SUCCESS!

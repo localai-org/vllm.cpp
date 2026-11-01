@@ -1,0 +1,13 @@
+server: request logging OFF outputs=OFF max_log_len=256 debug_stages=OFF
+server: multimodal limits language-model-only=ON audio=0 image=0 video=0
+server: loading model from /mnt/openwebui/AIKAR/Lumen-3.8-Flare/models/Nemotron-3.5-Bolt-E4B-GSQ-RCO-IQ3_M.gguf (config /mnt/openwebui/AIKAR/Lumen-3.8-Flare/models/Nemotron-3.5-Bolt-E4B-GSQ-RCO-IQ3_M.gguf/config.json, tokenizer /mnt/openwebui/AIKAR/Lumen-3.8-Flare/models/Nemotron-3.5-Bolt-E4B-GSQ-RCO-IQ3_M.gguf/tokenizer.json)
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+server: prefix caching enabled
+server: using chat template (20161 chars) from GGUF metadata (tokenizer.chat_template) in /mnt/openwebui/AIKAR/Lumen-3.8-Flare/models/Nemotron-3.5-Bolt-E4B-GSQ-RCO-IQ3_M.gguf enable_thinking=true
+server: tool-call parser hermes, reasoning parser disabled
+server: multimodal chat seam UNAVAILABLE for architecture 'Gemma4ForConditionalGeneration' (architecture 'Gemma4ForConditionalGeneration' declares multimodal support but no multimodal CHAT seam is registered for it; its processor and chat function are the missing part. Register one with REGISTER_VLLM_MM_CHAT from that architecture's own translation unit (include/vllm/entrypoints/openai/mm_chat_registry.h). Registered: DeepseekV4ForCausalLM, Dots3NoteForCausalLM, NemotronH_Nano_Omni_Reasoning_V3, NemotronH_Nano_VL_V2, Qwen3VLForConditionalGeneration. ENG-MM-INPUT-PIPELINE (#2475).); multimodal requests are REFUSED with HTTP 400 and the text path is unaffected
+server: utility endpoints: /tokenize /detokenize on
+server: GET /metrics enabled (PrometheusStatLogger)
+server: listening on http://127.0.0.1:11604 (model 'Lumen-3.8-Flare', HTTP worker pool 5 fixed)
+server: shutting down on signal 15

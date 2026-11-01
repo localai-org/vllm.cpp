@@ -131,12 +131,15 @@ void GeluErfKernel(Queue&, Tensor& out, const Tensor& x) {
 void AddKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   const int64_t n = a.Numel();
   const int64_t d = a.rank == 0 ? 1 : a.shape[a.rank - 1];
-  const int64_t rows = d == 0 ? 0 : n / d;
   // rank-1 b over a's last dim == a nn.Linear bias row-broadcast; otherwise
   // plain elementwise.
   const bool bcast = b.rank == 1 && a.rank != 1;
-  ParallelForRows(CurrentThreadpool(), rows, [&](int64_t r0, int64_t r1) {
-    for (int64_t i = r0 * d; i < r1 * d; ++i)
+  // Split the output element range, not the rows: the per-element expression
+  // (including the bias broadcast index) is unchanged, so this is
+  // bit-identical, and a decode step with one row no longer runs the whole
+  // vector on the caller (spec § W5).
+  ParallelForRows(CurrentThreadpool(), n, [&](int64_t r0, int64_t r1) {
+    for (int64_t i = r0; i < r1; ++i)
       StoreF32At(out, i, LoadF32At(a, i) + LoadF32At(b, bcast ? (i % d) : i));
   });
 }

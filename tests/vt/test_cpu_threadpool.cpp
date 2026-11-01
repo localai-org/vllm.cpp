@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -49,6 +50,15 @@ std::vector<uint8_t> Bytes(const void* p, size_t n) {
   std::vector<uint8_t> b(n);
   std::memcpy(b.data(), p, n);
   return b;
+}
+
+// Slots still holding the pre-call sentinel. An output-element split must
+// produce every element of its declared range, so a nonzero count means the
+// kernel under-produced and left part of the output untouched.
+int64_t Unwritten(const std::vector<float>& v) {
+  int64_t n = 0;
+  for (float x : v) n += std::isnan(x) ? 1 : 0;
+  return n;
 }
 
 // Swap the kernels' dispatch pool for the scope of one battery run.
@@ -524,6 +534,74 @@ std::vector<std::vector<uint8_t>> RunBattery(Threadpool& pool) {
                         vt::CausalConv1dArgs{true});
     outs.push_back(Bytes(out.data(), out.size() * sizeof(float)));
     outs.push_back(Bytes(state.data(), state.size() * sizeof(float)));
+  }
+  // W5 split these four kernels over the output element range instead of over
+  // rows. Their per-element expressions do not depend on the partition, so a
+  // partition mistake cannot change a value. The entries assert two things
+  // instead: the output bytes agree at every thread count, and every element of
+  // the declared output range is written (the sentinel count), which an extent
+  // that falls back to the row count leaves short. The shapes below are
+  // non-decode so the chunk grid is wider than the pool, and the odd inner dims
+  // put chunk boundaries inside a row.
+  // GeluAndMul [7,26] -> [7,13].
+  {
+    const float kSentinel = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> x(7 * 26), out(7 * 13, kSentinel);
+    FillF32(x, 35);
+    Tensor tx = Tensor::Contiguous(x.data(), DType::kF32, Cpu(), {7, 26});
+    Tensor to = Tensor::Contiguous(out.data(), DType::kF32, Cpu(), {7, 13});
+    vt::GeluAndMul(q, to, tx);
+    CHECK(Unwritten(out) == 0);
+    outs.push_back(Bytes(out.data(), out.size() * sizeof(float)));
+  }
+  // RopeNeox GQA T=10, Hq=4, Hk=2, D=8, rotary_dim=6, in place on q and k.
+  {
+    const int64_t T = 10, Hq = 4, Hk = 2, D = 8;
+    std::vector<float> qq(T * Hq * D), kk(T * Hk * D);
+    std::vector<int32_t> pos(T);
+    FillF32(qq, 36);
+    FillF32(kk, 37);
+    for (int64_t i = 0; i < T; ++i) pos[static_cast<size_t>(i)] = static_cast<int32_t>(1 + 3 * i);
+    Tensor tq = Tensor::Contiguous(qq.data(), DType::kF32, Cpu(), {T, Hq, D});
+    Tensor tk = Tensor::Contiguous(kk.data(), DType::kF32, Cpu(), {T, Hk, D});
+    Tensor tp = Tensor::Contiguous(pos.data(), DType::kI32, Cpu(), {T});
+    vt::RopeNeox(q, tq, tk, tp, vt::RopeArgs{10000.0f, 6});
+    outs.push_back(Bytes(qq.data(), qq.size() * sizeof(float)));
+    outs.push_back(Bytes(kk.data(), kk.size() * sizeof(float)));
+  }
+  // QkvSplit T=10, q_dim=12, k_dim=5, v_dim=7. All three outputs are compared.
+  {
+    const float kSentinel = std::numeric_limits<float>::quiet_NaN();
+    const int64_t T = 10, Q = 12, K = 5, V = 7;
+    std::vector<float> qkv(T * (Q + K + V)), qo(T * Q, kSentinel), ko(T * K, kSentinel),
+        vo(T * V, kSentinel);
+    FillF32(qkv, 38);
+    Tensor tqkv = Tensor::Contiguous(qkv.data(), DType::kF32, Cpu(), {T, Q + K + V});
+    Tensor tq = Tensor::Contiguous(qo.data(), DType::kF32, Cpu(), {T, Q});
+    Tensor tk = Tensor::Contiguous(ko.data(), DType::kF32, Cpu(), {T, K});
+    Tensor tv = Tensor::Contiguous(vo.data(), DType::kF32, Cpu(), {T, V});
+    vt::QkvSplit(q, tq, tk, tv, tqkv);
+    CHECK(Unwritten(qo) == 0);
+    CHECK(Unwritten(ko) == 0);
+    CHECK(Unwritten(vo) == 0);
+    outs.push_back(Bytes(qo.data(), qo.size() * sizeof(float)));
+    outs.push_back(Bytes(ko.data(), ko.size() * sizeof(float)));
+    outs.push_back(Bytes(vo.data(), vo.size() * sizeof(float)));
+  }
+  // Add [6,64] plus a rank-1 bias [64]. The broadcast index is inside the
+  // split element expression.
+  {
+    const float kSentinel = std::numeric_limits<float>::quiet_NaN();
+    const int64_t rows = 6, D = 64;
+    std::vector<float> a(rows * D), bias(D), out(rows * D, kSentinel);
+    FillF32(a, 39);
+    FillF32(bias, 40);
+    Tensor ta = Tensor::Contiguous(a.data(), DType::kF32, Cpu(), {rows, D});
+    Tensor tb = Tensor::Contiguous(bias.data(), DType::kF32, Cpu(), {D});
+    Tensor to = Tensor::Contiguous(out.data(), DType::kF32, Cpu(), {rows, D});
+    vt::Add(q, to, ta, tb);
+    CHECK(Unwritten(out) == 0);
+    outs.push_back(Bytes(out.data(), out.size() * sizeof(float)));
   }
   return outs;
 }

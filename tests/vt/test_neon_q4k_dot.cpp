@@ -228,13 +228,16 @@ TEST_CASE("FLINT-NEON-Q4K-DOT: per-sub-block scale extremes") {
 }
 
 TEST_CASE("FLINT-NEON-Q4K-DOT: dispatch agrees with the tier") {
-  // The dispatched kernel must equal whatever SelectQuantQ4KVecDot resolves
-  // under the CURRENT VT_CPU_Q4K_DOT value, so a legitimate `portable` override
-  // on a DotProd host stays green. Verify both facts through the same public
-  // surface the GEMM path consumes.
+  // Dispatch composes the Arm selector with the outer x86 AVX2 selector.
+  // Preserve each selector's current environment override and verify the
+  // production surface consumed by GEMM.
   const vt::cpu::VecDotFn portable = vt::cpu::QuantQ4KPortableVecDot();
-  CHECK(vt::cpu::BlockVecDot(vt::DType::kQ4_K) ==
-        vt::cpu::SelectQuantQ4KVecDot(portable));
+  vt::cpu::VecDotFn selected = vt::cpu::SelectQuantQ4KVecDot(portable);
+#if defined(__x86_64__) || defined(_M_X64)
+  selected = vt::cpu::SelectQuantKVecDot(vt::DType::kQ4_K, selected);
+#endif
+  CHECK(vt::cpu::BlockVecDot(vt::DType::kQ4_K) == selected);
+  CHECK(vt::cpu::QuantTraits(vt::DType::kQ4_K).vec_dot == selected);
   // Separately: in auto mode the dispatch IS the NEON kernel exactly when the
   // HWCAP dotprod probe is live (QuantQ4KNeonVecDot() is that probe). A
   // `portable` env override legitimately suppresses it, so this arm only runs
@@ -242,12 +245,15 @@ TEST_CASE("FLINT-NEON-Q4K-DOT: dispatch agrees with the tier") {
   const char* dot_env = std::getenv("VT_CPU_Q4K_DOT");
   const bool forced_portable =
       dot_env != nullptr && std::strcmp(dot_env, "portable") == 0;
-  if (!forced_portable) {
+  if (!forced_portable && vt::cpu::QuantQ4KNeonActive()) {
     CHECK(vt::cpu::SelectQuantQ4KVecDot(portable) ==
           vt::cpu::QuantQ4KNeonVecDot());
+  } else {
+    CHECK(vt::cpu::SelectQuantQ4KVecDot(portable) == portable);
   }
-  // End-to-end through the traits table: the dispatched kernel must still be
-  // bit-identical to the portable reference on a randomized corpus.
+  // Traits must execute the selected kernel. The scalar and NEON tiers also
+  // require portable bit identity. AVX2 arithmetic has its independent oracle
+  // and tolerance in test_ops_quant_dot, including adversarial inputs.
   uint32_t rng = 0xABCDEF01U;
   for (int rep = 0; rep < 256; ++rep) {
     std::vector<SuperBlock> blocks;
@@ -263,6 +269,10 @@ TEST_CASE("FLINT-NEON-Q4K-DOT: dispatch agrees with the tier") {
         3 * kK, &via_traits, 0, x.data(), 0, y.data(), 0, 1);
     const float ref = RunDot(vt::cpu::QuantQ4KPortableVecDot(), blocks);
     CAPTURE(rep);
-    REQUIRE(FloatBits(via_traits) == FloatBits(ref));
+    const float via_selected = RunDot(selected, blocks);
+    REQUIRE(FloatBits(via_traits) == FloatBits(via_selected));
+    if (selected == portable || selected == vt::cpu::QuantQ4KNeonVecDot()) {
+      REQUIRE(FloatBits(via_traits) == FloatBits(ref));
+    }
   }
 }

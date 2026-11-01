@@ -35,6 +35,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <string>
@@ -48,11 +49,22 @@
 #include "iq2xs_iq4xs_golden_vectors.h"  // the same artifact bytes, decoded
 #include "vt/cpu/cpu_threadpool.h"  // Threadpool::SwapForTesting (via -I src)
 #include "vt/cpu/cpu_quant_iq_tables.h"  // kIq1sGrid provenance check
+#if defined(__x86_64__) || defined(_M_X64)
+#include "vt/cpu/cpu_isa_x86.h"
+#endif
 #include "vt/device.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
 #include "vt/quant.h"
 #include "vt/tensor.h"
+
+#if defined(_WIN32)
+#define VT_TEST_SETENV(name, value) _putenv_s((name), (value))
+#define VT_TEST_UNSETENV(name) _putenv_s((name), "")
+#else
+#define VT_TEST_SETENV(name, value) setenv((name), (value), 1)
+#define VT_TEST_UNSETENV(name) unsetenv((name))
+#endif
 
 namespace {
 
@@ -656,6 +668,114 @@ TEST_CASE("G3 vec_dot == independent f64 dequantize-then-dot, all six types") {
       CHECK(std::fabs(static_cast<double>(got) - ref.dot) <= 1e-5 * ref.l1);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// G5 — the x86 AVX2 K-quant tier  (selection + numeric A/B)
+//
+// The G3 case above runs through BlockVecDot, which selects the wide kernel on
+// this host. This case proves three separate things that a single selected
+// call cannot: `auto` chooses the AVX2 arm, `VT_CPU_QUANT_AVX2=portable`
+// really returns the portable kernel (the defeat seam), and both arms stay
+// inside the same f64-reference tolerance. Ported from the `__AVX2__` arms of
+// llama.cpp b10451 arch/x86/quants.c:2018, :2406 and :3364.
+// ---------------------------------------------------------------------------
+TEST_CASE("G5 AVX2 K-quant tier is selectable and matches the portable tier") {
+#if defined(__x86_64__) || defined(_M_X64)
+  if (!vt::cpu::DetectX86IsaCaps().avx2) {
+    MESSAGE("host has no AVX2; only the portable tier exists here");
+    return;
+  }
+
+  const char* previous = std::getenv("VT_CPU_QUANT_AVX2");
+  const bool had_previous = previous != nullptr;
+  const std::string saved = had_previous ? previous : "";
+  struct Restore {
+    bool had;
+    std::string value;
+    ~Restore() {
+      if (had) {
+        VT_TEST_SETENV("VT_CPU_QUANT_AVX2", value.c_str());
+      } else {
+        VT_TEST_UNSETENV("VT_CPU_QUANT_AVX2");
+      }
+    }
+  } restore{had_previous, saved};
+
+  // A G5-local list keeps IQ3_S out of `kWeightCases`. The MatmulBTQuant NMSE
+  // case there runs at m=1,n=1, where IQ3_S's dot can cancel near zero and its
+  // unmutated NMSE is already ~1.10, so adding the row would fail that case.
+  // The q4_K and q6_K entries copy `kWeightCases` unchanged. IQ3_S's block is
+  // `d@0 qs@2 qh@66 signs@74 scales@106` (110 bytes).
+  const WeightCase kG5WeightCases[] = {
+      {vt::DType::kQ4_K, 256, 144, 0, 2, -1, "q4_K"},
+      {vt::DType::kQ6_K, 256, 210, 208, -1, -1, "q6_K"},
+      {vt::DType::kIQ3_S, 256, 110, 0, -1, -1, "iq3_s"},
+  };
+  for (const WeightCase& c : kG5WeightCases) {
+    CAPTURE(std::string(c.name));
+
+    VT_TEST_UNSETENV("VT_CPU_QUANT_AVX2");
+    const vt::cpu::VecDotFn wide =
+        vt::cpu::SelectQuantKVecDot(c.dtype, nullptr);
+    REQUIRE(wide != nullptr);
+    const vt::cpu::VecDotFn portable = vt::cpu::QuantKPortableVecDot(c.dtype);
+    REQUIRE(portable != nullptr);
+    CHECK(reinterpret_cast<uintptr_t>(wide) !=
+          reinterpret_cast<uintptr_t>(portable));
+
+    // The PRODUCTION dispatch must route to the wide kernel. Deleting the
+    // SelectKQuantVecDot arm in BlockVecDot has to turn this case red; a test
+    // that only called the selector would stay green with the tier unreached.
+    CHECK(reinterpret_cast<uintptr_t>(vt::cpu::BlockVecDot(c.dtype)) ==
+          reinterpret_cast<uintptr_t>(wide));
+
+    VT_TEST_SETENV("VT_CPU_QUANT_AVX2", "portable");
+    CHECK(vt::cpu::SelectQuantKVecDot(c.dtype, nullptr) == nullptr);
+    CHECK(reinterpret_cast<uintptr_t>(vt::cpu::BlockVecDot(c.dtype)) ==
+          reinterpret_cast<uintptr_t>(portable));
+
+    VT_TEST_SETENV("VT_CPU_QUANT_AVX2", "avx2");
+    CHECK(vt::cpu::SelectQuantKVecDot(c.dtype, nullptr) == wide);
+
+    VT_TEST_UNSETENV("VT_CPU_QUANT_AVX2");
+    for (int64_t nblocks : {int64_t{1}, int64_t{3}, int64_t{5}}) {
+      const int64_t k = nblocks * c.block_elems;
+      CAPTURE(nblocks);
+      const std::vector<uint8_t> wq = RandomBlocks(
+          c, nblocks, 0x5A00U + static_cast<uint32_t>(nblocks));
+      std::vector<float> act(static_cast<size_t>(k));
+      GenerateData(1.0F, act.size(), act.data());
+      const std::vector<uint8_t> aq =
+          QuantizeActivation(c.dtype, act.data(), k);
+      const vt::DType at = vt::cpu::QuantTraits(c.dtype).vec_dot_type;
+      const RefDot ref = ReferenceDotF64(c.dtype, wq.data(), at, aq.data(), k);
+
+      float got_wide = 0.0F;
+      float got_portable = 0.0F;
+      wide(static_cast<int>(k), &got_wide, 0, wq.data(), 0, aq.data(), 0, 1);
+      portable(static_cast<int>(k), &got_portable, 0, wq.data(), 0, aq.data(),
+               0, 1);
+
+      CAPTURE(got_wide);
+      CAPTURE(got_portable);
+      CAPTURE(ref.dot);
+      CAPTURE(ref.l1);
+      CHECK(std::isfinite(got_wide));
+      CHECK(std::fabs(static_cast<double>(got_wide) - ref.dot) <=
+            1e-5 * ref.l1);
+      CHECK(std::fabs(static_cast<double>(got_portable) - ref.dot) <=
+            1e-5 * ref.l1);
+      CHECK(std::fabs(static_cast<double>(got_wide) - got_portable) <=
+            1e-5 * ref.l1);
+    }
+  }
+
+  VT_TEST_SETENV("VT_CPU_QUANT_AVX2", "bogus");
+  CHECK_THROWS(vt::cpu::SelectQuantKVecDot(vt::DType::kQ4_K, nullptr));
+#else
+  MESSAGE("not x86-64; the AVX2 tier does not exist in this build");
+#endif
 }
 
 TEST_CASE("kIq1sGrid is the PINNED upstream table, not a look-alike") {

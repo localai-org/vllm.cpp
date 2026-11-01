@@ -255,3 +255,67 @@ rebuild a clean detached llama.cpp worktree at `237ad9b96` (`Release`,
 llama-bench -m "$MODEL" -p 512,128 -n 128,32 -t 20 -r 5 -ngl 0
 /usr/bin/time -v llama-bench -m "$MODEL" -p 0 -n 32 -t 20 -r 3 -ngl 0
 ```
+
+## W5 — the row split degenerates at decode (T=1), so split the output range
+
+**Status:** measured 2026-11-01 on the Lumen-3.8-Flare serving host; issue
+[ISSUE-LOCAL-01M69GMT8WCQZMDNMEF8HH96D3](../issues/QUANT-GGUF-CPU-THREADPOOL/ISSUE-LOCAL-01M69GMT8WCQZMDNMEF8HH96D3.md).
+
+**What W4 named, now measured.** W4 attributed the remaining decode gap to "the
+per-op kick at M=1 decode shapes" and left the inline fallback as a work item.
+It is real, but the cause is the split axis, not the kick. Every kernel ported
+in W1-W3 partitions **rows**, and `ParallelForRows` runs `nr == 1` inline by
+design. At decode `T == 1`, so every elementwise kernel hands it one row and
+the caller executes the whole row while the other 17 workers poll. A SIGPROF
+caller-thread profile plus an env-gated per-op timer (`VT_POOL_GAP`, scratch)
+over one 32-token greedy request, 18 threads, 6.7-7.0 s wall:
+
+| kernel | calls | inline total | per call |
+|---|---|---|---|
+| `kGeluAndMul` | 3,276 | 1.212 s | 370 us |
+| `kPagedAttention` (decode) | 1,596 | 0.303 s | 190 us |
+| `kRopeNeox` | 1,330 | 0.223 s | 167 us |
+| `kAdd` | 4,788 | 0.167 s | 35 us |
+| `kRmsNorm` | 8,018 | 0.139 s | 17 us |
+| `kQkvSplit` | 1,596 | 0.119 s | 74 us |
+
+Inline bodies total **2.197 s**, 31 % of the request, and 99.8 % of the
+inter-kick gap is caller CPU rather than descheduling. Rejection recorded: the
+kernels themselves are at per-thread parity with llama.cpp (1.47 vs 1.50 s per
+token at one thread), allocation is not the cost (36 ms of 6.7 s in the
+caller), and thread count, `taskset` pinning and `VT_CPU_MATMUL_STEAL` all
+moved less than the run-to-run spread.
+
+**Design.** Partition the **output element range**, not rows, for kernels whose
+outputs are independent of each other. `ParallelForRows` is already a generic
+splitter over a contiguous range, so no new dispatch seam is needed; the change
+is the unit each caller hands it. Fourth and later passes are unchanged.
+Converted in this change: `kGeluAndMul`, `kRopeNeox` (over `token x head`),
+`kQkvSplit`, `kAdd`. `kMulScalar` and `kSoftCap` already split flat;
+`kRmsNorm` keeps the row split because its reduction order must not move.
+
+**Bit-identity.** Each output element is still produced by exactly one thread
+with the identical expression and the identical rounding, and no cross-element
+reduction changes shape, so the result is bit-identical to the single-thread
+arm by construction — the same argument W1-W3 make for row chunking. The gate
+proves it rather than assuming it.
+
+**Upstream anchors.** ggml partitions elementwise ops over output rows with
+`ith`/`nth` and `dr = (nr + nth - 1)/nth`
+(`ggml/src/ggml-cpu/ops.cpp:2129-2152` at the W1 pin `237ad9b96`; the same shape
+at oracle pin b10451 `10bf611e`, `ops.cpp:2129-2152`). Our tensors are 2-D
+`[T, D]`, so the row count that ggml reads as `ne1*ne2*ne3` collapses to `T`;
+this change restores the intended granularity for that layout. The SIMD arm
+ggml pairs with it (`ggml_vec_gelu_f32` in `ggml/src/ggml-cpu/vec.cpp`) is
+**not** ported here and stays owed — this change is the parallel half of the
+same gap, and it keeps the exact scalar math vLLM's `activation.py:418`
+requires.
+
+**Tests and gates.** Same-binary A/B on one host in one session, greedy 32-token
+output byte-identical between the arms; `test_cpu_threadpool` for the splitter
+contract; the existing CPU op tests for the converted kernels; `verify.py
+--expect-cache on` against the serving deployment.
+
+**Stop conditions.** Stop and return `NEEDS_DECISION` if a conversion cannot
+preserve the per-element expression, or if any A/B run changes a single output
+byte without an explained arithmetic reason.
