@@ -438,6 +438,7 @@ const InertArg* FindAcceptedInertArg(const std::string& flag) {
 
 [[noreturn]] void Usage(const char* argv0, int code) {
   std::cerr
+      << "LumenEngine OpenAI-compatible server\n"
       << "usage: " << argv0
       << " --model <dir> [--host H] [--port P] [--tokenizer-config F]\n"
          "               [--served-model-name N] [--block-size N] "

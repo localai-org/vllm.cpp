@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "vllm/model_executor/models/llama.h"
+#include "vllm/model_executor/models/llama_gguf_weights.h"
 #include "vllm/model_executor/models/qwen3_5.h"         // ForwardLogits (shared carrier)
 #include "vllm/model_executor/models/qwen3_5_internal.h"  // detail::DeviceTokenIdsScope
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
@@ -71,7 +72,13 @@ class LlamaLoadedModel final : public LoadedModel {
 std::unique_ptr<LoadedModel> LoadLlamaForCausalLM(
     const ModelRegistration& registration, const HfConfig& config,
     const ModelSource& source) {
-  // Llama dense is text-only BF16 safetensors (no GGUF path yet).
+  if (source.kind == ModelSource::Kind::kGguf) {
+    if (!source.gguf) throw std::runtime_error("GGUF model source is empty");
+    const auto policy = GgufLoadPolicy::FromEnv(source.device, detail::ActDType(source.device));
+    return std::make_unique<LlamaLoadedModel>(registration,
+        LoadLlamaFromGguf(*source.gguf, config, &policy));
+  }
+  // Existing BF16 safetensors arm.
   if (source.kind != ModelSource::Kind::kSafetensors) {
     throw std::runtime_error(
         "Model architecture LlamaForCausalLM does not support GGUF weights");

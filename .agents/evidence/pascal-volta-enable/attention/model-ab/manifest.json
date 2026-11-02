@@ -1,0 +1,27 @@
+{
+  "time_utc": "2026-10-29T13:59:14.022778+00:00",
+  "binary": "/tmp/pascal-attention/actual-frozen",
+  "binary_sha256": "656228b1744c8ab20ad041546e71dc9bd2498cd92f35f2e9cbca5dedb92968fc",
+  "source_head": "22d433baf",
+  "model": "/tmp/lumen-models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+  "model_sha256": "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0",
+  "context": 256,
+  "block_size": 16,
+  "num_blocks": 32,
+  "sampling": {
+    "temperature": 0,
+    "ignore_eos": true,
+    "seed": 0
+  },
+  "mutex": "/home/user/gpu.lock held for complete campaign",
+  "order": "p16g16 ON/OFF,p16g64 OFF/ON,p128g16 ON/OFF,p128g64 OFF/ON",
+  "warm_repetitions": 3,
+  "cold_repetition": 0,
+  "memory_sample_ms": 10,
+  "inherited_attention_env": {},
+  "gpu_before": "Quadro P620, GPU-fc83f069-1409-46ec-84be-618f60c8d567, 580.178.04, P0, 1265 MHz, 2504 MHz, 38, [N/A], 7 MiB, 0 %",
+  "processes_before": "",
+  "gpu_after": "Quadro P620, GPU-fc83f069-1409-46ec-84be-618f60c8d567, 580.178.04, P0, 1354 MHz, 2504 MHz, 64, [N/A], 7 MiB, 87 %",
+  "processes_after": "",
+  "finished_utc": "2026-10-29T14:01:19.811606+00:00"
+}

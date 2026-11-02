@@ -457,9 +457,10 @@ bool IsQwen3Gguf(const GgufFile& gguf) {
 
 // --- weights --------------------------------------------------------------
 
-Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
-                                     const HfConfig& config,
-                                     const GgufLoadPolicy* policy) {
+Qwen3DenseWeights LoadDenseGgufWeights(const GgufFile& gguf,
+                                       const HfConfig& config,
+                                       const GgufLoadPolicy* policy,
+                                       bool keep_projection_parts) {
   const GgufLoadPolicy env_policy = GgufLoadPolicy::FromEnv(vt::DeviceType::kCPU);
   const GgufLoadPolicy& pol = policy != nullptr ? *policy : env_policy;
   // Merged matmul weights (q/k/v -> qkv_proj, gate/up -> gate_up_proj) must
@@ -502,6 +503,14 @@ Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
         OwnBf16(gguf, Blk(il, "ffn_norm.weight"),
                 {config.hidden_size});
 
+    if (keep_projection_parts) {
+      GgufLoadPolicy parts_pol = NoNvfp4(pol);
+      parts_pol.expand_nk = true;
+      parts_pol.elem_kn_repack = false;
+      parts_pol.quant_repack = false;
+      for (const auto* part : {"attn_q.weight", "attn_k.weight", "attn_v.weight"})
+        layer.attn.qkv_proj_parts.push_back(OwnMatmulWeight(gguf, Blk(il, part), parts_pol));
+    } else {
     // Attention: load q/k/v separately, then merge into one qkv_proj.
     // The merged weight is ALWAYS bf16 expand (no keep-quant for merged
     // weights in the initial implementation — the spec defers that).
@@ -524,6 +533,8 @@ Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
     v.nk = true;
     layer.attn.qkv_proj = ConcatBf16Rows(ConcatBf16Rows(q, k), v);
 
+    }
+
     // o_proj: standard matmul weight (may keep-quant or expand).
     layer.attn.o_proj =
         OwnMatmulWeight(gguf, Blk(il, "attn_output.weight"), pol);
@@ -543,6 +554,14 @@ Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
           OwnBf16(gguf, Blk(il, "attn_k_norm.weight"), {config.head_dim});
     }
 
+    if (keep_projection_parts) {
+      GgufLoadPolicy parts_pol = NoNvfp4(pol);
+      parts_pol.expand_nk = true;
+      parts_pol.elem_kn_repack = false;
+      parts_pol.quant_repack = false;
+      for (const auto* part : {"ffn_gate.weight", "ffn_up.weight"})
+        layer.mlp.gate_up_proj_parts.push_back(OwnMatmulWeight(gguf, Blk(il, part), parts_pol));
+    } else {
     // MLP: load gate/up separately, then merge into one gate_up_proj.
     RequireExpand(expand_pol, gguf, Blk(il, "ffn_gate.weight"),
                   GgufTensorRole::kMatmulWeight);
@@ -556,6 +575,8 @@ Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
     up.nk = true;
     layer.mlp.gate_up_proj = ConcatBf16Rows(gate, up);
 
+    }
+
     // down_proj: standard matmul weight (may keep-quant or expand).
     layer.mlp.down_proj =
         OwnMatmulWeight(gguf, Blk(il, "ffn_down.weight"), pol);
@@ -563,6 +584,12 @@ Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
     w.layers.push_back(std::move(layer));
   }
   return w;
+}
+
+Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
+                                  const HfConfig& config,
+                                  const GgufLoadPolicy* policy) {
+  return LoadDenseGgufWeights(gguf, config, policy, false);
 }
 
 }  // namespace vllm

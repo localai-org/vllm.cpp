@@ -1,0 +1,20 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:499:
+TEST CASE:  legacy CUDA selects portable attention without changing FLASH_ATTN
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:511: ERROR: CHECK_FALSE( legacy->supports_kv_cache_dtype(name) ) is NOT correct!
+  values: CHECK_FALSE( true )
+
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:552:
+TEST CASE:  legacy CUDA pins supported storage through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:567: ERROR: CHECK_THROWS_AS( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg), std::invalid_argument ) did NOT throw at all!
+  logged: kv := 1
+
+===============================================================================
+[doctest] test cases:  25 |  23 passed | 2 failed | 0 skipped
+[doctest] assertions: 148 | 146 passed | 2 failed |
+[doctest] Status: FAILURE!

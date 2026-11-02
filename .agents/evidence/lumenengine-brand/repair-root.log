@@ -1,0 +1,47 @@
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (0.8s)
+-- Generating done (1.6s)
+-- Build files have been written to: /tmp/lumen-brand-build
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Building CXX object engine/CMakeFiles/vllm_shared.dir/vllm_shared_stub.cpp.o
+[100%] Linking CXX shared library libvllm.so
+[100%] Built target vllm_shared
+[100%] Building C object engine/tests/CMakeFiles/test_lumenengine_header_c.dir/branding/consumer.c.o
+[100%] Linking C executable test_lumenengine_header_c
+[100%] Built target test_lumenengine_header_c
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm_shared
+[100%] Building CXX object engine/tests/CMakeFiles/test_lumenengine_header_cpp.dir/branding/consumer.cpp.o
+[100%] Linking CXX executable test_lumenengine_header_cpp
+[100%] Built target test_lumenengine_header_cpp
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm_shared
+[100%] Building C object engine/tests/CMakeFiles/test_lumenengine_legacy_header_c.dir/branding/legacy_consumer.c.o
+[100%] Linking C executable test_lumenengine_legacy_header_c
+[100%] Built target test_lumenengine_legacy_header_c
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm_shared
+[100%] Building CXX object engine/tests/CMakeFiles/test_lumenengine_legacy_header_cpp.dir/branding/legacy_consumer.cpp.o
+[100%] Linking CXX executable test_lumenengine_legacy_header_cpp
+[100%] Built target test_lumenengine_legacy_header_cpp
+Test project /tmp/lumen-brand-build/engine
+    Start 578: test_lumenengine_legacy_header_cpp
+1/5 Test #578: test_lumenengine_legacy_header_cpp ...   Passed    0.01 sec
+    Start 579: test_lumenengine_legacy_header_c
+2/5 Test #579: test_lumenengine_legacy_header_c .....   Passed    0.00 sec
+    Start 580: test_lumenengine_header_cpp
+3/5 Test #580: test_lumenengine_header_cpp ..........   Passed    0.00 sec
+    Start 581: test_lumenengine_header_c
+4/5 Test #581: test_lumenengine_header_c ............   Passed    0.00 sec
+    Start 852: test_lumenengine_commands
+5/5 Test #852: test_lumenengine_commands ............   Passed    0.22 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   0.26 sec

@@ -1,0 +1,21 @@
+F
+======================================================================
+FAIL: test_shipped_record_has_no_abandoned_active_row (__main__.GateWiringTests.test_shipped_record_has_no_abandoned_active_row)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records-before/tests/scripts/test_audit_live_rows.py", line 755, in test_shipped_record_has_no_abandoned_active_row
+    self.assertEqual(stale, [], f"stale ACTIVE rows remain: {stale}")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['BACKEND-CUDA-SM070'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'BACKEND-CUDA-SM070'
+
+- ['BACKEND-CUDA-SM070']
++ [] : stale ACTIVE rows remain: ['BACKEND-CUDA-SM070']
+
+----------------------------------------------------------------------
+Ran 1 test in 75.159s
+
+FAILED (failures=1)

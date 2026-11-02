@@ -1,0 +1,83 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:206:
+TEST CASE:  CUDA FP16 scalar split and merged SiLU port the exact primary matrix
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 961 == 0 )
+  logged: Name(dt) := 1
+          tokens := 7
+          d := 512
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 961 == 0 )
+  logged: Name(dt) := 1
+          tokens := 7
+          d := 512
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 26642 == 0 )
+  logged: Name(dt) := 1
+          tokens := 7
+          d := 13824
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 26642 == 0 )
+  logged: Name(dt) := 1
+          tokens := 7
+          d := 13824
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 11795 == 0 )
+  logged: Name(dt) := 1
+          tokens := 83
+          d := 512
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 11795 == 0 )
+  logged: Name(dt) := 1
+          tokens := 83
+          d := 512
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 315074 == 0 )
+  logged: Name(dt) := 1
+          tokens := 83
+          d := 13824
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 315074 == 0 )
+  logged: Name(dt) := 1
+          tokens := 83
+          d := 13824
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 289108 == 0 )
+  logged: Name(dt) := 1
+          tokens := 2048
+          d := 512
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 289108 == 0 )
+  logged: Name(dt) := 1
+          tokens := 2048
+          d := 512
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 7774107 == 0 )
+  logged: Name(dt) := 1
+          tokens := 2048
+          d := 13824
+
+./tests/vt/test_cuda_fp16_scalar.cpp:93: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 7774107 == 0 )
+  logged: Name(dt) := 1
+          tokens := 2048
+          d := 13824
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed |  1 failed | 10 skipped
+[doctest] assertions: 72 | 60 passed | 12 failed |
+[doctest] Status: FAILURE!
+MODERN_BRANCH_RED_EXIT 1

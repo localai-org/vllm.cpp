@@ -1,0 +1,20 @@
+linear-compile 0
+countnonnull-compile 0
+countnonnull-link 0
+countnonnull-run 1
+MUTATION countnonnull 1
+fastop-compile 0
+fastop-link 0
+fastop-run 1
+MUTATION fastop 1
+epiloguecontract-compile 0
+epiloguecontract-link 0
+epiloguecontract-run 1
+MUTATION epiloguecontract 1
+outcontract-compile 0
+outcontract-link 0
+outcontract-run 1
+MUTATION outcontract 1
+restored-compile 0
+restored-link 0
+restored-run 0

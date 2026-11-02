@@ -27,12 +27,14 @@
 // reference in src/vt/cpu/cpu_layernorm.cpp) — the same discipline as
 // cuda_glue.cu / cuda_moe.cu.
 #include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
 #include <stdexcept>
 #include <string>
 
 #include "vt/ops.h"
+#include "vt/op_provider.h"
 
 namespace vt::cuda {
 namespace {
@@ -52,6 +54,8 @@ unsigned GridFor(int64_t n) {
   return static_cast<unsigned>(blocks < 4096 ? blocks : 4096);
 }
 
+__device__ inline float Load(const __half* p, int64_t i) { return __half2float(p[i]); }
+__device__ inline void Store(__half* p, int64_t i, float v) { p[i] = __float2half_rn(v); }
 __device__ inline float Load(const float* p, int64_t i) { return p[i]; }
 __device__ inline float Load(const __nv_bfloat16* p, int64_t i) { return __bfloat162float(p[i]); }
 __device__ inline void Store(float* p, int64_t i, float v) { p[i] = v; }
@@ -264,30 +268,31 @@ void AddDispatchB(Queue& q, Tensor& out, const Tensor& a, const Tensor& b, int64
   if (b.dtype == DType::kBF16)
     AddKernel<<<grid, kBlock, 0, AsStream(q)>>>(
         o, ap, static_cast<const __nv_bfloat16*>(b.data), n, bcast_d);
+  else if (b.dtype == DType::kF16)
+    AddKernel<<<grid, kBlock, 0, AsStream(q)>>>(o, ap, b.Ptr<__half>(), n, bcast_d);
   else
     AddKernel<<<grid, kBlock, 0, AsStream(q)>>>(o, ap, static_cast<const float*>(b.data), n,
                                                 bcast_d);
   Check(cudaGetLastError(), "add launch");
 }
 
+template <typename OutT>
+void AddDispatchA(Queue& q, Tensor& out, const Tensor& a, const Tensor& b, int64_t n, int64_t bcast_d) {
+  if (a.dtype == DType::kF16) AddDispatchB<OutT, __half>(q, out, a, b, n, bcast_d);
+  else if (a.dtype == DType::kBF16) AddDispatchB<OutT, __nv_bfloat16>(q, out, a, b, n, bcast_d);
+  else AddDispatchB<OutT, float>(q, out, a, b, n, bcast_d);
+}
+
 void AddKernelCuda(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   const int64_t n = a.Numel();
   if (n == 0) return;
-  VT_CHECK((a.dtype == DType::kF32 || a.dtype == DType::kBF16) &&
-               (b.dtype == DType::kF32 || b.dtype == DType::kBF16),
-           "cuda add: a/b must be f32 or bf16");
+  VT_CHECK((a.dtype == DType::kF32 || a.dtype == DType::kBF16 || a.dtype == DType::kF16) &&
+           (b.dtype == DType::kF32 || b.dtype == DType::kBF16 || b.dtype == DType::kF16),
+           "cuda add: a/b must be f32, bf16 or f16");
   const int64_t bcast_d = (b.rank == 1 && a.rank != 1) ? a.shape[a.rank - 1] : 0;
-  if (out.dtype == DType::kBF16) {
-    if (a.dtype == DType::kBF16)
-      AddDispatchB<__nv_bfloat16, __nv_bfloat16>(q, out, a, b, n, bcast_d);
-    else
-      AddDispatchB<__nv_bfloat16, float>(q, out, a, b, n, bcast_d);
-  } else {
-    if (a.dtype == DType::kBF16)
-      AddDispatchB<float, __nv_bfloat16>(q, out, a, b, n, bcast_d);
-    else
-      AddDispatchB<float, float>(q, out, a, b, n, bcast_d);
-  }
+  if (out.dtype == DType::kF16) AddDispatchA<__half>(q, out, a, b, n, bcast_d);
+  else if (out.dtype == DType::kBF16) AddDispatchA<__nv_bfloat16>(q, out, a, b, n, bcast_d);
+  else AddDispatchA<float>(q, out, a, b, n, bcast_d);
 }
 
 // Registers the CUDA cross-family dense primitives during static init (pre-main,
@@ -305,6 +310,7 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<ReluFn>(&GeluErfKernelCuda)));
     RegisterOp(OpId::kAdd, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<AddFn>(&AddKernelCuda)));
+    RegisterOpScalarType(OpId::kAdd, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
   }
 };
 const Registrar registrar;

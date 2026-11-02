@@ -823,15 +823,24 @@ void GeluAndMulKernel(Queue&, Tensor& out, const Tensor& x) {
   // `F.gelu(x[..., :d], approximate=approximate) * x[..., d:]`, and gelu_tanh
   // is one of the activations test_activation.py:108 compares at atol=rtol=0.
   const DType in_dt = x.dtype;
-  ForRows(t, [&](int64_t r0, int64_t r1) {
-  for (int64_t i = r0; i < r1; ++i) {
-    for (int64_t j = 0; j < d; ++j) {
-      float g = LoadF32(x, i * 2 * d + j);
-      float up = LoadF32(x, i * 2 * d + d + j);
-      float inner = 0.7978845608028654f * (g + 0.044715f * g * g * g);
-      float gelu = RoundThrough(in_dt, 0.5f * g * (1.0f + std::tanh(inner)));
-      StoreF32(out, i * d + j, gelu * up);
-    }
+  // Split the OUTPUT ELEMENT range, not the rows. Every output element is
+  // independent of every other, so the cut position cannot change a value and
+  // the result stays bit-identical (spec § W5 and § Dispatch behavior). The
+  // row split degenerates at decode, where t==1 leaves this whole 2*d-wide row
+  // on the calling thread while the rest of the pool polls.
+  const int64_t n = t * d;
+  if (n <= 0) {
+    return;
+  }
+  ForRows(n, [&](int64_t r0, int64_t r1) {
+  int64_t i = r0 / d, j = r0 % d;
+  for (int64_t o = r0; o < r1; ++o) {
+    float g = LoadF32(x, i * 2 * d + j);
+    float up = LoadF32(x, i * 2 * d + d + j);
+    float inner = 0.7978845608028654f * (g + 0.044715f * g * g * g);
+    float gelu = RoundThrough(in_dt, 0.5f * g * (1.0f + std::tanh(inner)));
+    StoreF32(out, i * d + j, gelu * up);
+    if (++j == d) { j = 0; ++i; }
   }
   });
 }
@@ -1489,15 +1498,24 @@ void RopeRotateHead(const Tensor& t, int64_t head_off, int rot, double base, int
 
 void RopeNeoxKernel(Queue&, Tensor& qs, Tensor& ks, const Tensor& pos, const RopeArgs& args) {
   const int64_t t = qs.shape[0], hq = qs.shape[1], hk = ks.shape[1], d = qs.shape[2];
-  ForRows(t, [&](int64_t r0, int64_t r1) {
-  for (int64_t i = r0; i < r1; ++i) {
-    int64_t p = pos.dtype == DType::kI32 ? pos.Ptr<int32_t>()[i] : pos.Ptr<int64_t>()[i];
-    for (int64_t hh = 0; hh < hq; ++hh) {
+  // One unit per (token, head) instead of one per token: a head's rotation is
+  // independent of every other head's, so the split is bit-identical and a
+  // decode step (t==1) still fills the pool (spec § W5).
+  const int64_t hs = hq + hk;
+  const int64_t n = t * hs;
+  if (n <= 0) {
+    return;
+  }
+  ForRows(n, [&](int64_t r0, int64_t r1) {
+  int64_t i = r0 / hs, hh = r0 % hs;
+  for (int64_t o = r0; o < r1; ++o) {
+    const int64_t p = pos.dtype == DType::kI32 ? pos.Ptr<int32_t>()[i] : pos.Ptr<int64_t>()[i];
+    if (hh < hq) {
       RopeRotateHead(qs, (i * hq + hh) * d, args.rotary_dim, static_cast<double>(args.base), p, args);
+    } else {
+      RopeRotateHead(ks, (i * hk + (hh - hq)) * d, args.rotary_dim, static_cast<double>(args.base), p, args);
     }
-    for (int64_t hh = 0; hh < hk; ++hh) {
-      RopeRotateHead(ks, (i * hk + hh) * d, args.rotary_dim, static_cast<double>(args.base), p, args);
-    }
+    if (++hh == hs) { hh = 0; ++i; }
   }
   });
 }
@@ -4422,14 +4440,25 @@ void QkvSplitKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, const T
   const int64_t t = qkv.shape[0], q_dim = q_out.Numel() / t, k_dim = k_out.Numel() / t,
                 v_dim = v_out.Numel() / t;
   const int64_t total = q_dim + k_dim + v_dim;
-  ForRows(t, [&](int64_t r0, int64_t r1) {
-  for (int64_t i = r0; i < r1; ++i) {
+  // Flat over the [q|k|v] row: a pure elementwise split, so it is
+  // bit-identical and keeps decode (t==1) off the single-thread path
+  // (spec § W5).
+  const int64_t n = t * total;
+  if (n <= 0) {
+    return;
+  }
+  ForRows(n, [&](int64_t r0, int64_t r1) {
+  int64_t i = r0 / total, j = r0 % total;
+  for (int64_t o = r0; o < r1; ++o) {
     const int64_t row = i * total;
-    for (int64_t j = 0; j < q_dim; ++j) StoreF32(q_out, i * q_dim + j, LoadF32(qkv, row + j));
-    for (int64_t j = 0; j < k_dim; ++j)
-      StoreF32(k_out, i * k_dim + j, LoadF32(qkv, row + q_dim + j));
-    for (int64_t j = 0; j < v_dim; ++j)
-      StoreF32(v_out, i * v_dim + j, LoadF32(qkv, row + q_dim + k_dim + j));
+    if (j < q_dim) {
+      StoreF32(q_out, i * q_dim + j, LoadF32(qkv, row + j));
+    } else if (j < q_dim + k_dim) {
+      StoreF32(k_out, i * k_dim + (j - q_dim), LoadF32(qkv, row + j));
+    } else {
+      StoreF32(v_out, i * v_dim + (j - q_dim - k_dim), LoadF32(qkv, row + j));
+    }
+    if (++j == total) { j = 0; ++i; }
   }
   });
 }

@@ -68,6 +68,21 @@ inline constexpr MergedGemmGroup kKeepQuantGateUpSwiGLU = {
     /*name=*/"keepquant_gate_up_swiglu",
 };
 
+// Dense original-format shards. Each output is contiguous because the native
+// quantized contractions require packed output rows. No weight conversion is
+// implied by grouping; heterogeneous shard encodings remain independent.
+inline constexpr MergedGemmGroup kDenseQkvShards = {
+    3, MergedEpilogue::kNone, kNoMergedFastOp, "dense_qkv_shards"};
+inline constexpr MergedGemmGroup kDenseGateUpShards = {
+    2, MergedEpilogue::kSiluMulClamp, kNoMergedFastOp, "dense_gate_up_shards"};
+
+// Dense composite realization with original weight formats. products and
+// weights have desc.arity entries. SwiGLU uses the plain, unclamped reduction
+// and rounds each product to its declared output dtype before the epilogue.
+void MergedGemmDense(Queue& q, const MergedGemmGroup& desc, Tensor* products,
+                     const Tensor& act, const Tensor* weights, int count,
+                     Tensor* epilogue_out = nullptr);
+
 // The BLOCK-WISE (fine-grained 128x128) FP8 groups — MODEL-FP8-BLOCK-MERGED
 // (#1189 milestone M6, spec .agents/specs/model-fp8-block-merged.md). Two
 // descriptors, because vLLM runs two merged linears over this arm: one

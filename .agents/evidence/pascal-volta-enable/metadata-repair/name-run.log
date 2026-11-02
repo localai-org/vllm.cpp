@@ -1,0 +1,13 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:519:
+TEST CASE:  legacy CUDA pins head and block geometry through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:547: ERROR: CHECK( legacy->get_name() == "CUDA_LEGACY" ) is NOT correct!
+  values: CHECK( WRONG_NAME == CUDA_LEGACY )
+
+===============================================================================
+[doctest] test cases:  25 |  24 passed | 1 failed | 0 skipped
+[doctest] assertions: 148 | 147 passed | 1 failed |
+[doctest] Status: FAILURE!

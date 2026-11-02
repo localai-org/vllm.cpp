@@ -335,29 +335,25 @@ using vt::cpu::PagedAttnKDotBfDot;
   // pre-batch sequential order the reference and the strict goldens license.
   const bool scalar_fma = PagedAttnScalarFmaActive();
 
-  // The work decomposition: one unit per (query token, q head). The token-only
-  // split (`ParallelForRows` over total_q) left batch-1 decode — the serving
-  // regime — entirely on ONE thread: one token row means one unit, and the
-  // 32 heads x window keys x head dim of that row ran serially while the pool
-  // idled (row FLINT-SLIDING-ATTN: the sliding phase grew 0.263 ms per extra
-  // key, 16t and 1t indistinguishable). Splitting on (token, head) gives the
-  // pool hq units per token; every unit still walks its keys in the SAME
-  // jmin..jmax order with the same per-element math, so each output row is
-  // computed by exactly one thread exactly as the serial code computed it —
-  // bit-identical by construction (the parallel axis crosses heads, never a
-  // head's key loop).
+  // The (token, q-head) output range, with the K and V element encodings bound
+  // at compile time. Each pair owns its own d_v-wide output slice and its own
+  // sequential softmax passes, so the flat range is what the pool splits and no
+  // reduction crosses a chunk. Body text is unchanged from the per-element form
+  // apart from the two loads.
   auto run = [&](auto kv_tag) {
-    ParallelForRows(CurrentThreadpool(), total_q * hq, [&](int64_t u0, int64_t u1) {
+    ParallelForRows(CurrentThreadpool(), total_q * hq, [&](int64_t i0, int64_t i1) {
       std::vector<float> probs;
       std::vector<float> acc(static_cast<size_t>(d_v));
-      // This unit's (token, head) query row, widened once per unit. Sized d —
-      // the QK dot width — because only this head's slice of the token row is
-      // read. Unused (and unsized) when the query is already f32.
+      // The token's whole query row (hq*d contiguous elements), widened once and
+      // reused by every q-head of that token in this chunk. Unused (and unsized)
+      // when the query is already f32. Flat index order is monotone in t, so one
+      // remembered token covers every reuse.
       std::vector<float> qrow;
-      if (q_f32 == nullptr) qrow.resize(static_cast<size_t>(d));
-      for (int64_t u = u0; u < u1; ++u) {
-        const int64_t t = u / hq;
-        const int64_t h = u - t * hq;
+      if (q_f32 == nullptr) qrow.resize(static_cast<size_t>(hq * d));
+      int64_t qrow_t = -1;
+      for (int64_t i = i0; i < i1; ++i) {
+        const int64_t t = i / hq;
+        const int64_t h = i % hq;
         const int64_t r = tok_req[static_cast<size_t>(t)];
         const int64_t p = tok_pos[static_cast<size_t>(t)];  // absolute position
         const int64_t seqlen = tok_slen[static_cast<size_t>(t)];
@@ -367,153 +363,156 @@ using vt::cpu::PagedAttnKDotBfDot;
         jmax = std::min(jmax, seqlen - 1);
         if (jmax < jmin) continue;
         probs.assign(static_cast<size_t>(jmax - jmin + 1), 0.0f);
+        const float* qtok;
+        if (q_f32 != nullptr) {
+          qtok = q_f32 + t * hq * d;
+        } else {
+          if (qrow_t != t) {
+            WidenRowToF32(query.dtype, q_bytes + static_cast<size_t>(t * hq * d) * q_esize,
+                          hq * d, qrow.data());
+            qrow_t = t;
+          }
+          qtok = qrow.data();
+        }
         const int64_t g = h / qpk;
         const int64_t qoff = (t * hq + h) * d_v;
-        const float* q;
-        if (q_f32 != nullptr) {
-          q = q_f32 + (t * hq + h) * d;
-        } else {
-          WidenRowToF32(query.dtype,
-                        q_bytes + static_cast<size_t>((t * hq + h) * d) * q_esize, d,
-                        qrow.data());
-          q = qrow.data();
-        }
-          // Pass 1: scores + running max.
-          // SEEDED BY THE PER-Q-HEAD ATTENTION SINK when one is present.
-          // A sink is one extra logit that joins the DENOMINATOR and
-          // contributes NO value — expressed by starting the running max at
-          // the sink and the running denominator at exp(0)=1. Absent
-          // (sink_p == nullptr, every caller before MiMoV2) the seeds stay
-          // -inf and 0, so the loop and output are bit-identical to the
-          // pre-sink kernel.
-          float m = sink_p != nullptr ? sink_p[h] : -std::numeric_limits<float>::infinity();
+        const float* q = qtok + h * d;  // == &query[(t*hq+h)*d], as f32
+        // Pass 1: scores + running max.
+        // SEEDED BY THE PER-Q-HEAD ATTENTION SINK when one is present.
+        // A sink is one extra logit that joins the DENOMINATOR and
+        // contributes NO value — expressed by starting the running max at
+        // the sink and the running denominator at exp(0)=1. Absent
+        // (sink_p == nullptr, every caller before MiMoV2) the seeds stay
+        // -inf and 0, so the loop and output are bit-identical to the
+        // pre-sink kernel.
+        float m = sink_p != nullptr ? sink_p[h] : -std::numeric_limits<float>::infinity();
 #if defined(__aarch64__)
-          if (neon_active && d % 4 == 0 && d_v % 4 == 0) {
-            // The NEON lane: same scores, same masking, same softmax passes.
-            // Only the K reduction and the V accumulation run four lanes wide.
-            // The BFDOT arm (VT_CPU_PAGED_ATTN_BFDOT=1) replaces ONLY the K
-            // dot — 8 bf16 products per vbfdotq, native pair-dot over the
-            // UNWIDENED bf16 query; the V accumulation stays on the widen+
-            // vfma path below (no f32-accumulator BFMLA form matches the
-            // scalar fma DAG). It changes the DAG by design; the lane is
-            // already not bit-identical to the scalar body, and the BFDOT
-            // run is adjudicated by its own unit gate + the bench chain.
-            const bool bfdot_k = bfdot_requested;
-            const uint16_t* q_bf =
-                bfdot_k ? reinterpret_cast<const uint16_t*>(
-                              q_bytes + static_cast<size_t>(t * hq * d) * q_esize) +
-                              h * d
-                        : nullptr;
-            for (int64_t j = jmin; j <= jmax; ++j) {
-              const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
-              const int64_t off = j % block_size;
-              const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
-              float dot;
-              if (bfdot_k) {
-                dot = PagedAttnKDotBfDot(q_bf, reinterpret_cast<const uint16_t*>(k_base) + kbase, d);
-              } else {
-              float32x4_t vacc = vdupq_n_f32(0.0f);
-              for (int64_t e = 0; e < d; e += 4)
-                vacc = vfmaq_f32(vacc, vld1q_f32(q + e),
-                                 KvElem4<decltype(kv_tag)::value>(k_base, kbase + e, k_scale));
-              // Lane-serial-in-block, block-sequential: NOT the scalar order.
-              dot = vaddvq_f32(vacc);
-              }
-              dot *= scale;
-              if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
-              probs[static_cast<size_t>(j - jmin)] = dot;
-              if (dot > m) m = dot;
-            }
-            // The exp(sink - m) sink seed; see the scalar pass 2 below for
-            // why it is not exp(0).
-            float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
-            for (int64_t j = jmin; j <= jmax; ++j) {
-              const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
-              probs[static_cast<size_t>(j - jmin)] = e;
-              denom += e;
-            }
-            const float inv = 1.0f / denom;
-            for (int64_t e = 0; e < d_v; ++e) acc[static_cast<size_t>(e)] = 0.0f;
-            for (int64_t j = jmin; j <= jmax; ++j) {
-              const float pw = probs[static_cast<size_t>(j - jmin)] * inv;
-              const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
-              const int64_t off = j % block_size;
-              const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
-              const float32x4_t pwv = vdupq_n_f32(pw);
-              for (int64_t e = 0; e < d_v; e += 4) {
-                float32x4_t a = vld1q_f32(acc.data() + e);
-                a = vfmaq_f32(a, pwv, KvElem4<decltype(kv_tag)::value>(v_base, vbase + e, v_scale));
-                vst1q_f32(acc.data() + e, a);
-              }
-            }
-            StoreRowF32(out, qoff, d_v, acc.data());
-          } else
-#endif
-          {
+        if (neon_active && d % 4 == 0 && d_v % 4 == 0) {
+          // The NEON lane: same scores, same masking, same softmax passes.
+          // Only the K reduction and the V accumulation run four lanes wide.
+          // The BFDOT arm (VT_CPU_PAGED_ATTN_BFDOT=1) replaces ONLY the K
+          // dot — 8 bf16 products per vbfdotq, native pair-dot over the
+          // UNWIDENED bf16 query; the V accumulation stays on the widen+
+          // vfma path below (no f32-accumulator BFMLA form matches the
+          // scalar fma DAG). It changes the DAG by design; the lane is
+          // already not bit-identical to the scalar body, and the BFDOT
+          // run is adjudicated by its own unit gate + the bench chain.
+          const bool bfdot_k = bfdot_requested;
+          const uint16_t* q_bf =
+              bfdot_k ? reinterpret_cast<const uint16_t*>(
+                            q_bytes + static_cast<size_t>(t * hq * d) * q_esize) +
+                            h * d
+                      : nullptr;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
             const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
-            float dot = 0.0f;
-            if (scalar_fma && d % 4 == 0) {
-              float lane[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-              for (int64_t e = 0; e < d; e += 4)
-                for (int l = 0; l < 4; ++l)
-                  lane[l] = std::fma(
-                      q[e + l],
-                      KvElem<decltype(kv_tag)::value>(k_base, kbase + e + l, k_scale),
-                      lane[l]);
-              dot = (lane[0] + lane[1]) + (lane[2] + lane[3]);
+            float dot;
+            if (bfdot_k) {
+              dot = PagedAttnKDotBfDot(q_bf, reinterpret_cast<const uint16_t*>(k_base) + kbase, d);
             } else {
-              // The pre-batch body: plain sequential dot, the reference order.
-              for (int64_t e = 0; e < d; ++e)
-                dot += q[e] *
-                       KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale);
+            float32x4_t vacc = vdupq_n_f32(0.0f);
+            for (int64_t e = 0; e < d; e += 4)
+              vacc = vfmaq_f32(vacc, vld1q_f32(q + e),
+                               KvElem4<decltype(kv_tag)::value>(k_base, kbase + e, k_scale));
+            // Lane-serial-in-block, block-sequential: NOT the scalar order.
+            dot = vaddvq_f32(vacc);
             }
             dot *= scale;
             if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
             probs[static_cast<size_t>(j - jmin)] = dot;
             if (dot > m) m = dot;
           }
-          // Pass 2: exp + denominator. The sink's own contribution is
-          // exp(sink - m), NOT exp(0): m starts AT the sink but pass 1 then
-          // grows it past the sink whenever any score is larger, and an
-          // un-rescaled exp(0) seed silently turns the sink into exp(m - m)
-          // -- a LARGER term than the sink deserves, which shrinks every
-          // value weight (observed on Flint, whose per-head sinks are small:
-          // the attention output off by ~6%, the model logits off by ~2).
-          // Seeding at exp(sink - m_final) is bit-identical to the old seed
-          // whenever the sink IS the max (exp(0) == 1.0f, the MiMoV2
-          // large-sink regime this kernel was written for) and correct
-          // everywhere else. The online-softmax arms (`cpu_mla_attn.cpp`,
-          // `cuda_mla_attn.cu`) rescale their seed as m grows and never had
-          // the defect.
+          // The exp(sink - m) sink seed; see the scalar pass 2 below for
+          // why it is not exp(0).
           float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
             probs[static_cast<size_t>(j - jmin)] = e;
             denom += e;
           }
-          const float inv = 1.0f / denom;  // every valid decoder/encoder window has >= 1 key
-          // Pass 3: weighted sum of V (f32 accumulation), stored at out's dtype.
+          const float inv = 1.0f / denom;
           for (int64_t e = 0; e < d_v; ++e) acc[static_cast<size_t>(e)] = 0.0f;
           for (int64_t j = jmin; j <= jmax; ++j) {
             const float pw = probs[static_cast<size_t>(j - jmin)] * inv;
             const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
             const int64_t off = j % block_size;
             const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
-            for (int64_t e = 0; e < d_v; ++e)
-              if (scalar_fma)
-                acc[static_cast<size_t>(e)] = std::fma(
-                    pw, KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale),
-                    acc[static_cast<size_t>(e)]);
-              else
-                acc[static_cast<size_t>(e)] +=
-                    pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
+            const float32x4_t pwv = vdupq_n_f32(pw);
+            for (int64_t e = 0; e < d_v; e += 4) {
+              float32x4_t a = vld1q_f32(acc.data() + e);
+              a = vfmaq_f32(a, pwv, KvElem4<decltype(kv_tag)::value>(v_base, vbase + e, v_scale));
+              vst1q_f32(acc.data() + e, a);
+            }
           }
           StoreRowF32(out, qoff, d_v, acc.data());
+        } else
+#endif
+        {
+        for (int64_t j = jmin; j <= jmax; ++j) {
+          const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
+          const int64_t off = j % block_size;
+          const int64_t kbase = blk * kc_blk + off * kc_pg + g * kc_hd;
+          float dot = 0.0f;
+          if (scalar_fma && d % 4 == 0) {
+            float lane[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (int64_t e = 0; e < d; e += 4)
+              for (int l = 0; l < 4; ++l)
+                lane[l] = std::fma(
+                    q[e + l],
+                    KvElem<decltype(kv_tag)::value>(k_base, kbase + e + l, k_scale),
+                    lane[l]);
+            dot = (lane[0] + lane[1]) + (lane[2] + lane[3]);
+          } else {
+            // The pre-batch body: plain sequential dot, the reference order.
+            for (int64_t e = 0; e < d; ++e)
+              dot += q[e] *
+                     KvElem<decltype(kv_tag)::value>(k_base, kbase + e, k_scale);
           }
+          dot *= scale;
+          if (softcap > 0.0f) dot = softcap * std::tanh(dot / softcap);
+          probs[static_cast<size_t>(j - jmin)] = dot;
+          if (dot > m) m = dot;
         }
+        // Pass 2: exp + denominator. The sink's own contribution is
+        // exp(sink - m), NOT exp(0): m starts AT the sink but pass 1 then
+        // grows it past the sink whenever any score is larger, and an
+        // un-rescaled exp(0) seed silently turns the sink into exp(m - m)
+        // -- a LARGER term than the sink deserves, which shrinks every
+        // value weight (observed on Flint, whose per-head sinks are small:
+        // the attention output off by ~6%, the model logits off by ~2).
+        // Seeding at exp(sink - m_final) is bit-identical to the old seed
+        // whenever the sink IS the max (exp(0) == 1.0f, the MiMoV2
+        // large-sink regime this kernel was written for) and correct
+        // everywhere else. The online-softmax arms (`cpu_mla_attn.cpp`,
+        // `cuda_mla_attn.cu`) rescale their seed as m grows and never had
+        // the defect.
+        float denom = sink_p != nullptr ? std::exp(sink_p[h] - m) : 0.0f;
+        for (int64_t j = jmin; j <= jmax; ++j) {
+          const float e = std::exp(probs[static_cast<size_t>(j - jmin)] - m);
+          probs[static_cast<size_t>(j - jmin)] = e;
+          denom += e;
+        }
+        const float inv = 1.0f / denom;  // every valid decoder/encoder window has >= 1 key
+        // Pass 3: weighted sum of V (f32 accumulation), stored at out's dtype.
+        for (int64_t e = 0; e < d_v; ++e) acc[static_cast<size_t>(e)] = 0.0f;
+        for (int64_t j = jmin; j <= jmax; ++j) {
+          const float pw = probs[static_cast<size_t>(j - jmin)] * inv;
+          const int64_t blk = btab[r * bt_row + (j / block_size) * bt_col];
+          const int64_t off = j % block_size;
+          const int64_t vbase = blk * vc_blk + off * vc_pg + g * vc_hd;
+          for (int64_t e = 0; e < d_v; ++e)
+            if (scalar_fma)
+              acc[static_cast<size_t>(e)] = std::fma(
+                  pw, KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale),
+                  acc[static_cast<size_t>(e)]);
+            else
+              acc[static_cast<size_t>(e)] +=
+                  pw * KvElem<decltype(kv_tag)::value>(v_base, vbase + e, v_scale);
+        }
+        StoreRowF32(out, qoff, d_v, acc.data());
+        }
+      }
     });
   };
 

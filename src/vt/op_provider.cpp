@@ -42,6 +42,7 @@ constexpr size_t kOpCount = static_cast<size_t>(OpId::kCount);
 struct Slot {
   OpProvider providers[kMaxProvidersPerOp];
   int count = 0;
+  uint64_t scalar_types[kMaxProvidersPerOp] = {};
   // Resolved selection cache. GetOp is on the hot path of every op in the tree,
   // so the steady state must stay one relaxed load, exactly like the array load
   // it replaces. Registration and SetDeviceProviderCaps() clear it.
@@ -736,6 +737,30 @@ void RegisterOp(OpId op, DeviceType device, void* fn) {
   p.supports = nullptr;
   p.fn = fn;
   RegisterOpProvider(op, device, p);
+}
+
+void RegisterOpScalarType(OpId op, DeviceType device, const char* provider, DType dtype) {
+  if (static_cast<size_t>(op) >= kOpCount || static_cast<size_t>(device) >= kNumDeviceTypes ||
+      provider == nullptr || static_cast<unsigned>(dtype) >= 64) return;
+  Slot& slot = At(op, device);
+  for (int i = 0; i < slot.count; ++i) {
+    if (std::strcmp(slot.providers[i].name, provider) == 0) {
+      slot.scalar_types[i] |= uint64_t{1} << static_cast<unsigned>(dtype);
+      return;
+    }
+  }
+}
+
+bool OpSupportsScalarType(OpId op, DeviceType device, DType dtype) {
+  if (static_cast<unsigned>(dtype) >= 64) return false;
+  Slot& slot = At(op, device);
+  if (slot.selected.load(std::memory_order_relaxed) == nullptr) Resolve(op, device, slot);
+  const char* selected = slot.last_selected.load(std::memory_order_relaxed);
+  for (int i = 0; i < slot.count; ++i) {
+    if (selected != nullptr && std::strcmp(slot.providers[i].name, selected) == 0)
+      return (slot.scalar_types[i] & (uint64_t{1} << static_cast<unsigned>(dtype))) != 0;
+  }
+  return false;
 }
 
 const char* OpName(OpId op) { return OpNameImpl(op); }

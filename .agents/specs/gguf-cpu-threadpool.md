@@ -255,3 +255,343 @@ rebuild a clean detached llama.cpp worktree at `237ad9b96` (`Release`,
 llama-bench -m "$MODEL" -p 512,128 -n 128,32 -t 20 -r 5 -ngl 0
 /usr/bin/time -v llama-bench -m "$MODEL" -p 0 -n 32 -t 20 -r 3 -ngl 0
 ```
+
+## W5 — the row split degenerates at decode (T=1), so split the output range
+
+**Status:** measured 2026-11-01 on the Lumen-3.8-Flare serving host; issue
+[ISSUE-LOCAL-01M69GMT8WCQZMDNMEF8HH96D3](../issues/QUANT-GGUF-CPU-THREADPOOL/ISSUE-LOCAL-01M69GMT8WCQZMDNMEF8HH96D3.md).
+
+**What W4 named, now measured.** W4 attributed the remaining decode gap to "the
+per-op kick at M=1 decode shapes" and left the inline fallback as a work item.
+It is real, but the cause is the split axis, not the kick. Every kernel ported
+in W1-W3 partitions **rows**, and `ParallelForRows` runs `nr == 1` inline by
+design. At decode `T == 1`, so every elementwise kernel hands it one row and
+the caller executes the whole row while the other 17 workers poll. A SIGPROF
+caller-thread profile plus an env-gated per-op timer (`VT_POOL_GAP`, scratch)
+over one 32-token greedy request, 18 threads, 6.7-7.0 s wall:
+
+| kernel | calls | inline total | per call |
+|---|---|---|---|
+| `kGeluAndMul` | 3,276 | 1.212 s | 370 us |
+| `kPagedAttention` (decode) | 1,596 | 0.303 s | 190 us |
+| `kRopeNeox` | 1,330 | 0.223 s | 167 us |
+| `kAdd` | 4,788 | 0.167 s | 35 us |
+| `kRmsNorm` | 8,018 | 0.139 s | 17 us |
+| `kQkvSplit` | 1,596 | 0.119 s | 74 us |
+
+Inline bodies total **2.197 s**, 31 % of the request, and 99.8 % of the
+inter-kick gap is caller CPU rather than descheduling. Rejection recorded: the
+kernels themselves are at per-thread parity with llama.cpp (1.47 vs 1.50 s per
+token at one thread), allocation is not the cost (36 ms of 6.7 s in the
+caller), and thread count, `taskset` pinning and `VT_CPU_MATMUL_STEAL` all
+moved less than the run-to-run spread.
+
+**Design.** Partition the **output element range**, not rows, for kernels whose
+outputs are independent of each other. `ParallelForRows` is already a generic
+splitter over a contiguous range, so no new dispatch seam is needed; the change
+is the unit each caller hands it. Fourth and later passes are unchanged.
+Converted in this change: `kGeluAndMul`, `kRopeNeox` (over `token x head`),
+`kQkvSplit`, `kAdd`. `kMulScalar` and `kSoftCap` already split flat;
+`kRmsNorm` keeps the row split because its reduction order must not move.
+
+**Bit-identity.** Each output element is still produced by exactly one thread
+with the identical expression and the identical rounding, and no cross-element
+reduction changes shape, so the result is bit-identical to the single-thread
+arm by construction — the same argument W1-W3 make for row chunking. The gate
+proves it rather than assuming it.
+
+**Upstream anchors.** ggml partitions elementwise ops over output rows with
+`ith`/`nth` and `dr = (nr + nth - 1)/nth`
+(`ggml/src/ggml-cpu/ops.cpp:2129-2152` at the W1 pin `237ad9b96`; the same shape
+at oracle pin b10451 `10bf611e`, `ops.cpp:2129-2152`). Our tensors are 2-D
+`[T, D]`, so the row count that ggml reads as `ne1*ne2*ne3` collapses to `T`;
+this change restores the intended granularity for that layout. The SIMD arm
+ggml pairs with it (`ggml_vec_gelu_f32` in `ggml/src/ggml-cpu/vec.cpp`) is
+**not** ported here and stays owed — this change is the parallel half of the
+same gap, and it keeps the exact scalar math vLLM's `activation.py:418`
+requires.
+
+**Tests and gates.** Same-binary A/B on one host in one session, greedy 32-token
+output byte-identical between the arms; `test_cpu_threadpool` for the splitter
+contract; the existing CPU op tests for the converted kernels; `verify.py
+--expect-cache on` against the serving deployment.
+
+**Stop conditions.** Stop and return `NEEDS_DECISION` if a conversion cannot
+preserve the per-element expression, or if any A/B run changes a single output
+byte without an explained arithmetic reason.
+
+## W5 RESULT (2026-11-01) — output-range split landed and measured
+
+**Same-binary A/B.** One arm per server start, identical flags, 18 threads,
+`VT_GGUF_KEEP_QUANT=1`, greedy 32 tokens, two runs per arm and three
+interleaved base/final pairs in one session at 1-minute load 9.8-12.4 on the
+AVX2 host:
+
+| arm | wall median | CPU median |
+|---|---|---|
+| before | 6.355 s | 114.08 s |
+| after | 5.495 s | 98.78 s |
+
+Wall **1.157x**, CPU **1.155x**. Every pair favours the after arm (1.224x,
+1.153x, 1.167x), so the ordering is not an artifact of drift. An earlier
+three-run bracket and two live captures at load 58-79 are VOID and are not
+quoted: the same binary moved between 13 and 27 s there.
+
+**Byte identity.** All twelve greedy runs returned the same 32 tokens. A
+`verify.py --expect-cache on` capture of the live service, compared field by
+field against the pre-change capture, differs in zero fields outside `id` and
+`created`.
+
+**Review and coverage.** Ten mutations were applied to a scratch copy of the
+head: both chunk-seam carries, both chunk starts, the rope split extent, the
+k-head index, the q/k boundary, and the add extent and seam. Nine went RED on
+a shipped suite. The tenth, `hh < hq` changed to `hh < hk`, stayed green
+because every shipped rope case is `T=1, Hq=Hk=1`; the pool determinism
+battery also omitted all four converted kernels. Both gaps are closed.
+
+A GQA case at `T=10, Hq=4, Hk=2, D=8, rot=6` compares all 320 q and 160 k
+slots bit-exactly against a reference computed from `cos`/`sin` in the test,
+and every kernel-running case now holds 32 guard words on each side of q and
+of k that are snapshotted before the call and compared bit for bit afterwards.
+The guards are load-bearing rather than decorative: the boundary mutant writes
+16 words before k and the head-shift mutant 30 words after it, so without them
+the run ended in heap corruption and a SIGABRT instead of an assertion. With
+them both mutants fail as assertion failures and exit normally, 233 and 156 of
+1,142 at four threads. The battery runs the four kernels at 1, 3 and 20
+threads, and reverting the add split extent leaves 378 of 384 elements
+unwritten. `test_ops_rope` 7 cases / 1,142 assertions, `test_cpu_threadpool`
+9 cases / 19,635 assertions (19,636 with the pool size set through the
+environment), and `test_ops_activation`, `test_ops_qkv_merge` and
+`test_ops_layernorm` unchanged at 27/291120, 2/14 and 6/9263.
+
+**Rejected levers, measured in the same session.** Twelve and eight threads,
+`taskset` pinning, `VT_CPU_MATMUL_STEAL=1` and `VT_CPU_SPIN_ROUNDS=0` all moved
+less than the run-to-run spread. Allocation is 36 ms of the request. One thread
+runs these kernels at llama.cpp's rate (1.47 s against 1.50 s per token), so
+the gap was parallelism, not arithmetic.
+
+**What stays open.** `kPagedAttention` still runs its decode body inline at
+about 0.30 s per 32-token request and `kRmsNorm` keeps the row split at about
+0.14 s; each is a separate change with its own issue. The ggml SIMD arm
+(`ggml_vec_gelu_f32`) stays owed as recorded above. The after arm is 5.495 s
+against llama.cpp's 5.0-5.3 s for the same file on the same host, so the
+remaining gap is small but not closed.
+
+**Evidence.** `evidence/gsq-lumen-w5-20261101/` in the serving deployment
+(`README.md`, `ab-calm-20261101.json`, `verify-before/`, `verify-after/`,
+`verify-live2/`).
+
+## W6 — paged attention splits tokens, so decode runs every q head inline
+
+**Status:** implemented and measured 2026-11-01 on the Lumen-3.8-Flare serving
+host; issue
+[ISSUE-LOCAL-01M6A7PTZC5T44XE7FCG4F2JHQ](../issues/QUANT-GGUF-CPU-THREADPOOL/ISSUE-LOCAL-01M6A7PTZC5T44XE7FCG4F2JHQ.md).
+The design below is the committed pre-implementation text; the measured result
+is in `## W6 RESULT`.
+
+**What W5 left measured.** `kPagedAttention` was second in the W5 inline table:
+1,596 calls, 0.303 s of a 6.7-7.0 s 32-token greedy request, 190 us per call.
+The kernel partitions the **query-token** axis only
+([cpu_paged_attn.cpp:341](../../src/vt/cpu/cpu_paged_attn.cpp#L341)), so at
+decode `total_q == 1`, `ParallelForRows` takes its `nr == 1` inline fallback,
+and the caller runs all `hq` heads of the layer while the pool spins.
+
+**Re-profiled on the W5 tree, 2026-11-01.** The same `VT_POOL_GAP` build,
+linked from the deployment archive with the W5 `cpu_ops`/`cpu_layernorm`
+objects, one 8-token warm-up plus two 32-token greedy requests (72 tokens),
+18 threads, load 7.7: inline total 0.686 s. `PagedAttentionKernel` is now the
+largest inline site by a wide margin at 2,898 calls and 0.4606 s (158.9 us per
+call, 0.214 s per 32-token request, 4.0 % of the 5.27 s wall). The W5
+conversions no longer appear in the inline table at all. Next after it:
+`RmsNormKernel` 14,559 calls and 0.1833 s (0.081 s per request, 1.5 %).
+
+**Design.** Split the flat `token x q-head` range: `nr = total_q * hq`, and map
+index `i` inside a chunk to `t = i / hq`, `h = i % hq`. Every output element
+`out[(t*hq + h)*d_v .. +d_v)` is already produced independently by exactly one
+iteration of the existing head loop
+([cpu_paged_attn.cpp:367-439](../../src/vt/cpu/cpu_paged_attn.cpp#L367)), and
+the per-token values `r`, `p`, `seqlen`, `jmin`, `jmax` come from the
+pre-computed `tok_*` arrays, so the chunk body can recompute them from `t`
+without a barrier or a cross-chunk reduction. The scratch that today lives
+above the token loop (`probs`, `acc`, `qrow`) moves inside the (t, h) body and
+is reused across the pairs of one chunk: `probs` is re-`assign`ed per pair and
+`acc` is re-zeroed, exactly as the token loop does today. `qrow` stays a
+per-token widening and is cached on the last `t` a chunk visited, because flat
+index order is monotone in `t`; a chunk that spans several heads of one token
+still widens that token once.
+
+**Bit-identity.** Each `(t, h)` pair keeps the identical expression, the
+identical sequential pass order over its own keys and the identical rounding;
+the change only moves which thread executes the pair. No cross-head or
+cross-token reduction exists to change shape. Duplicate `qrow` widening across
+chunks is read-only, so it cannot reorder arithmetic. The gate proves the claim
+rather than assuming it.
+
+**Upstream anchors.** ggml splits attention over the query head axis inside
+`ggml_compute_forward_flash_attn_ext_f16`
+(`ggml/src/ggml-cpu/ops.cpp:9131-9140`, the `for (q_head ...)` loop at oracle
+pin b10451 `10bf611e`). At decode with `nek1 >= 512` it additionally splits the
+KV axis into `(nek1 + nth - 1) / nth` chunks per thread and merges partial
+softmax terms (`:9115-9130` in the same file); this change does **not** take
+that axis, because a KV split changes the softmax reduction order and the
+strict goldens require the sequential order. The extent idiom is the
+`ith`/`nth` split W5 already uses (`ops.cpp:2129-2152`).
+
+**Tests.** A decode-shaped `PagedAttention` case (`T=1`, `Hq=8`, `Hk=2`, `D=8`,
+`block_size=4`, causal) must exist in the threadpool determinism battery and
+agree byte for byte at 1, 3 and 20 pool threads; the existing 37-token prefill
+case stays so the token loop keeps coverage. `test_ops_paged_attn` and
+`test_ops_paged_attn_dtype` must stay green unchanged, because they already
+hold decode, sliding-window, sink and block-spanning cases.
+
+**Mutations the reviewer must apply.** `nr = total_q * hq` reduced by one (an
+unwritten last output element); the shifted-store form of `h` (compute from
+`(h+1)%hq` and store at the pair's `h`, or the reverse) — 1586 failures in
+`test_ops_paged_attn` plus 171 in the dtype suite, with the threadpool battery
+green because it is blind to a deterministic mapping error; the `qrow` cache
+key never advanced (every token after the first reuses the first query row);
+the per-pair `probs` scratch no longer sized — the `assign` is the only sizing,
+so deleting it ends the run in SIGSEGV rather than an assertion. Shifting `h`
+itself is a pure relabelling and fails nothing, and a sized-but-unzeroed
+`probs` is green everywhere, because pass 1 writes every `probs[j-jmin]` that
+pass 2 reads. A mutation must produce an observed failure, not merely a
+different number.
+
+**Gates.** Same-binary interleaved A/B on the serving host, 18 threads, greedy
+32 tokens, at least three pairs; byte-identical greedy output between arms;
+`verify.py --expect-cache on` against the live deployment; and a prefill check
+that the first-token latency of a long prompt does not regress beyond the
+run-to-run spread, because prefill is the shape where the flat split changes
+chunk composition.
+
+**Expected gain.** Inline cost 0.303 s per 32-token request, of which the eight
+q heads per layer are the natural units; the pool can retire a call in about
+one head plus one kick. The measured wall gain is recorded in the result
+section, not assumed here.
+
+**Stop conditions.** Stop and return `NEEDS_DECISION` if the split cannot keep
+one thread per output element, if any A/B run changes a single output byte
+without an explained arithmetic reason, or if prefill regresses beyond the
+spread while the decode gain is inside it.
+
+## W6 RESULT (2026-11-01) — the (token, q-head) split landed and measured
+
+**Change.** `PagedAttentionKernel` hands `ParallelForRows` `total_q * hq`
+instead of `total_q`, and maps a flat index `i` to `t = i / hq` and
+`h = i % hq`. The softmax scratch (`probs`, `acc`) and the widened query row
+(`qrow`) moved inside the `(t, h)` body; `qrow` is widened once per token and
+cached on the last `t` a chunk visited. `diff -w` shows the per-pair body is
+the previous head-loop iteration, dedented and with its loop indices named, so
+the arithmetic, the order over keys and the rounding did not move.
+
+**Profile that chose the lever.** A `VT_POOL_GAP` build of the W5 tree, linked
+from the deployment archive with the W5 `cpu_ops` and `cpu_layernorm` objects,
+one 8-token warm-up plus two 32-token greedy requests (72 tokens), 18 threads,
+load 7.7: `PagedAttentionKernel` 2,898 calls and 0.4606 s (158.9 us per call,
+0.214 s per 32-token request, 4.0 % of the 5.27 s wall). `RmsNormKernel` was
+next at 14,559 calls and 0.1833 s. The W5 conversions do not appear in the
+inline table any more.
+
+**Same-binary A/B.** Both arms are linked from the same deployment archive
+(`libvllm-g5.a`) with the same W5 objects and differ only in the
+`cpu_paged_attn.cpp` object, because the served artifact cannot yet be built
+from this branch (see Owed). 18 threads, `VT_GGUF_KEEP_QUANT=1`, greedy 32
+tokens, two runs per arm, seven interleaved pairs in one session:
+
+| bracket | before wall | after wall | wall ratio |
+|---|---|---|---|
+| load 12.9-17.6 (3 pairs) | 5.157 s | 4.902 s | 1.052x |
+| load 7.2-13.6 (4 pairs) | 5.037 s | 4.818 s | 1.045x |
+| pooled (7 pairs) | 5.078 s | 4.830 s | 1.051x |
+
+CPU seconds move with wall, 91.28 s to 86.90 s (1.051x). Six of the seven
+pairs favour the after arm (1.056, 1.093, 0.983, 1.093, 1.013, 1.039, 1.012);
+the 0.983 pair ran at load 17.55 against 15.90 and is kept in the pooled number
+rather than dropped. All fourteen greedy runs returned the same 32 tokens.
+
+**Prefill does not regress.** One warm-up plus three 402-token prompts with
+`max_tokens=1` per server, first prompt dropped as an allocation warm-up:
+0.306 s and 0.304 s before against 0.246 s and 0.243 s after, about 1.25x
+faster, because a 402-token prefill now divides its 3,216 pairs across the pool
+instead of its 402 tokens.
+
+**Review.** A fresh reviewer read the head and mutated a scratch copy. Every
+mutation below was applied, run, and reverted byte for byte; the counts are
+observed, not predicted.
+
+| mutation | `test_ops_paged_attn` | `test_ops_paged_attn_dtype` | `test_cpu_threadpool` |
+|---|---|---|---|
+| `nr = total_q * hq - 1` (unwritten last output element) | 69 fail | 171 fail | 6 fail |
+| shifted store: compute from `(h+1)%hq`, store at `h` | 1586 fail | 171 fail | green |
+| `h` shifted throughout (`(h+1)%hq` both sides) | green | green | green |
+| `qrow` cache key never advanced | 4 fail | 98 / 16 / 0 at 1 / 3 / 20 threads | 4 fail |
+| `qoff = (h*total_q + t)*d_v` (pair order flipped) | 1652 fail | 147 fail | green |
+| `probs` sizing (`assign`) deleted | SIGSEGV | SIGSEGV | SIGSEGV |
+| `probs` sized but never written by `assign(n, NaN)` | green | green | green |
+
+The shifted store is the important one: the head mapping is a deterministic
+mis-map, so the threadpool battery cannot see it and the two head tests can.
+Shifting `h` on both sides is a pure relabelling and fails nothing, which is
+why the battery comment now delegates the head mapping to
+`test_ops_paged_attn.cpp:463` and `test_ops_paged_attn_dtype.cpp:421`. Deleting
+the `assign` is the only sizing in the body, so that mutant dies in a signal
+rather than an assertion; the NaN-poison variant proves the stated reason for
+the green case, that pass 1 writes every `probs[j-jmin]` that pass 2 reads.
+
+Reachability was mutated too: removing the `RegisterOp` entry fails the suites,
+while removing the `qwen3_5` call site stays green because the tests enter at
+the op seam. The production call site is exercised by the e2e A/B above, not by
+the unit suites.
+
+The first review returned three findings, all in prose that claimed coverage
+the battery does not provide: the decode comment, the `qrow` cache comment and
+this section's mutation list. A fresh implementer corrected all three in
+`0903be579`, and a second fresh reviewer reproduced every mutation above and
+returned `PASS` with no residual finding.
+
+**Gate.** Release build, `ninja -j 6`, one binary per suite:
+
+| `VLLM_CPP_CPU_THREADS` | `test_ops_paged_attn` | `test_ops_paged_attn_dtype` | `test_cpu_threadpool` |
+|---|---|---|---|
+| unset | 15 / 1838 | 3 / 172 | 9 / 19650 |
+| 1 | 15 / 1838 | 3 / 172 | 9 / 19651 |
+| 3 | 15 / 1838 | 3 / 172 | 9 / 19651 |
+| 20 | 15 / 1838 | 3 / 172 | 9 / 19651 |
+
+One pre-existing skip runs in every threadpool configuration. The thread count
+adds one assertion because the explicit-pool case asserts its configured size.
+`test_cuda_quant_dot.cpp` fails to compile in this CUDA-off configuration on
+main's own text (`-Werror=unused-parameter`), so the whole-tree `ninja` target
+stops there; the three suites above were built by name and are current.
+
+**Live deployment.** `bin/lumenengine-server` at sha256 `9661f2cc` replaces the
+W5 binary, which is kept as `bin/lumenengine-server.before-w6-20261101`
+(sha256 `0f8d6cff`). The server restarts from `./serve.sh gsq-rco-cpu`, answers
+`/health` with 200, and holds 6.54 GB RSS with the same flags as before. Two
+`verify.py --expect-cache on` captures on the new process report 32 hits of 115
+queries and then 96; that is the same pair W5 recorded in the opposite order
+(96 then 32), so the alternation is cache warmth, not the kernel. `chat.json`,
+`completion-1.json`, `completion-2.json`, `models.json` and `health.txt` are
+field-identical to the W5 `verify-final` capture outside `id` and `created`.
+The rebuilt kernel object is byte-identical to the object compiled from this
+commit's `cpu_paged_attn.cpp`, and the deployed binary's
+`PagedAttentionKernel` disassembles identically to that rebuild.
+
+**What stays open.** `kRmsNorm` keeps its row split and about 0.081 s per
+32-token request, the largest remaining inline site. The pool is now at
+4.830 s against llama.cpp's 5.0-5.3 s for the same file on the same host, but
+an official same-session denominator is a separate measurement and the gap is
+not declared closed.
+
+**Evidence.** `evidence/gsq-lumen-w6-20261101/` in the serving deployment
+(`README.md`, `ab/`, `prefill/`, `profile/inline-post-w5.txt`,
+`binaries/cpu_paged_attn.sha256`, `verify-after/`, `verify-after2/`).
+
+
+## Owed
+
+- ISSUE-LOCAL-01M6A8SZSN03ZNFY8Y7HB6M7TZ: the served Lumen-3.8-Flare binary cannot
+  be reproduced from main. The GGUF KV array budget (1e6 against this artifact's
+  1,301,418 elements) and the `gemma4` GGUF architecture exist only in the
+  deployment scratch tree, so W6 measures on a binary linked from the deployment
+  archive and the fix needs its own row.

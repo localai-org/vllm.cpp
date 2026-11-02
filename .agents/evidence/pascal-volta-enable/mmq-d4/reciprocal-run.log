@@ -1,0 +1,18 @@
+m=9 n=7 k=32 q5=0 in=0 out=0 row=2 col=1 actual=-9.44471958e-06 expected=-9.5143705e-06
+registered Pascal MMQ differs from independent activation contract
+PASS m=1 n=7 k=32 q5=0 in=0 out=0
+PASS m=1 n=7 k=32 q5=0 in=0 out=2
+PASS m=1 n=7 k=32 q5=0 in=2 out=0
+PASS m=1 n=7 k=32 q5=0 in=2 out=2
+PASS m=1 n=7 k=576 q5=0 in=0 out=0
+PASS m=1 n=7 k=576 q5=0 in=0 out=2
+PASS m=1 n=7 k=576 q5=0 in=2 out=0
+PASS m=1 n=7 k=576 q5=0 in=2 out=2
+PASS m=8 n=7 k=32 q5=0 in=0 out=0
+PASS m=8 n=7 k=32 q5=0 in=0 out=2
+PASS m=8 n=7 k=32 q5=0 in=2 out=0
+PASS m=8 n=7 k=32 q5=0 in=2 out=2
+PASS m=8 n=7 k=576 q5=0 in=0 out=0
+PASS m=8 n=7 k=576 q5=0 in=0 out=2
+PASS m=8 n=7 k=576 q5=0 in=2 out=0
+PASS m=8 n=7 k=576 q5=0 in=2 out=2

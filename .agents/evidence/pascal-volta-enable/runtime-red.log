@@ -1,0 +1,69 @@
+Test project /tmp/lumen-build-legacy
+    Start 580: test_cuda_backend
+1/5 Test #580: test_cuda_backend ................   Passed    0.31 sec
+    Start 582: test_cuda_ops
+2/5 Test #582: test_cuda_ops ....................***Failed    1.51 sec
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_ops.cpp:331:
+TEST CASE:  CUDA silu_and_mul matches CPU
+
+./tests/vt/test_cuda_ops.cpp:107: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 6 == 0 )
+  logged: d := 173
+          static_cast<int>(c.in) := 2
+          static_cast<int>(c.out) := 0
+
+./tests/vt/test_cuda_ops.cpp:107: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 7 == 0 )
+  logged: d := 256
+          static_cast<int>(c.in) := 2
+          static_cast<int>(c.out) := 0
+
+===============================================================================
+[doctest] test cases:  13 |  12 passed | 1 failed | 0 skipped
+[doctest] assertions: 446 | 444 passed | 2 failed |
+[doctest] Status: FAILURE!
+
+    Start 583: test_cuda_legacy_matmul
+3/5 Test #583: test_cuda_legacy_matmul ..........   Passed    3.20 sec
+    Start 585: test_cuda_legacy_intrinsics
+4/5 Test #585: test_cuda_legacy_intrinsics ......   Passed    0.26 sec
+    Start 633: test_cuda_quant_dot
+5/5 Test #633: test_cuda_quant_dot ..............***Failed   67.97 sec
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_quant_dot.cpp:1440:
+TEST CASE:  32-block keep-quant lane: crosses the lane stride, and takes K = 640
+
+./tests/vt/test_cuda_quant_dot.cpp:1554: MESSAGE: 32-block lane iq4_nl: worst device-vs-CPU max|diff| = 4.57764e-05, worst fraction of the derived bound = 0.0849082
+
+./tests/vt/test_cuda_quant_dot.cpp:1554: MESSAGE: 32-block lane q5_0: worst device-vs-CPU max|diff| = 3.8147e-06, worst fraction of the derived bound = 0.00710636
+
+./tests/vt/test_cuda_quant_dot.cpp:1554: MESSAGE: 32-block lane q4_0: worst device-vs-CPU max|diff| = 1.90735e-06, worst fraction of the derived bound = 0.117954
+
+===============================================================================
+./tests/vt/test_cuda_quant_dot.cpp:1931:
+TEST CASE:  CUDA grouped keep-quant at GLM-5.3-Flash's published MoE geometry
+
+./tests/vt/test_cuda_quant_dot.cpp:1931: ERROR: test case THREW exception: vt cuda: cudaMalloc: out of memory
+  logged: what := blk.3-44 (39 layers)
+          cg.name := 1
+          cd.name := 1
+
+===============================================================================
+[doctest] test cases:     19 |     18 passed | 1 failed | 0 skipped
+[doctest] assertions: 254192 | 254192 passed | 0 failed |
+[doctest] Status: FAILURE!
+
+
+60% tests passed, 2 tests failed out of 5
+
+Total Test time (real) =  73.26 sec
+
+The following tests FAILED:
+	582 - test_cuda_ops (Failed)
+	633 - test_cuda_quant_dot (Failed)
+Errors while running CTest

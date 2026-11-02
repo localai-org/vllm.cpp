@@ -1,6 +1,6 @@
 # Environment variables
 
-vllm.cpp reads a number of environment variables. Most are kernel-internal
+LumenEngine reads a number of environment variables. Most are kernel-internal
 tuning and bisect knobs that belong to the engineering record, not to a
 deployment; this page documents the subset that changes user-visible behavior or
 is a supported operational lever. Everything else is enumerated on the

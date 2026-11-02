@@ -364,7 +364,9 @@ __global__ void MatmulNvfp4Tiled(Tout* out, const Tin* act, const uint8_t* packe
 // [WARPS_M x WARPS_N], K-loop over BK; dequant on CUDA cores, MMA on tensor
 // cores). BF16 activations only — the f32-act large-M case keeps the CUDA-core
 // tiled path (no test exercises f32-act large-M, and the model feeds bf16).
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 namespace wmma = nvcuda::wmma;
+#endif
 
 template <typename Tout, int BM, int BN, int BK, int WARPS_M, int WARPS_N>
 __global__ void MatmulNvfp4Wmma(Tout* out, const __nv_bfloat16* act, const uint8_t* packed,

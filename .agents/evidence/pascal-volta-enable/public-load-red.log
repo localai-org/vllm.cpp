@@ -1,0 +1,4 @@
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+public load: vllm_engine_load: No valid attention backend for device type 1 from {FLASH_ATTN: [compute capability not supported]} (use_mla=false, use_sparse=false)

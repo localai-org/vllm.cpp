@@ -1,0 +1,16 @@
+Test project /tmp/lumen-brand-build/engine/tests
+    Start 578: test_lumenengine_header_cpp
+1/2 Test #578: test_lumenengine_header_cpp ......   Passed    0.01 sec
+    Start 579: test_lumenengine_header_c
+2/2 Test #579: test_lumenengine_header_c ........   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.03 sec
+Test project /tmp/lumen-brand-build/engine/examples
+    Start 12: test_lumenengine_commands
+1/1 Test #12: test_lumenengine_commands ........   Passed    0.22 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.22 sec

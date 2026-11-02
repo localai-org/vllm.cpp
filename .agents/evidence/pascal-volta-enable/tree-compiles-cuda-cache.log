@@ -1,0 +1,81 @@
+check-tree-compiles: base db1d71c9b735 (origin/main)  head f28e56f1c901 (HEAD)
+  committed db1d71c9b735..f28e56f1c901: 2 path(s)
+  staged: 0 path(s)
+  unstaged: 14 path(s)
+  untracked: 9 path(s)
+  in scope: 11 C++ source(s), 2 header(s), 1 build file(s), out of 23 changed path(s)
+  configured /tmp/lumen-build-legacy in 4.6s: 1800 translation unit(s) in this configuration
+  dependency scan: 1800 unit(s) in 56.7s (a header is in scope)
+  35 unit(s) would not preprocess, so their include edges are unknown and they are checked unconditionally: src/vt/cuda/cuda_arch_tactics.cu, src/vt/cuda/cuda_attention_cross.cu, src/vt/cuda/cuda_backend.cu, src/vt/cuda/cuda_cache.cu, src/vt/cuda/cuda_combine_tokens.cu, src/vt/cuda/cuda_conv1d_general.cu, src/vt/cuda/cuda_conv3d.cu, src/vt/cuda/cuda_deepseek_v4.cu, src/vt/cuda/cuda_dropin.cu, src/vt/cuda/cuda_dsa_indexer.cu
+  checking 38 translation unit(s) with -fsyntax-only at -j4
+FAILED to compile src/vt/cuda/cuda_arch_tactics.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00223f42_00000000-17_cuda_arch_tactics.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_attention_cross.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00223f44_00000000-17_cuda_attention_cross.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_backend.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00223f47_00000000-17_cuda_backend.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_cache.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00223f48_00000000-17_cuda_cache.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_combine_tokens.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002240c2_00000000-17_cuda_combine_tokens.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_conv1d_general.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00224106_00000000-17_cuda_conv1d_general.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_conv3d.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022419c_00000000-17_cuda_conv3d.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_deepseek_v4.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002241fe_00000000-17_cuda_deepseek_v4.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_dropin.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002242aa_00000000-17_cuda_dropin.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_dsa_indexer.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022432a_00000000-17_cuda_dsa_indexer.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_exl3.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002243e9_00000000-17_cuda_exl3.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_gdn.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00224471_00000000-17_cuda_gdn.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_glm5_next.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022448f_00000000-17_cuda_glm5_next.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_glue.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00224600_00000000-17_cuda_glue.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_laguna.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022466a_00000000-17_cuda_laguna.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_layernorm.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002247d2_00000000-17_cuda_layernorm.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_ltx2.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002248a8_00000000-17_cuda_ltx2.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_ltx2_vae.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00224af3_00000000-17_cuda_ltx2_vae.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_matmul.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00224bbb_00000000-17_cuda_matmul.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_matmul_nvfp4.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00224d17_00000000-17_cuda_matmul_nvfp4.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_minimax_h3.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002252de_00000000-17_cuda_minimax_h3.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_mla_attn.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022619b_00000000-17_cuda_mla_attn.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_mla_prefill.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_002295bc_00000000-17_cuda_mla_prefill.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_moe.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022a8ca_00000000-17_cuda_moe.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_ops.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022cb42_00000000-17_cuda_ops.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_paged_attn.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0022cc24_00000000-17_cuda_paged_attn.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_quant_dot.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0023637b_00000000-17_cuda_quant_dot.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_quant_fp8.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0023f5fd_00000000-17_cuda_quant_fp8.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_qwen4_exp.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00241851_00000000-17_cuda_qwen4_exp.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_qwen4_exp_ple.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00241d22_00000000-17_cuda_qwen4_exp_ple.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_qwen4_exp_qsa.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00242958_00000000-17_cuda_qwen4_exp_qsa.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_rms_norm_group.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00242e10_00000000-17_cuda_rms_norm_group.o' (target: sm_60)
+FAILED to compile src/vt/cuda/cuda_sample.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00242f83_00000000-17_cuda_sample.o' (target: sm_60)
+FAILED to compile src/vt/cuda/nccl_communicator.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00243eae_00000000-17_nccl_communicator.o' (target: sm_60)
+FAILED to compile tests/vt/test_cuda_legacy_intrinsics.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_00244451_00000000-11_test_cuda_legacy_intrinsics.o'
+check-tree-compiles: 35 of 38 translation unit(s) in scope did not compile (272.0s). This checks syntax and semantics only; it does not link, run, or leave the default host configuration.

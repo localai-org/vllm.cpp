@@ -121,7 +121,10 @@ inline std::string DenseEmbedding(const Format& format,
 
 inline std::string BuildModel(const Format& format, bool dense_embedding,
                               const Format* gate_up_format = nullptr,
-                              const Format* down_format = nullptr) {
+                              const Format* down_format = nullptr,
+                              uint32_t head_dim = 64) {
+  if (head_dim == 0 || 256 % head_dim != 0)
+    throw std::invalid_argument("fixture head dimension must divide 256");
   using namespace gguf_test;
   GgufModelBuilder builder;
   builder.AddKv(StrKv("general.architecture", "qwen35"));
@@ -129,20 +132,22 @@ inline std::string BuildModel(const Format& format, bool dense_embedding,
   builder.AddKv(U32Kv("general.quantization_version", 2));
   builder.AddKv(U32Kv("qwen35.embedding_length", 256));
   builder.AddKv(U32Kv("qwen35.block_count", 1));
-  builder.AddKv(U32Kv("qwen35.attention.head_count", 4));
+  builder.AddKv(U32Kv("qwen35.attention.head_count", 256 / head_dim));
   builder.AddKv(U32Kv("qwen35.attention.head_count_kv", 1));
-  builder.AddKv(U32Kv("qwen35.attention.key_length", 64));
-  builder.AddKv(U32Kv("qwen35.attention.value_length", 64));
+  builder.AddKv(U32Kv("qwen35.attention.key_length", head_dim));
+  builder.AddKv(U32Kv("qwen35.attention.value_length", head_dim));
   builder.AddKv(U32Kv("qwen35.feed_forward_length", 256));
   builder.AddKv(U32Kv("qwen35.full_attention_interval", 1));
   builder.AddKv(U32Kv("qwen35.context_length", 64));
   builder.AddKv(U32Kv("qwen35.vocab_size", 128));
   builder.AddKv(F32Kv("qwen35.attention.layer_norm_rms_epsilon", 1e-6F));
   builder.AddKv(F32Kv("qwen35.rope.freq_base", 1000000.0F));
-  builder.AddKv(U32Kv("qwen35.rope.dimension_count", 64));
+  builder.AddKv(U32Kv("qwen35.rope.dimension_count", head_dim));
   // Stock qwen35.cpp::load_arch_hparams requires these even when every layer
   // is full attention. The SSM geometry stays inactive: no SSM tensor exists.
-  builder.AddKv(I32ArrayKv("qwen35.rope.dimension_sections", {16, 8, 8, 0}));
+  builder.AddKv(I32ArrayKv("qwen35.rope.dimension_sections",
+      {static_cast<int32_t>(head_dim / 4), static_cast<int32_t>(head_dim / 8),
+       static_cast<int32_t>(head_dim / 8), 0}));
   builder.AddKv(U32Kv("qwen35.ssm.conv_kernel", 4));
   builder.AddKv(U32Kv("qwen35.ssm.inner_size", 64));
   builder.AddKv(U32Kv("qwen35.ssm.state_size", 64));
@@ -194,8 +199,8 @@ inline std::string BuildModel(const Format& format, bool dense_embedding,
   };
   projection("output.weight", 256, 128);
   projection("blk.0.attn_q.weight", 256, 512);
-  projection("blk.0.attn_k.weight", 256, 64);
-  projection("blk.0.attn_v.weight", 256, 64);
+  projection("blk.0.attn_k.weight", 256, head_dim);
+  projection("blk.0.attn_v.weight", 256, head_dim);
   projection("blk.0.attn_output.weight", 256, 256);
   projection("blk.0.ffn_gate.weight", 256, 256, gate_up_format);
   projection("blk.0.ffn_up.weight", 256, 256, gate_up_format);
@@ -203,8 +208,8 @@ inline std::string BuildModel(const Format& format, bool dense_embedding,
   norm("output_norm.weight", 256);
   norm("blk.0.attn_norm.weight", 256);
   norm("blk.0.post_attention_norm.weight", 256);
-  norm("blk.0.attn_q_norm.weight", 64);
-  norm("blk.0.attn_k_norm.weight", 64);
+  norm("blk.0.attn_q_norm.weight", head_dim);
+  norm("blk.0.attn_k_norm.weight", head_dim);
   return builder.Build();
 }
 

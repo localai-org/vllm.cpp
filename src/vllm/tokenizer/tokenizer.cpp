@@ -1,10 +1,11 @@
 // vllm.cpp original (tokenizer); semantics mirror HF tokenizers byte-level
 // BPE. FromHfJson loads an HF tokenizer.json; FromGguf loads the same vocab
-// family from GGUF tokenizer.ggml.* kvs. Anything that is not the byte-level
-// BPE family we implement throws loudly (no silent wrong tokenization).
+// family from GGUF tokenizer.ggml.* kvs, including score-ranked Llama SPM.
+// Unsupported families throw rather than silently change tokenization.
 #include "vllm/tokenizer/tokenizer.h"
 
 #include <cstddef>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <stdexcept>
@@ -963,11 +964,11 @@ Tokenizer Tokenizer::FromHfJsonBytes(std::string_view tokenizer_json,
 Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
   Tokenizer tok;
 
-  // "gpt2" is llama.cpp's name for byte-level BPE (the only family we do).
+  // Pinned llama.cpp names byte-level BPE "gpt2" and score BPE "llama".
   const std::string& model = KvString(f, "tokenizer.ggml.model");
-  if (model != "gpt2") {
+  if (model != "gpt2" && model != "llama") {
     Fail("unsupported tokenizer.ggml.model \"" + model +
-         "\" (only \"gpt2\" byte-level BPE)");
+         "\" (expected \"gpt2\" byte-level BPE or \"llama\" score BPE)");
   }
 
   // Pre-tokenizer, by llama.cpp pre name. llama.cpp DOES distinguish the
@@ -978,8 +979,22 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
   // combining marks and which we do not implement — accepting it would
   // silently mistokenize real Qwen2.5/Qwen3 GGUFs, so it fails loudly like
   // the HfJson path.
-  const std::string& pre = KvString(f, "tokenizer.ggml.pre");
-  if (pre == "qwen35") {
+  tok.gguf_spm_ = model == "llama";
+  if (tok.gguf_spm_) {
+    tok.family_ = Family::kSentencePiece;
+    tok.metaspace_replacement_ = "▁";
+    tok.byte_fallback_ = true;
+    tok.unk_id_ = 0;
+    tok.prepend_scheme_ = PrependScheme::kAlways;
+  }
+  const std::string pre = tok.gguf_spm_ ? "" : KvString(f, "tokenizer.ggml.pre");
+  if (tok.gguf_spm_) {
+    // SPM ignores the BPE pretokenizer name (llama-vocab.cpp:2564).
+  } else if (pre == "smollm") {
+    // Pinned llama.cpp:362-371 isolates \p{N}, then runs GPT-2.
+    tok.pattern_ = SplitPattern::kGpt2;
+    tok.smollm_digits_ = true;
+  } else if (pre == "qwen35") {
     tok.pattern_ = SplitPattern::kQwen2;
   } else if (pre == "qwen2") {
     tok.pattern_ = SplitPattern::kQwen2Classic;
@@ -1133,6 +1148,11 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
     const int32_t type = std::get<int32_t>(types.elems[i].v);
     const int32_t id = static_cast<int32_t>(i);
     if (text.empty()) Fail("empty token string at id " + std::to_string(id));
+    if (tok.gguf_spm_ && type == 2) {
+      tok.added_tokens_.push_back({text, id, /*special=*/true});
+      tok.unk_id_ = id;
+      continue;
+    }
     switch (type) {
       case 1:    // normal
       case 2:    // unknown — still a plain vocab slot for byte-level BPE
@@ -1161,6 +1181,23 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
     }
   }
 
+  if (tok.gguf_spm_) {
+    // llama.cpp:2609-2653 accepts F32 or I32 scores, defaulting to zero.
+    const auto* value = f.FindKv("tokenizer.ggml.scores");
+    const GgufArray* scores = nullptr;
+    if (value != nullptr) {
+      if (value->TypeId() != kGgufArray) Fail("tokenizer.ggml.scores is not an array");
+      scores = &std::get<GgufArray>(value->v);
+      if ((scores->elem_type != kGgufF32 && scores->elem_type != kGgufI32) || scores->elems.size() < tokens.elems.size())
+        Fail("tokenizer.ggml.scores has invalid type or length");
+    }
+    for (size_t i = 0; i < tokens.elems.size(); ++i) {
+      const float score = scores == nullptr ? 0.f : scores->elem_type == kGgufF32
+          ? std::get<float>(scores->elems[i].v) : static_cast<float>(std::get<int32_t>(scores->elems[i].v));
+      if (!std::isfinite(score)) Fail("tokenizer.ggml.scores contains a nonfinite value");
+      tok.spm_scores_[std::get<std::string>(tokens.elems[i].v)] = score;
+    }
+  } else {
   // Merges are legacy-form "left right" strings.
   const GgufArray& merges =
       KvArray(f, "tokenizer.ggml.merges", kGgufString, "string");
@@ -1173,6 +1210,7 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
     ++rank;
   }
 
+  }
   // bos/eos ids are optional u32 kvs; absent -> -1 (callers fall back to the
   // model config, as with FromHfJson).
   const auto token_id_kv = [&](const char* key) -> int32_t {
@@ -1191,6 +1229,19 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
   };
   tok.bos_id_ = token_id_kv("tokenizer.ggml.bos_token_id");
   tok.eos_id_ = token_id_kv("tokenizer.ggml.eos_token_id");
+  if (tok.gguf_spm_) {
+    if (tok.bos_id_ < 0) tok.bos_id_ = 1;
+    if (tok.eos_id_ < 0) tok.eos_id_ = 2;
+    const auto flag = [&](const char* key, bool fallback) {
+      const auto* v = f.FindKv(key);
+      if (v == nullptr) return fallback;
+      if (v->TypeId() != kGgufBool) Fail(std::string(key) + " is not bool");
+      return std::get<bool>(v->v);
+    };
+    tok.prepend_scheme_ = flag("tokenizer.ggml.add_space_prefix", true) ? PrependScheme::kAlways : PrependScheme::kNever;
+    tok.template_bos_ = flag("tokenizer.ggml.add_bos_token", true) ? tok.bos_id_ : -1;
+    tok.template_eos_ = flag("tokenizer.ggml.add_eos_token", false) ? tok.eos_id_ : -1;
+  }
 
   tok.FinalizeTables();
   return tok;
@@ -1198,7 +1249,27 @@ Tokenizer Tokenizer::FromGguf(const GgufFile& f) {
 
 void Tokenizer::EncodePlain(std::string_view text,
                             std::vector<int32_t>& out) const {
-  for (const auto& [begin, end] : Pretokenize(text, pattern_)) {
+  std::vector<std::pair<size_t, size_t>> spans;
+  if (smollm_digits_) {
+    // The first regex isolates each Unicode number before GPT-2 can bind a space.
+    size_t begin = 0, pos = 0;
+    const auto append_gpt2 = [&](size_t from, size_t end) {
+      for (const auto& span : Pretokenize(text.substr(from, end - from), pattern_))
+        spans.emplace_back(from + span.first, from + span.second);
+    };
+    while (pos < text.size()) {
+      const size_t at = pos;
+      const uint32_t cp = DecodeUtf8(text, pos);
+      if (Category(cp) != UCat::kNumber) continue;
+      append_gpt2(begin, at);
+      spans.emplace_back(at, pos);
+      begin = pos;
+    }
+    append_gpt2(begin, text.size());
+  } else {
+    spans = Pretokenize(text, pattern_);
+  }
+  for (const auto& [begin, end] : spans) {
     const std::string mapped =
         MapBytesToUnicode(text.substr(begin, end - begin));
     if (ignore_merges_) {
@@ -1240,7 +1311,7 @@ void Tokenizer::EncodePlainSp(std::string_view text, bool at_input_start,
       prepend_scheme_ == PrependScheme::kAlways ||
       (prepend_scheme_ == PrependScheme::kFirst && at_input_start);
   if (prepend && !s.empty() &&
-      s.compare(0, metaspace_replacement_.size(), metaspace_replacement_) != 0) {
+      (gguf_spm_ || s.compare(0, metaspace_replacement_.size(), metaspace_replacement_) != 0)) {
     s.insert(0, metaspace_replacement_);
   }
   if (s.empty()) return;
@@ -1254,6 +1325,41 @@ void Tokenizer::EncodePlainSp(std::string_view text, bool at_input_start,
   const auto encode_piece = [&](std::string_view piece) {
     if (is_unigram_) {
       EncodePlainUnigram(piece, out);
+      return;
+    }
+    if (gguf_spm_) {
+      // Port of llama.cpp:111-246: score-ranked adjacent merges, then bytes.
+      // A scan implements the same highest-score/leftmost ordering as its queue.
+      std::vector<std::string> symbols;
+      size_t at = 0;
+      while (at < piece.size()) {
+        const size_t begin = at;
+        (void)DecodeUtf8(piece, at);
+        symbols.emplace_back(piece.substr(begin, at - begin));
+      }
+      while (symbols.size() > 1) {
+        size_t best = symbols.size();
+        float best_score = -std::numeric_limits<float>::infinity();
+        for (size_t i = 0; i + 1 < symbols.size(); ++i) {
+          const auto score = spm_scores_.find(symbols[i] + symbols[i+1]);
+          if (score != spm_scores_.end() && (best == symbols.size() || score->second > best_score)) {
+            best = i; best_score = score->second;
+          }
+        }
+        if (best == symbols.size()) break;
+        symbols[best] += symbols[best+1];
+        symbols.erase(symbols.begin() + static_cast<ptrdiff_t>(best + 1));
+      }
+      for (const auto& symbol : symbols) {
+        const auto id = vocab_.find(symbol);
+        if (id != vocab_.end()) { out.push_back(id->second); continue; }
+        for (unsigned char b : symbol) {
+          char name[7]; std::snprintf(name, sizeof(name), "<0x%02X>", static_cast<unsigned>(b));
+          const auto byte = vocab_.find(name);
+          if (byte == vocab_.end()) Fail("SentencePiece GGUF lacks byte fallback token");
+          out.push_back(byte->second);
+        }
+      }
       return;
     }
     std::vector<std::string> symbols;
@@ -1578,7 +1684,7 @@ std::string Tokenizer::SpDecodeTokens(const std::vector<std::string>& tokens,
   std::vector<uint8_t> byte_run;
   const auto flush = [&]() {
     if (byte_run.empty()) return;
-    if (IsValidUtf8(byte_run.data(), byte_run.size())) {
+    if (gguf_spm_ || IsValidUtf8(byte_run.data(), byte_run.size())) {
       out.append(reinterpret_cast<const char*>(byte_run.data()),
                  byte_run.size());
     } else {
@@ -1609,7 +1715,8 @@ std::string Tokenizer::SpDecodeTokens(const std::vector<std::string>& tokens,
   }
   flush();
   // Strip(content=" ", start=1): remove at most one leading space.
-  if (!out.empty() && out.front() == ' ') out.erase(out.begin());
+  if ((!gguf_spm_ || prepend_scheme_ != PrependScheme::kNever) &&
+      !out.empty() && out.front() == ' ') out.erase(out.begin());
   return out;
 }
 

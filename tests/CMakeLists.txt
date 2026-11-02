@@ -1146,6 +1146,8 @@ target_include_directories(test_laguna_gguf_load PRIVATE ${CMAKE_SOURCE_DIR}/src
 
 # The qwen3 GGUF loader (`Qwen3HfConfigFromGguf`, `LoadQwen3FromGguf`). Synthetic
 # GGUF via gguf_builder.h; no model file needed. Needs tests/vllm for gguf_builder.h.
+vllm_cpp_add_test(test_llama_gguf_weights vllm/models/test_llama_gguf_weights.cpp)
+target_include_directories(test_llama_gguf_weights PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
 vllm_cpp_add_test(test_qwen3_gguf_weights vllm/models/test_qwen3_gguf_weights.cpp)
 target_include_directories(test_qwen3_gguf_weights PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
 
@@ -3141,6 +3143,25 @@ target_link_libraries(vllm_capi_c_check PRIVATE vllm::vllm)
 target_compile_options(vllm_capi_c_check PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -std=c11>)
 
+# Test each public header in its own translation unit.
+add_executable(test_lumenengine_legacy_header_cpp branding/legacy_consumer.cpp)
+target_link_libraries(test_lumenengine_legacy_header_cpp PRIVATE vllm::shared)
+vllm_cpp_set_warnings(test_lumenengine_legacy_header_cpp)
+add_test(NAME test_lumenengine_legacy_header_cpp COMMAND test_lumenengine_legacy_header_cpp)
+add_executable(test_lumenengine_legacy_header_c branding/legacy_consumer.c)
+target_link_libraries(test_lumenengine_legacy_header_c PRIVATE vllm::shared)
+vllm_cpp_set_warnings(test_lumenengine_legacy_header_c)
+add_test(NAME test_lumenengine_legacy_header_c COMMAND test_lumenengine_legacy_header_c)
+# Additive public names must remain available to ordinary CTest consumers.
+add_executable(test_lumenengine_header_cpp branding/consumer.cpp)
+target_link_libraries(test_lumenengine_header_cpp PRIVATE LumenEngine::LumenEngine)
+vllm_cpp_set_warnings(test_lumenengine_header_cpp)
+add_test(NAME test_lumenengine_header_cpp COMMAND test_lumenengine_header_cpp)
+add_executable(test_lumenengine_header_c branding/consumer.c)
+target_link_libraries(test_lumenengine_header_c PRIVATE LumenEngine::shared)
+vllm_cpp_set_warnings(test_lumenengine_header_c)
+add_test(NAME test_lumenengine_header_c COMMAND test_lumenengine_header_c)
+
 # ── Packaging DoD (M3.5 Task 3): dlopen the built libvllm.so + verify exports ──
 # These are gated on the shared-lib target existing. The dlopen smoke test links
 # ONLY the doctest main + ${CMAKE_DL_LIBS} (NOT libvllm) — it resolves the whole
@@ -3169,11 +3190,60 @@ vllm_cpp_add_test(test_cuda_backend vt/test_cuda_backend.cpp)
 vllm_cpp_add_test(test_dropin_abi vt/test_dropin_abi.cpp)
 target_include_directories(test_dropin_abi PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_cuda_ops vt/test_cuda_ops.cpp)
+if(VLLM_CPP_CUDA)
+  vllm_cpp_add_test(test_cuda_fp16_scalar
+    vt/test_cuda_fp16_scalar.cpp
+    vt/cuda_fp16_scalar_reference.cu)
+endif()
+# Legacy operator and public-ABI checkpoint gates.
+if(VLLM_CPP_CUDA)
+  add_executable(test_cuda_legacy_matmul vt/test_cuda_legacy_matmul.cpp)
+  target_link_libraries(test_cuda_legacy_matmul PRIVATE vllm::vllm CUDA::cudart)
+  vllm_cpp_set_warnings(test_cuda_legacy_matmul)
+  add_test(NAME test_cuda_legacy_matmul COMMAND test_cuda_legacy_matmul)
+  set_tests_properties(test_cuda_legacy_matmul PROPERTIES SKIP_RETURN_CODE 77)
+  add_executable(test_cuda_legacy_refusals vt/test_cuda_legacy_refusals.cpp)
+  target_link_libraries(test_cuda_legacy_refusals PRIVATE vllm::vllm CUDA::cudart)
+  vllm_cpp_set_warnings(test_cuda_legacy_refusals)
+  add_test(NAME test_cuda_legacy_refusals COMMAND test_cuda_legacy_refusals)
+  set_tests_properties(test_cuda_legacy_refusals PROPERTIES SKIP_RETURN_CODE 77)
+  add_executable(test_cuda_legacy_public vt/test_cuda_legacy_public.cpp)
+  target_include_directories(test_cuda_legacy_public PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_cuda_legacy_public PRIVATE vllm::vllm CUDA::cudart)
+  vllm_cpp_set_warnings(test_cuda_legacy_public)
+  add_test(NAME test_cuda_legacy_public COMMAND test_cuda_legacy_public)
+  set_tests_properties(test_cuda_legacy_public PROPERTIES SKIP_RETURN_CODE 77)
+  add_executable(test_cuda_legacy_attention vt/test_cuda_legacy_attention.cpp)
+  target_link_libraries(test_cuda_legacy_attention PRIVATE vllm::vllm CUDA::cudart)
+  vllm_cpp_set_warnings(test_cuda_legacy_attention)
+  add_test(NAME test_cuda_legacy_attention COMMAND test_cuda_legacy_attention)
+  set_tests_properties(test_cuda_legacy_attention PROPERTIES SKIP_RETURN_CODE 77)
+  add_executable(test_cuda_pascal_mmq vt/test_cuda_pascal_mmq.cpp)
+  target_link_libraries(test_cuda_pascal_mmq PRIVATE vllm::vllm CUDA::cudart)
+  vllm_cpp_set_warnings(test_cuda_pascal_mmq)
+  add_test(NAME test_cuda_pascal_mmq COMMAND test_cuda_pascal_mmq)
+  set_tests_properties(test_cuda_pascal_mmq PROPERTIES SKIP_RETURN_CODE 77)
+  add_executable(test_cuda_legacy_capi vt/test_cuda_legacy_capi.cpp)
+  target_link_libraries(test_cuda_legacy_capi PRIVATE vllm::vllm)
+  vllm_cpp_set_warnings(test_cuda_legacy_capi)
+  add_test(NAME test_cuda_legacy_capi COMMAND test_cuda_legacy_capi)
+  set_tests_properties(test_cuda_legacy_capi PROPERTIES SKIP_RETURN_CODE 77)
+  # Force sm_60 code even on sm_61 to run the non-DP4A implementation.
+  # CUDA 13 removed Pascal code generation.
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13)
+    add_executable(test_cuda_legacy_intrinsics vt/test_cuda_legacy_intrinsics.cu)
+    target_include_directories(test_cuda_legacy_intrinsics PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    set_target_properties(test_cuda_legacy_intrinsics PROPERTIES CUDA_ARCHITECTURES 60)
+    add_test(NAME test_cuda_legacy_intrinsics COMMAND test_cuda_legacy_intrinsics)
+    set_tests_properties(test_cuda_legacy_intrinsics PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+endif()
+
 vllm_cpp_add_test(test_dtype vt/test_dtype.cpp)
 vllm_cpp_add_test(test_backend vt/test_backend.cpp)
 add_executable(test_vulkan_loader
   vt/test_vulkan_loader.cpp
-  ${CMAKE_SOURCE_DIR}/src/vt/vulkan/vulkan_loader.cpp)
+  ${PROJECT_SOURCE_DIR}/src/vt/vulkan/vulkan_loader.cpp)
 target_include_directories(test_vulkan_loader PRIVATE
   ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_vulkan_loader PRIVATE vllm_test_main ${CMAKE_DL_LIBS})

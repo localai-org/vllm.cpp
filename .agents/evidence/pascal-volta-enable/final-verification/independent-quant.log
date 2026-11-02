@@ -1,0 +1,16 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_quant_dot.cpp:1440:
+TEST CASE:  32-block keep-quant lane: crosses the lane stride, and takes K = 640
+
+./tests/vt/test_cuda_quant_dot.cpp:1554: MESSAGE: 32-block lane iq4_nl: worst device-vs-CPU max|diff| = 4.57764e-05, worst fraction of the derived bound = 0.0849082
+
+./tests/vt/test_cuda_quant_dot.cpp:1554: MESSAGE: 32-block lane q5_0: worst device-vs-CPU max|diff| = 3.8147e-06, worst fraction of the derived bound = 0.00710636
+
+./tests/vt/test_cuda_quant_dot.cpp:1554: MESSAGE: 32-block lane q4_0: worst device-vs-CPU max|diff| = 1.90735e-06, worst fraction of the derived bound = 0.117954
+
+===============================================================================
+[doctest] test cases:     18 |     18 passed | 0 failed | 1 skipped
+[doctest] assertions: 254192 | 254192 passed | 0 failed |
+[doctest] Status: SUCCESS!

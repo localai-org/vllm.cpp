@@ -1,0 +1,4 @@
+tests/branding/consumer.c:2:10: fatal error: lumenengine.h: No such file or directory
+    2 | #include <lumenengine.h>
+      |          ^~~~~~~~~~~~~~~
+compilation terminated.

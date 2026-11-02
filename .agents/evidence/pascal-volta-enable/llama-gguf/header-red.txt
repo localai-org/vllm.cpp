@@ -1,0 +1,4 @@
+tests/vllm/models/test_llama_gguf_weights.cpp:5:10: fatal error: vllm/model_executor/models/llama_gguf_weights.h: No such file or directory
+    5 | #include "vllm/model_executor/models/llama_gguf_weights.h"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.

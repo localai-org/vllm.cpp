@@ -1,0 +1,27 @@
+[
+  {
+    "path": "/tmp/pascal-attention/actual-frozen",
+    "size_bytes": 116320856,
+    "sha256": "656228b1744c8ab20ad041546e71dc9bd2498cd92f35f2e9cbca5dedb92968fc"
+  },
+  {
+    "path": "/tmp/realmodel-review/public-test.o",
+    "size_bytes": 14936,
+    "sha256": "133734255dc2b080bf76901802dadad68032960ecfe0881509217a2ceab1ebbf"
+  },
+  {
+    "path": "/tmp/pascal-attention/attention-final.o",
+    "size_bytes": 9038840,
+    "sha256": "1ece9e676fc727c8a83affecc160d6a5d8418ed18d9b0019fe74f2de89046b9e"
+  },
+  {
+    "path": "/tmp/tiny-repair/qwen-green.o",
+    "size_bytes": 381944,
+    "sha256": "61f8629c9a3ad8a58c8e5d6f289888cdc9e56df55a426783b1790ec2c88b39c9"
+  },
+  {
+    "path": "/tmp/pascal-attention/isolated.a",
+    "size_bytes": 4862806,
+    "sha256": "454fc2ae8eae54ebc93749c7885ca71ca0516d9d30b7ff0a9807acf2caaecdc0"
+  }
+]

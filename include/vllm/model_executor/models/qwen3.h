@@ -42,6 +42,8 @@ class SafetensorsFile;
 // F.linear hits (mirrors the qwen3_5-dense in_proj_qkvz choice, notes §3.6).
 struct Qwen3DenseAttnWeights {
   OwnedTensor qkv_proj;  // bf16 raw-NK [Hq*Dh + 2*Hkv*Dh, H] (rows q|k|v), nk
+  // Optional original GGUF shards in q/k/v order, including mixed encodings.
+  std::vector<OwnedTensor> qkv_proj_parts;
   OwnedTensor o_proj;    // bf16 raw-NK [H, Hq*Dh], nk
   OwnedTensor q_norm;    // bf16 [head_dim]  (per-head RMSNorm, non-gemma)
   OwnedTensor k_norm;    // bf16 [head_dim]
@@ -87,6 +89,8 @@ struct Qwen3DenseAttnWeights {
 // down_proj. Raw-NK like the attention projections.
 struct Qwen3DenseMlpWeights {
   OwnedTensor gate_up_proj;  // bf16 raw-NK [2*I, H] (rows gate|up), nk
+  // Optional original GGUF shards in gate/up order.
+  std::vector<OwnedTensor> gate_up_proj_parts;
   OwnedTensor down_proj;     // bf16 raw-NK [H, I], nk
 
   // NVFP4 W4A16 alternatives (see Qwen3DenseAttnWeights). gate and up are kept

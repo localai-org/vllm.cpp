@@ -1,6 +1,6 @@
 # Features <!-- ENG-RELEASE-WINDOWS: state=ACTIVE publication=pending artifact=unpublished -->
 
-What vllm.cpp supports, next to the engines it is measured against. This page is
+What LumenEngine supports, next to the engines it is measured against. This page is
 a **keyed table**: one row per feature, kept current. It is not a changelog.
 
 For measured speed see [BENCHMARKS.md](BENCHMARKS.md); for per-capability
@@ -52,7 +52,7 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 
 ## At a glance
 
-| | vllm.cpp | vLLM | SGLang | llama.cpp |
+| | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | Language | C++20 | Python + CUDA | Python + CUDA | C/C++ |
 | Runtime deps | none | PyTorch | PyTorch | none |
@@ -66,7 +66,7 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 
 ## Serving and scheduling
 
-| Feature | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Feature | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | Continuous batching | ✅ | ✅ | ✅ | ◐ |
 | Chunked prefill | ✅ | ✅ | ✅ | ☐ |
@@ -83,7 +83,7 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 
 ## KV cache and memory
 
-| Feature | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Feature | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | Block-paged KV with refcount and LRU evict | ✅ | ✅ | ✅ | ◐ |
 | Hybrid KV groups (full attention + GDN/Mamba) | ◐ GDN gate activation resolved from the checkpoint's `output_gate_type` (silu/swish/sigmoid; anything else refused at load, #489) | ✅ | ◐ | ◐ |
@@ -102,7 +102,7 @@ by #2794 (goldens predate the pin) and #2817 (the advance).
 
 ## Quantization and weight formats
 
-| Format | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Format | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | NVFP4 (W4A4 and W4A16 Marlin) | ✅ | ✅ | ✅ | ✅ in GGUF, not safetensors (#979). Was wrongly ☐: `GGML_TYPE_NVFP4 = 40` (`ggml.h:430`), CUDA MMQ and the ModelOpt repacking converter are UPSTREAM at pin `b10451`, the sm_121a GEMMs fork-local |
 | NVFP4 dense sinks take vLLM's dense Marlin, not the single-expert MoE route | ✅ `VT_MARLIN_DENSE` (single projection, `efa6e40d`) + `VT_MARLIN_DENSE_PAIR` (fused shared-expert gate_up), both default-ON; the pair sink measured +1.31% at c8 / +1.38% at c4 on 35B-A3B, SACRED 315/315 + 235/235 | ☐ | ☐ | ☐ |
@@ -298,7 +298,7 @@ on the committed fixture); reranking/classify models are not yet registered.
 
 ## Multimodal
 
-| Input | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Input | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | Image | ✅ correctness-gated | ✅ | ✅ | ◐ |
 | Video | ✅ correctness-gated | ✅ | ✅ | ☐ |
@@ -319,7 +319,7 @@ multimodal requests through `vllm_chat` remain unavailable.
 
 ## Speculative decoding
 
-| Speculator | vllm.cpp | vLLM | SGLang |
+| Speculator | LumenEngine | vLLM | SGLang |
 |---|---|---|---|
 | MTP (multi-token prediction) | ✅ token-identical, ~4% faster at c1, depth `k` configurable with default 1 | ✅ | ✅ |
 | Draft model | ◐ CPU brick | ✅ | ✅ |
@@ -334,7 +334,7 @@ multimodal requests through `vllm_chat` remain unavailable.
 
 ## Structured output and tool calling
 
-| Feature | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Feature | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | JSON schema constrained decode | ✅ | ✅ | ✅ | ✅ |
 | Regex constrained decode | ✅ | ✅ | ✅ | ✅ |
@@ -355,9 +355,10 @@ Q8_K one, and it is what the published Qwen3.8-Flash-Next quants store their
 `ffn_down_exps` in. IQ4_XS remains separate work in #3029; unsupported formats
 expand at load instead of reaching a device provider that cannot execute them.
 
-| Backend | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Backend | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | CUDA | ✅ sm_80 to sm_121a | ✅ | ✅ | ✅ |
+| Legacy CUDA | ◐ Pascal sm_60 and sm_61, Volta sm_70 with CUDA 12.4. P620 operator tests run on hardware. Model parity and performance remain pending. Native EXL3 GEMM and MoE refuse below sm_80. [Build and validation](BUILD.md#pascal-and-volta) | Volta target depends on toolkit | n/a | ✅ |
 | CPU (x86, Arm i8mm; A76 assembly correct/default, llama speed gate open, and the closed 20-core floor ran a SUPERSEDED fork denominator rather than the stock `b10451` pin, re-take owed #1003) | ✅ `CPU_ATTN` registered (#1371/#1392, [spec](../.agents/specs/attn-validate-configuration.md)) | ◐ | ☐ | ✅ |
 | Metal (Apple Silicon) | ✅ builds under Apple Clang with project warnings promoted to errors, the Qwen3.5 MoE loader included; its layout-refusal path uses the same messages and behavior on every platform (#1054) | ☐ | ☐ | ✅ |
 | Vulkan | ◐ **EXL3 is now NATIVE** ([#2530](https://github.com/mudler/vllm.cpp/issues/2530), [spec](../.agents/specs/backend-vulkan-exl3.md)): `kCastF16` and `kExl3Gemm` were the only two ops an EXL3 checkpoint ran on the CPU reference tier on a Vulkan queue, MEASURED at two fallback notices and now at ZERO. `kExl3Gemm` is TRANSCRIBED from the portable CPU reference, not ported from the CUDA kernel, whose 90 KiB shared-memory budget alone exceeds Vulkan's 16 KiB guarantee before one reaches `mma.sync`, `ldmatrix`, `cp.async` or a grid-wide barrier Vulkan has at no version -- so the gate is BYTE equality with the CPU arm on all three codebooks and every width, not a tolerance. Verified on llvmpipe with NO GPU and NO lease, which is what makes it a CI gate rather than a lease gate; no real Vulkan GPU and no checkpoint run, and NO speed number is claimed on any axis. `kExl3MoeMlp` and `kExl3HadR128` are owed | ☐ | ☐ | ✅ |
@@ -387,7 +388,7 @@ Build with `-DVLLM_CPP_VULKAN=ON`; off by default.
 
 ## Serving, API and operations
 
-| Feature | vllm.cpp | vLLM | SGLang | llama.cpp |
+| Feature | LumenEngine | vLLM | SGLang | llama.cpp |
 |---|---|---|---|---|
 | OpenAI-compatible `/v1/chat/completions` | ✅ | ✅ | ✅ | ✅ |
 | Streaming (SSE) | ✅ | ✅ | ✅ | ✅ |
@@ -435,7 +436,7 @@ Build with `-DVLLM_CPP_VULKAN=ON`; off by default.
 Single-GPU today. Every mode below is scoped against one `vt::Communicator`
 abstraction, and `world_size == 1` stays byte-identical.
 
-| Mode | vllm.cpp | vLLM | SGLang |
+| Mode | LumenEngine | vLLM | SGLang |
 |---|---|---|---|
 | Tensor parallel (TP) | ◐ CPU-gated, no 2-GPU run; TP-W1 LANDED 2026-08-08 (rank-layout group table + per-rank handle); TP-W2..W4+W7 CPU-completable | ✅ | ✅ |
 | Collective / process-group abstraction | ✅ CPU + NCCL transport | ✅ | ✅ |

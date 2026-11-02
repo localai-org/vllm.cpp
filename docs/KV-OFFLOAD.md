@@ -1,6 +1,6 @@
 # KV offload and external KV caches
 
-vllm.cpp can keep KV blocks outside the GPU's own paged cache and reuse them
+LumenEngine can keep KV blocks outside the GPU's own paged cache and reuse them
 later: a local CPU + disk tier, or a remote [LMCache](https://github.com/LMCache/LMCache)
 store over the `lm://` wire. Both are **opt-in and off by default**; with no KV
 transfer configured the engine runs exactly as it always has.

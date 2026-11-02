@@ -1,0 +1,200 @@
+[
+  {
+    "source": "src/vt/cuda/cuda_ops.cu",
+    "source_sha256": "2c77b32096aa7b32794c8061c11e57944925452d280fb7ae508e95127c84be65",
+    "arch": "sm_60",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_ops.cu-sm60.o",
+    "bytes": 5990224,
+    "object_sha256": "dc11604cb85ea39529c8847d1b90f802aff9635a4c19c607c301bd792e918140",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_layernorm.cu",
+    "source_sha256": "4569b14933426d3637508cebab0c25be25a45b9c96206dc1cf57a0587edaf71f",
+    "arch": "sm_60",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_layernorm.cu-sm60.o",
+    "bytes": 416784,
+    "object_sha256": "d9a1413cb5edb4dc7a1590fbd37526c177385ea104416f4fca079746a8c855eb",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_moe.cu",
+    "source_sha256": "ad98d7cdf704a37d39326541e3bcf4f7692f1431d43eaea4728e61e69479ed64",
+    "arch": "sm_60",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_moe.cu-sm60.o",
+    "bytes": 709104,
+    "object_sha256": "55244e0bfdca5e063523ec3e7092d69c232b46e4002e2e31f5fff22b9c998531",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_glue.cu",
+    "source_sha256": "701c3f816e834c1742bc8959c8f048b5631b4614dc0d6faf4fa6bc55fa39f0b5",
+    "arch": "sm_60",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_glue.cu-sm60.o",
+    "bytes": 356184,
+    "object_sha256": "dd88a4012b953be27694691faef46b98d997d4b98f2d1294db2bfe275908bc3f",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_matmul.cu",
+    "source_sha256": "4a1761eea3fc20f5d3c94352a9eefe45caa0cf717219e09a6330ef285edae2af",
+    "arch": "sm_60",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_matmul.cu-sm60.o",
+    "bytes": 220416,
+    "object_sha256": "1346da8829c81c8ba0830cd0d6a0172eda5044bcf00d5c28b45fa5aa10efcda2",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_quant_dot.cu",
+    "source_sha256": "3d6df116ed0269bfb7ffe1ca91afcfc4c843c3125334fcf1ca82199e423649a9",
+    "arch": "sm_60",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_quant_dot.cu-sm60.o",
+    "bytes": 4134544,
+    "object_sha256": "c328348ce40d9cace8d306cf77741b13eaa6b401f539aa2fee8bb41a4c8aacab",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_ops.cu",
+    "source_sha256": "2c77b32096aa7b32794c8061c11e57944925452d280fb7ae508e95127c84be65",
+    "arch": "sm_61",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_ops.cu.o",
+    "bytes": 5989136,
+    "object_sha256": "288a2776d3829bf342cd4ab37001296d2cde9151821d7084eb213cb0cde9631e",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_layernorm.cu",
+    "source_sha256": "4569b14933426d3637508cebab0c25be25a45b9c96206dc1cf57a0587edaf71f",
+    "arch": "sm_61",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_layernorm.cu.o",
+    "bytes": 417040,
+    "object_sha256": "d1df8eda98e3488ccfaab8f017c356395d4be7d03a6520c1340e339d3590204e",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_moe.cu",
+    "source_sha256": "ad98d7cdf704a37d39326541e3bcf4f7692f1431d43eaea4728e61e69479ed64",
+    "arch": "sm_61",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_moe.cu.o",
+    "bytes": 709104,
+    "object_sha256": "45d9025ca1adbf05e6aba8d3a299724c104e868a47c35d48f424c2ed53cf0ea4",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_glue.cu",
+    "source_sha256": "701c3f816e834c1742bc8959c8f048b5631b4614dc0d6faf4fa6bc55fa39f0b5",
+    "arch": "sm_61",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_glue.cu.o",
+    "bytes": 356184,
+    "object_sha256": "997b7824d3a2b2a09abdb91d65bd769ca0f67d83722fbb7e4218f6947068ea64",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_matmul.cu",
+    "source_sha256": "4a1761eea3fc20f5d3c94352a9eefe45caa0cf717219e09a6330ef285edae2af",
+    "arch": "sm_61",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_matmul.cu.o",
+    "bytes": 220416,
+    "object_sha256": "318ec5108e1e1b83be23f770fbf9ce9c8eb03454abb9a911dc4630afe99fadc3",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_quant_dot.cu",
+    "source_sha256": "3d6df116ed0269bfb7ffe1ca91afcfc4c843c3125334fcf1ca82199e423649a9",
+    "arch": "sm_61",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_quant_dot.cu.o",
+    "bytes": 4058512,
+    "object_sha256": "f31f983fa69e7ccd8aac461084faeace4beeff927c39e01a8bb6a282ddeef9af",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_ops.cu",
+    "source_sha256": "2c77b32096aa7b32794c8061c11e57944925452d280fb7ae508e95127c84be65",
+    "arch": "sm_70",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_ops.cu-sm70.o",
+    "bytes": 7298864,
+    "object_sha256": "15fe9cdf0ecb33b3f74624e011a4d5d72c89e0fc9525705aa5c24cff755b5d39",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_layernorm.cu",
+    "source_sha256": "4569b14933426d3637508cebab0c25be25a45b9c96206dc1cf57a0587edaf71f",
+    "arch": "sm_70",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_layernorm.cu-sm70.o",
+    "bytes": 440176,
+    "object_sha256": "5b51b4e6ef0f2c02fe95d9c187313d0c89dc67b9f5e67f37a4152394f6f8148b",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_moe.cu",
+    "source_sha256": "ad98d7cdf704a37d39326541e3bcf4f7692f1431d43eaea4728e61e69479ed64",
+    "arch": "sm_70",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_moe.cu-sm70.o",
+    "bytes": 780848,
+    "object_sha256": "c9b356ca11c664cdfc28014c5652099470d5378a2a33b3238def934cf60c4453",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_glue.cu",
+    "source_sha256": "701c3f816e834c1742bc8959c8f048b5631b4614dc0d6faf4fa6bc55fa39f0b5",
+    "arch": "sm_70",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_glue.cu-sm70.o",
+    "bytes": 342680,
+    "object_sha256": "cfd37251364438debb89ccf6a1b9c714c4bc0a233c0ffa21b58e927e6e5629eb",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_matmul.cu",
+    "source_sha256": "4a1761eea3fc20f5d3c94352a9eefe45caa0cf717219e09a6330ef285edae2af",
+    "arch": "sm_70",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_matmul.cu-sm70.o",
+    "bytes": 219776,
+    "object_sha256": "d0e662f24e3c5607b22501e7f67f233e817cebda413e8141d9406803249ce669",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_quant_dot.cu",
+    "source_sha256": "3d6df116ed0269bfb7ffe1ca91afcfc4c843c3125334fcf1ca82199e423649a9",
+    "arch": "sm_70",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_quant_dot.cu-sm70.o",
+    "bytes": 4385264,
+    "object_sha256": "4eff904fb45708efae2f5bfcc827cd5f4b1053b916e408d78ddc116a5ec8dda7",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_ops.cu",
+    "source_sha256": "2c77b32096aa7b32794c8061c11e57944925452d280fb7ae508e95127c84be65",
+    "arch": "sm_80",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_ops.cu-sm80.o",
+    "bytes": 7915704,
+    "object_sha256": "39aa7fe37e6f45e14281a89dd674de7e28e8db6e3dbd118a05441427b6df11d2",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_moe.cu",
+    "source_sha256": "ad98d7cdf704a37d39326541e3bcf4f7692f1431d43eaea4728e61e69479ed64",
+    "arch": "sm_80",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_moe.cu-sm80.o",
+    "bytes": 742960,
+    "object_sha256": "5e84b81ed852b24d87480c1484f4b592fa2517d9f3ad7413cc759511a9835336",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_ops.cu",
+    "source_sha256": "2c77b32096aa7b32794c8061c11e57944925452d280fb7ae508e95127c84be65",
+    "arch": "sm_90",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_ops.cu-sm90.o",
+    "bytes": 8456752,
+    "object_sha256": "dffdf91932125d123b29a9a3ab19837e1cedb2d8638b54d501e4cb4b6d8489dd",
+    "compile_exit": 0
+  },
+  {
+    "source": "src/vt/cuda/cuda_moe.cu",
+    "source_sha256": "ad98d7cdf704a37d39326541e3bcf4f7692f1431d43eaea4728e61e69479ed64",
+    "arch": "sm_90",
+    "object": "/tmp/lumen-fp16-wave1-build/cuda_moe.cu-sm90.o",
+    "bytes": 797496,
+    "object_sha256": "0d86f9351e533217ef7de49117b2c32f05ab3bedbfc008c83c605050bad5e905",
+    "compile_exit": 0
+  }
+]

@@ -1,4 +1,10 @@
-# C API reference
+# LumenEngine C API
+
+<a id="c-api-reference"></a>
+
+Include `lumenengine.h` or the existing `vllm.h`. Both expose the same versioned
+`vllm_*` C ABI and struct layouts. [CMake consumers](../BUILD.md#compatible-lumenengine-names)
+can link `LumenEngine::shared` or `LumenEngine::LumenEngine`.
 
 Use the public C ABI in `include/vllm.h` for external applications.
 

@@ -1,0 +1,100 @@
+Session role:
+  --   role=UNDECLARED session=ppid:4181559 branch=repair/legacy-fp16-wave1
+       This session has not declared a role. Run scripts/agent-start.py
+       for the canonical role interview and exact next actions.
+Record gates:
+  ok   check-conflict-markers
+
+  ok   test_audit_live_rows
+  FAIL test_check_gate_commands
+         ..........ERROR: these baseline rows left the gated population: ROW-THAT-IS-NOT-THERE. If that is a legitimate record edit, re-pin RUNNABLE_BASELINE in the SAME change, naming each row and the reason.
+         ERROR: these baseline rows left the gated population: ROW-THAT-IS-NOT-THERE. If that is a legitimate record edit, re-pin RUNNABLE_BASELINE in the SAME change, naming each row and the reason.
+         ...FFFFFFFFFFF.....F.....F....FF...................
+         ======================================================================
+
+         ======================================================================
+         FAIL: test_dropping_cudagraph_break_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_cudagraph_break_from_the_pin_breaks_it)
+         ----------------------------------------------------------------------
+         Traceback (most recent call last):
+           File "/tmp/lumen-fp16-wave1/tests/scripts/test_check_gate_commands.py", line 984, in test_dropping_cudagraph_break_from_the_pin_breaks_it
+             self.assertEqual(runnable - reduced, {"ENG-CUDAGRAPH-BREAK"})
+
+  ok   test_sglang_lease_identity
+  FAIL test_rocprof_attach_preflight
+         ...............{"reservation_compile": ["gcc", "-shared", "-fPIC", "-Wl,--build-id,-z,max-page-size=0x200000", "-Wl,-Ttext-segment=0x0", "/tmp/rocprof-preflight-test-o_k2k__d/register.c", "-o", "/tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so"], "headers": "\nElf file type is DYN (Shared object file)\nEntry point 0x0\nThere are 11 program headers, starting at offset 64\n\nProgram Headers:\n  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align\n  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x000600 0x000600 R   0x200000\n  LOAD           0x200000 0x0000000000200000 0x0000000000200000 0x00022d 0x00022d R E 0x200000\n  LOAD           0x400000 0x0000000000400000 0x0000000000400000 0x000158 0x000158 R   0x200000\n  LOAD           0x5ffdf8 0x00000000007ffdf8 0x00000000007ffdf8 0x000230 0x000238 RW  0x200000\n  DYNAMIC        0x5ffe08 0x00000000007ffe08 0x00000000007ffe08 0x0001c0 0x0001c0 RW  0x8\n  NOTE           0x0002a8 0x00000000000002a8 0x00000000000002a8 0x000024 0x000024 R   0x4\n  NOTE           0x400138 0x0000000000400138 0x0000000000400138 0x000020 0x000020 R   0x8\n  GNU_PROPERTY   0x400138 0x0000000000400138 0x0000000000400138 0x000020 0x000020 R   0x8\n  GNU_EH_FRAME   0x400024 0x0000000000400024 0x0000000000400024 0x00003c 0x00003c R   0x4\n  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x10\n  GNU_RELRO      0x5ffdf8 0x00000000007ffdf8 0x00000000007ffdf8 0x000208 0x000208 R   0x1\n\n Section to Segment mapping:\n  Segment Sections...\n   00     .note.gnu.build-id .gnu.hash .dynsym .dynstr .gnu.version .gnu.version_r .rela.dyn .rela.plt \n   01     .init .plt .plt.got .plt.sec .text .fini \n   02     .rodata .eh_frame_hdr .eh_frame .note.gnu.property \n   03     .init_array .fini_array .dynamic .got .got.plt .data .bss \n   04     .dynamic \n   05     .note.gnu.build-id \n   06     .note.gnu.property \n   07     .note.gnu.property \n   08     .eh_frame_hdr \n   09     \n   10     .init_array .fini_array .dynamic .got \n", "maps": ["7552f7e00000-7552f7e01000 r--p 00000000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f7e01000-7552f8000000 ---p 00001000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f8000000-7552f8001000 r-xp 00200000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f8001000-7552f8200000 ---p 00201000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f8200000-7552f8201000 r--p 00400000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f8201000-7552f85ff000 ---p 00401000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f85ff000-7552f8600000 r--p 005ff000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7552f8600000-7552f8601000 rw-p 00600000 00:2e 3132724                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so"], "exit": 0, "stderr": "loaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x1a524e0) via RTLD_GLOBAL | RTLD_LAZYloaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x1a524e0)"}
+         {"reservation_compile": ["gcc", "-shared", "-fPIC", "-Wl,--build-id,-z,max-page-size=0x200000", "-Wl,-Ttext-segment=0x200000", "/tmp/rocprof-preflight-test-o_k2k__d/register.c", "-o", "/tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so"], "headers": "\nElf file type is DYN (Shared object file)\nEntry point 0x0\nThere are 11 program headers, starting at offset 64\n\nProgram Headers:\n  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align\n  LOAD           0x000000 0x0000000000200000 0x0000000000200000 0x000600 0x000600 R   0x200000\n  LOAD           0x200000 0x0000000000400000 0x0000000000400000 0x00022d 0x00022d R E 0x200000\n  LOAD           0x400000 0x0000000000600000 0x0000000000600000 0x000158 0x000158 R   0x200000\n  LOAD           0x5ffdf8 0x00000000009ffdf8 0x00000000009ffdf8 0x000230 0x000238 RW  0x200000\n  DYNAMIC        0x5ffe08 0x00000000009ffe08 0x00000000009ffe08 0x0001c0 0x0001c0 RW  0x8\n  NOTE           0x0002a8 0x00000000002002a8 0x00000000002002a8 0x000024 0x000024 R   0x4\n  NOTE           0x400138 0x0000000000600138 0x0000000000600138 0x000020 0x000020 R   0x8\n  GNU_PROPERTY   0x400138 0x0000000000600138 0x0000000000600138 0x000020 0x000020 R   0x8\n  GNU_EH_FRAME   0x400024 0x0000000000600024 0x0000000000600024 0x00003c 0x00003c R   0x4\n  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x10\n  GNU_RELRO      0x5ffdf8 0x00000000009ffdf8 0x00000000009ffdf8 0x000208 0x000208 R   0x1\n\n Section to Segment mapping:\n  Segment Sections...\n   00     .note.gnu.build-id .gnu.hash .dynsym .dynstr .gnu.version .gnu.version_r .rela.dyn .rela.plt \n   01     .init .plt .plt.got .plt.sec .text .fini \n   02     .rodata .eh_frame_hdr .eh_frame .note.gnu.property \n   03     .init_array .fini_array .dynamic .got .got.plt .data .bss \n   04     .dynamic \n   05     .note.gnu.build-id \n   06     .note.gnu.property \n   07     .note.gnu.property \n   08     .eh_frame_hdr \n   09     \n   10     .init_array .fini_array .dynamic .got \n", "maps": ["7cf026400000-7cf026401000 r--p 00000000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026401000-7cf026600000 ---p 00001000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026600000-7cf026601000 r-xp 00200000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026601000-7cf026800000 ---p 00201000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026800000-7cf026801000 r--p 00400000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026801000-7cf026bff000 ---p 00401000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026bff000-7cf026c00000 r--p 005ff000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7cf026c00000-7cf026c01000 rw-p 00600000 00:2e 3132731                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so"], "exit": 0, "stderr": "loaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x5f924e0) via RTLD_GLOBAL | RTLD_LAZYloaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x5f924e0)"}
+         {"reservation_compile": ["gcc", "-shared", "-fPIC", "-Wl,--build-id,-z,max-page-size=0x200000", "-Wl,-Ttext-segment=0x0", "/tmp/rocprof-preflight-test-o_k2k__d/register.c", "-o", "/tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so"], "headers": "\nElf file type is DYN (Shared object file)\nEntry point 0x0\nThere are 11 program headers, starting at offset 2097216\n\nProgram Headers:\n  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align\n  LOAD           0x200000 0x0000000000000000 0x0000000000000000 0x000600 0x000600 R   0x200000\n  LOAD           0x400000 0x0000000000200000 0x0000000000200000 0x00022d 0x00022d R E 0x200000\n  LOAD           0x600000 0x0000000000400000 0x0000000000400000 0x000158 0x000158 R   0x200000\n  LOAD           0x7ffdf8 0x00000000007ffdf8 0x00000000007ffdf8 0x000230 0x000238 RW  0x200000\n  DYNAMIC        0x7ffe08 0x00000000007ffe08 0x00000000007ffe08 0x0001c0 0x0001c0 RW  0x8\n  NOTE           0x2002a8 0x00000000000002a8 0x00000000000002a8 0x000024 0x000024 R   0x4\n  NOTE           0x600138 0x0000000000400138 0x0000000000400138 0x000020 0x000020 R   0x8\n  GNU_PROPERTY   0x600138 0x0000000000400138 0x0000000000400138 0x000020 0x000020 R   0x8\n  GNU_EH_FRAME   0x600024 0x0000000000400024 0x0000000000400024 0x00003c 0x00003c R   0x4\n  GNU_STACK      0x200000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x10\n  GNU_RELRO      0x7ffdf8 0x00000000007ffdf8 0x00000000007ffdf8 0x000208 0x000208 R   0x1\n\n Section to Segment mapping:\n  Segment Sections...\n   00     .note.gnu.build-id .gnu.hash .dynsym .dynstr .gnu.version .gnu.version_r .rela.dyn .rela.plt \n   01     .init .plt .plt.got .plt.sec .text .fini \n   02     .rodata .eh_frame_hdr .eh_frame .note.gnu.property \n   03     .init_array .fini_array .dynamic .got .got.plt .data .bss \n   04     .dynamic \n   05     .note.gnu.build-id \n   06     .note.gnu.property \n   07     .note.gnu.property \n   08     .eh_frame_hdr \n   09     \n   10     .init_array .fini_array .dynamic .got \n", "maps": ["725450200000-725450201000 r--p 00200000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "725450201000-725450400000 ---p 00201000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "725450400000-725450401000 r-xp 00400000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "725450401000-725450600000 ---p 00401000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "725450600000-725450601000 r--p 00600000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "725450601000-7254509ff000 ---p 00601000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "7254509ff000-725450a00000 r--p 007ff000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so", "725450a00000-725450a01000 rw-p 00800000 00:2e 3132737                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-register.so"], "exit": 0, "stderr": "loaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x12b514e0) via RTLD_GLOBAL | RTLD_LAZYloaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x12b514e0)"}
+         {"reservation_compile": ["gcc", "-shared", "-fPIC", "-Wl,--build-id,-z,max-page-size=0x200000", "-Wl,-Ttext-segment=0x0", "/tmp/rocprof-preflight-test-o_k2k__d/register.c", "-o", "/tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so"], "headers": "\nElf file type is DYN (Shared object file)\nEntry point 0x0\nThere are 11 program headers, starting at offset 64\n\nProgram Headers:\n  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align\n  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x000600 0x000600 R   0x200000\n  LOAD           0x200000 0x0000000000200000 0x0000000000200000 0x00022d 0x00022d R E 0x200000\n  LOAD           0x400000 0x0000000000400000 0x0000000000400000 0x000158 0x000158 R   0x200000\n  LOAD           0x5ffdf8 0x00000000007ffdf8 0x00000000007ffdf8 0x000230 0x000238 RW  0x200000\n  DYNAMIC        0x5ffe08 0x00000000007ffe08 0x00000000007ffe08 0x0001c0 0x0001c0 RW  0x8\n  NOTE           0x0002a8 0x00000000000002a8 0x00000000000002a8 0x000024 0x000024 R   0x4\n  NOTE           0x400138 0x0000000000400138 0x0000000000400138 0x000020 0x000020 R   0x8\n  GNU_PROPERTY   0x400138 0x0000000000400138 0x0000000000400138 0x000020 0x000020 R   0x8\n  GNU_EH_FRAME   0x400024 0x0000000000400024 0x0000000000400024 0x00003c 0x00003c R   0x4\n  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x10\n  GNU_RELRO      0x5ffdf8 0x00000000007ffdf8 0x00000000007ffdf8 0x000208 0x000208 R   0x1\n\n Section to Segment mapping:\n  Segment Sections...\n   00     .note.gnu.build-id .gnu.hash .dynsym .dynstr .gnu.version .gnu.version_r .rela.dyn .rela.plt \n   01     .init .plt .plt.got .plt.sec .text .fini \n   02     .rodata .eh_frame_hdr .eh_frame .note.gnu.property \n   03     .init_array .fini_array .dynamic .got .got.plt .data .bss \n   04     .dynamic \n   05     .note.gnu.build-id \n   06     .note.gnu.property \n   07     .note.gnu.property \n   08     .eh_frame_hdr \n   09     \n   10     .init_array .fini_array .dynamic .got \n", "maps": ["7470b7e00000-7470b7e01000 r--p 00000000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b7e01000-7470b8000000 ---p 00001000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b8000000-7470b8001000 r-xp 00200000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b8001000-7470b8200000 ---p 00201000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b8200000-7470b8201000 r--p 00400000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b8201000-7470b85ff000 ---p 00401000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b85ff000-7470b8600000 r--p 005ff000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so", "7470b8600000-7470b8601000 rw-p 00600000 00:2e 3132743                    /tmp/rocprof-preflight-test-o_k2k__d/librocprofiler-sdk.so"], "exit": 0, "stderr": "loaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x728d4e0) via RTLD_GLOBAL | RTLD_LAZYloaded librocprofiler-register.so library at librocprofiler-register.so (handle=0x728d4e0)"}
+
+         ======================================================================
+         FAIL: test_reservation_allocation_metadata_is_refused (__main__.ControllerPreflight.test_reservation_allocation_metadata_is_refused) (fault='invalid-page')
+         ----------------------------------------------------------------------
+         Traceback (most recent call last):
+           File "/tmp/lumen-fp16-wave1/tests/scripts/test_rocprof_attach_preflight.py", line 463, in test_reservation_allocation_metadata_is_refused
+             self.assertIn(reason, result.stderr)
+
+  ok   commit style suites
+  FAIL tools suites
+         .....c8-leg-runner: NOT ADMISSIBLE — see fold.reasons
+         c8-leg-runner: NOT ADMISSIBLE — see fold.reasons
+         ..c8-leg-runner: NOT ADMISSIBLE — see fold.reasons
+         .c8-leg-runner: NOT ADMISSIBLE — see fold.reasons
+
+             "arms": {
+  SKIP check-arm-isa-build.py
+         needs arguments preflight does not supply: usage: check-arm-isa-build.py [-h] --compile-commands COMPILE_COMMANDS
+  ok   check-attention-rung-consistency.py
+  ok   check-benchmark-index.py
+  ok   check-build-runtime-deps.py
+
+  ok   check-container-workflow.py
+  SKIP check-cpu-isa-build.py
+         needs arguments preflight does not supply: usage: check-cpu-isa-build.py [-h] --compile-commands COMPILE_COMMANDS
+  SKIP check-cuda-fat-gencode.py
+         needs arguments preflight does not supply: usage: check-cuda-fat-gencode.py [-h] --compile-commands COMPILE_COMMANDS
+  ok   check-cuda-op-arch-gate.py
+
+         needs arguments preflight does not supply: usage: check-cpu-isa-build.py [-h] --compile-commands COMPILE_COMMANDS
+  SKIP check-cuda-fat-gencode.py
+         needs arguments preflight does not supply: usage: check-cuda-fat-gencode.py [-h] --compile-commands COMPILE_COMMANDS
+  ok   check-cuda-op-arch-gate.py
+  ok   check-deepseek-v4-vision-manifests.py
+  FAIL check-device-leakage.py
+
+  ok   check-deepseek-v4-vision-manifests.py
+  FAIL check-device-leakage.py
+         ERROR: DSR REGRESSION in bucket 'kcuda': 1 > baseline 0. A device-specific reference was added to the device-agnostic shared layer. Ask the op/provider table the question instead (vt::OpRegistered / Platform capability), or — if the site is genuinely the platform leg — add it to ALLOWLIST with a reason. NEVER raise the baseline to make this pass.
+
+         check-device-leakage: FAIL (1 error(s))
+         DSR-ALLOW exemptions in force: 21
+
+
+         check-device-leakage: FAIL (1 error(s))
+         DSR-ALLOW exemptions in force: 21
+           DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:57 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+           DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:126 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+           DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:172 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+
+  ok   check-oracle-pins.py
+  SKIP check-pr-size.py
+         needs arguments preflight does not supply: usage: check-pr-size.py [-h] --base BASE --head HEAD [--branch BRANCH]
+  ok   check-prompt-contract.py
+  ok   check-quickstart-recipes.py
+  ok   check-readme-structure.py
+
+  ok   check-test-registration.py
+  SKIP check-triton-aot-multiarch.py
+         needs arguments preflight does not supply: usage: check-triton-aot-multiarch.py [-h] --vendored-root VENDORED_ROOT
+  ok   check-windows-portability.py
+  ok   check-windows-release-state.py
+Committed range vs origin/main db1d71c9b7352a07983b408b2e755e853b4534f0:
+
+  ok   now-current range
+Tree compiles:
+       compiling what this change reaches. A records-only change returns
+       at once; a wide header change can take minutes.
+
+PREFLIGHT_INTERRUPTED_BEFORE_DEFAULT_EIGHT_WORKER_COMPILE
+
+
+PREFLIGHT_INTERRUPTED_BEFORE_DEFAULT_EIGHT_WORKER_COMPILE

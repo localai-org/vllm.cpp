@@ -1,0 +1,5 @@
+Session role:
+  [32mok[0m   role=helper row=BACKEND-CUDA-SM061 session=ppid:42641 branch=repair/legacy-fp16-wave1
+other coordinators recorded: 1
+  - /home/user/lumen-engine/.git/worktrees/lumen-integration - session ppid:3465643 on df-mini01 (pid 3465654, last heartbeat 5260s ago)
+ROLE CHECK ONLY -- this is NOT a full preflight; no record gate ran.

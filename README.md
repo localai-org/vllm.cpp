@@ -1,10 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.png">
-    <img alt="vllm.cpp" src="assets/logo-dark.png" width="420">
-  </picture>
-</p>
+<h1 align="center">LumenEngine</h1>
 
 <p align="center">
   <b>Same tokens as vLLM. Same throughput. 140x less to install.</b><br>
@@ -21,7 +15,7 @@
 
 **Brought to you by the [LocalAI](https://github.com/mudler/LocalAI) team**, the folks behind LocalAI, the open-source AI engine that runs any model (LLMs, vision, voice, image, video) on any hardware, no GPU required.
 
-> **Independent and unofficial.** vllm.cpp is a community port. It is not affiliated with, endorsed
+> **Independent and unofficial.** LumenEngine is a community port. It is not affiliated with, endorsed
 > by, or sponsored by the vLLM project, the PyTorch Foundation, or the Linux Foundation. "vLLM" is
 > used here only to name the upstream project this port mirrors and is measured against. See
 > [Trademarks](#trademarks).
@@ -34,6 +28,8 @@
 > it is versioned (`VLLM_ABI_VERSION`, checkable at runtime with `vllm_abi_version()`), grows by
 > appending fields whose zero value keeps existing behavior byte-identical, and only bumps on an
 > incompatible change. If you embed us, embed through that header.
+
+LumenEngine retains the `vllm_*` C ABI, `vllm.h`, existing commands, and build options. New consumers can use `lumenengine.h`, `LumenEngine::shared`, and the `lumenengine-cli`, `lumenengine-server`, and `lumenengine-bench` command aliases. See [build instructions](docs/BUILD.md) for the installed CMake package.
 
 ## News
 
@@ -114,7 +110,7 @@
 - **2026-08** **MXFP4 holds parity with vLLM.** Qwen3-8B MXFP4 runs W4A16 Marlin by default,
   matches the vLLM oracle token for token, and decodes **45.45 vs 41.94 tok/s**.
 
-vllm.cpp is a from-scratch C++20 inference engine chasing three things at once: be the
+LumenEngine is a from-scratch C++20 inference engine chasing three things at once: be the
 **smallest** thing you can deploy, be the **fastest** on the hardware you already own, and still
 carry **every feature people actually want**. No Python and no PyTorch at inference time.
 
@@ -128,7 +124,7 @@ wins on Apple Silicon. Safetensors and GGUF, CUDA and CPU and Metal and Vulkan, 
 
 ## Project status
 
-vllm.cpp is under heavy development. The README carries the stable public
+LumenEngine is under heavy development. The README carries the stable public
 overview; [Features](docs/FEATURES.md) lists shipped surfaces and
 [Benchmarks](docs/BENCHMARKS.md) indexes published measurements. Contributors
 derive detailed lifecycle state and history from Git, row specs, and matrices.
@@ -167,7 +163,7 @@ point on this curve:
 
 | Concurrency | 1 | 2 | 4 | 8 | 16 | 32 |
 |---|---|---|---|---|---|---|
-| **vllm.cpp** (tok/s) | **86.05** | **159.68** | **292.34** | **508.77** | **801.76** | **1095.01** |
+| **LumenEngine** (tok/s) | **86.05** | **159.68** | **292.34** | **508.77** | **801.76** | **1095.01** |
 | vLLM (tok/s) | 82.32 | 158.03 | 290.31 | 505.46 | 789.16 | 1076.25 |
 | **Ratio** | **1.045x** | **1.011x** | **1.007x** | **1.007x** | **1.016x** | **1.017x** |
 
@@ -189,7 +185,7 @@ And we hold every other engine to the same treatment: same model, same workload,
 
 ### vs llama.cpp, on CPU, from the same GGUF file
 
-| | vllm.cpp | llama.cpp | ratio |
+| | LumenEngine | llama.cpp | ratio |
 |---|--:|--:|--:|
 | prefill | **223.8 tok/s** | 177.3 | **1.18x** |
 | decode | 24.7 tok/s | 25.4 | 0.97x (tie) |
@@ -205,7 +201,7 @@ llama.cpp's server is unmeasured.
 
 ### vs MLX-LM, on Apple M4, warm b=1
 
-| | vllm.cpp | MLX-LM | ratio |
+| | LumenEngine | MLX-LM | ratio |
 |---|--:|--:|--:|
 | prefill TTFT | **524.5 ms** | 532.6 ms | **1.5% ahead** |
 | decode | 27.23 tok/s | 27.85 | 97.8% |
@@ -252,7 +248,7 @@ Full CLI, server, and library reference: [docs/USAGE.md](docs/USAGE.md) and
 
 ## Features: vLLM parity, then everything else
 
-vllm.cpp **mirrors vLLM by default**: same scheduler, same sampling order, same flags, same JSON
+LumenEngine **mirrors vLLM by default**: same scheduler, same sampling order, same flags, same JSON
 configs, token-for-token the same output. Switching to it should be boring. Everything below is what
 you get on top, most of it borrowed from whichever engine does it best:
 
@@ -495,14 +491,16 @@ prefix caching, custom logits processors, and engine sizing all have ABI surface
 `LoadedEngine::FromModelDir(...)` handing back the same `LLMEngine` / `AsyncLLM` the server uses.
 Both surfaces: [docs/USAGE.md](docs/USAGE.md).
 
-## Why vllm.cpp
+<a id="why-vllmcpp"></a>
+
+## Why LumenEngine
 
 Every engine today makes you give something up. vLLM has the best serving core in the business, but
 running it drags in a heavy Python / PyTorch / CUDA stack and assumes a datacenter. llama.cpp is
 wonderfully light and runs anywhere, but it is built around one user at a time. SGLang has scheduling
 ideas nobody else ships. MLX is excellent, and only on a Mac.
 
-We do not think you should have to choose. vllm.cpp is the attempt to have all of it in one place:
+We do not think you should have to choose. LumenEngine is the attempt to have all of it in one place:
 **real continuous batching and paged KV, in a 66 MiB library, on the hardware you already own, with
 the features the community keeps asking for, and none of the Python.** Where another engine has
 solved something better, we port from it and cite the file we ported from rather than inventing our
@@ -536,7 +534,7 @@ under [`.agents/`](.agents/). See [current state](.agents/NOW.md),
 
 ## Credits, and what we borrow
 
-vllm.cpp exists because other people built excellent engines first. Every implementation here is
+LumenEngine exists because other people built excellent engines first. Every implementation here is
 grounded in upstream source and cites the file it was ported from, so this is where the work comes
 from:
 
@@ -563,7 +561,7 @@ parakeet.cpp, uses ggml and is enabled by default.
 
 ## Citation
 
-If you use vllm.cpp, please cite this repository and the upstream vLLM project:
+If you use LumenEngine, please cite this repository and the upstream vLLM project:
 
 ```bibtex
 @software{vllm_cpp,
@@ -583,12 +581,12 @@ Ettore Di Giacinto ([@mudler](https://github.com/mudler)).
 
 ## Trademarks
 
-vllm.cpp is an independent community project. It is **not affiliated with, endorsed by, or sponsored
+LumenEngine is an independent community project. It is **not affiliated with, endorsed by, or sponsored
 by** the vLLM project, the [PyTorch Foundation](https://pytorch.org/projects/vllm/), or the Linux
 Foundation.
 
 "vLLM" is a mark of its respective owners. It is used throughout this repository in its descriptive
-sense only: to identify the upstream project that vllm.cpp ports, mirrors, and is gated against.
+sense only: to identify the upstream project that LumenEngine ports, mirrors, and is gated against.
 Nothing here should be read as a claim of ownership of that mark, or as a suggestion that the vLLM
 project has reviewed, approved, or endorsed this software. The Apache License, Version 2.0 under
 which vLLM is distributed grants no trademark rights (section 6), and none are claimed.
@@ -598,7 +596,7 @@ owners and are likewise used descriptively.
 
 ## License
 
-vllm.cpp is released under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for
+LumenEngine is released under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for
 third-party attributions. The model weights keep their own licenses.
 
 ---

@@ -1,0 +1,24 @@
+== Q4_K on (prof4)
+    412.5ms    134    3078.7us  void vt::cuda::<unnamed>::QuantDotGemmKernel<(vt::cuda::<unnamed>::WType)4, unsigned short>(T2 *, co
+    406.4ms   2010     202.2us  void vt::cuda::<unnamed>::PascalQ4KDecode<unsigned short>(T1 *, const unsigned char *, const vt::cud
+    201.0ms     20   10048.1us  void vt::cuda::<unnamed>::QuantDotGemmKernel<(vt::cuda::<unnamed>::WType)6, unsigned short>(T2 *, co
+     75.5ms    300     251.8us  void vt::cuda::<unnamed>::PascalQ6Decode<unsigned short>(T1 *, const unsigned char *, const vt::cuda
+     40.2ms     16    2509.9us  void vt::cuda::<unnamed>::PascalQ6Decode<float>(T1 *, const unsigned char *, const vt::cuda::<unname
+      6.5ms   2326       2.8us  vt::cuda::<unnamed>::PascalQuantizeQ8_1(vt::cuda::<unnamed>::PascalQ8_1 *, const void *, vt::cuda::<
+      5.5ms    330      16.8us  void vt::cuda::<unnamed>::PagedAttentionDecodeOptKernel<__nv_bfloat16, __nv_bfloat16, __nv_bfloat16,
+      5.3ms    720       7.4us  vt::cuda::<unnamed>::RmsNormRowFastKernel(__nv_bfloat16 *, const __nv_bfloat16 *, const __nv_bfloat1
+      3.8ms    154      24.5us  vt::cuda::<unnamed>::QuantizeQ8KPreqKernel(vt::cpu::BlockQ8_K *, const void *, vt::cuda::<unnamed>::
+      1.9ms     22      85.7us  void vt::cuda::<unnamed>::PagedFlashKernel<__nv_bfloat16, __nv_bfloat16, __nv_bfloat16, (bool)0>(T3 
+
+== Q4_K off (prof2)
+    868.0ms   2144     404.8us  void vt::cuda::<unnamed>::QuantDotGemmKernel<(vt::cuda::<unnamed>::WType)4, unsigned short>(T2 *, co
+    239.2ms     20   11958.9us  void vt::cuda::<unnamed>::QuantDotGemmKernel<(vt::cuda::<unnamed>::WType)6, unsigned short>(T2 *, co
+     75.8ms    300     252.8us  void vt::cuda::<unnamed>::PascalQ6Decode<unsigned short>(T1 *, const unsigned char *, const vt::cuda
+     40.2ms     16    2512.4us  void vt::cuda::<unnamed>::PascalQ6Decode<float>(T1 *, const unsigned char *, const vt::cuda::<unname
+     13.1ms   2164       6.1us  vt::cuda::<unnamed>::QuantizeQ8KPreqKernel(vt::cpu::BlockQ8_K *, const void *, vt::cuda::<unnamed>::
+      6.1ms    330      18.4us  void vt::cuda::<unnamed>::PagedAttentionDecodeOptKernel<__nv_bfloat16, __nv_bfloat16, __nv_bfloat16,
+      6.0ms    720       8.4us  vt::cuda::<unnamed>::RmsNormRowFastKernel(__nv_bfloat16 *, const __nv_bfloat16 *, const __nv_bfloat1
+      1.9ms    352       5.3us  void vt::cuda::<unnamed>::RopeFromCacheKernel<__nv_bfloat16, int>(T1 *, T1 *, const T2 *, const T1 *
+      1.9ms     22      85.3us  void vt::cuda::<unnamed>::PagedFlashKernel<__nv_bfloat16, __nv_bfloat16, __nv_bfloat16, (bool)0>(T3 
+      1.5ms    316       4.7us  vt::cuda::<unnamed>::PascalQuantizeQ8_1(vt::cuda::<unnamed>::PascalQ8_1 *, const void *, vt::cuda::<
+

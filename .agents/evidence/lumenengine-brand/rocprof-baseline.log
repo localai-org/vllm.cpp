@@ -1,0 +1,17 @@
+Baseline 8408d5035 exact test bytes, unchanged production script, patch and fixtures verified by git diff --exit-code.
+command: python3 /tmp/lumen-brand-rocprof-base-tqs6ig93/tests/scripts/test_rocprof_attach_preflight.py ControllerPreflight.test_reservation_allocation_metadata_is_refused
+exit=1
+F
+======================================================================
+FAIL: test_reservation_allocation_metadata_is_refused (__main__.ControllerPreflight.test_reservation_allocation_metadata_is_refused) (fault='invalid-page')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-brand-rocprof-base-tqs6ig93/tests/scripts/test_rocprof_attach_preflight.py", line 463, in test_reservation_allocation_metadata_is_refused
+    self.assertIn(reason, result.stderr)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'invalid system page size' not found in 'Traceback (most recent call last):\n  File "/tmp/rocprof-preflight-test-158dt16g/driver.py", line 1, in <module>\n    import ctypes, sys\n  File "/usr/lib/python3.14/ctypes/__init__.py", line 10, in <module>\n    from _ctypes import Union, Structure, Array\nMemoryError\n'
+
+----------------------------------------------------------------------
+Ran 1 test in 3.177s
+
+FAILED (failures=1)

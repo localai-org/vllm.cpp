@@ -167,8 +167,13 @@ class PublicSurfacePinnedTests(unittest.TestCase):
 
     def test_true_on_install_rule(self) -> None:
         self.assertTrue(
-            mod.public_surface_pinned("install(FILES include/vllm.h DESTINATION x)")
+            mod.public_surface_pinned("install(FILES include/vllm.h include/lumenengine.h DESTINATION x)")
         )
+
+    def test_false_when_either_public_header_is_missing(self) -> None:
+        for header in ("vllm.h", "lumenengine.h"):
+            self.assertFalse(mod.public_surface_pinned(
+                f"install(FILES include/{header} DESTINATION x)"))
 
     def test_false_without_install_rule(self) -> None:
         self.assertFalse(mod.public_surface_pinned("add_library(vllm ...)"))
@@ -177,7 +182,7 @@ class PublicSurfacePinnedTests(unittest.TestCase):
         # Installing an EXTRA header must red the pin (the boundary changed).
         self.assertFalse(
             mod.public_surface_pinned(
-                "install(FILES include/vllm.h include/vllm/extra.h DESTINATION x)"
+                "install(FILES include/vllm.h include/lumenengine.h include/vllm/extra.h DESTINATION x)"
             )
         )
 
@@ -362,7 +367,7 @@ def _base_files(sym: str = "vllm_complete") -> dict[str, str]:
         # (scripts/checker_text.py), so the fixture tree needs that file too — a
         # subprocess run of a scripts/ dir that lacks it dies on the import.
         "scripts/checker_text.py": SHARED_TEXT.read_text(encoding="utf-8"),
-        "CMakeLists.txt": "install(FILES include/vllm.h DESTINATION include)\n",
+        "CMakeLists.txt": "install(FILES include/vllm.h include/lumenengine.h DESTINATION include)\n",
         "include/vllm.h": "VLLM_API vllm_status vllm_complete(void);\n",
         "docs/FEATURES.md": (
             "#### caps " + mod.CAP_BEGIN + "\n"

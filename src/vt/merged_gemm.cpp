@@ -14,6 +14,22 @@
 
 namespace vt {
 
+void MergedGemmDense(Queue& q, const MergedGemmGroup& desc, Tensor* products,
+                     const Tensor& act, const Tensor* weights, int count,
+                     Tensor* epilogue_out) {
+  VT_CHECK(count == desc.arity && count >= 2 && products != nullptr && weights != nullptr,
+           "MergedGemmDense: descriptor and shard count must match");
+  VT_CHECK(desc.fast_op == kNoMergedFastOp,
+           "MergedGemmDense: no dense-shard fused provider is registered");
+  const bool swiglu = desc.epilogue == MergedEpilogue::kSiluMulClamp;
+  VT_CHECK(desc.epilogue == MergedEpilogue::kNone || (swiglu && count == 2),
+           "MergedGemmDense: unsupported dense epilogue");
+  VT_CHECK(swiglu == (epilogue_out != nullptr),
+           "MergedGemmDense: SwiGLU alone requires an epilogue output");
+  for (int i = 0; i < count; ++i) MatmulBT(q, products[i], act, weights[i]);
+  if (swiglu) MoeSiluMul(q, *epilogue_out, products[0], products[1]);
+}
+
 void MergedGemm(Queue& q, const MergedGemmGroup& desc, Tensor& out, const Tensor& act,
                 const Tensor& gate_w, const Tensor& up_w, const Tensor& expert_ids,
                 float epilogue_scalar, bool force_composite) {

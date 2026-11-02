@@ -1,0 +1,9 @@
+28e70bd5162cc8e5cece8e050cb3d577c97a16126b7f53e790ea2ef59ef62978  include/vllm.h
+4571b0d2b4305114dbfd79ffe3347c647948f0a691c77b703ab6d90b310e1965  include/lumenengine.h
+3334c91f0878dfb922cb0d6f8a549198c27cc87a6883b83a95b91bb870988aba  /tmp/lumen-brand-build/engine/libvllm.so.0.0.3
+f89b8f90ac5096be668d46ad6a6d032259bbbcecc5f04c5ea730ee4e5e1f3293  /tmp/lumen-brand-build/engine/examples/vllm-cli
+2ed158b65e19cc19c52aca2cb0352d1588920e70157619269a0b0c30e39b819f  /tmp/lumen-brand-build/engine/examples/vllm-server
+890148d94552040a233c8d428e5ebe6c50e185d2811d38c6dfe74c65090e8ddd  /tmp/lumen-brand-build/engine/examples/vllm-bench
+f89b8f90ac5096be668d46ad6a6d032259bbbcecc5f04c5ea730ee4e5e1f3293  /tmp/lumen-brand-build/engine/examples/lumenengine-cli
+2ed158b65e19cc19c52aca2cb0352d1588920e70157619269a0b0c30e39b819f  /tmp/lumen-brand-build/engine/examples/lumenengine-server
+890148d94552040a233c8d428e5ebe6c50e185d2811d38c6dfe74c65090e8ddd  /tmp/lumen-brand-build/engine/examples/lumenengine-bench

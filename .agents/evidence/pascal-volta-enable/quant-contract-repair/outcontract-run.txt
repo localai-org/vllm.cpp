@@ -1,0 +1,12 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/model_executor/layers/test_linear_method.cpp:636:
+TEST CASE:  dense malformed descriptors refuse unsafe contracts
+
+./tests/vllm/model_executor/layers/test_linear_method.cpp:651: ERROR: CHECK_THROWS_WITH_AS( vt::MergedGemmDense(queue, desc, dst, x, src, count, epilogue), "MergedGemmDense: SwiGLU alone requires an epilogue output", std::runtime_error ) did NOT throw at all!
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 12 skipped
+[doctest] assertions: 8 | 7 passed | 1 failed |
+[doctest] Status: FAILURE!

@@ -1,0 +1,140 @@
++ cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-build -DENGINE_SOURCE=/tmp/lumen-brand -DVLLM_CPP_CUDA=OFF -DVLLM_CPP_WITH_DIARIZATION=OFF -DVLLM_CPP_BUILD_TESTS=OFF -DVLLM_CPP_BUILD_EXAMPLES=ON -DVLLM_CPP_HF_DOWNLOAD=OFF -DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O0 -DNDEBUG'
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (0.2s)
+-- Generating done (0.2s)
+-- Build files have been written to: /tmp/lumen-brand-build
++ cmake --build /tmp/lumen-brand-build --target branding_old branding_new branding_shared branding_c branding_static branding_dlopen lumenengine-cli lumenengine-server lumenengine-bench -j4
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Building CXX object engine/CMakeFiles/vllm_shared.dir/vllm_shared_stub.cpp.o
+[100%] Linking CXX shared library libvllm.so
+[100%] Built target vllm_shared
+[100%] Linking CXX executable branding_old
+[100%] Built target branding_old
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm_shared
+[100%] Linking CXX executable branding_new
+[100%] Built target branding_new
+[  0%] Built target blake3_vendored
+[ 98%] Built target vllm
+[ 98%] Built target vllm_shared
+[100%] Linking CXX executable branding_shared
+[100%] Built target branding_shared
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm_shared
+[100%] Linking C executable branding_c
+[100%] Built target branding_c
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target branding_static
+[100%] Built target branding_dlopen
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm_shared
+[100%] Linking CXX executable vllm-cli
+[100%] Built target vllm-cli
+[100%] Built target lumenengine-cli
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target server
+[100%] Built target lumenengine-server
+[  0%] Built target blake3_vendored
+[100%] Built target vllm
+[100%] Built target vllm-bench
+[100%] Built target lumenengine-bench
++ ctest --test-dir /tmp/lumen-brand-build -R '^branding_' --output-on-failure
+Test project /tmp/lumen-brand-build
+    Start 1: branding_old
+1/7 Test #1: branding_old .....................   Passed    0.01 sec
+    Start 2: branding_new
+2/7 Test #2: branding_new .....................   Passed    0.00 sec
+    Start 3: branding_shared
+3/7 Test #3: branding_shared ..................   Passed    0.00 sec
+    Start 4: branding_c
+4/7 Test #4: branding_c .......................   Passed    0.00 sec
+    Start 5: branding_static
+5/7 Test #5: branding_static ..................   Passed    0.00 sec
+    Start 6: branding_dlopen
+6/7 Test #6: branding_dlopen ..................   Passed    0.00 sec
+    Start 7: branding_exports
+7/7 Test #7: branding_exports .................   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =   0.06 sec
++ /usr/bin/python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-build/engine/examples
+PASS: cli/server/bench aliases, help, and compatible server version
++ cmake --install /tmp/lumen-brand-build/engine --prefix /tmp/lumen-brand-build/branding-install-qu1d947w/stage
+-- Install configuration: "Release"
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/libvllm.a
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/libvllm.so.0.0.3
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/libvllm.so.0
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/libvllm.so
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/include/vllm.h
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/include/lumenengine.h
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/cmake/LumenEngine/LumenEngineTargets.cmake
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/cmake/LumenEngine/LumenEngineTargets-release.cmake
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/cmake/LumenEngine/LumenEngineConfig.cmake
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/lib/cmake/LumenEngine/LumenEngineConfigVersion.cmake
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/bin/vllm-server
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/bin/vllm-cli
+-- Set non-toolchain portion of runtime path of "/tmp/lumen-brand-build/branding-install-qu1d947w/stage/bin/vllm-cli" to "$ORIGIN/../lib"
+-- Installing: /tmp/lumen-brand-build/branding-install-qu1d947w/stage/bin/vllm-bench
++ cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-build/branding-install-qu1d947w/consumer -DCMAKE_PREFIX_PATH=/tmp/lumen-brand-build/branding-install-qu1d947w/relocated
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /tmp/lumen-brand-build/branding-install-qu1d947w/consumer
++ cmake --build /tmp/lumen-brand-build/branding-install-qu1d947w/consumer -j4
+[ 36%] Building CXX object CMakeFiles/branding_shared.dir/consumer.cpp.o
+[ 36%] Building CXX object CMakeFiles/branding_old.dir/consumer.cpp.o
+[ 36%] Building CXX object CMakeFiles/branding_new.dir/consumer.cpp.o
+[ 36%] Building C object CMakeFiles/branding_c.dir/consumer.c.o
+[ 45%] Linking C executable branding_c
+[ 54%] Linking CXX executable branding_new
+[ 72%] Linking CXX executable branding_shared
+[ 72%] Linking CXX executable branding_old
+[ 72%] Built target branding_c
+[ 72%] Built target branding_shared
+[ 72%] Built target branding_old
+[ 72%] Built target branding_new
+[ 81%] Building CXX object CMakeFiles/branding_dlopen.dir/tmp/lumen-brand/tests/capi/test_dlopen.cpp.o
+[ 90%] Building CXX object CMakeFiles/branding_dlopen.dir/tmp/lumen-brand/tests/doctest_main.cpp.o
+[100%] Linking CXX executable branding_dlopen
+[100%] Built target branding_dlopen
++ ctest --test-dir /tmp/lumen-brand-build/branding-install-qu1d947w/consumer -R '^branding_' --output-on-failure
+Test project /tmp/lumen-brand-build/branding-install-qu1d947w/consumer
+    Start 1: branding_old
+1/6 Test #1: branding_old .....................   Passed    0.01 sec
+    Start 2: branding_new
+2/6 Test #2: branding_new .....................   Passed    0.00 sec
+    Start 3: branding_shared
+3/6 Test #3: branding_shared ..................   Passed    0.00 sec
+    Start 4: branding_c
+4/6 Test #4: branding_c .......................   Passed    0.00 sec
+    Start 5: branding_dlopen
+5/6 Test #5: branding_dlopen ..................   Passed    0.00 sec
+    Start 6: branding_exports
+6/6 Test #6: branding_exports .................   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   0.04 sec
++ /usr/bin/python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-build/branding-install-qu1d947w/relocated/bin
+PASS: cli/server/bench aliases, help, and compatible server version
+PASS: build-tree and relocated installed consumers and commands

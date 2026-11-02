@@ -1,0 +1,20 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:499:
+TEST CASE:  legacy CUDA selects portable attention without changing FLASH_ATTN
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:516: ERROR: CHECK( legacy->get_kv_cache_shape(4, 16, 1, 64) == std::vector<int64_t>{4, 2, 16, 1, 64} ) is NOT correct!
+  values: CHECK( {4, 16, 2, 1, 64} == {4, 2, 16, 1, 64} )
+
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:519:
+TEST CASE:  legacy CUDA pins head and block geometry through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:548: ERROR: CHECK( legacy->get_kv_cache_shape(4, 32, 1, 256) == std::vector<int64_t>{4, 2, 32, 1, 256} ) is NOT correct!
+  values: CHECK( {4, 32, 2, 1, 256} == {4, 2, 32, 1, 256} )
+
+===============================================================================
+[doctest] test cases:  25 |  23 passed | 2 failed | 0 skipped
+[doctest] assertions: 148 | 146 passed | 2 failed |
+[doctest] Status: FAILURE!

@@ -1,0 +1,193 @@
+..........ERROR: these baseline rows left the gated population: ROW-THAT-IS-NOT-THERE. If that is a legitimate record edit, re-pin RUNNABLE_BASELINE in the SAME change, naming each row and the reason.
+ERROR: these baseline rows left the gated population: ROW-THAT-IS-NOT-THERE. If that is a legitimate record edit, re-pin RUNNABLE_BASELINE in the SAME change, naming each row and the reason.
+...FFFFFFFFFFF.....F.....F....FF...................
+======================================================================
+FAIL: test_dropping_cudagraph_break_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_cudagraph_break_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 984, in test_dropping_cudagraph_break_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"ENG-CUDAGRAPH-BREAK"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_cudagraph_dedup_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_cudagraph_dedup_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 970, in test_dropping_cudagraph_dedup_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"ENG-CUDAGRAPH-DEDUP"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_exl3_perf_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_exl3_perf_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 998, in test_dropping_exl3_perf_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"QUANT-EXL3-PERF"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_mtp_depth_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_mtp_depth_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 637, in test_dropping_mtp_depth_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"SPEC-MTP-K-GT-1"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_residency_config_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_residency_config_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 603, in test_dropping_residency_config_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"ENG-RESIDENCY-CONFIG"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_serve_recipe_args_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_serve_recipe_args_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 385, in test_dropping_serve_recipe_args_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"SERVE-RECIPE-ARGS"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_the_anchor_ratchet_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_the_anchor_ratchet_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 683, in test_dropping_the_anchor_ratchet_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"ENG-RECORD-ANCHOR-RATCHET"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_the_ltx2_pin_row_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_the_ltx2_pin_row_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 436, in test_dropping_the_ltx2_pin_row_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"ENG-UPSTREAM-LTX2-PIN"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_the_ltx2_vae_row_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_the_ltx2_vae_row_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 450, in test_dropping_the_ltx2_vae_row_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"KERNEL-LTX2-VAE"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_the_pool_best_fit_row_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_the_pool_best_fit_row_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 397, in test_dropping_the_pool_best_fit_row_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"ENG-POOL-BEST-FIT"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_dropping_the_request_length_guard_from_the_pin_breaks_it (__main__.RatchetTests.test_dropping_the_request_length_guard_from_the_pin_breaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 528, in test_dropping_the_request_length_guard_from_the_pin_breaks_it
+    self.assertEqual(runnable - reduced, {"SERVE-REQUEST-LENGTH-GUARD"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_hf_model_download_earns_its_runnable_baseline_entry (__main__.RatchetTests.test_hf_model_download_earns_its_runnable_baseline_entry)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 1054, in test_hf_model_download_earns_its_runnable_baseline_entry
+    self.assertEqual(runnable - reduced, {"ENG-HF-MODEL-DOWNLOAD"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_re_adding_done_to_the_gated_population_breaks_the_pin (__main__.RatchetTests.test_re_adding_done_to_the_gated_population_breaks_the_pin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 315, in test_re_adding_done_to_the_gated_population_breaks_the_pin
+    self.assertEqual(runnable - set(gates.RUNNABLE_BASELINE), departed)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_the_baseline_matches_the_shipped_record (__main__.RatchetTests.test_the_baseline_matches_the_shipped_record)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 266, in test_the_baseline_matches_the_shipped_record
+    self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+======================================================================
+FAIL: test_the_baseline_re_pin_is_load_bearing (__main__.RatchetTests.test_the_baseline_re_pin_is_load_bearing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 670, in test_the_baseline_re_pin_is_load_bearing
+    self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+'BACKEND-CUDA-SM061'
+'BACKEND-CUDA-SM060'
+
+----------------------------------------------------------------------
+Ran 61 tests in 15.526s
+
+FAILED (failures=15)
+    52  runnable
+    76  gates-no-command
+    17  no-gates-section
+     1  no-spec
+
+146 gated rows; 52 carry a command that can fail.

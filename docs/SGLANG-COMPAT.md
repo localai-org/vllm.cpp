@@ -1,6 +1,6 @@
 # SGLang-compatible behaviors
 
-vllm.cpp mirrors vLLM by default, and additionally exposes a small set of
+LumenEngine mirrors vLLM by default, and additionally exposes a small set of
 **SGLang-inspired runtime knobs** as first-class, documented toggles. Each one is
 **opt-in and defaults to today's behavior**, a caller (library, C ABI, or
 server) that sets none of them gets an engine byte-identical to one built without
@@ -26,7 +26,7 @@ grounding live in [`.agents/specs/sglang-enablement.md`](../.agents/specs/sglang
 
 **What it does.** SGLang's RadixAttention keeps a radix tree of KV prefixes and
 serves the longest cached prefix of each new request instead of recomputing it.
-In vllm.cpp this is **fused into our block-hash automatic prefix caching (APC)**,
+In LumenEngine this is **fused into our block-hash automatic prefix caching (APC)**,
 there is no separate radix code path; `--enable-radix-attention` is a documented
 alias for the APC toggle (see
 [`.agents/specs/sglang-radixattention.md`](../.agents/specs/sglang-radixattention.md)
@@ -74,7 +74,7 @@ admission-order half of that behavior is folded into LPM scheduling below.
 
 **What it does.** SGLang's `--schedule-policy=lpm` reorders the waiting queue by
 each request's **longest matched cached prefix**, so requests that will hit the
-cache are admitted first (maximizing cache reuse under load). vllm.cpp implements
+cache are admitted first (maximizing cache reuse under load). LumenEngine implements
 this as the `lpm` scheduling policy over our block-hash APC index. It is
 **output-neutral**, it changes admission *order* only; every request computes
 identical tokens, and is meaningful **only with prefix caching ON**. With APC

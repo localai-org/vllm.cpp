@@ -1,0 +1,18 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine-fatal: EngineCore busy loop threw: vt: matmul: inner dims mismatch at ./src/vt/ops.cpp:150
+async-llm: output handler saw engine death: EngineCore encountered an issue. See stack trace (above) for the root cause. [vt: matmul: inner dims mismatch at ./src/vt/ops.cpp:150]
+===============================================================================
+./tests/vllm/models/test_llama_gguf_weights.cpp:135:
+TEST CASE:  Llama untied quantized GGUF head completes through the public API
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:165: FATAL ERROR: REQUIRE( status == VLLM_OK ) is NOT correct!
+  values: REQUIRE( 3 == 0 )
+  logged: 1
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 4 skipped
+[doctest] assertions: 2 | 1 passed | 1 failed |
+[doctest] Status: FAILURE!

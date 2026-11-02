@@ -1,0 +1,18 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/test_bpe.cpp:1146:
+TEST CASE:  GGUF SmolLM isolates digits before GPT2 BPE
+
+./tests/vllm/test_bpe.cpp:1146: ERROR: test case THREW exception: tokenizer: unsupported tokenizer.ggml.pre "smollm"
+
+===============================================================================
+./tests/vllm/test_bpe.cpp:1172:
+TEST CASE:  GGUF Llama score BPE honors ties prefixes bytes and special metadata
+
+./tests/vllm/test_bpe.cpp:1172: ERROR: test case THREW exception: tokenizer: unsupported tokenizer.ggml.model "llama" (only "gpt2" byte-level BPE)
+
+===============================================================================
+[doctest] test cases: 2 | 0 passed | 2 failed | 29 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: FAILURE!

@@ -1,0 +1,102 @@
+check-tree-compiles: base db1d71c9b735 (db1d71c9b7352a07983b408b2e755e853b4534f0)  head 3c2111d30308 (HEAD)
+  committed db1d71c9b735..3c2111d30308: 306 path(s)
+  staged: 0 path(s)
+  unstaged: 1 path(s)
+  untracked: 0 path(s)
+  in scope: 45 C++ source(s), 18 header(s), 4 build file(s), out of 306 changed path(s)
+  configured /tmp/tree-compiles-vtmi7agg in 19.3s: 1820 translation unit(s) in this configuration
+  dependency scan: 1820 unit(s) in 106.3s (a header is in scope)
+  44 unit(s) would not preprocess, so their include edges are unknown and they are checked unconditionally: src/vt/cuda/cuda_arch_tactics.cu, src/vt/cuda/cuda_attention_cross.cu, src/vt/cuda/cuda_backend.cu, src/vt/cuda/cuda_cache.cu, src/vt/cuda/cuda_combine_tokens.cu, src/vt/cuda/cuda_conv1d_general.cu, src/vt/cuda/cuda_conv3d.cu, src/vt/cuda/cuda_deepseek_v4.cu, src/vt/cuda/cuda_dropin.cu, src/vt/cuda/cuda_dsa_indexer.cu
+  2 C++ source(s) in scope that no target in this configuration compiles, so nothing checked them: .agents/evidence/pascal-volta-enable/tokenizer-repair/actual.cpp, .agents/evidence/pascal-volta-enable/tokenizer-repair/oracle.cpp
+  checking 829 translation unit(s) with -fsyntax-only at -j2
+FAILED to compile src/vt/cuda/cuda_arch_tactics.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_attention_cross.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_backend.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_cache.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_combine_tokens.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_conv1d_general.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_conv3d.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_deepseek_v4.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_dropin.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_dsa_indexer.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_exl3.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_gdn.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_glm5_next.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_glue.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_laguna.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_layernorm.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_ltx2.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_ltx2_vae.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_marlin_dense.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_marlin_repack.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_matmul.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_matmul_nvfp4.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_minimax_h3.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_mla_attn.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_mla_prefill.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_moe.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_moe_marlin.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_nvfp4_sm12x.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_ops.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_paged_attn.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_quant_dot.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_quant_fp8.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_qwen4_exp.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_qwen4_exp_ple.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_qwen4_exp_qsa.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_rms_norm_group.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/cuda_sample.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/marlin/libtorch_stable/moe/marlin_moe_wna16/marlin_mm_moe.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/marlin/libtorch_stable/moe/marlin_moe_wna16/sm80_kernel_bfloat16_fe2m1f_bfloat16.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/marlin/libtorch_stable/quantization/marlin/marlin_mm_dense.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/marlin/libtorch_stable/quantization/marlin/sm80_kernel_bfloat16_fe2m1f_bfloat16.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile src/vt/cuda/nccl_communicator.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile tests/vt/cuda_fp16_scalar_reference.cu
+    nvcc fatal   : Unsupported gpu architecture 'compute_121a'
+FAILED to compile tests/vt/test_cuda_legacy_intrinsics.cu
+    nvlink fatal   : Could not open input file '/tmp/tmpxft_0002eb4d_00000000-11_test_cuda_legacy_intrinsics.o'
+check-tree-compiles: 44 of 829 translation unit(s) in scope did not compile (981.2s). This checks syntax and semantics only; it does not link, run, or leave the default host configuration.
+
+STANDALONE_TREE_COMPILE_EXIT 1

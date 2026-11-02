@@ -1,0 +1,42 @@
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=64 prompt=1 ids= 22 7 82 46
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=64 prompt=16 ids= 79 2 11 22
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=64 prompt=37 ids= 29 29 29 29
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=128 prompt=1 ids= 22 7 82 46
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=128 prompt=16 ids= 79 2 11 103
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=128 prompt=37 ids= 29 29 29 29
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+synthetic public CPU/CUDA head_dim=256 prompt=1 ids= 22 7 82 46
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+engine-fatal: EngineCore busy loop threw: vt cuda: paged flash smem opt-in: kernel needs 65536 B of dynamic shared memory, but sm_61 caps opt-in shared memory at 49152 B; this shape needs an architecture-specific tile (see .agents/specs/cuda-arch-additivity.md)
+async-llm: output handler saw engine death: EngineCore encountered an issue. See stack trace (above) for the root cause. [vt cuda: paged flash smem opt-in: kernel needs 65536 B of dynamic shared memory, but sm_61 caps opt-in shared memory at 49152 B; this shape needs an architecture-specific tile (see .agents/specs/cuda-arch-additivity.md)]
+public completion: vllm_complete_tokens: EngineCore encountered an issue. See stack trace (above) for the root cause. [vt cuda: paged flash smem opt-in: kernel needs 65536 B of dynamic shared memory, but sm_61 caps opt-in shared memory at 49152 B; this shape needs an architecture-specific tile (see .agents/specs/cuda-arch-additivity.md)]

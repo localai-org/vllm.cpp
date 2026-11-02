@@ -1,0 +1,24 @@
+DSR-ALLOW exemptions in force: 21
+  DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:57 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+  DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:126 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+  DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:172 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+  DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:1957 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+  DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:2369 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+  DSR-ALLOW src/vllm/entrypoints/openai/server_main.cpp:2454 [vt_ifdef] #if defined(VT_BENCH_PROFILE_CONTROL) && !defined(_WIN32)
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:459 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:929 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:1274 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:1402 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:2147 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:2209 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna.cpp:2909 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna_weights.cpp:348 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/laguna_weights.cpp:458 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/nemotron_h_device.cpp:113 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/nemotron_h_device.cpp:376 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/nemotron_h_device.cpp:827 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/nemotron_h_device.cpp:1000 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/nemotron_h_device.cpp:1172 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+  DSR-ALLOW src/vllm/model_executor/models/nemotron_h_device.cpp:1872 [vt_ifdef] #ifdef VT_MARLIN_NVFP4
+DSR by bucket: kcuda=0, is_cuda=0, dev_cast=0, cuda_inc=0, vt_ifdef=32  -> total 32
+check-device-leakage: OK (DSR 32 == baseline 32, ratchet holds)

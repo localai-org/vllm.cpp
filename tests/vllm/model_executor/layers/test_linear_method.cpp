@@ -12,6 +12,8 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <cstring>
+#include "vt/merged_gemm.h"
 #include <string>
 #include <vector>
 
@@ -558,4 +560,145 @@ TEST_CASE("linear_method: the fp8 w8a8 method reaches the shared seam in both ar
   CHECK(vt::OpRegistered(vt::OpId::kQuantFp8Static, vt::DeviceType::kCPU));
   CHECK(vt::OpRegistered(vt::OpId::kMatmulFp8Cutlass, vt::DeviceType::kCPU));
   CHECK_FALSE(vt::OpRegistered(vt::OpId::kMatmulFp8CublasLt, vt::DeviceType::kCPU));
+}
+
+namespace {
+OwnedTensor MakeQuantShard(DType dtype, int64_t rows, int64_t cols, int seed) {
+  OwnedTensor w;
+  w.dtype = dtype;
+  w.nk = true;
+  w.rank = 2;
+  w.shape[0] = rows;
+  w.shape[1] = cols;
+  const auto row_bytes = vt::RowSizeBytes(dtype, cols);
+  w.bytes.resize(static_cast<size_t>(rows * row_bytes));
+  const int64_t block_bytes = vt::BlockBytes(dtype);
+  for (int64_t i = 0; i < rows * cols / vt::BlockElems(dtype); ++i) {
+    auto* p = reinterpret_cast<uint8_t*>(w.bytes.data()) + i * block_bytes;
+    p[0] = 0x00;
+    p[1] = 0x24;  // f16 scale 1/64, finite and nonzero.
+    for (int64_t j = 2; j < block_bytes; ++j)
+      p[j] = static_cast<uint8_t>((i * 13 + j * 7 + seed) % 127);
+  }
+  return w;
+}
+}
+
+TEST_CASE("dense merged shards preserve heterogeneous quantized contractions") {
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  layers::Dev d{backend, queue};
+  auto input = MakeBf16({3, 64}, 91);
+  auto x = layers::ResidentWeight(d, input);
+  std::vector<OwnedTensor> owners;
+  owners.push_back(MakeQuantShard(DType::kQ4_0, 5, 64, 1));
+  owners.push_back(MakeQuantShard(DType::kQ8_0, 3, 64, 2));
+  owners.push_back(MakeQuantShard(DType::kQ4_0, 3, 64, 3));
+  std::vector<vt::Tensor> weights;
+  std::vector<layers::DBuf> output, expected;
+  for (const auto& w : owners) {
+    weights.push_back(layers::ResidentWeight(d, w));
+    output.emplace_back(d, DType::kBF16, std::initializer_list<int64_t>{3, w.shape[0]});
+    expected.emplace_back(d, DType::kBF16, std::initializer_list<int64_t>{3, w.shape[0]});
+    vt::MatmulBT(queue, expected.back().t(), x, weights.back());
+  }
+  vt::Tensor products[] = {output[0].t(), output[1].t(), output[2].t()};
+  vt::MergedGemmDense(queue, vt::kDenseQkvShards, products, x, weights.data(), 3);
+  for (size_t i = 0; i < output.size(); ++i) {
+    const auto n = static_cast<size_t>(3 * owners[i].shape[0]);
+    CHECK(std::memcmp(output[i].t().data, expected[i].t().data, n * 2) == 0);
+    CHECK(weights[i].dtype == owners[i].dtype);
+  }
+}
+
+TEST_CASE("dense quantized gate up shards use the MLP method and shared epilogue") {
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  layers::Dev d{backend, queue};
+  auto input = MakeBf16({2, 64}, 17);
+  auto x = layers::ResidentWeight(d, input);
+  std::vector<OwnedTensor> weights;
+  weights.push_back(MakeQuantShard(DType::kQ4_0, 8, 64, 5));
+  weights.push_back(MakeQuantShard(DType::kQ8_0, 8, 64, 6));
+  layers::DenseShardMlpGateUpMethod method(&weights, 8);
+  auto actual = method.Apply(d, x);
+  auto wg = layers::ResidentWeight(d, weights[0]);
+  auto wu = layers::ResidentWeight(d, weights[1]);
+  layers::DBuf gate(d, DType::kBF16, {2, 8}), up(d, DType::kBF16, {2, 8});
+  layers::DBuf expected(d, DType::kBF16, {2, 8});
+  vt::MatmulBT(queue, gate.t(), x, wg);
+  vt::MatmulBT(queue, up.t(), x, wu);
+  vt::MoeSiluMul(queue, expected.t(), gate.t(), up.t());
+  CHECK(std::memcmp(actual.t().data, expected.t().data, 32) == 0);
+  CHECK(std::string(method.Name()) == "dense-shard-gate-up");
+}
+
+TEST_CASE("dense malformed descriptors refuse unsafe contracts") {
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  auto& backend = vt::GetBackend(vt::DeviceType::kCPU);
+  layers::Dev d{backend, queue};
+  auto input = MakeBf16({1, 64}, 23);
+  const auto x = layers::ResidentWeight(d, input);
+  auto owner = MakeQuantShard(DType::kQ4_0, 8, 64, 7);
+  const auto w = layers::ResidentWeight(d, owner);
+  const vt::Tensor weights[] = {w, w, w};
+  layers::DBuf a(d, DType::kBF16, {1, 8}), b(d, DType::kBF16, {1, 8});
+  layers::DBuf c(d, DType::kBF16, {1, 8}), out(d, DType::kBF16, {1, 8});
+  vt::Tensor products[] = {a.t(), b.t(), c.t()};
+  const auto refuses = [&](const vt::MergedGemmGroup& desc, vt::Tensor* dst,
+                           const vt::Tensor* src, int count, vt::Tensor* epilogue,
+                           const char* diagnostic) {
+    CHECK_THROWS_WITH_AS(vt::MergedGemmDense(queue, desc, dst, x, src, count, epilogue),
+                         doctest::Contains(diagnostic), std::runtime_error);
+  };
+  const char* count_error = "MergedGemmDense: descriptor and shard count must match";
+  refuses(vt::kDenseQkvShards, products, weights, 2, nullptr, count_error);
+  auto single = vt::kDenseQkvShards;
+  single.arity = 1;
+  refuses(single, products, weights, 1, nullptr, count_error);
+  // Zero contractions keep a removed array guard from dereferencing null.
+  auto empty = vt::kDenseQkvShards;
+  empty.arity = 0;
+  refuses(empty, nullptr, weights, 0, nullptr, count_error);
+  refuses(empty, products, nullptr, 0, nullptr, count_error);
+  auto fused = vt::kDenseQkvShards;
+  fused.fast_op = static_cast<int>(vt::OpId::kMoeGateUpSwiGLUGrouped);
+  refuses(fused, products, weights, 3, nullptr,
+          "MergedGemmDense: no dense-shard fused provider is registered");
+  auto three_way_swiglu = vt::kDenseQkvShards;
+  three_way_swiglu.epilogue = vt::MergedEpilogue::kSiluMulClamp;
+  refuses(three_way_swiglu, products, weights, 3, &out.t(),
+          "MergedGemmDense: unsupported dense epilogue");
+  auto unknown = vt::kDenseQkvShards;
+  unknown.epilogue = static_cast<vt::MergedEpilogue>(255);
+  refuses(unknown, products, weights, 3, nullptr,
+          "MergedGemmDense: unsupported dense epilogue");
+  refuses(vt::kDenseQkvShards, products, weights, 3, &out.t(),
+          "MergedGemmDense: SwiGLU alone requires an epilogue output");
+}
+
+TEST_CASE("dense SwiGLU requires its output before contraction") {
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  // The descriptor rejects the missing output before touching tensor storage.
+  vt::Tensor products[2]{};
+  vt::Tensor weights[2]{};
+  const vt::Tensor input{};
+  CHECK_THROWS_WITH_AS(
+      vt::MergedGemmDense(queue, vt::kDenseGateUpShards, products, input, weights, 2),
+      doctest::Contains("MergedGemmDense: SwiGLU alone requires an epilogue output"),
+      std::runtime_error);
+}
+
+TEST_CASE("dense null shard arrays are rejected before tensor access") {
+  vt::Queue queue{vt::Device{vt::DeviceType::kCPU, 0}, nullptr};
+  vt::Tensor products[2]{};
+  vt::Tensor weights[2]{};
+  const vt::Tensor input{};
+  auto plain = vt::kDenseQkvShards;
+  plain.arity = 2;
+  const auto expected = doctest::Contains("MergedGemmDense: descriptor and shard count must match");
+  CHECK_THROWS_WITH_AS(vt::MergedGemmDense(queue, plain, nullptr, input, weights, 2),
+                       expected, std::runtime_error);
+  CHECK_THROWS_WITH_AS(vt::MergedGemmDense(queue, plain, products, input, nullptr, 2),
+                       expected, std::runtime_error);
 }

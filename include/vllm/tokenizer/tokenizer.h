@@ -216,10 +216,9 @@ class Tokenizer {
   int32_t bos_id_ = -1;
   // The tokens the POST-PROCESSOR itself prepends/appends, which is a strictly
   // narrower thing than "this model's bos/eos ids". Set ONLY from an HF
-  // TemplateProcessing "single" template (FromHfJson); left -1 by FromGguf,
-  // whose `tokenizer.ggml.{bos,eos}_token_id` merely NAME the special tokens
-  // and do NOT imply the tokenizer adds them to a prompt. Conflating the two
-  // would append an EOS to every GGUF prompt.
+  // TemplateProcessing "single" template (FromHfJson), or explicit/default
+  // add_bos_token/add_eos_token flags on Llama GGUF. Other GGUF families keep
+  // these -1: their BOS/EOS IDs alone never license prompt insertion.
   int32_t template_bos_ = -1;
   int32_t template_eos_ = -1;
   bool ignore_merges_ = false;  // BPE option: whole-pretoken vocab hit wins
@@ -228,6 +227,9 @@ class Tokenizer {
   // pairs where score is a log-probability; index == id. The unk penalty is
   // unigram_min_score_ - 10.0 (HF tokenizers default when no unk_score is
   // declared). ---
+  bool gguf_spm_ = false;
+  bool smollm_digits_ = false;
+  std::unordered_map<std::string, float> spm_scores_;
   bool is_unigram_ = false;
   std::unordered_map<std::string, float> unigram_scores_;
   float unigram_min_score_ = 0.0f;

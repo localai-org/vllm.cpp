@@ -1,0 +1,2 @@
+478d7cbb5da7912042f05f35745dad1d885623fe7217d032a94b5371f7a2cbd8  src/vllm/v1/attention/cuda_legacy.cpp
+9e34c1b9bc29af9ee1944e0f029571c7613c4fcfc18dbf30b052b4d5a6d0a4cf  tests/vllm/v1/attention/test_attn_validate_configuration.cpp

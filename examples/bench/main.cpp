@@ -61,7 +61,7 @@ void Usage(const char* argv0, std::FILE* out) {
       "          [--chat-template <file or single-line template>]\n"
       "          [--enable-thinking | --no-enable-thinking]\n"
       "\n"
-      "Throughput/latency benchmark over the vllm.cpp V1 AsyncLLM, mirroring\n"
+      "Throughput/latency benchmark over the LumenEngine V1 AsyncLLM, mirroring\n"
       "`vllm bench serve` metrics. With no --model, a synthetic CPU engine runs\n"
       "(numbers meaningless; smoke only). Defaults: --num-prompts 8 "
       "--input-len 16\n"

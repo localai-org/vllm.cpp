@@ -1,0 +1,25 @@
+{"decoded":"","ids":[],"special_ids":[],"text":""}
+{"decoded":"a","ids":[81],"special_ids":[81],"text":"a"}
+{"decoded":"abc","ids":[25276],"special_ids":[25276],"text":"abc"}
+{"decoded":"hello world","ids":[28120,905],"special_ids":[28120,905],"text":"hello world"}
+{"decoded":" hello","ids":[33662],"special_ids":[33662],"text":" hello"}
+{"decoded":"  hello  ","ids":[216,33662,256],"special_ids":[216,33662,256],"text":"  hello  "}
+{"decoded":"1234567890","ids":[33,34,35,36,37,38,39,40,41,32],"special_ids":[33,34,35,36,37,38,39,40,41,32],"text":"1234567890"}
+{"decoded":" 123 45","ids":[216,33,34,35,216,36,37],"special_ids":[216,33,34,35,216,36,37],"text":" 123 45"}
+{"decoded":"a123b","ids":[81,33,34,35,82],"special_ids":[81,33,34,35,82],"text":"a123b"}
+{"decoded":"１２３４","ids":[8083,235,8083,236,8083,237,8083,238],"special_ids":[8083,235,8083,236,8083,237,8083,238],"text":"１２３４"}
+{"decoded":"Ⅲ²①","ids":[173,223,112,19133,173,235,250],"special_ids":[173,223,112,19133,173,235,250],"text":"Ⅲ²①"}
+{"decoded":"hello\nworld","ids":[28120,198,6693],"special_ids":[28120,198,6693],"text":"hello\nworld"}
+{"decoded":"\tline\r\nnext","ids":[197,1311,201,198,11282],"special_ids":[197,1311,201,198,11282],"text":"\tline\r\nnext"}
+{"decoded":"café naïve","ids":[83,1939,2756,15486,46494],"special_ids":[83,1939,2756,15486,46494],"text":"café naïve"}
+{"decoded":"한글 日本語 中文","ids":[33085,246,181,133,218,17097,241,115,40993,179,120,248,216,28589,29184],"special_ids":[33085,246,181,133,218,17097,241,115,40993,179,120,248,216,28589,29184],"text":"한글 日本語 中文"}
+{"decoded":"á é","ids":[81,151,219,297,151,219],"special_ids":[81,151,219,297,151,219],"text":"á é"}
+{"decoded":"😀🙂🚀","ids":[10813,242,218,10813,38887,10813,244,218],"special_ids":[10813,242,218,10813,38887,10813,244,218],"text":"😀🙂🚀"}
+{"decoded":"<s>hello</s>","ids":[44,99,46,28120,9617,99,46],"special_ids":[44,99,46,28120,9617,99,46],"text":"<s>hello</s>"}
+{"decoded":"<unk>abc","ids":[44,5131,46,25276],"special_ids":[44,5131,46,25276],"text":"<unk>abc"}
+{"decoded":"hello<s>world","ids":[28120,44,99,46,6693],"special_ids":[28120,44,99,46,6693],"text":"hello<s>world"}
+{"decoded":"<|im_start|>user\nHello<|im_end|>","ids":[1,4093,198,19556,2],"special_ids":[1,4093,198,19556,2],"text":"<|im_start|>user\nHello<|im_end|>"}
+{"decoded":"  \n\t","ids":[256,3354],"special_ids":[256,3354],"text":"  \n\t"}
+{"decoded":"can't I'm DON'T","ids":[4055,982,339,5248,422,2154,23,68],"special_ids":[4055,982,339,5248,422,2154,23,68],"text":"can't I'm DON'T"}
+{"decoded":"©™€$","ids":[14115,14824,14195,20],"special_ids":[14115,14824,14195,20],"text":"©™€$"}
+{"decoded":"Explain how a computer stores information and why careful testing matters. Give a clear example. ","ids":[36971,638,253,2583,7821,1096,284,1701,5649,3728,5939,30,13843,253,2437,1183,30,216],"special_ids":[36971,638,253,2583,7821,1096,284,1701,5649,3728,5939,30,13843,253,2437,1183,30,216],"text":"Explain how a computer stores information and why careful testing matters. Give a clear example. "}

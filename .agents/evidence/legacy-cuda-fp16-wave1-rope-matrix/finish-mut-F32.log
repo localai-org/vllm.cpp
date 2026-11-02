@@ -1,0 +1,12 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:306:
+TEST CASE:  CUDA FP16 scalar cached RoPE ports upstream conventions optional keys and head strides
+
+./tests/vt/test_cuda_fp16_scalar.cpp:306: ERROR: test case THREW exception: mutation removed F32 cached production dispatch
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: FAILURE!

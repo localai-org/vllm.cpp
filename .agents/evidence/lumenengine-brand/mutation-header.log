@@ -1,0 +1,11 @@
+Scratch forwarding include removed, real C consumer syntax check
+exit=1
+/tmp/tmpe_9j3rek/consumer.c: In function ‘main’:
+/tmp/tmpe_9j3rek/consumer.c:2:25: error: implicit declaration of function ‘vllm_abi_version’ [-Wimplicit-function-declaration]
+    2 | int main(void) { return vllm_abi_version() == VLLM_ABI_VERSION ? 0 : 1; }
+      |                         ^~~~~~~~~~~~~~~~
+/tmp/tmpe_9j3rek/consumer.c:2:47: error: ‘VLLM_ABI_VERSION’ undeclared (first use in this function)
+    2 | int main(void) { return vllm_abi_version() == VLLM_ABI_VERSION ? 0 : 1; }
+      |                                               ^~~~~~~~~~~~~~~~
+/tmp/tmpe_9j3rek/consumer.c:2:47: note: each undeclared identifier is reported only once for each function it appears in
+Production header remains unchanged.

@@ -1,0 +1,9 @@
+Mutation: expected set retains only vllm.h
+exit=1
+ERROR: the DERIVED public header set from CMakeLists.txt's install(FILES ...) rules is ['lumenengine.h', 'vllm.h'], not the pinned ['vllm.h']. The installed/exported surface changed; re-derive EXPECTED_PUBLIC in check-surface-coverage.py so the example include-boundary stays anchored to what downstream consumers actually get.
+
+Mutation: expected set retains only lumenengine.h
+exit=1
+ERROR: the DERIVED public header set from CMakeLists.txt's install(FILES ...) rules is ['lumenengine.h', 'vllm.h'], not the pinned ['lumenengine.h']. The installed/exported surface changed; re-derive EXPECTED_PUBLIC in check-surface-coverage.py so the example include-boundary stays anchored to what downstream consumers actually get.
+
+Restoration: byte-for-byte confirmed, SHA256 6fb93c0877159d442d38cd607a1c2becb951bd5d44268b1c3601548bf179f8f2

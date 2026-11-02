@@ -1,0 +1,16 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:552:
+TEST CASE:  legacy CUDA pins supported storage through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [kv_cache_dtype not supported]"
+  logged: kv := 1
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [kv_cache_dtype not supported]"
+  logged: kv := 1
+
+===============================================================================
+[doctest] test cases:  25 |  24 passed | 1 failed | 0 skipped
+[doctest] assertions: 148 | 146 passed | 2 failed |
+[doctest] Status: FAILURE!

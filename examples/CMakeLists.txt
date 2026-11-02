@@ -67,18 +67,18 @@ vllm_cpp_set_warnings(gliner-cli)
 # GFLOP/s for kMatmulBTQuant, portable vs Arm i8mm mmla tier.
 add_executable(quant-gemm-bench quant_gemm_bench/main.cpp)
 target_link_libraries(quant-gemm-bench PRIVATE vllm::vllm)
-target_include_directories(quant-gemm-bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(quant-gemm-bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
 vllm_cpp_set_warnings(quant-gemm-bench)
 
 add_executable(vllm-cpu-kernel-bench cpu_kernel_bench/main.cpp)
 target_link_libraries(vllm-cpu-kernel-bench PRIVATE vllm::vllm)
-target_include_directories(vllm-cpu-kernel-bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(vllm-cpu-kernel-bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
 vllm_cpp_set_warnings(vllm-cpu-kernel-bench)
 if(VLLM_CPP_BUILD_TESTS)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME test_cpu_kernel_bench_cli
     COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_SOURCE_DIR}/tests/scripts/test_cpu_kernel_bench.py
+      ${PROJECT_SOURCE_DIR}/tests/scripts/test_cpu_kernel_bench.py
       $<TARGET_FILE:vllm-cpu-kernel-bench>)
 endif()
 
@@ -91,7 +91,7 @@ if(VLLM_CPP_SERVER)
   # the server's gate only because it uses the same vendored httplib transport.
   add_executable(video-studio video_studio/main.cpp)
   target_link_libraries(video-studio PRIVATE vllm::shared)
-  target_include_directories(video-studio SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+  target_include_directories(video-studio SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
   set_target_properties(video-studio PROPERTIES OUTPUT_NAME vllm-video-studio)
   vllm_cpp_set_warnings(video-studio)
 
@@ -177,28 +177,28 @@ if(VLLM_CPP_SERVER)
     set(_vllm_server_artifact_id
       "${_vllm_server_os}-${_vllm_server_arch}-${_vllm_server_artifact_backend}")
   endif()
-  set(_vllm_server_release_dir "${CMAKE_BINARY_DIR}/release")
+  set(_vllm_server_release_dir "${PROJECT_BINARY_DIR}/release")
   set(_vllm_server_stage_dir "${_vllm_server_release_dir}/stage")
   set(_vllm_server_archive
     "${_vllm_server_release_dir}/vllm.cpp-${PROJECT_VERSION}-${_vllm_server_artifact_id}.tar.gz")
 
   add_custom_target(vllm-server-stage
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/package-server.py
-      --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/package-server.py
+      --build-dir ${PROJECT_BINARY_DIR}
       --stage-dir ${_vllm_server_stage_dir}
       --config $<CONFIG>
-    DEPENDS server ${CMAKE_SOURCE_DIR}/scripts/package-server.py
+    DEPENDS server ${PROJECT_SOURCE_DIR}/scripts/package-server.py
     COMMENT "Installing the vllm-server component into an empty staging prefix"
     VERBATIM)
 
   add_custom_target(vllm-server-archive
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/package-server.py
-      --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/package-server.py
+      --build-dir ${PROJECT_BINARY_DIR}
       --stage-dir ${_vllm_server_stage_dir}
       --archive ${_vllm_server_archive}
       --archive-format tar.gz
       --config $<CONFIG>
-    DEPENDS server ${CMAKE_SOURCE_DIR}/scripts/package-server.py
+    DEPENDS server ${PROJECT_SOURCE_DIR}/scripts/package-server.py
     BYPRODUCTS ${_vllm_server_archive}
     COMMENT "Creating deterministic installed vllm-server archive"
     VERBATIM)
@@ -363,9 +363,9 @@ vllm_cpp_set_warnings(ltx2-gen)
 # (surface-coverage-2026-08-07.md, "Out of the gated examples/ tree"): it links
 # `vllm::vllm` and calls the vocoder core directly, because the thing being timed
 # is the seam and not a model. NOT gated on CUDA — the CPU arm is half the A/B.
-add_executable(vocoder-conv-ab ${CMAKE_SOURCE_DIR}/benchmarks/vocoder_conv_ab.cpp)
+add_executable(vocoder-conv-ab ${PROJECT_SOURCE_DIR}/benchmarks/vocoder_conv_ab.cpp)
 target_link_libraries(vocoder-conv-ab PRIVATE vllm::vllm)
-target_include_directories(vocoder-conv-ab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(vocoder-conv-ab PRIVATE ${PROJECT_SOURCE_DIR}/src)
 vllm_cpp_set_warnings(vocoder-conv-ab)
 
 # expert-stream-device-w0e: the W0e measurement harness for row
@@ -379,7 +379,7 @@ vllm_cpp_set_warnings(vocoder-conv-ab)
 # rule and needs no `src/` include path. Not gated on CUDA: the CPU arm is the
 # baseline the CUDA arm is compared against.
 add_executable(expert-stream-device-w0e
-               ${CMAKE_SOURCE_DIR}/benchmarks/expert_stream_device_w0e.cpp)
+               ${PROJECT_SOURCE_DIR}/benchmarks/expert_stream_device_w0e.cpp)
 target_link_libraries(expert-stream-device-w0e PRIVATE vllm::shared)
 vllm_cpp_set_warnings(expert-stream-device-w0e)
 
@@ -389,9 +389,9 @@ vllm_cpp_set_warnings(expert-stream-device-w0e)
 # tactic each arm actually ran (a silent fallback would post a plausible pair of
 # timings that mean nothing).
 if(VLLM_CPP_VULKAN)
-  add_executable(vulkan-gemm-ab ${CMAKE_SOURCE_DIR}/benchmarks/vulkan_gemm_ab.cpp)
+  add_executable(vulkan-gemm-ab ${PROJECT_SOURCE_DIR}/benchmarks/vulkan_gemm_ab.cpp)
   target_link_libraries(vulkan-gemm-ab PRIVATE vllm::vllm)
-  target_include_directories(vulkan-gemm-ab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(vulkan-gemm-ab PRIVATE ${PROJECT_SOURCE_DIR}/src)
   vllm_cpp_set_warnings(vulkan-gemm-ab)
 
   # vulkan-dispatch-floor: the VK-A2 sizing measurement. Sweeps ONE op across a
@@ -399,9 +399,9 @@ if(VLLM_CPP_VULKAN)
   # kernel cost -- two causes that produce an identical wall clock but imply
   # opposite fixes. Same Vulkan-only condition, same reason.
   add_executable(vulkan-dispatch-floor
-                 ${CMAKE_SOURCE_DIR}/benchmarks/vulkan_dispatch_floor.cpp)
+                 ${PROJECT_SOURCE_DIR}/benchmarks/vulkan_dispatch_floor.cpp)
   target_link_libraries(vulkan-dispatch-floor PRIVATE vllm::vllm)
-  target_include_directories(vulkan-dispatch-floor PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(vulkan-dispatch-floor PRIVATE ${PROJECT_SOURCE_DIR}/src)
   vllm_cpp_set_warnings(vulkan-dispatch-floor)
 
   # vulkan-gemv-ab: the BACKEND-VULKAN-GEMVROWS variant sweep. Runs the decode
@@ -409,9 +409,9 @@ if(VLLM_CPP_VULKAN)
   # be accepted or discarded without spending a 50 GB e2e run on it. Same
   # Vulkan-only condition and the same reason as the two above: it prints the
   # pipeline cache key, so an arm proves which specialization it ran.
-  add_executable(vulkan-gemv-ab ${CMAKE_SOURCE_DIR}/benchmarks/vulkan_gemv_ab.cpp)
+  add_executable(vulkan-gemv-ab ${PROJECT_SOURCE_DIR}/benchmarks/vulkan_gemv_ab.cpp)
   target_link_libraries(vulkan-gemv-ab PRIVATE vllm::vllm)
-  target_include_directories(vulkan-gemv-ab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(vulkan-gemv-ab PRIVATE ${PROJECT_SOURCE_DIR}/src)
   vllm_cpp_set_warnings(vulkan-gemv-ab)
 endif()
 
@@ -424,9 +424,9 @@ endif()
 # fast arm that moved a float is void rather than interesting. CUDA-only and run
 # by hand, like vulkan-gemv-ab above.
 if(VLLM_CPP_CUDA)
-  add_executable(w32-grouped-cols-ab ${CMAKE_SOURCE_DIR}/benchmarks/w32_grouped_cols_ab.cpp)
+  add_executable(w32-grouped-cols-ab ${PROJECT_SOURCE_DIR}/benchmarks/w32_grouped_cols_ab.cpp)
   target_link_libraries(w32-grouped-cols-ab PRIVATE vllm::vllm)
-  target_include_directories(w32-grouped-cols-ab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(w32-grouped-cols-ab PRIVATE ${PROJECT_SOURCE_DIR}/src)
   vllm_cpp_set_warnings(w32-grouped-cols-ab)
 endif()
 
@@ -447,3 +447,41 @@ vllm_cpp_set_warnings(parakeet-transcribe)
 add_executable(minimax-music3-gen minimax_music3_gen/main.cpp)
 target_link_libraries(minimax-music3-gen PRIVATE vllm::shared)
 vllm_cpp_set_warnings(minimax-music3-gen)
+
+# Copy the actual executables so old and new names use identical entry points.
+# Copies are portable to Windows and need no symlink permissions.
+function(lumenengine_command_alias original alias)
+  set(alias_file "$<TARGET_FILE_DIR:${original}>/${alias}${CMAKE_EXECUTABLE_SUFFIX}")
+  add_custom_target(${alias} ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:${original}>" "${alias_file}"
+    DEPENDS ${original}
+    VERBATIM)
+  # Copy the installed original after CMake patches its runtime search path.
+  install(CODE "file(COPY_FILE
+    \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/$<TARGET_FILE_NAME:${original}>\"
+    \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${alias}${CMAKE_EXECUTABLE_SUFFIX}\"
+    ONLY_IF_DIFFERENT)")
+endfunction()
+file(RELATIVE_PATH _lumenengine_lib_from_bin
+  "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBDIR}")
+if(APPLE)
+  set_property(TARGET vllm-cli PROPERTY INSTALL_RPATH
+    "@loader_path/${_lumenengine_lib_from_bin}")
+elseif(UNIX)
+  set_property(TARGET vllm-cli PROPERTY INSTALL_RPATH
+    "$ORIGIN/${_lumenengine_lib_from_bin}")
+endif()
+install(TARGETS vllm-cli vllm-bench RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+lumenengine_command_alias(vllm-cli lumenengine-cli)
+lumenengine_command_alias(vllm-bench lumenengine-bench)
+if(TARGET server)
+  lumenengine_command_alias(server lumenengine-server)
+endif()
+
+if(VLLM_CPP_BUILD_TESTS AND TARGET server)
+  add_test(NAME test_lumenengine_commands
+    COMMAND ${Python3_EXECUTABLE}
+      ${PROJECT_SOURCE_DIR}/tests/branding/check_commands.py
+      $<TARGET_FILE_DIR:vllm-cli>)
+endif()

@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+# The installed package exposes the shared C ABI, not private C++ internals.
+if(NOT TARGET vllm::shared)
+  include("${CMAKE_CURRENT_LIST_DIR}/LumenEngineTargets.cmake")
+endif()
+if(NOT TARGET LumenEngine::LumenEngine)
+  add_library(LumenEngine::LumenEngine ALIAS vllm::shared)
+endif()
+if(NOT TARGET LumenEngine::shared)
+  add_library(LumenEngine::shared ALIAS vllm::shared)
+endif()
+check_required_components(LumenEngine)

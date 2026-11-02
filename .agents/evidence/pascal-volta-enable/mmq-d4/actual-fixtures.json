@@ -1,0 +1,47 @@
+[
+  {
+    "path": "/tmp/lumen-models/SmolLM2-135M-Instruct-Q4_K_M.gguf",
+    "size": 105454432,
+    "sha256": "2e8040ceae7815abe0dcb3540b9995eaa1fa0d2ca9e797d0a635ae4433c68c2d"
+  },
+  {
+    "path": "/tmp/smol-oracle-history-dumps/attn_norm-0-step0.f32",
+    "size": 36864,
+    "sha256": "ab0c0ec515e16338d46e1eb70eecf37edcb5e505d5debc7970e56433440c5b9b"
+  },
+  {
+    "path": "/tmp/smol-oracle-history-dumps/Vcur-0-step0.f32",
+    "size": 12288,
+    "sha256": "de7e702e7513a25a53061d5a32445b4052b6009a201fdc3a337b5c6132ee81a2"
+  },
+  {
+    "path": "/tmp/smol-oracle-history-dumps/ffn_norm-0-step0.f32",
+    "size": 36864,
+    "sha256": "e5257da1ad08a7fffa0a41ea3bd9fc8d8926493842219cbf910d23400cf03eb7"
+  },
+  {
+    "path": "/tmp/smol-oracle-history-dumps/ffn_up-0-step0.f32",
+    "size": 98304,
+    "sha256": "25b56dfdac2978a4b252daa05ca3bc02e97903bc30d7d5e3681dd719eac7dfa9"
+  },
+  {
+    "path": "/tmp/smol-oracle-history-dumps/ffn_gate-0-step0.f32",
+    "size": 98304,
+    "sha256": "c236b2433bb7f378866c70d6e2cbb35d8d04ab7a20245add6e85cdb4e876d45c"
+  },
+  {
+    "path": "/tmp/pascal-mmq/attn_v.packed",
+    "size": 117504,
+    "sha256": "fbef73d0e9997c886cd7e2a2ba43e700f7088e7d1e08a041cf292b7d6dc87ed9"
+  },
+  {
+    "path": "/tmp/pascal-mmq/ffn_up.packed",
+    "size": 608256,
+    "sha256": "7dc17b0747b74db4b50729de990df274ba5012daa1b1ab3eee5ecb8f08f793fb"
+  },
+  {
+    "path": "/tmp/pascal-mmq/ffn_gate.packed",
+    "size": 608256,
+    "sha256": "0753551072c0c9ba34b3cc181b3f516c7c4df378b242ecc85f94fb43bdbe1ef8"
+  }
+]

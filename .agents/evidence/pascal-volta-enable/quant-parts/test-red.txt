@@ -1,0 +1,16 @@
+/tmp/lumen-quant-parts/tests/vllm/model_executor/layers/test_linear_method.cpp: In function ‘void DOCTEST_ANON_FUNC_20()’:
+/tmp/lumen-quant-parts/tests/vllm/model_executor/layers/test_linear_method.cpp:606:7: error: ‘MergedGemmDense’ is not a member of ‘vt’; did you mean ‘MergedGemmGroup’?
+  606 |   vt::MergedGemmDense(queue, vt::kDenseQkvShards, products, x, weights.data(), 3);
+      |       ^~~~~~~~~~~~~~~
+      |       MergedGemmGroup
+/tmp/lumen-quant-parts/tests/vllm/model_executor/layers/test_linear_method.cpp:606:34: error: ‘kDenseQkvShards’ is not a member of ‘vt’
+  606 |   vt::MergedGemmDense(queue, vt::kDenseQkvShards, products, x, weights.data(), 3);
+      |                                  ^~~~~~~~~~~~~~~
+/tmp/lumen-quant-parts/tests/vllm/model_executor/layers/test_linear_method.cpp: In function ‘void DOCTEST_ANON_FUNC_22()’:
+/tmp/lumen-quant-parts/tests/vllm/model_executor/layers/test_linear_method.cpp:623:11: error: ‘DenseShardMlpGateUpMethod’ is not a member of ‘{anonymous}::layers’; did you mean ‘MakeMlpGateUpMethod’?
+  623 |   layers::DenseShardMlpGateUpMethod method(&weights, 8);
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~
+      |           MakeMlpGateUpMethod
+/tmp/lumen-quant-parts/tests/vllm/model_executor/layers/test_linear_method.cpp:624:17: error: ‘method’ was not declared in this scope
+  624 |   auto actual = method.Apply(d, x);
+      |                 ^~~~~~

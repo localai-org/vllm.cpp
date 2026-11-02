@@ -1,0 +1,13 @@
+..........ERROR: these baseline rows left the gated population: ROW-THAT-IS-NOT-THERE. If that is a legitimate record edit, re-pin RUNNABLE_BASELINE in the SAME change, naming each row and the reason.
+ERROR: these baseline rows left the gated population: ROW-THAT-IS-NOT-THERE. If that is a legitimate record edit, re-pin RUNNABLE_BASELINE in the SAME change, naming each row and the reason.
+...................................................
+----------------------------------------------------------------------
+Ran 61 tests in 14.500s
+
+OK
+    52  runnable
+    76  gates-no-command
+    17  no-gates-section
+     1  no-spec
+
+146 gated rows; 52 carry a command that can fail.

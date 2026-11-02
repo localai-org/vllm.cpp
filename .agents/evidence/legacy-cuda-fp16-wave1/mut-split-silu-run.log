@@ -1,0 +1,15 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:399:
+TEST CASE:  CUDA FP16 scalar SiLU rounds before multiplication exactly
+
+./tests/vt/test_cuda_fp16_scalar.cpp:411: ERROR: CHECK( out.read()[0] == -0.53271484375f ) is NOT correct!
+  values: CHECK( -0.533203 == -0.532715 )
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 2 | 1 passed | 1 failed |
+[doctest] Status: FAILURE!
+
+MUTATION_EXIT 1

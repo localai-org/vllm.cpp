@@ -1,0 +1,13 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_ops.cpp:867:
+TEST CASE:  CUDA legacy split SwiGLU narrows the activated BF16 gate before multiply
+
+./tests/vt/test_cuda_ops.cpp:107: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 254 == 0 )
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 4 | 3 passed | 1 failed |
+[doctest] Status: FAILURE!

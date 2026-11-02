@@ -1,0 +1,12 @@
+[913/924] Building CXX object tests/CMakeFiles/test_cuda_quant_dot.dir/vt/test_cuda_quant_dot.cpp.o
+[914/924] Linking CUDA executable tests/test_cuda_legacy_intrinsics
+[915/924] Linking CXX static library libvllm.a
+[916/924] Linking CXX executable tests/test_cuda_ops
+[917/924] Linking CXX executable tests/test_cuda_legacy_matmul
+[918/924] Linking CXX executable tests/test_cuda_backend
+[919/924] Building CXX object tests/CMakeFiles/test_attn_validate_configuration.dir/vllm/v1/attention/test_attn_validate_configuration.cpp.o
+[920/924] Linking CXX executable tests/test_cuda_legacy_public
+[921/924] Linking CXX executable tests/test_cuda_legacy_refusals
+[922/924] Linking CXX executable tests/test_cuda_legacy_capi
+[923/924] Linking CXX executable tests/test_attn_validate_configuration
+[924/924] Linking CXX executable tests/test_cuda_quant_dot

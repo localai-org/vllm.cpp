@@ -35,7 +35,7 @@ bool EmbeddingQuantSupported(DType dt);
 
 // Gather `ids` out of a block-quantized `table` into `out`, decoding one row per
 // id. Preconditions are the ones `vt::Embedding` already checked: rank-2 table,
-// contiguous everything, `table.shape[1] % BlockElems(dtype) == 0`, out f32 or
+// contiguous everything, `table.shape[1] % BlockElems(dtype) == 0`, out f32, f16 or
 // bf16, ids i32 or i64. Returns the launch status; an out-of-range id is
 // clamped in-kernel and recorded in `err` rather than throwing, exactly as the
 // float path does.

@@ -1,0 +1,19 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:99:
+TEST CASE:  CUDA FP16 scalar reverse cast preserves half format and row strides
+
+./tests/vt/test_cuda_fp16_scalar.cpp:95: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 7 == 0 )
+  logged: first := 0
+          got[first] := 0.00787354
+          want[first] := 1.00098
+          bad := 7
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 2 | 1 passed | 1 failed |
+[doctest] Status: FAILURE!
+
+MUTATION_EXIT 1

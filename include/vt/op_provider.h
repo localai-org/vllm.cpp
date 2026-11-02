@@ -58,6 +58,7 @@
 #include <cstdint>
 
 #include "vt/device.h"
+#include "vt/dtype.h"
 
 namespace vt {
 
@@ -125,6 +126,12 @@ void RegisterOpProvider(OpId op, DeviceType device, const OpProvider& provider);
 // capability predicate. Every backend in the tree keeps registering this way and
 // keeps winning, because nothing else registers at priority 0 under that name.
 void RegisterOp(OpId op, DeviceType device, void* fn);
+
+// Additive typed admission for a named, already registered provider. Call this
+// during registration, before dispatch. Existing providers claim no new types.
+// Query the selected provider, never a different provider on the same device.
+void RegisterOpScalarType(OpId op, DeviceType device, const char* provider, DType dtype);
+bool OpSupportsScalarType(OpId op, DeviceType device, DType dtype);
 
 // The canonical spelling of an op — the enumerator without its `k`. The
 // counterpart of DeviceTypeName (include/vt/device.h), and what every refusal

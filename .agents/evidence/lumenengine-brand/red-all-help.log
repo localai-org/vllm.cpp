@@ -1,0 +1,6 @@
+cli exit= 0 LumenEngine in help= False
+server exit= 0 LumenEngine in help= False
+bench exit= 0 LumenEngine in help= False
+Traceback (most recent call last):
+  File "<stdin>", line 9, in <module>
+AssertionError: ['cli', 'server', 'bench']

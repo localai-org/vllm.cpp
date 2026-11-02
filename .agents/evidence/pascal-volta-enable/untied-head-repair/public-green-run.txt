@@ -1,0 +1,8 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+===============================================================================
+[doctest] test cases:   5 |   5 passed | 0 failed | 0 skipped
+[doctest] assertions: 180 | 180 passed | 0 failed |
+[doctest] Status: SUCCESS!

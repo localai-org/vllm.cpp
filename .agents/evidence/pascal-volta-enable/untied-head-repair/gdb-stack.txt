@@ -1,0 +1,33 @@
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+Breakpoint 1 at 0x1a1b540
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+[New Thread 0x7fffd2dff000 (LWP 3135213)]
+[New Thread 0x7fffd114a000 (LWP 3135216)]
+[New Thread 0x7fffd0949000 (LWP 3135236)]
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+[New Thread 0x7fff912db000 (LWP 3135404)]
+[New Thread 0x7fff90ada000 (LWP 3135406)]
+[Switching to Thread 0x7fff912db000 (LWP 3135404)]
+
+Thread 5 "public-baseline" hit Breakpoint 1, 0x0000555556f6f540 in vt::Matmul(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&) ()
+#0  0x0000555556f6f540 in vt::Matmul(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&) ()
+#1  0x000055555600377a in vllm::(anonymous namespace)::ForwardLayers(vllm::dense_attn::Dev, vt::Tensor const&, std::vector<int, std::allocator<int> > const&, vllm::v1::CommonAttentionMetadata const&, std::vector<vllm::PagedKvCache, std::allocator<vllm::PagedKvCache> > const&, vllm::Qwen3DenseWeights const&, vllm::HfConfig const&, std::vector<int, std::allocator<int> > const&, bool, std::optional<vllm::dense_attn::DBuf>*) ()
+#2  0x0000555556003cd6 in vllm::(anonymous namespace)::ForwardBody(vllm::dense_attn::Dev, std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, vllm::v1::CommonAttentionMetadata const&, std::vector<vllm::PagedKvCache, std::allocator<vllm::PagedKvCache> > const&, vllm::Qwen3DenseWeights const&, vllm::HfConfig const&, std::vector<int, std::allocator<int> > const&, bool, std::vector<unsigned short, std::allocator<unsigned short> > const*, std::optional<vllm::dense_attn::DBuf>*) ()
+#3  0x00005555560080c3 in vllm::Qwen3DenseModel::ForwardDevice(std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, vllm::v1::CommonAttentionMetadata const&, std::vector<vllm::PagedKvCache, std::allocator<vllm::PagedKvCache> > const&, vllm::Qwen3DenseWeights const&, vllm::HfConfig const&, vt::Queue&, std::vector<int, std::allocator<int> > const&) ()
+#4  0x00005555567611eb in vllm::(anonymous namespace)::ForwardLlamaForCausalLM(vllm::LoadedModel&, vllm::ModelForwardInput const&) ()
+#5  0x00005555568d99b6 in vllm::ModelRegistry::Forward(vllm::LoadedModel&, vllm::ModelForwardInput const&) ()
+#6  0x0000555556b64678 in vllm::v1::GPUModelRunner::execute_model(vllm::v1::SchedulerOutput const&) ()
+#7  0x0000555556c3b1c3 in vllm::v1::Executor::execute_model(vllm::v1::SchedulerOutput const&) ()
+#8  0x0000555556bbb9cd in vllm::v1::EngineCore::step_with_batch_queue() ()
+#9  0x0000555556bc6d47 in vllm::v1::EngineCoreProc::process_engine_step() ()
+#10 0x0000555556bc7f50 in vllm::v1::EngineCoreProc::run_busy_loop() ()
+#11 0x0000555556bcb677 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<vllm::v1::InprocClient::InprocClient(vllm::v1::Scheduler&, vllm::v1::Executor&, vllm::v1::StructuredOutputManager*, int, int, bool)::{lambda()#1}> > >::_M_run() ()
+There is no member named shape.
+There is no member named shape.

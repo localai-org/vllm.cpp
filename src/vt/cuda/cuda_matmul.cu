@@ -47,10 +47,14 @@
 #include <unordered_map>
 
 #include "vt/cuda/cublas_lt_hgemm.h"
+#include "cuda_device_caps.h"
+#include "cuda_legacy_matmul.cuh"
 #include "vt/cuda/fp8_plan_cache.h"
 #include "vt/cuda/gemm_algo_log.h"
 #include "vt/cuda/gemm_plan_cache.h"
 #include "vt/ops.h"
+#include "vt/cuda/cublas_lt_hgemm.h"
+#include "vt/op_provider.h"
 
 namespace vt::cuda {
 namespace {
@@ -359,10 +363,12 @@ void MatmulKernelCuda(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
                        (out.dtype == DType::kF32 || out.dtype == DType::kBF16);
   const bool f32_all =
       a.dtype == DType::kF32 && b.dtype == DType::kF32 && out.dtype == DType::kF32;
-  if (!bf16_in && !f32_all) {
+  const bool f16_in = a.dtype == DType::kF16 && b.dtype == DType::kF16 &&
+                      (out.dtype == DType::kF16 || out.dtype == DType::kF32);
+  if (!bf16_in && !f32_all && !f16_in) {
     throw std::runtime_error("vt cuda: matmul: unsupported dtype combo " +
                              ComboName(a, b, out) +
-                             "; supported: (bf16,bf16)->f32|bf16, (f32,f32)->f32");
+                             "; supported: (f16,f16)->f16|f32, (bf16,bf16)->f32|bf16, (f32,f32)->f32");
   }
   const int64_t m = a.shape[0], k = a.shape[1], n = b.shape[1];
   if (m == 0 || n == 0) return;
@@ -372,6 +378,10 @@ void MatmulKernelCuda(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
     return;
   }
 
+  if (f16_in) {
+    CublasLtHgemm(q, out, a, b);
+    return;
+  }
   const LtContext ctx = GetContext(q.device.index);
   const cudaDataType_t ab_type = a.dtype == DType::kF32 ? CUDA_R_32F : CUDA_R_16BF;
   const cudaDataType_t out_type = out.dtype == DType::kF32 ? CUDA_R_32F : CUDA_R_16BF;
@@ -491,10 +501,13 @@ void MatmulBTKernelCuda(Queue& q, Tensor& out, const Tensor& a, const Tensor& b)
   const bool bf16_in = a.dtype == DType::kBF16 && b.dtype == DType::kBF16;
   const bool f32_in = a.dtype == DType::kF32 && b.dtype == DType::kF32;
   const bool f32_act_bf16_w = a.dtype == DType::kF32 && b.dtype == DType::kBF16;
-  if (!bf16_in && !f32_in && !f32_act_bf16_w) {
+  const bool f16_in = a.dtype == DType::kF16 && b.dtype == DType::kF16 &&
+                      (out.dtype == DType::kF16 || out.dtype == DType::kF32);
+  if ((!bf16_in && !f32_in && !f32_act_bf16_w && !f16_in) ||
+      (out.dtype == DType::kF16 && !f16_in)) {
     throw std::runtime_error(
         "vt cuda: matmul_bt: unsupported dtype combo " + ComboName(a, b, out) +
-        "; supported: (bf16,bf16)->f32|bf16, (f32,f32)->f32|bf16, (f32,bf16)->f32|bf16");
+        "; supported: (f16,f16)->f16|f32, (bf16,bf16)->f32|bf16, (f32,f32)->f32|bf16, (f32,bf16)->f32|bf16");
   }
   const int64_t m = a.shape[0], k = a.shape[1], n = b.shape[0];
   if (m == 0 || n == 0) return;
@@ -526,8 +539,8 @@ void MatmulBTKernelCuda(Queue& q, Tensor& out, const Tensor& a, const Tensor& b)
   }
 
   const LtContext ctx = GetContext(q.device.index);
-  const cudaDataType_t ab_type = f32_in ? CUDA_R_32F : CUDA_R_16BF;
-  const cudaDataType_t out_type = out.dtype == DType::kF32 ? CUDA_R_32F : CUDA_R_16BF;
+  const cudaDataType_t ab_type = f32_in ? CUDA_R_32F : (f16_in ? CUDA_R_16F : CUDA_R_16BF);
+  const cudaDataType_t out_type = out.dtype == DType::kF32 ? CUDA_R_32F : (f16_in ? CUDA_R_16F : CUDA_R_16BF);
 
   DescGuard desc;
   CheckLt(cublasLtMatmulDescCreate(&desc.v, CUBLAS_COMPUTE_32F, CUDA_R_32F),
@@ -641,6 +654,12 @@ void BatchedMatmulKernelCuda(Queue& q, Tensor& out, const Tensor& a, const Tenso
         }
       }
     }
+    return;
+  }
+
+  const auto& caps = GetDeviceCaps(q.device.index);
+  if (caps.valid && caps.sm_major < 8 && f32_in && out.dtype == DType::kBF16) {
+    CheckCuda(legacy::LaunchBatchedF32Bf16(q, out, a, b), "legacy batched f32 to bf16");
     return;
   }
 
@@ -1311,8 +1330,10 @@ struct Registrar {
   Registrar() {
     RegisterOp(OpId::kMatmul, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<MatmulFn>(&MatmulKernelCuda)));
+    RegisterOpScalarType(OpId::kMatmul, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(OpId::kMatmulBT, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<MatmulFn>(&MatmulBTKernelCuda)));
+    RegisterOpScalarType(OpId::kMatmulBT, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(OpId::kBatchedMatmul, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<BatchedMatmulFn>(&BatchedMatmulKernelCuda)));
     RegisterOp(OpId::kMatmulFp8CublasLt, DeviceType::kCUDA,

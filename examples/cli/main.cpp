@@ -84,7 +84,7 @@ void Usage(const char* argv0, std::FILE* out) {
       "          [--kv-cache-dtype auto|bfloat16|fp8|fp8_e4m3]\n"
       "          [--speculative-config '<json>'] [--offload-config '<json>']\n"
       "\n"
-      "Runs completion(s) over the vllm.cpp C ABI (libvllm). <dir> holds\n"
+      "Runs completion(s) over the LumenEngine C ABI (libvllm). <dir> holds\n"
       "config.json, tokenizer.json and the *.safetensors shards.\n"
       "--repeat N: load once, run N blocking completions (for warm tok/s).\n",
       argv0);

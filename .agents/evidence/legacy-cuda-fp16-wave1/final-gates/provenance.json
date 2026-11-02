@@ -1,0 +1,85 @@
+{
+  "broad-independent-review.md": {
+    "source": "/tmp/lumen-fp16-wave1-independent-review.md",
+    "sha256": "312e6d94d9b99ce1023018cf1f504346957a5c92ef0fd9ad0cf70e62ca52638f",
+    "bytes": 9359
+  },
+  "rope-scoped-rereview.md": {
+    "source": "/tmp/lumen-fp16-wave1-rope-rereview.md",
+    "sha256": "2ea1d656f2b44c38d2119de3b64b3899b99dedfa260831ba5b7dafb412083637",
+    "bytes": 4186
+  },
+  "operator-scalar.log": {
+    "source": "/tmp/lumen-operator-fp16-wave1-scalar.log",
+    "sha256": "db84ef6537732999d1a58a23aa37fdfbf3d8e335fa0911ddef6e806973b20060",
+    "bytes": 302
+  },
+  "standalone-tree-compile.log": {
+    "source": "/tmp/lumen-fp16-wave1-build/standalone-tree-compile.log",
+    "sha256": "2fd801cb36013cff51b875bf594f273c2ccacc86ceba28ff2d86752357f8ff7c",
+    "bytes": 6586
+  },
+  "operator-brand-gate.log": {
+    "source": "/tmp/lumen-operator-gatebaseline-green.log",
+    "sha256": "124a44cdbcc423807bc6918a8b1565abcb4de14557862fd1346d0ae74b12684b",
+    "bytes": 677
+  },
+  "operator-integrated-dsr.log": {
+    "source": "/tmp/lumen-operator-fp16-integrated-dsr.log",
+    "sha256": "0d9d6bd0656b5be81a922ecba1f7d0cbdefbd921f2809385c46b6af44b8da17f",
+    "bytes": 2428
+  },
+  "implementation-record-check.log": {
+    "source": "/tmp/lumen-fp16-wave1-build/agent-record-final.log",
+    "sha256": "271c36a1701c5a5ee86825a8742b8ef2f5a02773d6d633ff5810b1c8925a6144",
+    "bytes": 81
+  },
+  "full-range-trailers.log": {
+    "source": "/tmp/lumen-fp16-wave1-build/full-commit-trailers.log",
+    "sha256": "d5adedc69db8b54e6d88210a3b3bd45e8dd04626849ada850b6adb9d60aa14e6",
+    "bytes": 2166
+  },
+  "new-range-trailers.log": {
+    "source": "/tmp/lumen-fp16-wave1-build/new-commit-trailers.log",
+    "sha256": "fa7f289a9eb37a599f16f16d652b5d9da760b497df2f5f378583edac8f063c35",
+    "bytes": 28
+  },
+  "full-range-style.log": {
+    "source": "/tmp/lumen-fp16-wave1-build/full-commit-style.log",
+    "sha256": "270c0f051b2aab0c5d16c77f0cc63f36294d7f56c216758bdffd0eba5920e59a",
+    "bytes": 25
+  },
+  "original-preflight": {
+    "source": "/tmp/lumen-fp16-wave1-final-preflight.log",
+    "sha256": "7616e47bc5276f24f3705800196540bd0fd6ebd0d37c1e78e6d23a3283aee0d4",
+    "bytes": 26409,
+    "retained": "preflight-excerpt.log",
+    "fail_labels": [
+      "test_check_gate_commands",
+      "test_rocprof_attach_preflight",
+      "tools suites",
+      "check-device-leakage.py"
+    ]
+  },
+  "integrated-source": {
+    "head": "2f195a4c3",
+    "sha256": {
+      "include/vt/op_provider.h": "3a669caf30dacac561c9e6594b290162e92533879441b8e41cc0d329baad6dd3",
+      "src/vt/op_provider.cpp": "55b7b500ef6d2da81717616f5f0bc790f34ae9a9709ceb74b7978f892e597b7e",
+      "src/vt/ops.cpp": "32d056e9b5a12debb6be71714bb153118a2499fef8588ce385a746778b84138a",
+      "src/vt/cuda/cuda_ops.cu": "24e65b554e231b0009dc6351ebf010294b81d507c169c8f8d8caa96e00667bd4",
+      "src/vt/cuda/cuda_layernorm.cu": "4569b14933426d3637508cebab0c25be25a45b9c96206dc1cf57a0587edaf71f",
+      "src/vt/cuda/cuda_moe.cu": "ad98d7cdf704a37d39326541e3bcf4f7692f1431d43eaea4728e61e69479ed64",
+      "src/vt/cuda/cuda_glue.cu": "701c3f816e834c1742bc8959c8f048b5631b4614dc0d6faf4fa6bc55fa39f0b5",
+      "src/vt/cuda/cuda_matmul.cu": "4a1761eea3fc20f5d3c94352a9eefe45caa0cf717219e09a6330ef285edae2af",
+      "src/vt/cuda/cuda_quant_dot.cu": "3d6df116ed0269bfb7ffe1ca91afcfc4c843c3125334fcf1ca82199e423649a9",
+      "tests/vt/test_cuda_fp16_scalar.cpp": "aafd4c33d69d314ccc1bc23809fa8dc00926b2ffbd42a5be9feb67d3c1939411",
+      "tests/vt/cuda_fp16_scalar_reference.cu": "7c7f28ab6c9ef6126d92ab6c7911d72d86562025357322c26556a9975178dcb7"
+    }
+  },
+  "integrated-record-check.log": {
+    "source": "/tmp/fp16-final-record-agentcheck.log",
+    "sha256": "271c36a1701c5a5ee86825a8742b8ef2f5a02773d6d633ff5810b1c8925a6144",
+    "bytes": 81
+  }
+}

@@ -101,6 +101,9 @@ inline const std::vector<AttnPriorityRow>& AttnPriorityTable() {
 
 inline std::vector<std::string> LookupAttnPriority(int major,
                                                    const AttnSelectorConfig& cfg) {
+  // Local legacy descriptor: the pinned primary has no Pascal implementation.
+  // Leave the upstream priorities unchanged on every newer architecture.
+  if (!cfg.use_mla && (major == 6 || major == 7)) return {"CUDA_LEGACY"};
   const AttnPriorityRow* match = nullptr;
   const AttnPriorityRow* fallback = nullptr;
   for (const AttnPriorityRow& row : AttnPriorityTable()) {

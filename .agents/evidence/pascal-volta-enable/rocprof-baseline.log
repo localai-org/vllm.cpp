@@ -1,0 +1,14 @@
+F
+======================================================================
+FAIL: test_reservation_allocation_metadata_is_refused (__main__.ControllerPreflight.test_reservation_allocation_metadata_is_refused) (fault='invalid-page')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-baseline/tests/scripts/test_rocprof_attach_preflight.py", line 463, in test_reservation_allocation_metadata_is_refused
+    self.assertIn(reason, result.stderr)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'invalid system page size' not found in 'Traceback (most recent call last):\n  File "/tmp/rocprof-preflight-test-iiwz87cw/driver.py", line 1, in <module>\n    import ctypes, sys\n  File "/usr/lib/python3.14/ctypes/__init__.py", line 10, in <module>\n    from _ctypes import Union, Structure, Array\nMemoryError\n'
+
+----------------------------------------------------------------------
+Ran 1 test in 3.334s
+
+FAILED (failures=1)

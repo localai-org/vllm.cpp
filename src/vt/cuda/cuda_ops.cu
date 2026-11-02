@@ -19,6 +19,7 @@
 #include "vt/cuda/cuda_embedding_quant.h"  // the KGATHER seam: block-table gather + its error record
 #include "vt/cuda/rmsnorm_decode_fast.h"
 #include "vt/ops.h"
+#include "vt/op_provider.h"
 #include "vt/dflash_attn_grid.h"
 #include "vt/dflash_attn_mask.h"
 
@@ -53,6 +54,7 @@ unsigned GridFor(int64_t n) {
 __device__ inline float Load(const float* p, int64_t i) { return p[i]; }
 __device__ inline float Load(const __nv_bfloat16* p, int64_t i) { return __bfloat162float(p[i]); }
 __device__ inline void Store(float* p, int64_t i, float v) { p[i] = v; }
+__device__ inline void Store(__half* p, int64_t i, float v) { p[i] = __float2half_rn(v); }
 __device__ inline void Store(__nv_bfloat16* p, int64_t i, float v) {
   p[i] = __float2bfloat16(v);  // round-to-nearest-even, same as host F32ToBF16
 }
@@ -72,9 +74,9 @@ __device__ inline void Store(__nv_bfloat16* p, int64_t i, float v) {
 // AHEAD of this project's pin 5559679229, a forward reference, #2502), and
 // `CudaPlatform::supported_dtypes` already promises kF16 (platforms/cuda.cpp:112).
 //
-// kF16 is admitted ONLY as a gamma. `Tin` (the activation) and `out` are still
-// f32/bf16 on this arm, which is a SEPARATE divergence of the same class and is
-// recorded, not fixed, here (#2542).
+// The earlier gamma-only extension left activation/output support owed (#2542).
+// The shared FP16 scalar arm now also admits half activations and outputs;
+// the gamma loader above remains valid for all three scalar formats.
 __device__ inline float Load(const __half* p, int64_t i) { return __half2float(p[i]); }
 
 template <int N>
@@ -114,6 +116,7 @@ __device__ inline void LoadVec(const __nv_bfloat16* p, int64_t i, float* o) {
 // f32 residual, so the previous f32-residual path stays byte-for-byte unchanged.
 template <typename Tres> __device__ inline float ResRound(float v);
 template <> __device__ inline float ResRound<float>(float v) { return v; }
+template <> __device__ inline float ResRound<__half>(float v) { return __half2float(__float2half_rn(v)); }
 template <> __device__ inline float ResRound<__nv_bfloat16>(float v) {
   return __bfloat162float(__float2bfloat16(v));
 }
@@ -150,11 +153,11 @@ template <> __device__ inline float ResRound<__nv_bfloat16>(float v) {
 // the f32 arithmetic below is bit-identical for every pairing that already worked.
 template <typename Tin, typename Tw, typename Tout, typename Tres>
 __global__ void RmsNormRowKernel(Tout* out, const Tin* x, const Tw* w, Tres* residual,
-                                 int64_t h, float eps, bool gemma) {
+                                 int64_t h, float eps, bool gemma, int64_t x_stride, int64_t res_stride) {
   const int64_t row = blockIdx.x;
-  const Tin* xrow = x + row * h;
+  const Tin* xrow = x + row * x_stride;
   Tout* orow = out + row * h;
-  Tres* rrow = residual == nullptr ? nullptr : residual + row * h;
+  Tres* rrow = residual == nullptr ? nullptr : residual + row * res_stride;
 
   __shared__ float partial[kBlock];
   float acc = 0.0f;
@@ -408,6 +411,7 @@ inline bool TryLaunchRmsNormDecodeFast(cudaStream_t s, Tensor& out, const Tensor
                                        const Tensor& w, const RmsNormArgs& args,
                                        Tensor* residual, unsigned rows, int64_t h) {
   if (!RmsNormDecodeFastFlagIsOn(std::getenv("VT_RMSNORM_DECODE_FAST"))) return false;
+  if (!x.IsContiguous() || (residual != nullptr && !residual->IsContiguous())) return false;
   if (out.dtype != DType::kBF16 || x.dtype != DType::kBF16 || w.dtype != DType::kBF16)
     return false;
   if (residual == nullptr || residual->dtype != DType::kBF16) return false;
@@ -434,6 +438,7 @@ inline bool TryLaunchRmsNormDecodeFastF32(cudaStream_t s, Tensor& out, const Ten
                                           const Tensor& w, const RmsNormArgs& args,
                                           Tensor* residual, unsigned rows, int64_t h) {
   if (!RmsNormDecodeFastFlagIsOn(std::getenv("VT_RMSNORM_DECODE_FAST"))) return false;
+  if (!x.IsContiguous() || (residual != nullptr && !residual->IsContiguous())) return false;
   if (out.dtype != DType::kF32 || x.dtype != DType::kF32 || w.dtype != DType::kF32) return false;
   if (residual == nullptr || residual->dtype != DType::kF32) return false;
   if (h % 4 != 0 || h < 1024 || h > kFastMaxH) return false;
@@ -459,11 +464,15 @@ void LaunchRmsNormRes(cudaStream_t s, Tensor& out, const Tensor& x, const Tensor
   if (residual != nullptr && residual->dtype == DType::kBF16) {
     RmsNormRowKernel<Tin, Tw, Tout, __nv_bfloat16><<<rows, kBlock, 0, s>>>(
         out.Ptr<Tout>(), x.Ptr<Tin>(), w.Ptr<Tw>(), residual->Ptr<__nv_bfloat16>(), h,
-        args.eps, args.gemma);
+        args.eps, args.gemma, x.stride[0], residual == nullptr ? h : residual->stride[0]);
+  } else if (residual != nullptr && residual->dtype == DType::kF16) {
+    RmsNormRowKernel<Tin, Tw, Tout, __half><<<rows, kBlock, 0, s>>>(
+        out.Ptr<Tout>(), x.Ptr<Tin>(), w.Ptr<Tw>(), residual->Ptr<__half>(), h,
+        args.eps, args.gemma, x.stride[0], residual->stride[0]);
   } else {
     float* res = residual == nullptr ? nullptr : residual->Ptr<float>();
     RmsNormRowKernel<Tin, Tw, Tout, float><<<rows, kBlock, 0, s>>>(
-        out.Ptr<Tout>(), x.Ptr<Tin>(), w.Ptr<Tw>(), res, h, args.eps, args.gemma);
+        out.Ptr<Tout>(), x.Ptr<Tin>(), w.Ptr<Tw>(), res, h, args.eps, args.gemma, x.stride[0], residual == nullptr ? h : residual->stride[0]);
   }
 }
 
@@ -493,6 +502,9 @@ void LaunchRmsNorm(cudaStream_t s, Tensor& out, const Tensor& x, const Tensor& w
   switch (out.dtype) {
     case DType::kF32:
       LaunchRmsNormRes<Tin, Tw, float>(s, out, x, w, args, residual, rows, h);
+      break;
+    case DType::kF16:
+      LaunchRmsNormRes<Tin, Tw, __half>(s, out, x, w, args, residual, rows, h);
       break;
     case DType::kBF16:
       LaunchRmsNormRes<Tin, Tw, __nv_bfloat16>(s, out, x, w, args, residual, rows, h);
@@ -536,10 +548,13 @@ void RmsNormKernelCuda(Queue& q, Tensor& out, const Tensor& x, const Tensor& w,
     case DType::kF32:
       DispatchRmsNormWeight<float>(AsStream(q), out, x, w, args, residual);
       break;
+    case DType::kF16:
+      DispatchRmsNormWeight<__half>(AsStream(q), out, x, w, args, residual);
+      break;
     case DType::kBF16:
       DispatchRmsNormWeight<__nv_bfloat16>(AsStream(q), out, x, w, args, residual);
       break;
-    default: VT_CHECK(false, "cuda rmsnorm: unsupported input dtype (f32/bf16 only)");
+    default: VT_CHECK(false, "cuda rmsnorm: unsupported input dtype (f32/f16/bf16 only)");
   }
 }
 
@@ -679,7 +694,9 @@ __global__ void SiluAndMulKernel(Tout* out, const Tin* x, int64_t n, int64_t d) 
     const int64_t j = idx - i * d;
     const float gate = Load(x, i * 2 * d + j);
     const float up = Load(x, i * 2 * d + d + j);
-    const float silu = gate / (1.0f + expf(-gate));
+    // vLLM a7c23ac96d csrc/libtorch_stable/activation_kernels.cu:165-167
+    // returns input scalar_t before compute():44 multiplies by up.
+    const float silu = static_cast<float>(static_cast<Tin>(gate / (1.0f + expf(-gate))));
     Store(out, idx, silu * up);
   }
 }
@@ -694,6 +711,9 @@ void LaunchSiluAndMul(cudaStream_t s, Tensor& out, const Tensor& x) {
       SiluAndMulKernel<Tin, float>
           <<<GridFor(n), kBlock, 0, s>>>(out.Ptr<float>(), x.Ptr<Tin>(), n, d);
       break;
+    case DType::kF16:
+      SiluAndMulKernel<Tin, __half><<<GridFor(n), kBlock, 0, s>>>(out.Ptr<__half>(), x.Ptr<Tin>(), n, d);
+      break;
     case DType::kBF16:
       SiluAndMulKernel<Tin, __nv_bfloat16>
           <<<GridFor(n), kBlock, 0, s>>>(out.Ptr<__nv_bfloat16>(), x.Ptr<Tin>(), n, d);
@@ -705,9 +725,10 @@ void LaunchSiluAndMul(cudaStream_t s, Tensor& out, const Tensor& x) {
 
 void SiluAndMulKernelCuda(Queue& q, Tensor& out, const Tensor& x) {
   switch (x.dtype) {
+    case DType::kF16: LaunchSiluAndMul<__half>(AsStream(q), out, x); break;
     case DType::kF32: LaunchSiluAndMul<float>(AsStream(q), out, x); break;
     case DType::kBF16: LaunchSiluAndMul<__nv_bfloat16>(AsStream(q), out, x); break;
-    default: VT_CHECK(false, "cuda silu_and_mul: unsupported input dtype (f32/bf16 only)");
+    default: VT_CHECK(false, "cuda silu_and_mul: unsupported input dtype (f32/f16/bf16 only)");
   }
 }
 
@@ -938,6 +959,7 @@ template <typename Tin>
 cudaError_t LaunchEmbeddingIn(cudaStream_t s, Tensor& out, const Tensor& table,
                               const Tensor& ids, EmbeddingErr* err) {
   if (out.dtype == DType::kF32) return LaunchEmbedding<Tin, float>(s, out, table, ids, err);
+  if (out.dtype == DType::kF16) return LaunchEmbedding<Tin, __half>(s, out, table, ids, err);
   return LaunchEmbedding<Tin, __nv_bfloat16>(s, out, table, ids, err);
 }
 
@@ -1022,7 +1044,7 @@ void EmbeddingKernelCuda(Queue& q, Tensor& out, const Tensor& table, const Tenso
   // nothing in this fleet. The decode is one row per gathered id, mirroring the
   // CPU arm (cpu_ops.cpp EmbeddingKernel) and `ggml_compute_forward_get_rows_q`.
   const bool block_table = IsBlockQuant(table.dtype);
-  VT_CHECK(block_table || table.dtype == DType::kF32 || table.dtype == DType::kBF16,
+  VT_CHECK(block_table || table.dtype == DType::kF32 || table.dtype == DType::kBF16 || table.dtype == DType::kF16,
            "cuda embedding: unsupported table dtype (f32/bf16 or a block quant)");
   // A block dtype with NO device decoder must say so by name. It cannot be
   // reached from the loader, whose `DeviceQuantGatherSupported` gate is pinned
@@ -1031,7 +1053,7 @@ void EmbeddingKernelCuda(Queue& q, Tensor& out, const Tensor& table, const Tenso
   VT_CHECK(!block_table || EmbeddingQuantSupported(table.dtype),
            std::string("cuda embedding: no device row decoder for block dtype ") +
                Name(table.dtype));
-  VT_CHECK(out.dtype == DType::kF32 || out.dtype == DType::kBF16,
+  VT_CHECK(out.dtype == DType::kF32 || out.dtype == DType::kBF16 || out.dtype == DType::kF16,
            "cuda embedding: unsupported out dtype");
   const int64_t n = ids.shape[0] * table.shape[1];
   if (n == 0) return;
@@ -1069,6 +1091,8 @@ void EmbeddingKernelCuda(Queue& q, Tensor& out, const Tensor& table, const Tenso
     st = block_table ? LaunchEmbeddingQuant(s, out, table, ids, slot.dev)
          : table.dtype == DType::kF32
              ? LaunchEmbeddingIn<float>(s, out, table, ids, slot.dev)
+             : table.dtype == DType::kF16
+             ? LaunchEmbeddingIn<__half>(s, out, table, ids, slot.dev)
              : LaunchEmbeddingIn<__nv_bfloat16>(s, out, table, ids, slot.dev);
   }
   if (st == cudaSuccess) {
@@ -1153,8 +1177,9 @@ __global__ void RopeNeoxKernel(T* qs, T* ks, const Tid* pos, int64_t hq, int64_t
     double freq = pow(base, -2.0 * static_cast<double>(pair) / static_cast<double>(rot));
     freq = Llama3ScaleFreq(freq, l3_sf, l3_lo, l3_hi, l3_omax);
     const double angle = static_cast<double>(p) * freq;
-    const float c = static_cast<float>(cos(angle));
-    const float sn = static_cast<float>(sin(angle));
+    float c = static_cast<float>(cos(angle));
+    float sn = static_cast<float>(sin(angle));
+    if constexpr (std::is_same_v<T, __half>) { c = ResRound<__half>(c); sn = ResRound<__half>(sn); }
     const float x = Load(ptr, off + pair);
     const float y = Load(ptr, off + pair + half);
     Store(ptr, off + pair, x * c - y * sn);
@@ -1189,6 +1214,7 @@ void LaunchRope(cudaStream_t s, Tensor& qs, Tensor& ks, const Tensor& pos,
 void RopeNeoxKernelCuda(Queue& q, Tensor& qs, Tensor& ks, const Tensor& pos,
                         const RopeArgs& args) {
   switch (qs.dtype) {
+    case DType::kF16: LaunchRope<__half>(AsStream(q), qs, ks, pos, args); break;
     case DType::kF32: LaunchRope<float>(AsStream(q), qs, ks, pos, args); break;
     case DType::kBF16: LaunchRope<__nv_bfloat16>(AsStream(q), qs, ks, pos, args); break;
     default: VT_CHECK(false, "cuda rope: unsupported dtype (f32/bf16 only)");
@@ -1302,6 +1328,9 @@ void RopeFromCacheKernelCuda(Queue& q, Tensor& qs, Tensor* ks,
                              const Tensor& positions, const Tensor& cache,
                              const RopeArgs& args) {
   switch (qs.dtype) {
+    case DType::kF16:
+      LaunchRopeFromCache<__half>(AsStream(q), qs, ks, positions, cache, args);
+      break;
     case DType::kF32:
       LaunchRopeFromCache<float>(AsStream(q), qs, ks, positions, cache, args);
       break;
@@ -2541,7 +2570,7 @@ __global__ void DFlashAttnChunkKernel(Tout* out, const Tin* query, const Tin* ke
 // and it is why this path is gated at a bf16 tolerance rather than the f32 path's
 // 2e-5. f32 inputs therefore stay on DFlashAttnChunkKernel, whose f32 tolerance
 // this could not hold.
-__device__ __forceinline__ void MmaBf16M16N8K16(float* c, const unsigned* a, const unsigned* b) {
+[[maybe_unused]] __device__ __forceinline__ void MmaBf16M16N8K16(float* c, const unsigned* a, const unsigned* b) {
 #if __CUDA_ARCH__ >= 800
   asm volatile(
       "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
@@ -3823,6 +3852,8 @@ void LaunchFusedInterpRes(cudaStream_t s, Tensor& out, const Tensor& x, const Te
                           Tensor* residual, const FusedRecipe& r, float eps) {
   if (residual != nullptr && residual->dtype == DType::kBF16) {
     LaunchFusedInterp<Tin, Tout, __nv_bfloat16>(s, out, x, weight, residual, r, eps);
+  } else if (residual != nullptr && residual->dtype == DType::kF16) {
+    LaunchFusedInterp<Tin, Tout, __half>(s, out, x, weight, residual, r, eps);
   } else {
     LaunchFusedInterp<Tin, Tout, float>(s, out, x, weight, residual, r, eps);
   }
@@ -3840,9 +3871,20 @@ void FusedChainKernelCuda(Queue& q, Tensor& out, const Tensor& x, const Tensor& 
         case DType::kF32:
           LaunchFusedInterpRes<float, float>(s, out, x, weight, residual, r, eps);
           break;
+        case DType::kF16:
+          LaunchFusedInterpRes<float, __half>(s, out, x, weight, residual, r, eps);
+          break;
         case DType::kBF16:
           LaunchFusedInterpRes<float, __nv_bfloat16>(s, out, x, weight, residual, r, eps);
           break;
+        default: VT_CHECK(false, "cuda fused_chain: unsupported out dtype");
+      }
+      break;
+    case DType::kF16:
+      switch (out.dtype) {
+        case DType::kF16: LaunchFusedInterpRes<__half, __half>(s, out, x, weight, residual, r, eps); break;
+        case DType::kBF16: LaunchFusedInterpRes<__half, __nv_bfloat16>(s, out, x, weight, residual, r, eps); break;
+        case DType::kF32: LaunchFusedInterpRes<__half, float>(s, out, x, weight, residual, r, eps); break;
         default: VT_CHECK(false, "cuda fused_chain: unsupported out dtype");
       }
       break;
@@ -3850,6 +3892,9 @@ void FusedChainKernelCuda(Queue& q, Tensor& out, const Tensor& x, const Tensor& 
       switch (out.dtype) {
         case DType::kF32:
           LaunchFusedInterpRes<__nv_bfloat16, float>(s, out, x, weight, residual, r, eps);
+          break;
+        case DType::kF16:
+          LaunchFusedInterpRes<__nv_bfloat16, __half>(s, out, x, weight, residual, r, eps);
           break;
         case DType::kBF16:
           LaunchFusedInterpRes<__nv_bfloat16, __nv_bfloat16>(s, out, x, weight, residual, r, eps);
@@ -4108,11 +4153,15 @@ struct Registrar {
   Registrar() {
     RegisterOp(OpId::kRmsNorm, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<RmsNormFn>(&RmsNormKernelCuda)));
+    RegisterOpScalarType(OpId::kRmsNorm, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
+    RegisterOpScalarType(OpId::kRmsNorm, DeviceType::kCUDA, kNativeProviderName, DType::kF32);
+    RegisterOpScalarType(OpId::kRmsNorm, DeviceType::kCUDA, kNativeProviderName, DType::kBF16);
     RegisterOp(OpId::kRmsNormQuantFp8, DeviceType::kCUDA,
                reinterpret_cast<void*>(
                    static_cast<RmsNormQuantFp8Fn>(&RmsNormQuantFp8KernelCuda)));
     RegisterOp(OpId::kSiluAndMul, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<SiluAndMulFn>(&SiluAndMulKernelCuda)));
+    RegisterOpScalarType(OpId::kSiluAndMul, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(OpId::kClampedSwiGLU, DeviceType::kCUDA,
                reinterpret_cast<void*>(
                    static_cast<ClampedSwiGLUFn>(&ClampedSwiGLUKernelCuda)));
@@ -4124,6 +4173,7 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<SoftCapFn>(&SoftCapKernelCuda)));
     RegisterOp(OpId::kEmbedding, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<EmbeddingFn>(&EmbeddingKernelCuda)));
+    RegisterOpScalarType(OpId::kEmbedding, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     // KGATHER. `EmbeddingKernelCuda` branches on `IsBlockQuant(table.dtype)` and
     // routes a block table to `LaunchEmbeddingQuant` (decoders in
     // vt/cuda/cuda_quant_dequant.cuh). Registering it under the quant id is what
@@ -4145,10 +4195,12 @@ struct Registrar {
     RegisterCudaBlockGather();
     RegisterOp(OpId::kRopeNeox, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<RopeFn>(&RopeNeoxKernelCuda)));
+    RegisterOpScalarType(OpId::kRopeNeox, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(
         OpId::kRopeFromCache, DeviceType::kCUDA,
         reinterpret_cast<void*>(
             static_cast<RopeFromCacheFn>(&RopeFromCacheKernelCuda)));
+    RegisterOpScalarType(OpId::kRopeFromCache, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(
         OpId::kFusedNormRope, DeviceType::kCUDA,
         reinterpret_cast<void*>(static_cast<FusedNormRopeFn>(&FusedNormRopeKernelCuda)));
@@ -4174,6 +4226,7 @@ struct Registrar {
                    static_cast<DFlashPagedBlockAttentionFn>(&DFlashPagedBlockAttentionKernelCuda)));
     RegisterOp(OpId::kFusedChain, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<FusedChainFn>(&FusedChainKernelCuda)));
+    RegisterOpScalarType(OpId::kFusedChain, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(OpId::kDFlashGroupedConv, DeviceType::kCUDA,
                reinterpret_cast<void*>(
                    static_cast<DFlashGroupedConvFn>(&DFlashGroupedConvKernelCuda)));
@@ -4194,6 +4247,7 @@ struct Registrar {
 void RegisterCudaBlockGather() {
   RegisterOp(OpId::kEmbeddingQuant, DeviceType::kCUDA,
              reinterpret_cast<void*>(static_cast<EmbeddingFn>(&EmbeddingKernelCuda)));
+    RegisterOpScalarType(OpId::kEmbeddingQuant, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
 }
 
 }  // namespace vt::cuda

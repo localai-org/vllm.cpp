@@ -101,6 +101,9 @@ BASE_TREE: dict[str, str] = {
     "src/vllm/v1/attention/backends/gdn_attn.cpp": (
         "const AttentionBackendRegistrar kG{vt::DeviceType::kCUDA, \"GDN_ATTN\", h};\n"
     ),
+    "src/vllm/v1/attention/cuda_legacy.cpp": (
+        'const AttentionBackendRegistrar kLegacy{vt::DeviceType::kCUDA, "CUDA_LEGACY", f};\n'
+    ),
     # A device leg. NOT part of the scanned shared layer: this is exactly where
     # device-specific code is SUPPOSED to live, and counting it would invert the
     # metric's meaning.
@@ -285,6 +288,23 @@ class DsrRatchetMutationTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.require(err, "ALLOWLIST STALE")
         self.require(err, "has 1 reference(s) but the allowlist expects exactly 2")
+
+    def test_legacy_registrar_extra_device_branch_fails(self) -> None:
+        self.tree.append(
+            "src/vllm/v1/attention/cuda_legacy.cpp",
+            "bool Branch(Dev d) { return d.type == vt::DeviceType::kCUDA; }\n",
+        )
+        rc, _out, err = self.tree.run()
+        self.assertEqual(rc, 1)
+        self.require(err, "ALLOWLIST STALE: src/vllm/v1/attention/cuda_legacy.cpp")
+        self.require(err, "has 2 reference(s) but the allowlist expects exactly 1")
+
+    def test_legacy_registrar_missing_key_fails(self) -> None:
+        self.tree.write("src/vllm/v1/attention/cuda_legacy.cpp", "// removed registrar\n")
+        rc, _out, err = self.tree.run()
+        self.assertEqual(rc, 1)
+        self.require(err, "ALLOWLIST STALE: src/vllm/v1/attention/cuda_legacy.cpp")
+        self.require(err, "has 0 reference(s) but the allowlist expects exactly 1")
 
     # --- 3. monotonic decrease ------------------------------------------------
 

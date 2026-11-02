@@ -1,0 +1,20 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/model_executor/layers/test_linear_method.cpp:587:
+TEST CASE:  dense merged shards preserve heterogeneous quantized contractions
+
+./tests/vllm/model_executor/layers/test_linear_method.cpp:609: ERROR: CHECK( std::memcmp(output[i].t().data, expected[i].t().data, n * 2) == 0 ) is NOT correct!
+  values: CHECK( -194 == 0 )
+
+===============================================================================
+./tests/vllm/model_executor/layers/test_linear_method.cpp:614:
+TEST CASE:  dense quantized gate up shards use the MLP method and shared epilogue
+
+./tests/vllm/model_executor/layers/test_linear_method.cpp:632: ERROR: CHECK( std::memcmp(actual.t().data, expected.t().data, 32) == 0 ) is NOT correct!
+  values: CHECK( -100 == 0 )
+
+===============================================================================
+[doctest] test cases: 2 | 0 passed | 2 failed | 8 skipped
+[doctest] assertions: 8 | 6 passed | 2 failed |
+[doctest] Status: FAILURE!

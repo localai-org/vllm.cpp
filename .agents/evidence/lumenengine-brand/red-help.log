@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 25, in <module>
+    assert b'LumenEngine' in after.stdout + after.stderr, suffix
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: cli

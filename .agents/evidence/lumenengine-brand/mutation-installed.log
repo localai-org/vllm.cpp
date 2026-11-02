@@ -1,0 +1,159 @@
+Mutation: delete installed lumenengine.h
+command: cc -std=c11 -I /tmp/lumen-brand-install/include -fsyntax-only /tmp/lumen-brand/tests/branding/consumer.c
+exit=1
+/tmp/lumen-brand/tests/branding/consumer.c:2:10: fatal error: lumenengine.h: No such file or directory
+    2 | #include <lumenengine.h>
+      |          ^~~~~~~~~~~~~~~
+compilation terminated.
+
+Restored byte-for-byte 4571b0d2b4305114dbfd79ffe3347c647948f0a691c77b703ab6d90b310e1965
+Mutation: delete installed vllm.h
+command: cc -std=c11 -I /tmp/lumen-brand-install/include -fsyntax-only /tmp/lumen-brand/tests/branding/consumer.c
+exit=1
+/tmp/lumen-brand/tests/branding/consumer.c:1:10: fatal error: vllm.h: No such file or directory
+    1 | #include <vllm.h>
+      |          ^~~~~~~~
+compilation terminated.
+
+Restored byte-for-byte 28e70bd5162cc8e5cece8e050cb3d577c97a16126b7f53e790ea2ef59ef62978
+Mutation: delete installed production alias LumenEngine::LumenEngine
+command: cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-mutation-LumenEngine -DCMAKE_PREFIX_PATH=/tmp/lumen-brand-install
+exit=1
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.6s)
+-- Generating done (0.0s)
+CMake Error at CMakeLists.txt:16 (target_link_libraries):
+  Target "branding_new" links to:
+
+    LumenEngine::LumenEngine
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
+
+Restored byte-for-byte 283c5614b5a38a633740550437f0e823be3e7b4eab71552a37e42446b993c21f
+Mutation: delete installed production alias LumenEngine::shared
+command: cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-mutation-shared -DCMAKE_PREFIX_PATH=/tmp/lumen-brand-install
+exit=1
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.6s)
+-- Generating done (0.0s)
+CMake Error at CMakeLists.txt:17 (target_link_libraries):
+  Target "branding_shared" links to:
+
+    LumenEngine::shared
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Error at CMakeLists.txt:19 (target_link_libraries):
+  Target "branding_c" links to:
+
+    LumenEngine::shared
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
+
+Restored byte-for-byte 283c5614b5a38a633740550437f0e823be3e7b4eab71552a37e42446b993c21f
+Mutation: delete installed command alias cli
+command: python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-install/bin
+exit=1
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 14, in <module>
+    assert new.is_file(), new
+           ~~~~~~~~~~~^^
+AssertionError: /tmp/lumen-brand-install/bin/lumenengine-cli
+
+Restored byte-for-byte 345d1e013c66a8e3520d0492a9b560ebed669c4cef8b7fc4417381ea62d30249
+Mutation: replace human help identity in both cli command spellings
+command: python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-install/bin
+exit=1
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 25, in <module>
+    assert b'LumenEngine' in after.stdout + after.stderr, suffix
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: cli
+
+Restored both command spellings byte-for-byte
+Mutation: delete installed command alias server
+command: python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-install/bin
+exit=1
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 14, in <module>
+    assert new.is_file(), new
+           ~~~~~~~~~~~^^
+AssertionError: /tmp/lumen-brand-install/bin/lumenengine-server
+
+Restored byte-for-byte 2ed158b65e19cc19c52aca2cb0352d1588920e70157619269a0b0c30e39b819f
+Mutation: replace human help identity in both server command spellings
+command: python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-install/bin
+exit=1
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 25, in <module>
+    assert b'LumenEngine' in after.stdout + after.stderr, suffix
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: server
+
+Restored both command spellings byte-for-byte
+Mutation: delete installed command alias bench
+command: python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-install/bin
+exit=1
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 14, in <module>
+    assert new.is_file(), new
+           ~~~~~~~~~~~^^
+AssertionError: /tmp/lumen-brand-install/bin/lumenengine-bench
+
+Restored byte-for-byte 890148d94552040a233c8d428e5ebe6c50e185d2811d38c6dfe74c65090e8ddd
+Mutation: replace human help identity in both bench command spellings
+command: python3 /tmp/lumen-brand/tests/branding/check_commands.py /tmp/lumen-brand-install/bin
+exit=1
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 25, in <module>
+    assert b'LumenEngine' in after.stdout + after.stderr, suffix
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: bench
+
+Restored both command spellings byte-for-byte
+Restored command gate exit=0
+PASS: cli/server/bench aliases, help, and compatible server version

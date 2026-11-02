@@ -1,0 +1,144 @@
+Mutation: LumenEngine::LumenEngine delete
+command: cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-source-mutation-yr3171ck/LumenEnginedelete -DENGINE_SOURCE=/tmp/lumen-brand-source-mutation-yr3171ck -DVLLM_CPP_CUDA=OFF -DVLLM_CPP_WITH_DIARIZATION=OFF -DVLLM_CPP_BUILD_TESTS=OFF -DVLLM_CPP_BUILD_EXAMPLES=OFF -DVLLM_CPP_HF_DOWNLOAD=OFF
+exit=1
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (0.7s)
+-- Generating done (0.2s)
+CMake Error at CMakeLists.txt:24 (target_link_libraries):
+  Target "branding_new" links to:
+
+    LumenEngine::LumenEngine
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
+
+Mutation: LumenEngine::LumenEngine static
+command: cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-source-mutation-yr3171ck/LumenEnginestatic -DENGINE_SOURCE=/tmp/lumen-brand-source-mutation-yr3171ck -DVLLM_CPP_CUDA=OFF -DVLLM_CPP_WITH_DIARIZATION=OFF -DVLLM_CPP_BUILD_TESTS=OFF -DVLLM_CPP_BUILD_EXAMPLES=OFF -DVLLM_CPP_HF_DOWNLOAD=OFF
+exit=1
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring incomplete, errors occurred!
+CMake Error at CMakeLists.txt:16 (message):
+  LumenEngine::LumenEngine must select the shared C ABI library
+
+
+
+Mutation: LumenEngine::shared delete
+command: cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-source-mutation-yr3171ck/shareddelete -DENGINE_SOURCE=/tmp/lumen-brand-source-mutation-yr3171ck -DVLLM_CPP_CUDA=OFF -DVLLM_CPP_WITH_DIARIZATION=OFF -DVLLM_CPP_BUILD_TESTS=OFF -DVLLM_CPP_BUILD_EXAMPLES=OFF -DVLLM_CPP_HF_DOWNLOAD=OFF
+exit=1
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (0.7s)
+-- Generating done (0.2s)
+CMake Error at CMakeLists.txt:25 (target_link_libraries):
+  Target "branding_shared" links to:
+
+    LumenEngine::shared
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Error at CMakeLists.txt:27 (target_link_libraries):
+  Target "branding_c" links to:
+
+    LumenEngine::shared
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
+
+Mutation: LumenEngine::shared static
+command: cmake -S /tmp/lumen-brand/tests/branding -B /tmp/lumen-brand-source-mutation-yr3171ck/sharedstatic -DENGINE_SOURCE=/tmp/lumen-brand-source-mutation-yr3171ck -DVLLM_CPP_CUDA=OFF -DVLLM_CPP_WITH_DIARIZATION=OFF -DVLLM_CPP_BUILD_TESTS=OFF -DVLLM_CPP_BUILD_EXAMPLES=OFF -DVLLM_CPP_HF_DOWNLOAD=OFF
+exit=1
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring incomplete, errors occurred!
+CMake Error at CMakeLists.txt:16 (message):
+  LumenEngine::shared must select the shared C ABI library
+
+
+
+Production CMakeLists.txt remained byte-for-byte unchanged.

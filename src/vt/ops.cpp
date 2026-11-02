@@ -27,6 +27,17 @@ namespace {
 // them at once with zero call-site edits.
 bool IsFloat(DType d) { return d == DType::kF32 || d == DType::kF16 || d == DType::kBF16; }
 bool IsOutFloat(DType d) { return d == DType::kF32 || d == DType::kBF16; }
+// Only explicitly typed providers can widen the output contract to FP16.
+bool IsScalarFloat(DType d, OpId op, const Queue& q) {
+  return IsOutFloat(d) || (d == DType::kF16 && OpSupportsScalarType(op, q.device.type, d));
+}
+
+bool HasPackedNormRows(const Tensor& t, const Queue& q) {
+  return t.IsContiguous() ||
+      (OpSupportsScalarType(OpId::kRmsNorm, q.device.type, t.dtype) &&
+       t.stride[1] == 1 && t.stride[0] >= t.shape[1]);
+}
+
 // Retained model values are scoped to ordinary weights, never activations.
 void ValidateWeightValues(const Tensor& weight, const Tensor& other,
                           const Tensor& out, const Queue& q) {
@@ -150,8 +161,8 @@ void Matmul(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   VT_CHECK(a.shape[1] == b.shape[0], "matmul: inner dims mismatch");
   VT_CHECK(out.shape[0] == a.shape[0] && out.shape[1] == b.shape[1],
            "matmul: output shape mismatch");
-  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
-           "matmul: float inputs and f32/bf16 output required");
+  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsScalarFloat(out.dtype, OpId::kMatmul, q),
+           "matmul: float inputs and f32/bf16 or provider FP16 output required");
   VT_CHECK(a.IsContiguous() && b.IsContiguous() && out.IsContiguous(),
            "matmul: contiguous tensors required");
   VT_CHECK(a.device == b.device && a.device == out.device && a.device == q.device,
@@ -199,8 +210,8 @@ void MatmulBT(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
   VT_CHECK(a.shape[1] == b.shape[1], "matmul_bt: inner dims mismatch (b is [N,K])");
   VT_CHECK(out.shape[0] == a.shape[0] && out.shape[1] == b.shape[0],
            "matmul_bt: output shape mismatch");
-  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
-           "matmul_bt: float inputs and f32/bf16 output required");
+  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsScalarFloat(out.dtype, OpId::kMatmulBT, q),
+           "matmul_bt: float inputs and f32/bf16 or provider FP16 output required");
   // The ACTIVATION may be ROW-STRIDED (relaxed at MLA campaign W6): upstream's
   // `kv_b_proj(kv_c)` inside `_compute_prefill_context`
   // (mla_attention.py:2141-2160) is applied to a COLUMN SLICE of the 576-wide
@@ -1136,8 +1147,8 @@ void MarlinDenseGemm(Queue& q, Tensor& c, const Tensor& a, const Tensor& b_q_wei
 void MoeSiluMul(Queue& q, Tensor& out, const Tensor& gate, const Tensor& up) {
   VT_CHECK(gate.Numel() == out.Numel() && up.Numel() == out.Numel(),
            "moe_silu_mul: out/gate/up must have the same element count");
-  VT_CHECK(IsFloat(gate.dtype) && IsFloat(up.dtype) && IsOutFloat(out.dtype),
-           "moe_silu_mul: float gate/up, f32/bf16 out");
+  VT_CHECK(IsFloat(gate.dtype) && IsFloat(up.dtype) && IsScalarFloat(out.dtype, OpId::kMoeSiluMul, q),
+           "moe_silu_mul: float gate/up, f32/bf16 or provider FP16 out");
   VT_CHECK(out.IsContiguous() && gate.IsContiguous() && up.IsContiguous(),
            "moe_silu_mul: contiguous tensors required");
   VT_CHECK(out.device == q.device && gate.device == q.device && up.device == q.device,
@@ -1159,16 +1170,16 @@ void RmsNorm(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight,
   VT_CHECK(x.rank == 2 && out.rank == 2 && weight.rank == 1, "rmsnorm: x/out rank-2, w rank-1");
   VT_CHECK(x.shape[0] == out.shape[0] && x.shape[1] == out.shape[1], "rmsnorm: shape mismatch");
   VT_CHECK(weight.shape[0] == x.shape[1], "rmsnorm: weight size mismatch");
-  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsOutFloat(out.dtype),
-           "rmsnorm: float in, f32/bf16 out");
-  VT_CHECK(x.IsContiguous() && out.IsContiguous() && weight.IsContiguous(),
-           "rmsnorm: contiguous required");
+  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsScalarFloat(out.dtype, OpId::kRmsNorm, q),
+           "rmsnorm: float in, f32/bf16 or provider FP16 out");
+  VT_CHECK(HasPackedNormRows(x, q) && out.IsContiguous() && weight.IsContiguous(),
+           "rmsnorm: packed input rows and contiguous output/weight required");
   if (residual != nullptr) {
-    VT_CHECK((residual->dtype == DType::kF32 || residual->dtype == DType::kBF16) &&
+    VT_CHECK(IsScalarFloat(residual->dtype, OpId::kRmsNorm, q) &&
                  residual->rank == 2 &&
                  residual->shape[0] == x.shape[0] && residual->shape[1] == x.shape[1] &&
-                 residual->IsContiguous() && residual->device == x.device,
-             "rmsnorm: residual must be f32/bf16 [T,H] contiguous on x's device");
+                 HasPackedNormRows(*residual, q) && residual->device == x.device,
+             "rmsnorm: residual must have float [T,H] packed rows on x's device");
   }
   VT_CHECK(x.device == out.device && weight.device == x.device && x.device == q.device,
            "rmsnorm: device mismatch (x/out/weight/queue)");
@@ -1517,7 +1528,17 @@ void FusedChain(Queue& q, const FusedRecipe& recipe, const FusedBinding& binding
   // Tier-1 interpreter path: only for Tier-1-able recipes (all elementwise/rms)
   // over the canonical operand order [x, weight, residual?, out]. Everything else
   // (quant/rope/gated/attn) runs through the byte-exact composite.
-  if (RecipeIsTier1Able(recipe) && FusedTier() == 1) {
+  // An untyped Tier-1 provider cannot consume FP16. Keep the registered
+  // composite path available when its constituent operations accept the format.
+  bool tier1_scalar = RecipeIsTier1Able(recipe) && FusedTier() == 1;
+  if (tier1_scalar) {
+    for (int i = 0; i < binding.n; ++i) {
+      if (binding.op[i] != nullptr && binding.op[i]->dtype == DType::kF16)
+        tier1_scalar = tier1_scalar &&
+            OpSupportsScalarType(OpId::kFusedChain, q.device.type, DType::kF16);
+    }
+  }
+  if (tier1_scalar) {
     Tensor* x = FusedOp(binding, 0, "fused_chain: null x");
     Tensor* weight = FusedOp(binding, 1, "fused_chain: null weight");
     Tensor* residual =
@@ -1564,12 +1585,12 @@ void FusedChain(Queue& q, Tensor& out, const Tensor& x, const Tensor& weight, Te
   VT_CHECK(x.shape[0] == out.shape[0] && x.shape[1] == out.shape[1],
            "fused_chain: out shape must match x");
   VT_CHECK(weight.shape[0] == x.shape[1], "fused_chain: weight size mismatch");
-  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsOutFloat(out.dtype),
+  VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsScalarFloat(out.dtype, OpId::kRmsNorm, q),
            "fused_chain: float in, f32/bf16 out");
   VT_CHECK(x.IsContiguous() && out.IsContiguous() && weight.IsContiguous(),
            "fused_chain: contiguous required");
   if (residual != nullptr) {
-    VT_CHECK((residual->dtype == DType::kF32 || residual->dtype == DType::kBF16) &&
+    VT_CHECK(IsScalarFloat(residual->dtype, OpId::kRmsNorm, q) &&
                  residual->rank == 2 && residual->shape[0] == x.shape[0] &&
                  residual->shape[1] == x.shape[1] && residual->IsContiguous() &&
                  residual->device == x.device,
@@ -1656,7 +1677,7 @@ void SiluAndMul(Queue& q, Tensor& out, const Tensor& x) {
   VT_CHECK(x.shape[1] % 2 == 0, "silu_and_mul: inner dim must be even");
   VT_CHECK(out.shape[0] == x.shape[0] && out.shape[1] == x.shape[1] / 2,
            "silu_and_mul: output shape mismatch");
-  VT_CHECK(IsFloat(x.dtype) && IsOutFloat(out.dtype), "silu_and_mul: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(x.dtype) && IsScalarFloat(out.dtype, OpId::kSiluAndMul, q), "silu_and_mul: float in, f32/bf16 or provider FP16 out");
   VT_CHECK(x.IsContiguous() && out.IsContiguous(), "silu_and_mul: contiguous required");
   VT_CHECK(x.device == out.device && x.device == q.device, "silu_and_mul: device mismatch");
   reinterpret_cast<SiluAndMulFn>(GetOp(OpId::kSiluAndMul, q.device.type))(q, out, x);
@@ -1776,8 +1797,8 @@ void Add(Queue& q, Tensor& out, const Tensor& a, const Tensor& b) {
     for (int i = 0; i < a.rank; ++i)
       VT_CHECK(b.shape[i] == a.shape[i], "add: b shape must match a");
   }
-  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsOutFloat(out.dtype),
-           "add: float in, f32/bf16 out");
+  VT_CHECK(IsFloat(a.dtype) && IsFloat(b.dtype) && IsScalarFloat(out.dtype, OpId::kAdd, q),
+           "add: float in, f32/bf16 or provider FP16 out");
   VT_CHECK(a.IsContiguous() && b.IsContiguous() && out.IsContiguous(),
            "add: contiguous required");
   VT_CHECK(a.device == out.device && b.device == a.device && a.device == q.device,
@@ -1800,7 +1821,7 @@ void Embedding(Queue& q, Tensor& out, const Tensor& table, const Tensor& ids) {
   // residency (Qwen3.8-Flash-Next: 28.8 GB of IQ4_NL against 102.4 GB of bf16).
   VT_CHECK(IsFloat(table.dtype) || IsBlockQuant(table.dtype),
            "embedding: table must be float or block-quantized");
-  VT_CHECK(IsOutFloat(out.dtype), "embedding: f32/bf16 out");
+  VT_CHECK(IsScalarFloat(out.dtype, IsBlockQuant(table.dtype) ? OpId::kEmbeddingQuant : OpId::kEmbedding, q), "embedding: f32/bf16 or provider FP16 out");
   // `ggml_row_size` asserts a row is a whole number of blocks; a ragged K has no
   // row stride at all, so it refuses here rather than mis-striding every row
   // after the first. (This is also the reason the shipped table is IQ4_NL:
@@ -1835,8 +1856,8 @@ void RopeNeox(Queue& q, Tensor& q_states, Tensor& k_states, const Tensor& positi
            "rope: positions[T] mismatch");
   VT_CHECK(positions.dtype == DType::kI32 || positions.dtype == DType::kI64,
            "rope: positions i32/i64");
-  VT_CHECK(IsOutFloat(q_states.dtype) && k_states.dtype == q_states.dtype,
-           "rope: q/k must be f32 or bf16, same dtype");
+  VT_CHECK(IsScalarFloat(q_states.dtype, OpId::kRopeNeox, q) && k_states.dtype == q_states.dtype,
+           "rope: q/k must be f32, bf16 or provider FP16, same dtype");
   VT_CHECK(args.rotary_dim > 0 && args.rotary_dim % 2 == 0 &&
                args.rotary_dim <= q_states.shape[2],
            "rope: rotary_dim must be even and <= head_dim");
@@ -1892,9 +1913,9 @@ void RopeFromCache(Queue& q, Tensor& q_states, Tensor* k_states,
   VT_CHECK(cos_sin_cache.rank == 2 && cos_sin_cache.shape[0] > 0 &&
                cos_sin_cache.shape[1] == args.rotary_dim,
            "rope_from_cache: cache must be [P,rotary_dim]");
-  VT_CHECK(IsOutFloat(q_states.dtype) &&
+  VT_CHECK(IsScalarFloat(q_states.dtype, OpId::kRopeFromCache, q) &&
                cos_sin_cache.dtype == q_states.dtype,
-           "rope_from_cache: q/k/cache must share f32 or bf16 dtype");
+           "rope_from_cache: q/k/cache must share f32, bf16 or provider FP16 dtype");
   VT_CHECK(args.rotary_dim > 0 && args.rotary_dim % 2 == 0 &&
                args.rotary_dim <= head_dim,
            "rope_from_cache: rotary_dim must be even and <= head_dim");
@@ -5587,7 +5608,7 @@ void PermuteVHeads(Queue& q, Tensor& out, const Tensor& in,
 
 void CastF32(Queue& q, Tensor& out, const Tensor& in) {
   VT_CHECK(out.dtype == DType::kF32, "cast_f32: out must be f32");
-  VT_CHECK(in.dtype == DType::kBF16, "cast_f32: in must be bf16");
+  VT_CHECK(in.dtype == DType::kBF16 || (in.dtype == DType::kF16 && OpSupportsScalarType(OpId::kCastF32, q.device.type, in.dtype)), "cast_f32: in must be bf16 or provider FP16");
   VT_CHECK(out.Numel() == in.Numel(), "cast_f32: out/in must have the same element count");
   int64_t inner = 1;
   bool inner_contiguous = true;

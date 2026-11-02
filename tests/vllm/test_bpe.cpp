@@ -945,10 +945,10 @@ TEST_CASE("FromGguf failure modes throw with actionable messages") {
     kvs.erase(kvs.begin());
     CheckThrowsContains([&] { LoadGguf(kvs); }, "tokenizer.ggml.model");
   }
-  SUBCASE("non-gpt2 model names the value") {
+  SUBCASE("unknown model names the value") {
     auto kvs = TinyGgufKvs();
-    kvs[0] = gguf_test::StrKv("tokenizer.ggml.model", "llama");
-    CheckThrowsContains([&] { LoadGguf(kvs); }, "llama");
+    kvs[0] = gguf_test::StrKv("tokenizer.ggml.model", "unimplemented");
+    CheckThrowsContains([&] { LoadGguf(kvs); }, "unimplemented");
   }
   SUBCASE("missing tokenizer.ggml.pre") {
     auto kvs = TinyGgufKvs();
@@ -1140,4 +1140,67 @@ TEST_CASE("tokenizer_config.json add_bos_token is NOT applied (DeepSeek-V2 shape
     CHECK(t.BosId() == 20);  // the post_processor's token; 19 is never used
     CHECK(t.EncodeWithSpecialTokens("hello world")[0] == 20);
   }
+}
+
+// llama.cpp 62318cd57 src/llama-vocab.cpp:111-246,362-371.
+TEST_CASE("GGUF SmolLM isolates digits before GPT2 BPE") {
+  auto kvs = TinyGgufKvs();
+  kvs[1] = gguf_test::StrKv("tokenizer.ggml.pre", "smollm");
+  kvs[2] = gguf_test::StrArrayKv("tokenizer.ggml.tokens", {"1", "2", "12", "Ġ", "Ġ1"});
+  kvs[3] = gguf_test::I32ArrayKv("tokenizer.ggml.token_type", {1,1,1,1,1});
+  kvs[4] = gguf_test::StrArrayKv("tokenizer.ggml.merges", {"1 2", "Ġ 1"});
+  kvs.pop_back();
+  const auto tok = LoadGguf(kvs);
+  CHECK(tok.Encode("12") == Ids{0,1});
+  CHECK(tok.Encode(" 12") == Ids{3,0,1});
+  CHECK(tok.Decode(tok.Encode(" 12")) == " 12");
+}
+
+namespace {
+std::vector<std::string> SpGgufKvs() {
+  // ab and bc have equal scores. The upstream leftmost tie chooses ab.
+  const std::vector<std::string> vocab = {"<unk>", "<s>", "</s>", "▁", "a", "b", "c", "ab", "bc", "▁a", "<0xF0>", "<0x9F>", "<0x98>", "<0x80>"};
+  std::vector<int32_t> types(vocab.size(), 1);
+  types[0] = 2; types[1] = types[2] = 3;
+  for (int i = 10; i < 14; ++i) types[i] = 6;
+  std::vector<float> scores(vocab.size(), -10);
+  scores[7] = scores[8] = 3; scores[9] = 1;
+  std::string arr = gguf_test::GStr("tokenizer.ggml.scores") + gguf_test::U32Le(9) + gguf_test::U32Le(6) + gguf_test::U64Le(scores.size());
+  for (float score : scores) { uint32_t bits; std::memcpy(&bits, &score, 4); arr += gguf_test::U32Le(bits); }
+  return {gguf_test::StrKv("tokenizer.ggml.model", "llama"),
+    gguf_test::StrArrayKv("tokenizer.ggml.tokens", vocab),
+    gguf_test::I32ArrayKv("tokenizer.ggml.token_type", types), arr,
+    gguf_test::U32Kv("tokenizer.ggml.bos_token_id", 1),
+    gguf_test::U32Kv("tokenizer.ggml.eos_token_id", 2)};
+}
+}
+TEST_CASE("GGUF Llama score BPE honors ties prefixes bytes and special metadata") {
+  const auto tok = LoadGguf(SpGgufKvs());
+  CHECK(tok.Encode("abc") == Ids{3,7,6});
+  CHECK(tok.Encode("a") == Ids{9});
+  CHECK(tok.Encode(" a") == Ids{3,9});
+  CHECK(tok.Encode("😀") == Ids{3,10,11,12,13});
+  CHECK(tok.Encode("<s>a") == Ids{1,9});
+  CHECK(tok.Encode("<unk>a") == Ids{0,9});
+  CHECK(tok.EncodeWithSpecialTokens("") == Ids{1});
+  CHECK(tok.EncodeWithSpecialTokens("abc") == Ids{1,3,7,6});
+  CHECK(tok.Decode(tok.Encode(" a")) == " a");
+  CHECK(tok.Decode(tok.Encode("😀")) == "😀");
+  CHECK(tok.Decode({10}) == std::string("\xf0", 1));
+  auto broken = SpGgufKvs(); broken[3] = gguf_test::StrArrayKv("tokenizer.ggml.scores", {});
+  CHECK_THROWS(LoadGguf(broken));
+}
+
+TEST_CASE("GGUF Llama honors explicit prefix and BOS EOS flags") {
+  auto kvs = SpGgufKvs();
+  const auto flag = [](const std::string& name, bool value) {
+    return gguf_test::GStr(name) + gguf_test::U32Le(7) + std::string(1, value ? 1 : 0);
+  };
+  kvs.push_back(flag("tokenizer.ggml.add_space_prefix", false));
+  kvs.push_back(flag("tokenizer.ggml.add_bos_token", false));
+  kvs.push_back(flag("tokenizer.ggml.add_eos_token", true));
+  const auto tok = LoadGguf(kvs);
+  CHECK(tok.Encode("abc") == Ids{7,6});
+  CHECK(tok.EncodeWithSpecialTokens("abc") == Ids{7,6,2});
+  CHECK(tok.EncodeWithSpecialTokens("") == Ids{2});
 }

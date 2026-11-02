@@ -1,0 +1,17 @@
+F
+======================================================================
+FAIL: test_M0_unmutated_tree_passes (tests.scripts.test_device_leakage.DsrRatchetMutationTests.test_M0_unmutated_tree_passes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-pascal-dsr/tests/scripts/test_device_leakage.py", line 181, in test_M0_unmutated_tree_passes
+    self.assertEqual(rc, 0, err)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: 1 != 0 : ERROR: DSR REGRESSION in bucket 'kcuda': 2 > baseline 1. A device-specific reference was added to the device-agnostic shared layer. Ask the op/provider table the question instead (vt::OpRegistered / Platform capability), or — if the site is genuinely the platform leg — add it to ALLOWLIST with a reason. NEVER raise the baseline to make this pass.
+
+check-device-leakage: FAIL (1 error(s))
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.004s
+
+FAILED (failures=1)

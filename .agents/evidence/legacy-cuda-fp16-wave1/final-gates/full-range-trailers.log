@@ -1,0 +1,24 @@
+commit trailer check FAILED:
+  - 7d39b3e977b3: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - 7d39b3e977b3: [trailers] Following-Agents-Protocol must appear exactly once
+  - 7d39b3e977b3: [attribution] AI-Assisted must appear exactly once
+  - c10872598ddc: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - c10872598ddc: [trailers] Following-Agents-Protocol must appear exactly once
+  - c10872598ddc: [attribution] AI-Assisted must appear exactly once
+  - 89baf0adf06b: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - 89baf0adf06b: [trailers] Following-Agents-Protocol must appear exactly once
+  - 89baf0adf06b: [attribution] AI-Assisted must appear exactly once
+  - 561ee7b38a1a: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - 561ee7b38a1a: [trailers] Following-Agents-Protocol must appear exactly once
+  - 561ee7b38a1a: [attribution] AI-Assisted must appear exactly once
+  - c23f356356a9: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - c23f356356a9: [trailers] Following-Agents-Protocol must appear exactly once
+  - c23f356356a9: [attribution] AI-Assisted must appear exactly once
+  - 0ba43ff955fb: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - 0ba43ff955fb: [trailers] Following-Agents-Protocol must appear exactly once
+  - 0ba43ff955fb: [attribution] AI-Assisted must appear exactly once
+  - e1bea7113b1e: [trailers] FOLLOWING_AGENTS_PROTOCOL must appear exactly once as a separate paragraph before the trailer paragraph
+  - e1bea7113b1e: [trailers] Following-Agents-Protocol must appear exactly once
+  - e1bea7113b1e: [attribution] AI-Assisted must appear exactly once
+  - d6813eadc014: [trailers] Following-Agents-Protocol must be exactly true
+  - d6813eadc014: [attribution] malformed Assisted-by value 'OpenAI Codex GPT-6 [API]'

@@ -148,8 +148,9 @@ class CudaPlatform final : public Platform {
   //   * cfg.use_mla == false (our Qwen3 dense + GDN gate models): unchanged —
   //       major 10 → FLASHINFER, FLASH_ATTN, TRITON_ATTN, FLEX_ATTENTION, TURBOQUANT
   //       else (incl. GB10 sm_121 == major 12) → FLASH_ATTN first.
-  //     Behavior-preserving: FLASH_ATTN is the only registered CUDA backend, so
-  //     SelectAttentionBackendName still returns "FLASH_ATTN".
+  //     Legacy majors 6/7 instead select the portable CUDA_LEGACY descriptor;
+  //     its predicate accepts only sm_60, sm_61, and sm_70. Newer priorities
+  //     and FLASH_ATTN's upstream minimum remain unchanged.
   //   * cfg.use_mla == true, major 12 (GB10) → [TRITON_MLA,
   //     FLASHINFER_MLA_SPARSE_SM120]; the sparse entry is filtered by the
   //     selector for a dense request, so TRITON_MLA is the answer — matching the

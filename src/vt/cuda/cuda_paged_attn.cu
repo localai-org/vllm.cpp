@@ -236,7 +236,12 @@ __device__ __forceinline__ float ApplySoftcap(float s, float softcap) {
   if (softcap <= 0.0f) return s;
   float y;
   const float x = s / softcap;
+#if __CUDA_ARCH__ >= 750
   asm("tanh.approx.f32 %0, %1;" : "=f"(y) : "f"(x));
+#else
+  // llama.cpp fattn-vec.cuh:277 @ 62318cd57 uses libdevice tanhf here.
+  y = tanhf(x);
+#endif
   return softcap * y;
 }
 
@@ -373,6 +378,8 @@ __device__ inline void LoadRow8(const float* p, int64_t base, int lane, float r[
 // elems == 128, so a warp still covers exactly one head-dim row.
 template <int EPL, typename T>
 __device__ inline void LoadRowN(const T* p, int64_t base, int lane, float* r);
+
+#include "cuda_paged_attn_legacy.cuh"
 
 template <>
 __device__ inline void LoadRowN<8, __nv_bfloat16>(const __nv_bfloat16* p, int64_t base, int lane,
@@ -806,11 +813,15 @@ __global__ void PagedFlashKernel(Tout* out, const TQ* query, const TKV* k_cache,
 //   paged cache; S = Q·Kᵀ (WMMA, f32 acc) → per-row online softmax (f32,
 //   causal-masked) → P bf16 → O += P·V (WMMA, acc = rescaled running O).
 // ===========================================================================
+// Pascal has no WMMA namespace, and Volta has no BF16 fragments.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 namespace attn_wmma = nvcuda::wmma;
+#endif
 constexpr int kWmmaM = 16;        // WMMA tile M=N=K
 constexpr int kWmmaBN = 64;       // keys per K/V tile (multiple of 16)
 constexpr int kWmmaWarps = 8;     // warps per block
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 using AccFrag = attn_wmma::fragment<attn_wmma::accumulator, kWmmaM, kWmmaM, kWmmaM, float>;
 using ArowFrag =
     attn_wmma::fragment<attn_wmma::matrix_a, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
@@ -818,6 +829,7 @@ using BcolFrag =
     attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::col_major>;
 using BrowFrag =
     attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+#endif
 
 template <typename TQ, typename TKV, typename Tout, bool HasWindow>
 __global__ void PagedFlashWmmaKernel(Tout* out, const TQ* query, const TKV* k_cache,
@@ -2073,7 +2085,8 @@ bool DecodeGqaEnabled() {
 // the decode-opt kernel entirely on the `d == 32 * kDecEpl` (256) gate and falls
 // to the generic block kernel.
 //
-// DEFAULT OFF, opt in with VT_ATTN_DECODE_D128=1. It is correctness-complete but
+// Default off outside Pascal. Set VT_ATTN_DECODE_D128=1 to opt in.
+// It is correctness-complete but
 // NOT byte-exact against the block kernel it replaces: the two reduce the KV
 // sequence in a different ORDER (warp-strided online softmax vs the block
 // kernel's per-tile loop), so a greedy anchor can move at an exact bf16 tie.
@@ -2081,12 +2094,12 @@ bool DecodeGqaEnabled() {
 // FA2 decode GQA group-swap landed (gated OFF, correctness-complete) before it
 // was flipped ON against the full gate. The flip is a separate change and owes
 // the near-tie razor + distributional gate + regen under the ratified-tie rule.
-bool DecodeD128Enabled() {
-  static const bool enabled = [] {
+bool DecodeD128Enabled(bool default_enabled) {
+  static const int setting = [] {
     const char* e = std::getenv("VT_ATTN_DECODE_D128");
-    return e != nullptr && e[0] == '1';
+    return e == nullptr ? -1 : static_cast<int>(e[0] == '1');
   }();
-  return enabled;
+  return setting == -1 ? default_enabled : setting != 0;
 }
 
 // --- Launchers -------------------------------------------------------------
@@ -2124,12 +2137,32 @@ void LaunchDecode(cudaStream_t s, Tensor& out, const Tensor& query, const Tensor
                   int64_t hq, int64_t d, int64_t num_reqs, int64_t num_kv_heads,
                   int64_t block_size) {
   const dim3 grid(static_cast<unsigned>(num_tokens), static_cast<unsigned>(hq));
+  // Pascal d64 uses the same register online-softmax kernel as d128.
+  // A single cross-warp barrier replaces the portable kernel's barriers/key.
+  if (DecodeOptEnabled() && LegacyRegisterDecodeEnabled() && d == 64 &&
+      LegacyDecodeRowsAligned<TQ, TKV>(query, k_cache, v_cache, 2)) {
+    const size_t shmem = (static_cast<size_t>(kDecWarps) * d + 2 * kDecWarps) * sizeof(float);
+    auto* kernel = args.window_size.has_value()
+                       ? PagedAttentionDecodeOptKernel<TQ, TKV, Tout, true, 2>
+                       : PagedAttentionDecodeOptKernel<TQ, TKV, Tout, false, 2>;
+    kernel<<<grid, kDecWarps * 32, shmem, s>>>(
+        out.Ptr<Tout>(), query.Ptr<TQ>(), k_cache.Ptr<TKV>(), v_cache.Ptr<TKV>(),
+        block_table.Ptr<int32_t>(), seq_lens.Ptr<int32_t>(), query_start_loc.Ptr<int32_t>(),
+        num_reqs, hq, num_kv_heads, d, block_size, block_table.stride[0], block_table.stride[1],
+        k_cache.stride[0], k_cache.stride[1], k_cache.stride[2], v_cache.stride[0],
+        v_cache.stride[1], v_cache.stride[2], args.scale, args.logits_soft_cap, args.causal,
+        WindowLeft(args), WindowRight(args));
+    Check(cudaGetLastError(), "paged_attention legacy decode-d64 launch");
+    return;
+  }
   // head_dim 128 (EPL=4), opt-in. No GQA carve-out: PagedAttentionDecodeGqaKernel
   // sits inside the `d == 32 * kDecEpl` (256) branch below, so at head_dim 128 it
   // can never run, and excluding qpk == kDecGqaQG here would strand exactly those
   // models (e.g. Qwen3-32B, hq/num_kv_heads == 8) on the generic block kernel this
   // arm exists to replace.
-  if (DecodeOptEnabled() && DecodeD128Enabled() && d == 32 * 4) {
+  if (DecodeOptEnabled() && DecodeD128Enabled(LegacyRegisterDecodeEnabled()) &&
+      (!LegacyRegisterDecodeEnabled() ||
+       LegacyDecodeRowsAligned<TQ, TKV>(query, k_cache, v_cache, 4)) && d == 32 * 4) {
     const int block = kDecWarps * 32;
     const size_t shmem = (static_cast<size_t>(kDecWarps) * d + 2 * kDecWarps) * sizeof(float);
     auto* k4 = args.window_size.has_value()
@@ -2301,7 +2334,16 @@ void LaunchPrefillFlash(cudaStream_t s, Tensor& out, const Tensor& query, const 
       BuildPrefillTiles(s, query_start_loc, args, num_reqs, kBM, &d_tiles);
   if (num_tiles == 0) return;
 
-  const int bn = kBN;
+  int bn = kBN;
+  const DeviceCaps& caps = GetDeviceCaps();
+  if (caps.valid && caps.sm_major < 8 && caps.max_shared_memory_per_block_optin > 0) {
+    // The portable kernel accepts a runtime key tile. Keep the same key order
+    // when a legacy device cannot stage 32 F32 keys and values for this head.
+    while (bn > 1 && static_cast<size_t>(2) * bn * d * sizeof(float) >
+                         static_cast<size_t>(caps.max_shared_memory_per_block_optin)) {
+      bn /= 2;
+    }
+  }
   const size_t shmem = static_cast<size_t>(2) * bn * d * sizeof(float);
   auto* kernel = args.window_size.has_value()
                      ? PagedFlashKernel<TQ, TKV, Tout, true>

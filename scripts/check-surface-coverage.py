@@ -4,9 +4,9 @@
 The target invariant (developer-directed 2026-08-07): **`examples/*` are THIN CLIENTS
 of the public surface, never of internal headers.** A capability must be usable through
 the packaged library the way a downstream consumer uses it — the flat C ABI
-(`include/vllm.h`), which is the ONLY header `make install` ships
-(`CMakeLists.txt:1757` `install(FILES include/vllm.h ...)`; the packaged `vllm_shared`
-PUBLIC-includes exactly that one header and is version-scripted to export only the
+(`include/vllm.h`, also exposed by the `lumenengine.h` forwarding header),
+which `make install` ships (`install(FILES ...)`; the packaged `vllm_shared`
+exposes those installed headers and is version-scripted to export only the
 `vllm_*` C ABI, `CMakeLists.txt:1712-1730`). An example that instead `#include`s the
 internal C++ tree (`vllm/...`, `vt/...`, `src/...`) is coupling to engine internals: it
 proves the capability is reachable ONLY by re-implementing against private headers, the
@@ -100,9 +100,9 @@ UNREACHABLE = "embedder-unreachable"
 # (`public_headers_from_cmake`), because that is the source of truth for what a
 # downstream consumer actually gets. EXPECTED_PUBLIC is the pinned expectation the
 # derived set is checked against, so the boundary can never drift silently: today
-# `make install` ships exactly `include/vllm.h` (CMakeLists.txt:1757), and the packaged
-# vllm_shared PUBLIC-includes exactly it (CMakeLists.txt:1712-1717).
-EXPECTED_PUBLIC = frozenset({"vllm.h"})
+# `make install` ships `vllm.h` and the compatible `lumenengine.h` forwarding
+# header. Both expose the same versioned C ABI.
+EXPECTED_PUBLIC = frozenset({"vllm.h", "lumenengine.h"})
 
 # Ratchet: the number of example units still reaching internal headers may only DECREASE
 # as folds land (developer-directed 2026-08-07: no permanent exemptions, the allowlist

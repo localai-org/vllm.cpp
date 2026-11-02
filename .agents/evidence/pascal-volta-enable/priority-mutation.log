@@ -1,0 +1,16 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:499:
+TEST CASE:  legacy CUDA selects portable attention without changing FLASH_ATTN
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:502: ERROR: CHECK( SelectAttentionBackendName(platform, "", GateModelConfig()) == "CUDA_LEGACY" ) THREW exception: "No valid attention backend for device type 1 from {FLASH_ATTN: [compute capability not supported]} (use_mla=false, use_sparse=false)"
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:502: ERROR: CHECK( SelectAttentionBackendName(platform, "", GateModelConfig()) == "CUDA_LEGACY" ) THREW exception: "No valid attention backend for device type 1 from {FLASH_ATTN: [compute capability not supported]} (use_mla=false, use_sparse=false)"
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:502: ERROR: CHECK( SelectAttentionBackendName(platform, "", GateModelConfig()) == "CUDA_LEGACY" ) THREW exception: "No valid attention backend for device type 1 from {FLASH_ATTN: [compute capability not supported]} (use_mla=false, use_sparse=false)"
+
+===============================================================================
+[doctest] test cases:  22 |  21 passed | 1 failed | 0 skipped
+[doctest] assertions: 104 | 101 passed | 3 failed |
+[doctest] Status: FAILURE!

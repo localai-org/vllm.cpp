@@ -1,0 +1,61 @@
+MUTATION remove BACKEND-CUDA-SM060: exit=1
+
+F
+======================================================================
+FAIL: test_the_baseline_matches_the_shipped_record (__main__.RatchetTests.test_the_baseline_matches_the_shipped_record)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 266, in test_the_baseline_matches_the_shipped_record
+    self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM060'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.290s
+
+FAILED (failures=1)
+
+MUTATION remove BACKEND-CUDA-SM061: exit=1
+
+F
+======================================================================
+FAIL: test_the_baseline_matches_the_shipped_record (__main__.RatchetTests.test_the_baseline_matches_the_shipped_record)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 266, in test_the_baseline_matches_the_shipped_record
+    self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM061'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.247s
+
+FAILED (failures=1)
+
+MUTATION remove BACKEND-CUDA-SM070: exit=1
+
+F
+======================================================================
+FAIL: test_the_baseline_matches_the_shipped_record (__main__.RatchetTests.test_the_baseline_matches_the_shipped_record)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/lumen-cuda-records/tests/scripts/test_check_gate_commands.py", line 266, in test_the_baseline_matches_the_shipped_record
+    self.assertEqual(runnable, set(gates.RUNNABLE_BASELINE))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'BACKEND-CUDA-SM070'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.238s
+
+FAILED (failures=1)
+
+RESTORED: exit=0
+
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.251s
+
+OK

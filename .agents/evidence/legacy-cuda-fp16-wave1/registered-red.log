@@ -1,0 +1,68 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:65:
+TEST CASE:  CUDA FP16 scalar reverse cast preserves half format and row strides
+
+./tests/vt/test_cuda_fp16_scalar.cpp:65: ERROR: test case THREW exception: vt: cast_f32: in must be bf16 at ./src/vt/ops.cpp:5590
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:73:
+TEST CASE:  CUDA FP16 scalar add and broadcast use half stores
+
+./tests/vt/test_cuda_fp16_scalar.cpp:73: ERROR: test case THREW exception: vt: add: float in, f32/bf16 out at ./src/vt/ops.cpp:1779
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:84:
+TEST CASE:  CUDA FP16 scalar RMSNorm ports upstream shapes residual strides and weightless
+
+./tests/vt/test_cuda_fp16_scalar.cpp:84: ERROR: test case THREW exception: vt: rmsnorm: float in, f32/bf16 out at ./src/vt/ops.cpp:1162
+  logged: Name(dt) := 1
+          tokens := 7
+          hidden := 8
+          residual := false
+          strided := false
+          weightless := false
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:109:
+TEST CASE:  CUDA FP16 scalar FusedChain preserves residual rounding
+
+./tests/vt/test_cuda_fp16_scalar.cpp:109: ERROR: test case THREW exception: vt: rmsnorm: float in, f32/bf16 out at ./src/vt/ops.cpp:1162
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:117:
+TEST CASE:  CUDA FP16 scalar split and merged SiLU preserve primary intermediate rounding
+
+./tests/vt/test_cuda_fp16_scalar.cpp:117: ERROR: test case THREW exception: vt: silu_and_mul: float in, f32/bf16 out at ./src/vt/ops.cpp:1659
+  logged: tokens := 7
+          d := 512
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:135:
+TEST CASE:  CUDA FP16 scalar ordinary and quantized embedding gather typed outputs
+
+./tests/vt/test_cuda_fp16_scalar.cpp:135: ERROR: test case THREW exception: vt: embedding: f32/bf16 out at ./src/vt/ops.cpp:1803
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:144:
+TEST CASE:  CUDA FP16 scalar dense Matmul and MatmulBT preserve orientation strides and output
+
+./tests/vt/test_cuda_fp16_scalar.cpp:144: ERROR: test case THREW exception: vt: matmul: float inputs and f32/bf16 output required at ./src/vt/ops.cpp:153
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:153:
+TEST CASE:  CUDA FP16 scalar cached RoPE ports upstream conventions optional keys and head strides
+
+./tests/vt/test_cuda_fp16_scalar.cpp:153: ERROR: test case THREW exception: vt: rope_from_cache: q/k/cache must share f32 or bf16 dtype at ./src/vt/ops.cpp:1895
+
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:165:
+TEST CASE:  CUDA FP16 scalar direct RoPE rounds cache trigonometry to the model format
+
+./tests/vt/test_cuda_fp16_scalar.cpp:165: ERROR: test case THREW exception: vt: rope: q/k must be f32 or bf16, same dtype at ./src/vt/ops.cpp:1838
+
+===============================================================================
+[doctest] test cases: 9 | 0 passed | 9 failed | 0 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: FAILURE!

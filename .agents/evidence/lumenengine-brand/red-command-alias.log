@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/tmp/lumen-brand/tests/branding/check_commands.py", line 14, in <module>
+    assert new.is_file(), new
+           ~~~~~~~~~~~^^
+AssertionError: /tmp/lumen-brand-build/engine/examples/lumenengine-cli

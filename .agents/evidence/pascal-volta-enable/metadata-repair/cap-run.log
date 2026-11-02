@@ -1,0 +1,19 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:97:
+TEST CASE:  test_flash_attn: an unsupported compute capability refuses FLASH_ATTN
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:103: ERROR: CHECK_THROWS_AS( SelectAttentionBackendName(sm75, "", GateModelConfig()), std::runtime_error ) did NOT throw at all!
+
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:499:
+TEST CASE:  legacy CUDA selects portable attention without changing FLASH_ATTN
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:508: ERROR: CHECK_FALSE( legacy->supports_compute_capability(cap) ) is NOT correct!
+  values: CHECK_FALSE( true )
+
+===============================================================================
+[doctest] test cases:  25 |  23 passed | 2 failed | 0 skipped
+[doctest] assertions: 148 | 146 passed | 2 failed |
+[doctest] Status: FAILURE!

@@ -1,0 +1,3 @@
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+repetition=0 prompt_tokens=16 generated_tokens=4 seconds=0.214543312 ids=282,638,253,2583

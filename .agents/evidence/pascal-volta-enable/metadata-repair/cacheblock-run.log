@@ -1,0 +1,12 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:519:
+TEST CASE:  legacy CUDA pins head and block geometry through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:549: ERROR: CHECK_THROWS_AS( legacy->get_kv_cache_shape(4, 24, 1, 256), std::invalid_argument ) did NOT throw at all!
+
+===============================================================================
+[doctest] test cases:  25 |  24 passed | 1 failed | 0 skipped
+[doctest] assertions: 148 | 147 passed | 1 failed |
+[doctest] Status: FAILURE!

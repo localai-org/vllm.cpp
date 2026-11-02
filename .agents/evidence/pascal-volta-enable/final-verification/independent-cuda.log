@@ -1,0 +1,19 @@
+Test project /tmp/lumen-build-legacy
+    Start 434: test_attn_validate_configuration
+1/7 Test #434: test_attn_validate_configuration ...   Passed    0.30 sec
+    Start 580: test_cuda_backend
+2/7 Test #580: test_cuda_backend ..................   Passed    0.27 sec
+    Start 582: test_cuda_ops
+3/7 Test #582: test_cuda_ops ......................   Passed    0.44 sec
+    Start 583: test_cuda_legacy_matmul
+4/7 Test #583: test_cuda_legacy_matmul ............   Passed    1.18 sec
+    Start 584: test_cuda_legacy_refusals
+5/7 Test #584: test_cuda_legacy_refusals ..........   Passed    0.32 sec
+    Start 585: test_cuda_legacy_public
+6/7 Test #585: test_cuda_legacy_public ............   Passed    0.59 sec
+    Start 587: test_cuda_legacy_intrinsics
+7/7 Test #587: test_cuda_legacy_intrinsics ........   Passed    0.20 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =   3.33 sec

@@ -1,0 +1,19 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:488:
+TEST CASE:  CUDA FP16 scalar norm rounds the residual before variance
+
+./tests/vt/test_cuda_fp16_scalar.cpp:95: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 3 == 0 )
+  logged: first := 1
+          got[first] := -0.45166
+          want[first] := -0.451416
+          bad := 3
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 4 | 3 passed | 1 failed |
+[doctest] Status: FAILURE!
+
+MUTATION_EXIT 1

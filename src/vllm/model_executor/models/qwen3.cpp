@@ -135,11 +135,15 @@ DBuf MlpBlock(Dev d, const Qwen3DenseMlpWeights& w, const HfConfig& cfg,
   // QUANT-EXL3 (#2181): the scheme is chosen ONCE from the populated weights,
   // by the same factory shape the fp4 arm uses. Exactly one of {bf16, fp4,
   // exl3} is populated per layer.
-  auto gate_up =
-      w.IsExl3() ? layers::MakeMlpGateUpMethod(w.gate_up_proj, w.gate_proj_exl3,
+  std::unique_ptr<layers::MlpGateUpMethodBase> gate_up;
+  if (!w.gate_up_proj_parts.empty()) {
+    gate_up = std::make_unique<layers::DenseShardMlpGateUpMethod>(&w.gate_up_proj_parts, I);
+  } else {
+    gate_up = w.IsExl3() ? layers::MakeMlpGateUpMethod(w.gate_up_proj, w.gate_proj_exl3,
                                                w.up_proj_exl3, I)
                  : layers::MakeMlpGateUpMethod(w.gate_up_proj, w.gate_proj_fp4,
                                                w.up_proj_fp4, I);
+  }
   DBuf act = gate_up->Apply(d, dh2);
   auto down = w.IsExl3() ? layers::MakeLinearMethod(w.down_proj, w.down_proj_exl3)
                          : layers::MakeLinearMethod(w.down_proj, w.down_proj_fp4);
@@ -366,8 +370,9 @@ DBuf ForwardLayers(Dev d, const Tensor& hidden_in,
   }
 
   // lm_head. Tied (Qwen3-0.6B): logits = hidden @ embed_tokens^T via MatmulBT
-  // over the [vocab,H] embed table (== [N=vocab,K=H]). Untied: the loaded
-  // Matmul-B [H,vocab] lm_head via vt::Matmul.
+  // over the [vocab,H] embed table (== [N=vocab,K=H]). Untied GGUF heads
+  // retain that NK layout, including quantized blocks. HF Matmul-B heads
+  // retain [H,vocab] and use vt::Matmul.
   // QUANT-EXL3 (#2181): an EXL3 checkpoint ships a REAL quantized head and does
   // not tie it. Its width is its own -- 6-bit against a 3-bit body in the
   // published 3.0bpw quant -- which is why nothing here reads a config scalar.
@@ -378,7 +383,7 @@ DBuf ForwardLayers(Dev d, const Tensor& hidden_in,
   Tensor lm = tied ? ResidentWeight(d, weights.embed_tokens, {vocab, H})
                    : ResidentWeight(d, weights.lm_head);
   DBuf logits(d, DType::kF32, {n_out, vocab});
-  if (tied)
+  if (tied || weights.lm_head.nk)
     vt::MatmulBT(d.q, logits.t(), src, lm);
   else
     vt::Matmul(d.q, logits.t(), src, lm);

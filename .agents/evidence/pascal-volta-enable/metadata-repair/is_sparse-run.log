@@ -1,0 +1,81 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:499:
+TEST CASE:  legacy CUDA selects portable attention without changing FLASH_ATTN
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:502: ERROR: CHECK( SelectAttentionBackendName(platform, "", GateModelConfig()) == "CUDA_LEGACY" ) THREW exception: "No valid attention backend for device type 1 from {CUDA_LEGACY: [non-sparse not supported]} (use_mla=false, use_sparse=false)"
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:502: ERROR: CHECK( SelectAttentionBackendName(platform, "", GateModelConfig()) == "CUDA_LEGACY" ) THREW exception: "No valid attention backend for device type 1 from {CUDA_LEGACY: [non-sparse not supported]} (use_mla=false, use_sparse=false)"
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:502: ERROR: CHECK( SelectAttentionBackendName(platform, "", GateModelConfig()) == "CUDA_LEGACY" ) THREW exception: "No valid attention backend for device type 1 from {CUDA_LEGACY: [non-sparse not supported]} (use_mla=false, use_sparse=false)"
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:515: ERROR: CHECK_FALSE( legacy->is_sparse() ) is NOT correct!
+  values: CHECK_FALSE( true )
+
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:519:
+TEST CASE:  legacy CUDA pins head and block geometry through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:525: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: head := 8
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:525: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: head := 16
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:525: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: head := 64
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:525: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: head := 128
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:525: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: head := 192
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:525: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: head := 256
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:538: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: block := 0
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:538: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: block := 16
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:538: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: block := 32
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:538: ERROR: CHECK( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: block := 64
+
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:552:
+TEST CASE:  legacy CUDA pins supported storage through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: kv := 1
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: kv := 1
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: kv := 1
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: kv := 1
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: kv := 1
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:560: ERROR: CHECK( SelectAttentionBackendName(volta, "CUDA_LEGACY", cfg) == "CUDA_LEGACY" ) THREW exception: "Selected backend CUDA_LEGACY is not valid for this configuration. Reason: [non-sparse not supported]"
+  logged: kv := 1
+
+===============================================================================
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:571:
+TEST CASE:  legacy CUDA refuses unsupported request modes through the registered selector
+
+./tests/vllm/v1/attention/test_attn_validate_configuration.cpp:584: ERROR: CHECK_THROWS_AS( SelectAttentionBackendName(pascal, "CUDA_LEGACY", cfg), std::invalid_argument ) did NOT throw at all!
+
+===============================================================================
+[doctest] test cases:  25 |  21 passed |  4 failed | 0 skipped
+[doctest] assertions: 148 | 127 passed | 21 failed |
+[doctest] Status: FAILURE!

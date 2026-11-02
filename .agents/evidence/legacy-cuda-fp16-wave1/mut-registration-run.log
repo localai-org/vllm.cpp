@@ -1,0 +1,14 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:99:
+TEST CASE:  CUDA FP16 scalar reverse cast preserves half format and row strides
+
+./tests/vt/test_cuda_fp16_scalar.cpp:99: ERROR: test case THREW exception: vt: cast_f32: in must be bf16 or provider FP16 at ./src/vt/ops.cpp:5611
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: FAILURE!
+
+MUTATION_EXIT 1

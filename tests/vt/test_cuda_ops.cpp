@@ -582,17 +582,17 @@ TEST_CASE("CUDA matmul_bt (cuBLASLt TN) matches CPU on odd sizes") {
   }
 }
 
-TEST_CASE("CUDA matmul: unsupported dtype combo (f16 inputs) throws naming it") {
+TEST_CASE("CUDA matmul: unsupported mixed f16 and bf16 inputs throw naming them") {
   if (!HasCuda()) {
     MESSAGE("no CUDA backend registered; skipping");
     return;
   }
   Backend& gpu = vt::GetBackend(DeviceType::kCUDA);
   QueueGuard gq(gpu);
-  // The op-level validation admits f16 inputs; the cuBLASLt kernel does not
-  // implement them and must throw before touching the data (left unset).
+  // Shared validation admits both float inputs. The kernel refuses their mixed
+  // formats before touching the data, which remains unset.
   DeviceTensor da(gpu, gq.q, DType::kF16, {4, 8});
-  DeviceTensor db(gpu, gq.q, DType::kF16, {8, 3});
+  DeviceTensor db(gpu, gq.q, DType::kBF16, {8, 3});
   DeviceTensor dout(gpu, gq.q, DType::kF32, {4, 3});
   bool threw = false;
   try {
@@ -603,6 +603,7 @@ TEST_CASE("CUDA matmul: unsupported dtype combo (f16 inputs) throws naming it") 
     CAPTURE(msg);
     CHECK(msg.find("matmul") != std::string::npos);
     CHECK(msg.find("f16") != std::string::npos);
+    CHECK(msg.find("bf16") != std::string::npos);
   }
   CHECK(threw);
   CHECK_NOTHROW(gpu.Synchronize(gq.q));
@@ -862,4 +863,27 @@ TEST_CASE("PermuteVHeads: CUDA reproduces the CPU gather bit-exactly") {
   CHECK(vt::GetReferenceTierHits() == ref_before);
 
   CheckSameAs(gpu_out, want, "cuda");
+}
+
+TEST_CASE("CUDA legacy split SwiGLU narrows the activated BF16 gate before multiply") {
+  if (!HasCuda()) return;
+  auto& gpu = vt::GetBackend(DeviceType::kCUDA);
+  if (gpu.DeviceCapabilityMajor() > 7 ||
+      (gpu.DeviceCapabilityMajor() == 7 && gpu.DeviceCapabilityMinor() >= 5)) return;
+  constexpr int64_t width = 256;
+  const auto gate_bytes = Pack(RandomF32(width, 214), DType::kBF16);
+  const auto up_bytes = Pack(RandomF32(width, 713), DType::kBF16);
+  std::vector<float> expected(width), actual(width);
+  Queue cpu{Cpu(), nullptr};
+  Tensor gate = MakeTensor(const_cast<uint8_t*>(gate_bytes.data()), DType::kBF16, Cpu(), {1, width});
+  Tensor up = MakeTensor(const_cast<uint8_t*>(up_bytes.data()), DType::kBF16, Cpu(), {1, width});
+  Tensor out = MakeTensor(expected.data(), DType::kF32, Cpu(), {1, width});
+  vt::MoeSiluMul(cpu, out, gate, up);
+  QueueGuard gq(gpu);
+  DeviceTensor dg(gpu, gq.q, DType::kBF16, {1, width}, gate_bytes.data());
+  DeviceTensor du(gpu, gq.q, DType::kBF16, {1, width}, up_bytes.data());
+  DeviceTensor dout(gpu, gq.q, DType::kF32, {1, width});
+  vt::MoeSiluMul(gq.q, dout.tensor(), dg.tensor(), du.tensor());
+  dout.Download(gq.q, actual.data());
+  CheckClose(actual, expected, 1e-6f, 1e-6f);
 }

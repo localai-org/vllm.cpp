@@ -1,0 +1,45 @@
+-- Triton AOT: default OFF — the vendored artifacts are CUDA cubins and VLLM_CPP_CUDA is OFF
+-- HuggingFace download: HTTPS disabled (VLLM_CPP_HF_DOWNLOAD=OFF); --model org/repo is refused against an https:// endpoint
+-- CUDA FA2 compiled-arch manifest: []
+-- Configuring done (0.0s)
+CMake Error at CMakeLists.txt:12 (target_link_libraries):
+  Target "branding_new" links to:
+
+    LumenEngine::LumenEngine
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Error at CMakeLists.txt:13 (target_link_libraries):
+  Target "branding_shared" links to:
+
+    LumenEngine::shared
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+CMake Error at CMakeLists.txt:15 (target_link_libraries):
+  Target "branding_c" links to:
+
+    LumenEngine::shared
+
+  but the target was not found.  Possible reasons include:
+
+    * There is a typo in the target name.
+    * A find_package call is missing for an IMPORTED target.
+    * An ALIAS target is missing.
+
+
+
+-- Generating done (0.1s)
+CMake Generate step failed.  Build files cannot be regenerated correctly.

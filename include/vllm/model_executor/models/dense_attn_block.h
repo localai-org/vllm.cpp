@@ -46,6 +46,7 @@
 #include "vt/backend.h"
 #include "vt/ops.h"
 #include "vt/recipes.h"
+#include "vt/merged_gemm.h"
 
 namespace vllm {
 namespace dense_attn {
@@ -596,7 +597,15 @@ inline DBuf AttnBlock(Dev d, const Qwen3DenseAttnWeights& w, const HfConfig& cfg
     k = DBuf(d, adt, {T, kdim});
     v = DBuf(d, adt, {T, kdim});
   }
-  if (w.IsExl3()) {
+  if (!w.qkv_proj_parts.empty()) {
+    VT_CHECK(w.qkv_proj_parts.size() == 3,
+             "dense QKV shards require exactly three weights");
+    Tensor weights[] = {ResidentWeight(d, w.qkv_proj_parts[0]),
+                        ResidentWeight(d, w.qkv_proj_parts[1]),
+                        ResidentWeight(d, w.qkv_proj_parts[2])};
+    Tensor products[] = {q.t(), k.t(), v.t()};
+    vt::MergedGemmDense(d.q, vt::kDenseQkvShards, products, dhn, weights, 3);
+  } else if (w.IsExl3()) {
     // QUANT-EXL3 (#2181). THREE projections, not one merged operand, because
     // that is how an EXL3 checkpoint stores them: the trellis is
     // `[k/16, n/16, 32*bits]`, so joining on the output dim interleaves per

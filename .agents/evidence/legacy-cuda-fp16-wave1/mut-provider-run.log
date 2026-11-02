@@ -1,0 +1,15 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_fp16_scalar.cpp:378:
+TEST CASE:  CUDA FP16 scalar admission belongs to the selected provider
+
+./tests/vt/test_cuda_fp16_scalar.cpp:390: ERROR: CHECK_FALSE( OpSupportsScalarType(OpId::kDropinProbe, DeviceType::kCPU, DType::kF16) ) is NOT correct!
+  values: CHECK_FALSE( true )
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 13 skipped
+[doctest] assertions: 4 | 3 passed | 1 failed |
+[doctest] Status: FAILURE!
+
+MUTATION_EXIT 1

@@ -1,0 +1,22 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vt/test_cuda_ops.cpp:331:
+TEST CASE:  CUDA silu_and_mul matches CPU
+
+./tests/vt/test_cuda_ops.cpp:107: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 6 == 0 )
+  logged: d := 173
+          static_cast<int>(c.in) := 2
+          static_cast<int>(c.out) := 0
+
+./tests/vt/test_cuda_ops.cpp:107: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 7 == 0 )
+  logged: d := 256
+          static_cast<int>(c.in) := 2
+          static_cast<int>(c.out) := 0
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed | 1 failed | 12 skipped
+[doctest] assertions: 20 | 18 passed | 2 failed |
+[doctest] Status: FAILURE!

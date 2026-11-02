@@ -1,0 +1,61 @@
+{
+  "axis": "p128-g16",
+  "enabled": true,
+  "label": "p128-g16-on",
+  "command": [
+    "/tmp/pascal-attention/actual-frozen",
+    "/tmp/lumen-models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+    "/tmp/lumen-real-gates/tiny/p128.i32",
+    "16",
+    "4"
+  ],
+  "environment": {
+    "VT_ATTN_DECODE_OPT": "1"
+  },
+  "returncode": 0,
+  "wall_seconds": 11.48280961799901,
+  "baseline_gpu_memory_bytes": 64946176,
+  "peak_gpu_memory_bytes": 1033961472,
+  "incremental_peak_bytes": 969015296,
+  "oracle_file": "/tmp/lumen-real-gates/tiny/p128-t16/greedy_ids.npy",
+  "oracle_sha256": "bebb555b314a895ffaa7956ddd64aead8a0e0d3e21749a6756cbf9b863dc59c8",
+  "repetitions": [
+    {
+      "index": 0,
+      "seconds": 6.387869674,
+      "tokens": 16,
+      "oracle_exact": true,
+      "cold": true,
+      "tokens_per_second": 2.5047474066547464
+    },
+    {
+      "index": 1,
+      "seconds": 1.556115341,
+      "tokens": 16,
+      "oracle_exact": true,
+      "cold": false,
+      "tokens_per_second": 10.282014178793448
+    },
+    {
+      "index": 2,
+      "seconds": 1.553831981,
+      "tokens": 16,
+      "oracle_exact": true,
+      "cold": false,
+      "tokens_per_second": 10.297123624462198
+    },
+    {
+      "index": 3,
+      "seconds": 1.555516576,
+      "tokens": 16,
+      "oracle_exact": true,
+      "cold": false,
+      "tokens_per_second": 10.285972034540377
+    }
+  ],
+  "warm_median_seconds": 1.555516576,
+  "warm_min_seconds": 1.553831981,
+  "warm_max_seconds": 1.556115341,
+  "warm_mean_seconds": 1.5551546326666668,
+  "warm_median_tokens_per_second": 10.285972034540377
+}

@@ -1,0 +1,248 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_llama_gguf_weights.cpp:55:
+TEST CASE:  Llama GGUF config maps GQA and tied output without QK normalization
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16256 == 16384 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16384 == 16512 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16448 == 16576 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16512 == 16256 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16544 == 16448 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16576 == 16544 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16656 == 16672 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16672 == 16704 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16688 == 16736 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16704 == 16656 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16720 == 16688 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16736 == 16720 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16900 == 16904 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16904 == 16912 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16908 == 16920 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16912 == 16900 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16916 == 16908 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16920 == 16916 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16256 == 16384 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16384 == 16512 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16448 == 16576 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16512 == 16256 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16544 == 16448 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16576 == 16544 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16656 == 16672 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16672 == 16704 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16688 == 16736 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16704 == 16656 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16720 == 16688 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:73: ERROR: CHECK( p[(h*8+i)*16]==vt::F32ToBF16(float(h*8+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16736 == 16720 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16900 == 16904 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16904 == 16912 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16908 == 16920 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16912 == 16900 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16916 == 16908 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:75: ERROR: CHECK( p[i*16]==vt::F32ToBF16(float(32+2*(i%4)+i/4)) ) is NOT correct!
+  values: CHECK( 16920 == 16916 )
+
+===============================================================================
+./tests/vllm/models/test_llama_gguf_weights.cpp:87:
+TEST CASE:  Llama GGUF preserves heterogeneous quant blocks through QK row inversion
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -1 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -2 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -3 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -4 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -5 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -6 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -7 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 7 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 6 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 5 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 4 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 3 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 2 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 1 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -1 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -2 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -3 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -4 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -5 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -6 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -7 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 7 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 6 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 5 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 4 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 3 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 2 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 1 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -1 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -2 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -3 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -4 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -5 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -6 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( -7 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 7 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 6 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 5 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 4 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 3 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 2 == 0 )
+
+./tests/vllm/models/test_llama_gguf_weights.cpp:105: ERROR: CHECK( std::memcmp(p.bytes.data()+row*bytes,source.data+from*bytes,bytes)==0 ) is NOT correct!
+  values: CHECK( 1 == 0 )
+
+===============================================================================
+[doctest] test cases:   4 |  2 passed |  2 failed | 0 skipped
+[doctest] assertions: 171 | 93 passed | 78 failed |
+[doctest] Status: FAILURE!

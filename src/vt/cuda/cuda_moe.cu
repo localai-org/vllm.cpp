@@ -7,6 +7,8 @@
 // Upstream counterpart: layers/fused_moe/ (fused_topk / moe_align + grouped
 // GEMM Triton/cutlass kernels — M2.2 replaces this correctness-grade path).
 #include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#include <type_traits>
 #include <cuda_runtime.h>
 
 #include <cstdlib>
@@ -15,6 +17,7 @@
 
 #include "vt/cuda/moe_router_warp.h"
 #include "vt/ops.h"
+#include "vt/op_provider.h"
 
 namespace vt::cuda {
 namespace {
@@ -35,6 +38,8 @@ unsigned GridFor(int64_t n) {
 }
 
 // f32 load/store overloads: bf16 converts on the way in/out, math is f32.
+__device__ inline float Load(const __half* p, int64_t i) { return __half2float(p[i]); }
+__device__ inline void Store(__half* p, int64_t i, float v) { p[i] = __float2half_rn(v); }
 __device__ inline float Load(const float* p, int64_t i) { return p[i]; }
 __device__ inline float Load(const __nv_bfloat16* p, int64_t i) { return __bfloat162float(p[i]); }
 __device__ inline void Store(float* p, int64_t i, float v) { p[i] = v; }
@@ -830,7 +835,8 @@ __global__ void MoeSiluMulKernel(Tout* out, const Tg* gate, const Tu* up, int64_
   const int64_t step = static_cast<int64_t>(gridDim.x) * blockDim.x;
   for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < n; i += step) {
     const float g = Load(gate, i);
-    const float s = g / (1.0f + expf(-g));
+    // vLLM a7c23ac96d activation_kernels.cu:165-167 returns the gate type.
+    const float s = static_cast<float>(static_cast<Tg>(g / (1.0f + expf(-g))));
     Store(out, i, s * Load(up, i));
   }
 }
@@ -846,6 +852,8 @@ template <typename Tg, typename Tu>
 void SiluMulByOut(cudaStream_t s, Tensor& out, const Tensor& gate, const Tensor& up, int64_t n) {
   if (out.dtype == DType::kF32) {
     LaunchSiluMul<Tg, Tu, float>(s, out, gate, up, n);
+  } else if (out.dtype == DType::kF16) {
+    LaunchSiluMul<Tg, Tu, __half>(s, out, gate, up, n);
   } else {
     LaunchSiluMul<Tg, Tu, __nv_bfloat16>(s, out, gate, up, n);
   }
@@ -855,21 +863,25 @@ template <typename Tg>
 void SiluMulByUp(cudaStream_t s, Tensor& out, const Tensor& gate, const Tensor& up, int64_t n) {
   if (up.dtype == DType::kF32) {
     SiluMulByOut<Tg, float>(s, out, gate, up, n);
+  } else if (up.dtype == DType::kF16) {
+    SiluMulByOut<Tg, __half>(s, out, gate, up, n);
   } else {
     SiluMulByOut<Tg, __nv_bfloat16>(s, out, gate, up, n);
   }
 }
 
 void MoeSiluMulKernelCuda(Queue& q, Tensor& out, const Tensor& gate, const Tensor& up) {
-  VT_CHECK(gate.dtype == DType::kF32 || gate.dtype == DType::kBF16,
-           "cuda moe_silu_mul: unsupported gate dtype (f32/bf16 only)");
-  VT_CHECK(up.dtype == DType::kF32 || up.dtype == DType::kBF16,
-           "cuda moe_silu_mul: unsupported up dtype (f32/bf16 only)");
+  VT_CHECK(gate.dtype == DType::kF32 || gate.dtype == DType::kBF16 || gate.dtype == DType::kF16,
+           "cuda moe_silu_mul: unsupported gate dtype (f32/f16/bf16 only)");
+  VT_CHECK(up.dtype == DType::kF32 || up.dtype == DType::kBF16 || up.dtype == DType::kF16,
+           "cuda moe_silu_mul: unsupported up dtype (f32/f16/bf16 only)");
   const int64_t n = out.Numel();
   if (n == 0) return;
   cudaStream_t s = AsStream(q);
   if (gate.dtype == DType::kF32) {
     SiluMulByUp<float>(s, out, gate, up, n);
+  } else if (gate.dtype == DType::kF16) {
+    SiluMulByUp<__half>(s, out, gate, up, n);
   } else {
     SiluMulByUp<__nv_bfloat16>(s, out, gate, up, n);
   }
@@ -940,6 +952,7 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<MoeCombineGateFn>(&MoeCombineGateKernelCuda)));
     RegisterOp(OpId::kMoeSiluMul, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<MoeSiluMulFn>(&MoeSiluMulKernelCuda)));
+    RegisterOpScalarType(OpId::kMoeSiluMul, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(OpId::kMoeRelu2, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<MoeRelu2Fn>(&MoeRelu2KernelCuda)));
   }

@@ -1,6 +1,8 @@
-# Building vllm.cpp
+# Building LumenEngine
 
-vllm.cpp uses CMake (>= 3.24) and a C++20 compiler (gcc 13/14 and clang are
+<a id="building-vllmcpp"></a>
+
+LumenEngine uses CMake (>= 3.24) and a C++20 compiler (gcc 13/14 and clang are
 exercised; the tree builds -Werror-clean on gcc 14.2). The text engine uses its own tensor runtime.
 The default build includes parakeet.cpp for diarization, with its ggml dependency.
 The OpenAI server uses the vendored header-only HTTP transport cpp-httplib.
@@ -119,6 +121,35 @@ compile `-Werror`-clean and emit the expected SASS, but no board here has
 executed them. See [Project status](../README.md#project-status) for what that label means and
 `.agents/specs/cuda-arch-ampere-fastpath.md` for the per-arch detail. Reports
 from those boards are welcome.
+
+### Pascal and Volta
+
+Use CUDA 12.4 and select `60` for P100, `61` for consumer Pascal, or `70`
+for Volta. CUDA 13 removes code generation for these targets.
+
+```sh
+cmake -S . -B build-legacy -G Ninja -DVLLM_CPP_CUDA=ON \
+  '-DVLLM_CPP_CUDA_ARCHITECTURES=60;61;70' -DVLLM_CPP_BUILD_TESTS=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-legacy -j4
+flock "${GPU_LOCK:-$HOME/gpu.lock}" ctest --test-dir build-legacy \
+  -R '^test_cuda_(legacy_intrinsics|legacy_matmul|legacy_public|legacy_refusals|ops|quant_dot|backend)$' \
+  --output-on-failure
+```
+
+The `CUDA_LEGACY` attention descriptor selects the existing portable dense
+decoder path on sm_60, sm_61, and sm_70. It retains BF16 storage and uses FP32
+CUDA-core arithmetic. It does not advertise FP16 tensor-core optimization,
+MLA, sparse attention, attention sinks, or quantized KV cache.
+Pascal sm_61 retains native DP4A. P100 sm_60 uses exact byte products because
+that GPU lacks DP4A. Native EXL3 GEMM and fused EXL3 MoE refuse Pascal and Volta
+because their `m16n8k16` kernels require sm_80. Newer GPU feature selection stays
+unchanged.
+
+P620 operator results do not establish model parity or performance. P100 and
+Volta runtime validation remain pending. See the
+[legacy CUDA gate](../.agents/specs/pascal-volta-enable.md) for the measured
+scope and the checklist to run after Volta hardware arrives.
 
 ## Metal build (Apple Silicon)
 
@@ -292,3 +323,30 @@ measured results.
 
 Runtime environment variables are in the
 [environment-variable reference](ENVIRONMENT.md).
+
+## Compatible LumenEngine names
+
+Existing CMake options, `libvllm` filenames, and command names remain supported.
+The build adds `lumenengine-cli`, `lumenengine-server`, and `lumenengine-bench`
+as copies of the existing commands. Build these targets before installation.
+The server alias exists when `VLLM_CPP_SERVER` is enabled.
+
+Install the libraries, headers, package, and built command aliases with:
+
+```sh
+cmake --build build --target lumenengine-cli lumenengine-server lumenengine-bench -j4
+cmake --install build --prefix /path/to/install
+```
+
+An external CMake project can consume the shared C ABI:
+
+```cmake
+find_package(LumenEngine CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE LumenEngine::shared)
+```
+
+Pass `-DCMAKE_PREFIX_PATH=/path/to/install` when configuring that project.
+`LumenEngine::LumenEngine` selects the same shared library.
+Both names also work with `add_subdirectory` in a build tree.
+`vllm::shared` remains supported. The static `vllm::vllm` target remains
+available in the build tree. The installed package exposes the shared C ABI.

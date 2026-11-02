@@ -400,6 +400,12 @@ ALLOWLIST: dict[str, dict[str, tuple[object, str]]] = {
                      "`AttentionBackendEnum` (registry.py:34-120) spends a "
                      "closed enum entry on exactly the same thing."),
     },
+    "src/vllm/v1/attention/cuda_legacy.cpp": {
+        "kcuda": (1, "the `(kCUDA, \"CUDA_LEGACY\")` registrar key declares "
+                     "the portable CUDA attention capability descriptor. This "
+                     "is the platform leg, like backend.cpp above; an extra "
+                     "device branch must still fail the exact-count guard."),
+    },
     "src/vllm/v1/attention/backends/gdn_attn.cpp": {
         "kcuda": (1, "the `(kCUDA, \"GDN_ATTN\")` registrar key — same reason as "
                      "backend.cpp above."),

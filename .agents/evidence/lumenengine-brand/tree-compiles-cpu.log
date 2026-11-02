@@ -1,0 +1,10 @@
+check-tree-compiles: base db1d71c9b735 (origin/main)  head 8408d50359b6 (HEAD)
+  committed db1d71c9b735..8408d50359b6: 3 path(s)
+  staged: 49 path(s)
+  unstaged: 0 path(s)
+  untracked: 0 path(s)
+  in scope: 5 C++ source(s), 1 header(s), 4 build file(s), out of 49 changed path(s)
+  configured /tmp/lumen-brand-treecheck in 1.8s: 1462 translation unit(s) in this configuration
+  dependency scan: 1462 unit(s) in 52.4s (a header is in scope)
+  checking 5 translation unit(s) with -fsyntax-only at -j4
+check-tree-compiles: 5 of 5 translation unit(s) in scope compiled (7.1s). This checks syntax and semantics only; it does not link, run, or leave the default host configuration.

@@ -12,6 +12,7 @@
 #include <string>
 
 #include "vt/ops.h"
+#include "vt/op_provider.h"
 
 namespace vt::cuda {
 namespace {
@@ -34,6 +35,7 @@ unsigned GridFor(int64_t n) {
 // f32 load/store overloads: bf16 converts on the way in/out, math is f32
 // (mirrors cuda_moe.cu; __float2bfloat16 is round-to-nearest-even, same as the
 // host F32ToBF16).
+__device__ inline float Load(const __half* p, int64_t i) { return __half2float(p[i]); }
 __device__ inline float Load(const float* p, int64_t i) { return p[i]; }
 __device__ inline float Load(const __nv_bfloat16* p, int64_t i) { return __bfloat162float(p[i]); }
 __device__ inline void Store(float* p, int64_t i, float v) { p[i] = v; }
@@ -100,14 +102,15 @@ void CastF16KernelCuda(Queue& q, Tensor& out, const Tensor& in) {
 
 // cast_f32: bf16 -> f32 upcast. Input may be a torch.split-style packed view:
 // each logical row is dense, while row_stride spans the parent Q+K+V tensor.
-__global__ void CastF32Kernel(float* out, const __nv_bfloat16* in, int64_t n,
+template <typename Src>
+__global__ void CastF32Kernel(float* out, const Src* in, int64_t n,
                               int64_t row_size, int64_t row_stride) {
   const int64_t step = static_cast<int64_t>(gridDim.x) * blockDim.x;
   for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
        i < n; i += step) {
     const int64_t row = i / row_size;
     const int64_t col = i - row * row_size;
-    out[i] = __bfloat162float(in[row * row_stride + col]);
+    out[i] = Load(in, row * row_stride + col);
   }
 }
 
@@ -116,9 +119,11 @@ void CastF32KernelCuda(Queue& q, Tensor& out, const Tensor& in) {
   if (n == 0) return;
   const int64_t rows = in.shape[0];
   const int64_t row_size = n / rows;
-  CastF32Kernel<<<GridFor(n), kBlock, 0, AsStream(q)>>>(out.Ptr<float>(),
-                                                        in.Ptr<__nv_bfloat16>(), n,
-                                                        row_size, in.stride[0]);
+  if (in.dtype == DType::kF16) {
+    CastF32Kernel<<<GridFor(n), kBlock, 0, AsStream(q)>>>(out.Ptr<float>(), in.Ptr<__half>(), n, row_size, in.stride[0]);
+  } else {
+    CastF32Kernel<<<GridFor(n), kBlock, 0, AsStream(q)>>>(out.Ptr<float>(), in.Ptr<__nv_bfloat16>(), n, row_size, in.stride[0]);
+  }
   Check(cudaGetLastError(), "cast_f32 launch");
 }
 
@@ -500,6 +505,7 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<CastF16Fn>(&CastF16KernelCuda)));
     RegisterOp(OpId::kCastF32, DeviceType::kCUDA,
                reinterpret_cast<void*>(static_cast<CastF32Fn>(&CastF32KernelCuda)));
+    RegisterOpScalarType(OpId::kCastF32, DeviceType::kCUDA, kNativeProviderName, DType::kF16);
     RegisterOp(OpId::kPermuteVHeads, DeviceType::kCUDA,
                reinterpret_cast<void*>(
                    static_cast<PermuteVHeadsFn>(&PermuteVHeadsKernelCuda)));

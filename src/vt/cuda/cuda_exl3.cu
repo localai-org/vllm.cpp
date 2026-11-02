@@ -67,6 +67,7 @@
 //     `## W2cd design` W2c-3) rather than the regular kernel's tier 3.
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include "cuda_legacy_intrinsics.cuh"
 
 #include <map>
 #include <mutex>
@@ -164,6 +165,8 @@ constexpr int kExl3GemvMaxMDev = 8;
 // ptx.cuh:52-74. FP16 @ FP16 + FP32 -> FP32.
 __device__ inline void ptx_mma_m16n8k16(const FragA& frag_a, const FragB& frag_b,
                                         FragC& frag_c) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+
   const uint32_t* a = reinterpret_cast<const uint32_t*>(&frag_a);
   const uint32_t* b = reinterpret_cast<const uint32_t*>(&frag_b);
   float* c = reinterpret_cast<float*>(&frag_c);
@@ -173,11 +176,17 @@ __device__ inline void ptx_mma_m16n8k16(const FragA& frag_a, const FragB& frag_b
       : "=f"(c[0]), "=f"(c[1]), "=f"(c[2]), "=f"(c[3])
       : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "f"(d[0]), "f"(d[1]),
         "f"(d[2]), "f"(d[3]));
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
 // ptx.cuh:103-139. The split-K column barrier: threadblocks in one output column
 // hand the partial sum down in reverse k order, and the LAST one resets the lock.
 __device__ inline void barrier_acquire(int* lock, int stage) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+
   if (threadIdx.x == 0) {
     volatile int state = -1;
     do {
@@ -185,9 +194,15 @@ __device__ inline void barrier_acquire(int* lock, int stage) {
     } while (state != stage);
   }
   __syncthreads();
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
 __device__ inline void barrier_release(int* lock, int val, bool reset) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+
   __syncthreads();
   if (threadIdx.x == 0) {
     if (reset) {
@@ -197,6 +212,10 @@ __device__ inline void barrier_release(int* lock, int val, bool reset) {
     asm volatile("fence.acq_rel.gpu;\n");
     asm volatile("red.relaxed.gpu.global.add.s32 [%0], %1;\n" : : "l"(lock), "r"(val));
   }
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
 // The whole-grid barrier, in the shape of upstream's `group_barrier`
@@ -224,7 +243,11 @@ __device__ inline void group_barrier(int* barrier_cs, int group_id, int group_si
       __threadfence();
       *sense = 1 - old_sense;  // release: everyone may proceed
     } else {
-      while (*sense == old_sense) __nanosleep(32);
+      while (*sense == old_sense) {
+#if __CUDA_ARCH__ >= 700
+        __nanosleep(32);
+#endif
+      }
       __threadfence();  // acquire: see what the other blocks wrote
     }
   }
@@ -239,27 +262,51 @@ __device__ inline void grid_barrier(int* cs, int group_size) {
 
 // ptx.cuh:159-212.
 __device__ inline void cp_async(void* smem_ptr, const void* glob_ptr) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+
   const int bytes = 16;
   uint32_t smem = static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
   asm volatile("{\n"
                "   cp.async.cg.shared.global [%0], [%1], %2;\n"
                "}\n" ::"r"(smem),
                "l"(glob_ptr), "n"(bytes));
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
-__device__ inline void cp_async_fence() { asm volatile("cp.async.commit_group;\n" ::); }
+__device__ inline void cp_async_fence() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+ asm volatile("cp.async.commit_group;\n" ::);
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
+}
 
 template <int n>
 __device__ inline void cp_async_wait() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+
   asm volatile("cp.async.wait_group %0;\n" ::"n"(n));
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
 __device__ inline void ldsm4(FragA& frag_a, const void* smem_ptr) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+
   uint32_t* a = reinterpret_cast<uint32_t*>(&frag_a);
   uint32_t smem = static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
   asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
                : "=r"(a[0]), "=r"(a[1]), "=r"(a[2]), "=r"(a[3])
                : "r"(smem));
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
 // ── the MCG codebook, cb == 1 (codebook.cuh:44-54,109-116) ───────────────────
@@ -304,8 +351,8 @@ __device__ inline half2 decode_mcg_product_2(uint32_t x0, uint32_t x1) {
 // agree bit for bit, which `tests/vt/test_exl3_gemm.cpp` gates.
 __device__ inline half2 decode_mul1_product_2(uint32_t x0, uint32_t x1) {
   const uint32_t acc = 0x6400u;
-  uint32_t sum0 = __dp4a(x0, 0x01010101u, acc);
-  uint32_t sum1 = __dp4a(x1, 0x01010101u, acc);
+  uint32_t sum0 = LegacyDp4a(x0, 0x01010101u, acc);
+  uint32_t sum1 = LegacyDp4a(x1, 0x01010101u, acc);
   half2 k_inv_h2 = __half2half2(__ushort_as_half(0x1eee));
   half2 k_bias_h2 = __half2half2(__ushort_as_half(0xc931));
   half_uint16 h0(static_cast<uint16_t>(sum0));
@@ -1271,6 +1318,8 @@ __global__ __launch_bounds__(kBaseThreads* TILESIZE_K / 16) void exl3_gemm_kerne
 // (exl3_gemv_kernel.cuh:37-52).
 __device__ inline void ptx_mma_ab_h(const FragB& a01, const FragB& a23, const FragB& b,
                                     FragC_h& c) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+
   const uint32_t* a0 = reinterpret_cast<const uint32_t*>(&a01);
   const uint32_t* a1 = reinterpret_cast<const uint32_t*>(&a23);
   const uint32_t* bb = reinterpret_cast<const uint32_t*>(&b);
@@ -1279,6 +1328,10 @@ __device__ inline void ptx_mma_ab_h(const FragB& a01, const FragB& a23, const Fr
       "{%0,%1}, {%2,%3,%4,%5}, {%6,%7}, {%0,%1};\n"
       : "+r"(cc[0]), "+r"(cc[1])
       : "r"(a0[0]), "r"(a0[1]), "r"(a1[0]), "r"(a1[1]), "r"(bb[0]), "r"(bb[1]));
+
+#else
+  __trap();  // The host refuses native EXL3 below sm_80.
+#endif
 }
 
 // The register form of `dq8<3, cb, 4>` with the per-lane funnel alignment
@@ -2373,6 +2426,12 @@ void Exl3GemmKernelCuda(Queue& q, Tensor& c, const Tensor& a, const Tensor& trel
   int device = 0;
   Check(cudaGetDevice(&device), "cudaGetDevice");
   const DeviceCaps& caps = GetDeviceCaps(device);
+  if (!caps.valid || caps.sm_major < 8) {
+    throw std::runtime_error(
+        "vt cuda exl3: native EXL3 GEMM and MoE require sm_80 m16n8k16 tensor cores; "
+        "Pascal and Volta native EXL3 kernels are not implemented");
+  }
+
   const Exl3Cc cc = Exl3CcFromSm(caps.sm_major, caps.sm_minor);
 
   const half* a_ptr0 = a.Ptr<half>();
@@ -3077,6 +3136,12 @@ void Exl3MoeMlpKernelCuda(Queue& q, Tensor& output_state, const Tensor& hidden_s
   int device = 0;
   Check(cudaGetDevice(&device), "cudaGetDevice");
   const DeviceCaps& caps = GetDeviceCaps(device);
+  if (!caps.valid || caps.sm_major < 8) {
+    throw std::runtime_error(
+        "vt cuda exl3: native EXL3 GEMM and MoE require sm_80 m16n8k16 tensor cores; "
+        "Pascal and Volta native EXL3 kernels are not implemented");
+  }
+
   const int num_sms = caps.multiprocessor_count > 0 ? caps.multiprocessor_count : 1;
 
   // exl3_moe.cu:210-222. Every block of the grid must be co-resident for the

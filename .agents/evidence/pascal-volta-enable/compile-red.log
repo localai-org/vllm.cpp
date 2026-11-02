@@ -1,0 +1,100 @@
+[1/3] Building CUDA object CMakeFiles/vllm.dir/src/vt/cuda/cuda_paged_attn.cu.o
+FAILED: [code=1] CMakeFiles/vllm.dir/src/vt/cuda/cuda_paged_attn.cu.o 
+ccache /usr/bin/nvcc -forward-unknown-to-host-compiler -DCPPHTTPLIB_OPENSSL_SUPPORT -DGGML_USE_CPU -DVLLM_CPP_CUDA -DVLLM_CPP_SERVER -DVLLM_CPP_TRITON=1 -DVLLM_CPP_TRITON_CHUNKO_BF16=1 -DVLLM_WITH_DIARIZATION=1 -I/tmp/lumen-pascal/include -I/tmp/lumen-build-legacy/include -I/tmp/lumen-pascal/src -I/tmp/lumen-build-legacy/_deps/parakeet_cpp-src/include -I/tmp/lumen-build-legacy/triton_aot_multiarch -I/tmp/lumen-pascal/third_party/blake3 -I/tmp/lumen-build-legacy/_deps/parakeet_cpp-src/third_party/ggml/src/../include -isystem /tmp/lumen-pascal/third_party -std=c++20 -Xcompiler=-fPIC -ffile-prefix-map=/tmp/lumen-pascal=. -ffile-prefix-map=/tmp/lumen-build-legacy=. -Werror=all-warnings -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -MD -MT CMakeFiles/vllm.dir/src/vt/cuda/cuda_paged_attn.cu.o -MF CMakeFiles/vllm.dir/src/vt/cuda/cuda_paged_attn.cu.o.d -x cu -c /tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu -o CMakeFiles/vllm.dir/src/vt/cuda/cuda_paged_attn.cu.o
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(809): error: name must be a namespace name
+  namespace attn_wmma = nvcuda::wmma;
+                        ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(809): error: expected a ";"
+  namespace attn_wmma = nvcuda::wmma;
+                              ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(814): error: identifier "attn_wmma" is undefined
+  using AccFrag = attn_wmma::fragment<attn_wmma::accumulator, kWmmaM, kWmmaM, kWmmaM, float>;
+                  ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(814): error: fragment is not a template
+  using AccFrag = attn_wmma::fragment<attn_wmma::accumulator, kWmmaM, kWmmaM, kWmmaM, float>;
+                             ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(814): error: name followed by "::" must be a class or namespace name
+  using AccFrag = attn_wmma::fragment<attn_wmma::accumulator, kWmmaM, kWmmaM, kWmmaM, float>;
+                                      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(814): error: expected a ";"
+  using AccFrag = attn_wmma::fragment<attn_wmma::accumulator, kWmmaM, kWmmaM, kWmmaM, float>;
+                           ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(816): error: identifier "attn_wmma" is undefined
+      attn_wmma::fragment<attn_wmma::matrix_a, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(816): error: fragment is not a template
+      attn_wmma::fragment<attn_wmma::matrix_a, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+                 ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(816): error: name followed by "::" must be a class or namespace name
+      attn_wmma::fragment<attn_wmma::matrix_a, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+                          ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(816): error: name followed by "::" must be a class or namespace name
+      attn_wmma::fragment<attn_wmma::matrix_a, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+                                                                                      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(816): error: expected a ";"
+      attn_wmma::fragment<attn_wmma::matrix_a, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+               ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(818): error: identifier "attn_wmma" is undefined
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::col_major>;
+      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(818): error: fragment is not a template
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::col_major>;
+                 ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(818): error: name followed by "::" must be a class or namespace name
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::col_major>;
+                          ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(818): error: name followed by "::" must be a class or namespace name
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::col_major>;
+                                                                                      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(818): error: expected a ";"
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::col_major>;
+               ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(820): error: identifier "attn_wmma" is undefined
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(820): error: fragment is not a template
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+                 ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(820): error: name followed by "::" must be a class or namespace name
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+                          ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(820): error: name followed by "::" must be a class or namespace name
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+                                                                                      ^
+
+/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu(820): error: expected a ";"
+      attn_wmma::fragment<attn_wmma::matrix_b, kWmmaM, kWmmaM, kWmmaM, __nv_bfloat16, attn_wmma::row_major>;
+               ^
+
+21 errors detected in the compilation of "/tmp/lumen-pascal/src/vt/cuda/cuda_paged_attn.cu".
+[2/3] Building CUDA object CMakeFiles/vllm.dir/src/vt/cuda/cuda_ops.cu.o
+FAILED: [code=1] CMakeFiles/vllm.dir/src/vt/cuda/cuda_ops.cu.o 
+ccache /usr/bin/nvcc -forward-unknown-to-host-compiler -DCPPHTTPLIB_OPENSSL_SUPPORT -DGGML_USE_CPU -DVLLM_CPP_CUDA -DVLLM_CPP_SERVER -DVLLM_CPP_TRITON=1 -DVLLM_CPP_TRITON_CHUNKO_BF16=1 -DVLLM_WITH_DIARIZATION=1 -I/tmp/lumen-pascal/include -I/tmp/lumen-build-legacy/include -I/tmp/lumen-pascal/src -I/tmp/lumen-build-legacy/_deps/parakeet_cpp-src/include -I/tmp/lumen-build-legacy/triton_aot_multiarch -I/tmp/lumen-pascal/third_party/blake3 -I/tmp/lumen-build-legacy/_deps/parakeet_cpp-src/third_party/ggml/src/../include -isystem /tmp/lumen-pascal/third_party -std=c++20 -Xcompiler=-fPIC -ffile-prefix-map=/tmp/lumen-pascal=. -ffile-prefix-map=/tmp/lumen-build-legacy=. -Werror=all-warnings -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -MD -MT CMakeFiles/vllm.dir/src/vt/cuda/cuda_ops.cu.o -MF CMakeFiles/vllm.dir/src/vt/cuda/cuda_ops.cu.o.d -x cu -c /tmp/lumen-pascal/src/vt/cuda/cuda_ops.cu -o CMakeFiles/vllm.dir/src/vt/cuda/cuda_ops.cu.o
+/tmp/lumen-pascal/src/vt/cuda/cuda_ops.cu(2544): error #177-D: function "vt::cuda::<unnamed>::MmaBf16M16N8K16" was declared but never referenced
+                            void MmaBf16M16N8K16(float* c, const unsigned* a, const unsigned* b) {
+                                 ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+1 error detected in the compilation of "/tmp/lumen-pascal/src/vt/cuda/cuda_ops.cu".
+[3/3] Building CUDA object CMakeFiles/vllm.dir/src/vt/cuda/cuda_matmul.cu.o
+ninja: build stopped: subcommand failed.

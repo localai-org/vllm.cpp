@@ -63,4 +63,12 @@ Qwen3DenseWeights LoadQwen3FromGguf(const GgufFile& gguf,
                                      const HfConfig& config,
                                      const GgufLoadPolicy* policy = nullptr);
 
+// Shared dense GGUF tensor map. Parts retain each source encoding and NK rows;
+// callers own family-specific Q/K transforms. Qwen3's existing wrapper keeps
+// its historical concatenation and residency unchanged.
+Qwen3DenseWeights LoadDenseGgufWeights(const GgufFile& gguf,
+                                       const HfConfig& config,
+                                       const GgufLoadPolicy* policy,
+                                       bool keep_projection_parts);
+
 }  // namespace vllm

@@ -1,0 +1,50 @@
+[
+  {
+    "axis": "p16-g16",
+    "on_warm_median_seconds": 1.547378152,
+    "off_warm_median_seconds": 1.590105345,
+    "on_tokens_per_second": 10.340071028739715,
+    "off_tokens_per_second": 10.062226411797893,
+    "throughput_on_over_off": 1.0276126381549169,
+    "latency_reduction_fraction": 0.02687066811916161,
+    "on_incremental_peak_bytes": 960626688,
+    "off_incremental_peak_bytes": 960626688,
+    "token_exact_repetitions": 8
+  },
+  {
+    "axis": "p16-g64",
+    "on_warm_median_seconds": 4.334521456,
+    "off_warm_median_seconds": 4.696210023,
+    "on_tokens_per_second": 14.765182419713001,
+    "off_tokens_per_second": 13.628010605691772,
+    "throughput_on_over_off": 1.0834437136074935,
+    "latency_reduction_fraction": 0.07701711917239773,
+    "on_incremental_peak_bytes": 960626688,
+    "off_incremental_peak_bytes": 960626688,
+    "token_exact_repetitions": 8
+  },
+  {
+    "axis": "p128-g16",
+    "on_warm_median_seconds": 1.555516576,
+    "off_warm_median_seconds": 1.802811338,
+    "on_tokens_per_second": 10.285972034540377,
+    "off_tokens_per_second": 8.875027387918502,
+    "throughput_on_over_off": 1.1589791878887699,
+    "latency_reduction_fraction": 0.1371717366024242,
+    "on_incremental_peak_bytes": 969015296,
+    "off_incremental_peak_bytes": 969015296,
+    "token_exact_repetitions": 8
+  },
+  {
+    "axis": "p128-g64",
+    "on_warm_median_seconds": 4.325300232,
+    "off_warm_median_seconds": 5.551067997,
+    "on_tokens_per_second": 14.796660709586552,
+    "off_tokens_per_second": 11.529312924033347,
+    "throughput_on_over_off": 1.2833948394914565,
+    "latency_reduction_fraction": 0.22081656460746824,
+    "on_incremental_peak_bytes": 969015296,
+    "off_incremental_peak_bytes": 969015296,
+    "token_exact_repetitions": 8
+  }
+]
