@@ -1,0 +1,51 @@
+2026-11-02 21:10:55.293 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-11-02 21:10:55.293 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-11-02 21:10:55.294 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-11-02 21:10:55.294 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-11-02 21:10:55.297 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-11-02 21:10:55.297 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-11-02 21:10:55.324 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-11-02 21:10:55.324 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-11-02 21:10:55.324 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-11-02 21:10:55.324 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-11-02 21:10:55.325 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-11-02 21:10:55.339 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_paged.cpp:442:
+TEST CASE:  flint paged: a mixed two-request batch matches the reference chains
+
+./tests/vllm/models/test_flint_paged.cpp:518: MESSAGE: flint paged: max |paged - reference| logit gap = 0.00576401
+
+./tests/vllm/models/test_flint_paged.cpp:524: MESSAGE: flint paged: req0 chain 1 the reference; req1 chain 1 the reference
+
+./tests/vllm/models/test_flint_paged.cpp:566: MESSAGE: flint paged: worst teacher-forced near-tie gap = 1.33695 nats
+
+===============================================================================
+./tests/vllm/models/test_flint_paged.cpp:577:
+TEST CASE:  flint paged: single 6-token prefill matches the reference logits
+
+./tests/vllm/models/test_flint_paged.cpp:593: MESSAGE: flint paged: single-prefill vs reference gap = 2.34401
+
+./tests/vllm/models/test_flint_paged.cpp:596: MESSAGE: flint paged: single-prefill teacher-forced near-tie gap = 3.65969 nats (recorded; the chains case gates the band)
+
+===============================================================================
+./tests/vllm/models/test_flint_paged.cpp:601:
+TEST CASE:  flint paged: the sliding window masks beyond the window
+
+./tests/vllm/models/test_flint_paged.cpp:677: MESSAGE: flint paged: out-of-window token edit moved logits by 1.18909
+
+./tests/vllm/models/test_flint_paged.cpp:695: MESSAGE: flint paged: windowed step vs reference gap = 1.73658
+
+./tests/vllm/models/test_flint_paged.cpp:698: MESSAGE: flint paged: windowed near-tie gaps = 3.29921 / 2.05635 nats (recorded; the chains case gates the band)
+
+===============================================================================
+[doctest] test cases:   4 |   4 passed | 0 failed | 0 skipped
+[doctest] assertions: 208 | 208 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-02 21:10:55.497 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-11-02 21:10:55.497 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-11-02 21:10:55.549 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-11-02 21:10:55.549 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-11-02 21:10:55.549 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)

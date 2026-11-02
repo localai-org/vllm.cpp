@@ -1047,6 +1047,24 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       // serve is no longer reachable on this hand-off, under ANY pool
       // ordering — the spread the W0 band suffered collapses by
       // construction, not by measurement luck.
+      // THE PRE-BOUNDARY PROBE (temporary diagnostic, VT_FLINT_TT_DOWN_PROBE):
+      // run the SAME down matmul against `a` BEFORE the boundary — its input
+      // serve is the exact-serve of the silu-committed shadow. If this probe
+      // is correct while the post-boundary model down is wrong, the staging
+      // upload arm (not the shadow) carries the poison.
+      if (std::getenv("VT_FLINT_TT_DOWN_PROBE") != nullptr) {
+        DBuf probe_dev(d, vt::DType::kBF16, {t, h});
+        MatmulWeight(d.q, probe_dev.t(), a.t(), tl.down);
+        const std::vector<float> probe = DownloadBf16AsF32(d, probe_dev);
+        double s = 0.0, sq = 0.0;
+        for (float v : probe) { s += v; sq += double(v) * v; }
+        std::fprintf(stderr,
+                     "[FLINT-TT-STAGING] L%-3lld preprobe [%lld,%lld] "
+                     "sum=%16.6f sq=%.6e\n",
+                     static_cast<long long>(layer),
+                     static_cast<long long>(t),
+                     static_cast<long long>(h), s, sq);
+      }
       {
         std::vector<uint16_t> a_bits(a.bytes() / 2);
         a.Download(d, a_bits.data());  // Copy + Synchronize: the commit retires
@@ -1057,6 +1075,24 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         d.b.Copy(d.q, a.ptr(), a_bits.data(), a_bits.size() * 2);
       }
       MatmulWeight(d.q, ff_dev.t(), a.t(), tl.down);
+      // THE REPEAT-SERVE PROBE (temporary diagnostic): re-run the SAME matmul
+      // on the SAME slots after the model down. If the second call differs
+      // from the first, the first call's input serve consumed bytes that the
+      // slot no longer serves — a serve-state or async-upload defect, not a
+      // kernel defect.
+      if (std::getenv("VT_FLINT_TT_DOWN_PROBE") != nullptr) {
+        DBuf ff2_dev(d, vt::DType::kBF16, {t, h});
+        MatmulWeight(d.q, ff2_dev.t(), a.t(), tl.down);
+        const std::vector<float> ff2 = DownloadBf16AsF32(d, ff2_dev);
+        double s = 0.0, sq = 0.0;
+        for (float v : ff2) { s += v; sq += double(v) * v; }
+        std::fprintf(stderr,
+                     "[FLINT-TT-STAGING] L%-3lld repprobe [%lld,%lld] "
+                     "sum=%16.6f sq=%.6e\n",
+                     static_cast<long long>(layer),
+                     static_cast<long long>(t),
+                     static_cast<long long>(h), s, sq);
+      }
       // THE OUT-SLOT TEST (FLINT-TT-DENSE-MLP-STAGING diagnosis): zero the
       // out block before the matmul — if the model's ff was contaminated by
       // the RECYCLED block's previous-tenant bytes (the matmul's

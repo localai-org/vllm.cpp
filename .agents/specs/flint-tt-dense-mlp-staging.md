@@ -73,3 +73,33 @@ this staging path.
 ## Git integration
 
 One pull request, `row/FLINT-TT-DENSE-MLP-STAGING`, spec committed first.
+
+## Now
+
+DONE 2026-11-02. The band is allocation-order-insensitive: all four
+staging-order legs land at 2.683e-1 after the fix. The mechanism, the
+permutation matrix, and the standing gates are recorded in
+`.agents/evidence/flint-tt-dense-mlp-staging-20261101/README.md`
+(the slot-serve fix section) and the row issue's Resolution.
+
+## Outcome
+
+- The defect was NOT in flint_tt.cpp's staging lifetimes. The three-matmul
+  probe (leg-l-prepost-probes.log) split it: same input slot, same weight,
+  correct / WRONG / correct — only the OUT block differed, and the out block
+  that poisoned was a #1922 best-fit BORROW (a 40960-B block serving a
+  20480-B request).
+- The mechanism: `EnsureHostBytes` picked the download's host write width
+  from the slot's registered CAPACITY (`s->bytes`) instead of the shadow's
+  dtype, so a borrowed bf16 slot's download wrote f32 bytes that the bf16
+  reader consumed word-halved. The fix writes the shadow's own dtype and
+  demotes the capacity to a size check — one hunk, no Synchronize, no copy.
+- Measured: the W0 band under all four lifetime legs before (2.683e-1 x3,
+  7.224e-1 oproj-scoped) and after (2.683e-1 x4). L46 sh_silu rel_rms
+  1.76e+0 -> 1.7655e-2 (the same borrowed-slot poison rode the shared
+  expert's silu). Greedy chain identical across legs (the recorded
+  hard-divergence bias class, unchanged — no band re-adjudication).
+- Rejected: a persistent-buffer retire in `MarkScratchAcquired` (leg-g) —
+  did not move the band; the probe matrix disproved the hypothesis.
+- The W0 band value itself is UNCHANGED (2.683e-1 was already the recorded
+  healthy value) — this is a repair, not a re-pin.

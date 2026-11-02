@@ -1,0 +1,312 @@
+2026-11-02 20:54:27.603 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:228)
+2026-11-02 20:54:27.603 | info     |             UMD | Cluster constructor started. (cluster.cpp:389)
+2026-11-02 20:54:27.604 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:96)
+2026-11-02 20:54:27.604 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:115)
+2026-11-02 20:54:27.607 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:575)
+2026-11-02 20:54:27.607 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:119)
+2026-11-02 20:54:27.635 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:167)
+2026-11-02 20:54:27.635 | info     |             UMD | IOMMU: enabled (cluster.cpp:147)
+2026-11-02 20:54:27.635 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:150)
+2026-11-02 20:54:27.635 | info     |             UMD | Cluster constructor completed. (cluster.cpp:648)
+2026-11-02 20:54:27.636 | info     |             UMD | Starting devices in cluster (cluster.cpp:1184)
+2026-11-02 20:54:27.644 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1192)
+[flint-tt-w0] resident=3871748096 B (3.606 GiB) expert_tier=75698798592 B (70.500 GiB) streamed/layer=37748736 B dense=2 moe=47 sliding=35 tensors=485
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-02 21:06:22.288 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:437)
+2026-11-02 21:06:22.288 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:499)
+2026-11-02 21:06:22.288 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:113)
+2026-11-02 21:06:22.288 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2406)
+2026-11-02 21:06:22.288 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:2414)
+2026-11-02 21:06:22.949 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1066)
+2026-11-02 21:06:23.893 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.893 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.893 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.893 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.899 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.899 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.899 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.899 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.937 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.937 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.937 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:23.937 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab949114540 g=0xaab949131180 u=0xaab9491401c0 a=0xaab94914f200 ff=0xaab3150aec00
+[FLINT-TT-STAGING] L0   gate       [5,6144] n=30720 sum_tt=   -14182.281744 sum_cpu=   -14194.216846 sq_tt=2.366531e+04 sq_cpu=2.368100e+04 rel_rms=6.8008e-03 max_abs=3.1250e-02
+[FLINT-TT-STAGING] L0   up         [5,6144] n=30720 sum_tt=      112.916258 sum_cpu=       86.071594 sq_tt=5.077654e+04 sq_cpu=5.080130e+04 rel_rms=7.2615e-03 max_abs=6.2500e-02
+[FLINT-TT-STAGING] L0   silu       [5,6144] n=30720 sum_tt=       12.223865 sum_cpu=       16.456834 sq_tt=1.159385e+03 sq_cpu=1.159817e+03 rel_rms=1.1759e-02 max_abs=2.3438e-02
+[FLINT-TT-STAGING] L0   silu|gu    [5,6144] n=30720 sum_tt=       12.223865 sum_cpu=       12.337603 sq_tt=1.159385e+03 sq_cpu=1.160565e+03 rel_rms=3.1900e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -12.464300 sq_tt=2.675666e+01 sq_cpu=2.675163e+01 rel_rms=1.1000e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -12.438910 sq_tt=2.675666e+01 sq_cpu=2.671891e+01 rel_rms=9.4343e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -11.865345 sq_tt=2.675666e+01 sq_cpu=2.675666e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -11.865345 sq_tt=2.675666e+01 sq_cpu=2.675666e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [5,2048] n=10240 sum_tt=      414.901520 sum_cpu=      414.901520 sq_tt=1.788781e+05 sq_cpu=1.788781e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+[flint-tt-w0] dispatch: the kTENSTORRENT case was EXERCISED (counter 0 -> 1)
+[flint-tt-w0] mode=bf16 quant_dispatch_calls=0
+[flint-tt-w0] first-token logits: max_abs=3.279e+01 rms=6.167e+00 rel_rms=2.683e-01 (n=750720)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab949114540 g=0xaab949131180 u=0xaab9491401c0 a=0xaab94914f200 ff=0xaab3150aec00
+[FLINT-TT-STAGING] L0   gate       [5,6144] n=30720 sum_tt=   -14182.281744 sum_cpu=   -14194.216846 sq_tt=2.366531e+04 sq_cpu=2.368100e+04 rel_rms=6.8008e-03 max_abs=3.1250e-02
+[FLINT-TT-STAGING] L0   up         [5,6144] n=30720 sum_tt=      112.916258 sum_cpu=       86.071594 sq_tt=5.077654e+04 sq_cpu=5.080130e+04 rel_rms=7.2615e-03 max_abs=6.2500e-02
+[FLINT-TT-STAGING] L0   silu       [5,6144] n=30720 sum_tt=       12.223865 sum_cpu=       16.456834 sq_tt=1.159385e+03 sq_cpu=1.159817e+03 rel_rms=1.1759e-02 max_abs=2.3438e-02
+[FLINT-TT-STAGING] L0   silu|gu    [5,6144] n=30720 sum_tt=       12.223865 sum_cpu=       12.337603 sq_tt=1.159385e+03 sq_cpu=1.160565e+03 rel_rms=3.1900e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -12.464300 sq_tt=2.675666e+01 sq_cpu=2.675163e+01 rel_rms=1.1000e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -12.438910 sq_tt=2.675666e+01 sq_cpu=2.671891e+01 rel_rms=9.4343e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -11.865345 sq_tt=2.675666e+01 sq_cpu=2.675666e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [5,2048] n=10240 sum_tt=      -11.865345 sum_cpu=      -11.865345 sq_tt=2.675666e+01 sq_cpu=2.675666e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [5,2048] n=10240 sum_tt=      414.901520 sum_cpu=      414.901520 sq_tt=1.788781e+05 sq_cpu=1.788781e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:06:42.016 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.016 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.016 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.016 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.026 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.026 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.026 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:42.026 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab37a4ee640 g=0xaab37a50f680 u=0xaab37a5216c0 a=0xaab507449fc0 ff=0xaab507477380
+[FLINT-TT-STAGING] L0   gate       [6,6144] n=36864 sum_tt=   -17729.924197 sum_cpu=   -17745.327518 sq_tt=3.029880e+04 sq_cpu=3.032390e+04 rel_rms=6.8741e-03 max_abs=3.9062e-02
+[FLINT-TT-STAGING] L0   up         [6,6144] n=36864 sum_tt=      236.546212 sum_cpu=      203.998962 sq_tt=6.436171e+04 sq_cpu=6.439813e+04 rel_rms=7.3119e-03 max_abs=6.2500e-02
+[FLINT-TT-STAGING] L0   silu       [6,6144] n=36864 sum_tt=       16.902276 sum_cpu=       22.205293 sq_tt=1.535264e+03 sq_cpu=1.535934e+03 rel_rms=1.1714e-02 max_abs=2.3438e-02
+[FLINT-TT-STAGING] L0   silu|gu    [6,6144] n=36864 sum_tt=       16.902276 sum_cpu=       16.959590 sq_tt=1.535264e+03 sq_cpu=1.536835e+03 rel_rms=3.1839e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [6,2048] n=12288 sum_tt=      -12.094164 sum_cpu=      -12.861921 sq_tt=3.305666e+01 sq_cpu=3.302106e+01 rel_rms=1.1635e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [6,2048] n=12288 sum_tt=      -12.094164 sum_cpu=      -12.843708 sq_tt=3.305666e+01 sq_cpu=3.298193e+01 rel_rms=1.0099e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [6,2048] n=12288 sum_tt=      -12.094164 sum_cpu=      -12.094164 sq_tt=3.305666e+01 sq_cpu=3.305666e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [6,2048] n=12288 sum_tt=      -12.094164 sum_cpu=      -12.094164 sq_tt=3.305666e+01 sq_cpu=3.305666e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [6,2048] n=12288 sum_tt=      337.488312 sum_cpu=      337.488312 sq_tt=2.310461e+05 sq_cpu=2.310461e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:06:51.766 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.766 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.766 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.766 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.776 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.776 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.776 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:06:51.776 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaabf7f0a3500 g=0xaabf7f0c9540 u=0xaabf7f0de580 a=0xaabf7f0f35c0 ff=0xaabf7f132780
+[FLINT-TT-STAGING] L0   gate       [7,6144] n=43008 sum_tt=   -20259.556954 sum_cpu=   -20280.466260 sq_tt=3.410271e+04 sq_cpu=3.413879e+04 rel_rms=6.8802e-03 max_abs=7.8125e-02
+[FLINT-TT-STAGING] L0   up         [7,6144] n=43008 sum_tt=      303.281308 sum_cpu=      266.083809 sq_tt=7.287562e+04 sq_cpu=7.292870e+04 rel_rms=7.2450e-03 max_abs=6.2500e-02
+[FLINT-TT-STAGING] L0   silu       [7,6144] n=43008 sum_tt=       -3.818551 sum_cpu=        2.220955 sq_tt=1.659539e+03 sq_cpu=1.660141e+03 rel_rms=1.1696e-02 max_abs=2.3438e-02
+[FLINT-TT-STAGING] L0   silu|gu    [7,6144] n=43008 sum_tt=       -3.818551 sum_cpu=       -3.703777 sq_tt=1.659539e+03 sq_cpu=1.661146e+03 rel_rms=3.1833e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [7,2048] n=14336 sum_tt=      -13.953881 sum_cpu=      -14.819117 sq_tt=3.793445e+01 sq_cpu=3.787021e+01 rel_rms=1.1272e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [7,2048] n=14336 sum_tt=      -13.953881 sum_cpu=      -14.793105 sq_tt=3.793445e+01 sq_cpu=3.783187e+01 rel_rms=9.7998e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [7,2048] n=14336 sum_tt=      -13.953881 sum_cpu=      -13.953881 sq_tt=3.793445e+01 sq_cpu=3.793445e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=6 ff_sum=   -1.859717 recomp_sum=   -1.859717 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [7,2048] n=14336 sum_tt=      -13.953881 sum_cpu=      -13.953881 sq_tt=3.793445e+01 sq_cpu=3.793445e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [7,2048] n=14336 sum_tt=      341.549042 sum_cpu=      341.549042 sq_tt=2.528652e+05 sq_cpu=2.528652e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:07:02.971 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.971 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.971 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.971 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.982 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.982 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.982 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:02.982 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab9491401c0 g=0xaabb9c8f24c0 u=0xaabb9c90a500 a=0xaabb9c922540 ff=0xaab94914f200
+[FLINT-TT-STAGING] L0   gate       [8,6144] n=49152 sum_tt=   -22286.353696 sum_cpu=   -22311.024447 sq_tt=3.675957e+04 sq_cpu=3.680213e+04 rel_rms=6.8703e-03 max_abs=7.8125e-02
+[FLINT-TT-STAGING] L0   up         [8,6144] n=49152 sum_tt=      375.435629 sum_cpu=      333.692085 sq_tt=7.939752e+04 sq_cpu=7.946082e+04 rel_rms=7.2345e-03 max_abs=6.2500e-02
+[FLINT-TT-STAGING] L0   silu       [8,6144] n=49152 sum_tt=       -3.894594 sum_cpu=        2.796682 sq_tt=1.777910e+03 sq_cpu=1.778623e+03 rel_rms=1.1687e-02 max_abs=2.7344e-02
+[FLINT-TT-STAGING] L0   silu|gu    [8,6144] n=49152 sum_tt=       -3.894594 sum_cpu=       -3.738916 sq_tt=1.777910e+03 sq_cpu=1.779569e+03 rel_rms=3.1722e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [8,2048] n=16384 sum_tt=      -16.533862 sum_cpu=      -17.496904 sq_tt=4.200791e+01 sq_cpu=4.192255e+01 rel_rms=1.1054e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [8,2048] n=16384 sum_tt=      -16.533862 sum_cpu=      -17.459380 sq_tt=4.200791e+01 sq_cpu=4.188199e+01 rel_rms=9.6101e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [8,2048] n=16384 sum_tt=      -16.533862 sum_cpu=      -16.533862 sq_tt=4.200791e+01 sq_cpu=4.200791e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=6 ff_sum=   -1.859717 recomp_sum=   -1.859717 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=7 ff_sum=   -2.579981 recomp_sum=   -2.579981 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [8,2048] n=16384 sum_tt=      -16.533862 sum_cpu=      -16.533862 sq_tt=4.200791e+01 sq_cpu=4.200791e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [8,2048] n=16384 sum_tt=      464.353027 sum_cpu=      464.353027 sq_tt=2.748718e+05 sq_cpu=2.748718e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:07:15.583 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.583 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.583 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.583 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.591 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.591 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.591 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:15.591 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab9491401c0 g=0xaabc65159f80 u=0xaabeb8894840 a=0xaabeb88af880 ff=0xaab94914f200
+[FLINT-TT-STAGING] L0   gate       [9,6144] n=55296 sum_tt=   -24834.231167 sum_cpu=   -24861.625422 sq_tt=4.052770e+04 sq_cpu=4.057764e+04 rel_rms=6.8442e-03 max_abs=7.8125e-02
+[FLINT-TT-STAGING] L0   up         [9,6144] n=55296 sum_tt=      436.620465 sum_cpu=      390.947930 sq_tt=8.755240e+04 sq_cpu=8.763344e+04 rel_rms=7.1848e-03 max_abs=6.2500e-02
+[FLINT-TT-STAGING] L0   silu       [9,6144] n=55296 sum_tt=      -25.190210 sum_cpu=      -17.774046 sq_tt=1.892727e+03 sq_cpu=1.893614e+03 rel_rms=1.1662e-02 max_abs=2.7344e-02
+[FLINT-TT-STAGING] L0   silu|gu    [9,6144] n=55296 sum_tt=      -25.190210 sum_cpu=      -25.048377 sq_tt=1.892727e+03 sq_cpu=1.894358e+03 rel_rms=3.1642e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [9,2048] n=18432 sum_tt=      -18.366300 sum_cpu=      -19.392530 sq_tt=4.684513e+01 sq_cpu=4.672964e+01 rel_rms=1.0805e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [9,2048] n=18432 sum_tt=      -18.366300 sum_cpu=      -19.347813 sq_tt=4.684513e+01 sq_cpu=4.668752e+01 rel_rms=9.4250e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [9,2048] n=18432 sum_tt=      -18.366300 sum_cpu=      -18.366300 sq_tt=4.684513e+01 sq_cpu=4.684513e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=6 ff_sum=   -1.859717 recomp_sum=   -1.859717 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=7 ff_sum=   -2.579981 recomp_sum=   -2.579981 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=8 ff_sum=   -1.832439 recomp_sum=   -1.832439 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [9,2048] n=18432 sum_tt=      -18.366300 sum_cpu=      -18.366300 sq_tt=4.684513e+01 sq_cpu=4.684513e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [9,2048] n=18432 sum_tt=      464.486816 sum_cpu=      464.486816 sq_tt=2.953886e+05 sq_cpu=2.953886e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:07:29.040 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.041 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.041 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.041 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.049 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.049 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.049 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:29.049 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab9491401c0 g=0xaab0c1851d00 u=0xaab0c186fd40 a=0xaab0c188dd80 ff=0xaab94914f200
+[FLINT-TT-STAGING] L0   gate       [10,6144] n=61440 sum_tt=   -26921.755383 sum_cpu=   -26950.284677 sq_tt=4.322314e+04 sq_cpu=4.327534e+04 rel_rms=6.8294e-03 max_abs=7.8125e-02
+[FLINT-TT-STAGING] L0   up         [10,6144] n=61440 sum_tt=      499.318027 sum_cpu=      449.293561 sq_tt=9.390813e+04 sq_cpu=9.399295e+04 rel_rms=7.1738e-03 max_abs=9.3750e-02
+[FLINT-TT-STAGING] L0   silu       [10,6144] n=61440 sum_tt=      -30.784237 sum_cpu=      -22.578678 sq_tt=1.992540e+03 sq_cpu=1.993653e+03 rel_rms=1.1659e-02 max_abs=2.7344e-02
+[FLINT-TT-STAGING] L0   silu|gu    [10,6144] n=61440 sum_tt=      -30.784237 sum_cpu=      -30.627412 sq_tt=1.992540e+03 sq_cpu=1.994169e+03 rel_rms=3.1511e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [10,2048] n=20480 sum_tt=      -20.589046 sum_cpu=      -21.724794 sq_tt=5.080134e+01 sq_cpu=5.074081e+01 rel_rms=1.0819e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [10,2048] n=20480 sum_tt=      -20.589046 sum_cpu=      -21.666361 sq_tt=5.080134e+01 sq_cpu=5.067121e+01 rel_rms=9.2984e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [10,2048] n=20480 sum_tt=      -20.589046 sum_cpu=      -20.589046 sq_tt=5.080134e+01 sq_cpu=5.080134e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=6 ff_sum=   -1.859717 recomp_sum=   -1.859717 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=7 ff_sum=   -2.579981 recomp_sum=   -2.579981 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=8 ff_sum=   -1.832439 recomp_sum=   -1.832439 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=9 ff_sum=   -2.222746 recomp_sum=   -2.222746 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [10,2048] n=20480 sum_tt=      -20.589046 sum_cpu=      -20.589046 sq_tt=5.080134e+01 sq_cpu=5.080134e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [10,2048] n=20480 sum_tt=      537.411743 sum_cpu=      537.411743 sq_tt=3.147049e+05 sq_cpu=3.147049e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:07:44.022 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.022 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.022 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.022 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.030 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.030 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.030 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:07:44.030 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab62f0c5f40 g=0xaab6310d0cc0 u=0xaab6310f2d00 a=0xaab631114d40 ff=0xaab37a50f680
+[FLINT-TT-STAGING] L0   gate       [11,6144] n=67584 sum_tt=   -29026.904538 sum_cpu=   -29059.327029 sq_tt=4.591108e+04 sq_cpu=4.597033e+04 rel_rms=6.8201e-03 max_abs=7.8125e-02
+[FLINT-TT-STAGING] L0   up         [11,6144] n=67584 sum_tt=      558.897074 sum_cpu=      504.737175 sq_tt=1.001255e+05 sq_cpu=1.002196e+05 rel_rms=7.1580e-03 max_abs=9.3750e-02
+[FLINT-TT-STAGING] L0   silu       [11,6144] n=67584 sum_tt=      -39.428720 sum_cpu=      -30.664832 sq_tt=2.085991e+03 sq_cpu=2.087166e+03 rel_rms=1.1636e-02 max_abs=2.7344e-02
+[FLINT-TT-STAGING] L0   silu|gu    [11,6144] n=67584 sum_tt=      -39.428720 sum_cpu=      -39.245496 sq_tt=2.085991e+03 sq_cpu=2.087629e+03 rel_rms=3.1456e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [11,2048] n=22528 sum_tt=      -22.638625 sum_cpu=      -23.865346 sq_tt=5.472544e+01 sq_cpu=5.469450e+01 rel_rms=1.0679e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [11,2048] n=22528 sum_tt=      -22.638625 sum_cpu=      -23.807544 sq_tt=5.472544e+01 sq_cpu=5.462464e+01 rel_rms=9.1991e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [11,2048] n=22528 sum_tt=      -22.638625 sum_cpu=      -22.638625 sq_tt=5.472544e+01 sq_cpu=5.472544e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=6 ff_sum=   -1.859717 recomp_sum=   -1.859717 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=7 ff_sum=   -2.579981 recomp_sum=   -2.579981 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=8 ff_sum=   -1.832439 recomp_sum=   -1.832439 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=9 ff_sum=   -2.222746 recomp_sum=   -2.222746 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=10 ff_sum=   -2.049579 recomp_sum=   -2.049579 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [11,2048] n=22528 sum_tt=      -22.638625 sum_cpu=      -22.638625 sq_tt=5.472544e+01 sq_cpu=5.472544e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [11,2048] n=22528 sum_tt=      586.538391 sum_cpu=      586.538391 sq_tt=3.329902e+05 sq_cpu=3.329902e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+2026-11-02 21:08:00.522 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.522 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.522 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.522 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.533 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 80, dfb size: 32, return value: 112 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.533 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.533 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+2026-11-02 21:08:00.533 | info     |           Metal | Finalize dfb: dfb_offset == base_offset: 0, dfb size: 0, return value: 0 (dataflow_buffer.cpp:1690)
+[FLINT-TT-STAGING] L0   blocks n2=0xaab62f0c5f40 g=0xaab821461d40 u=0xaab821485d80 a=0xaab8214a9dc0 ff=0xaab37a50f680
+[FLINT-TT-STAGING] L0   gate       [12,6144] n=73728 sum_tt=   -31140.175338 sum_cpu=   -31177.288570 sq_tt=4.858454e+04 sq_cpu=4.865214e+04 rel_rms=6.8081e-03 max_abs=7.8125e-02
+[FLINT-TT-STAGING] L0   up         [12,6144] n=73728 sum_tt=      615.636429 sum_cpu=      557.727932 sq_tt=1.062170e+05 sq_cpu=1.063230e+05 rel_rms=7.1302e-03 max_abs=9.3750e-02
+[FLINT-TT-STAGING] L0   silu       [12,6144] n=73728 sum_tt=      -49.533981 sum_cpu=      -40.259902 sq_tt=2.176576e+03 sq_cpu=2.177783e+03 rel_rms=1.1611e-02 max_abs=2.7344e-02
+[FLINT-TT-STAGING] L0   silu|gu    [12,6144] n=73728 sum_tt=      -49.533981 sum_cpu=      -49.302186 sq_tt=2.176576e+03 sq_cpu=2.178200e+03 rel_rms=3.1501e-03 max_abs=7.8125e-03
+[FLINT-TT-STAGING] L0   down       [12,2048] n=24576 sum_tt=      -24.591835 sum_cpu=      -25.914204 sq_tt=5.857271e+01 sq_cpu=5.859429e+01 rel_rms=1.0673e-02 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|aTT   [12,2048] n=24576 sum_tt=      -24.591835 sum_cpu=      -25.846980 sq_tt=5.857271e+01 sq_cpu=5.852298e+01 rel_rms=9.2507e-03 max_abs=1.5625e-02
+[FLINT-TT-STAGING] L0   down|recomp [12,2048] n=24576 sum_tt=      -24.591835 sum_cpu=      -24.591835 sq_tt=5.857271e+01 sq_cpu=5.857271e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=0 ff_sum=   -3.144333 recomp_sum=   -3.144333 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=1 ff_sum=   -2.566404 recomp_sum=   -2.566404 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=2 ff_sum=   -2.356057 recomp_sum=   -2.356057 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=3 ff_sum=   -1.958180 recomp_sum=   -1.958180 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=4 ff_sum=   -1.840371 recomp_sum=   -1.840371 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=5 ff_sum=   -0.228819 recomp_sum=   -0.228819 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=6 ff_sum=   -1.859717 recomp_sum=   -1.859717 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=7 ff_sum=   -2.579981 recomp_sum=   -2.579981 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=8 ff_sum=   -1.832439 recomp_sum=   -1.832439 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=9 ff_sum=   -2.222746 recomp_sum=   -2.222746 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=10 ff_sum=   -2.049579 recomp_sum=   -2.049579 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   row r=11 ff_sum=   -1.953210 recomp_sum=   -1.953210 maxdev=0.0000e+00
+[FLINT-TT-STAGING] L0   down|live  [12,2048] n=24576 sum_tt=      -24.591835 sum_cpu=      -24.591835 sq_tt=5.857271e+01 sq_cpu=5.857271e+01 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L0   n2in       [12,2048] n=24576 sum_tt=      622.240601 sum_cpu=      622.240601 sq_tt=3.508217e+05 sq_cpu=3.508217e+05 rel_rms=0.0000e+00 max_abs=0.0000e+00
+[FLINT-TT-STAGING] L46  router     [1,256] n=256 sum_tt=    -1470.063715 sum_cpu=    -1470.112500 sq_tt=1.049799e+04 sq_cpu=1.049208e+04 rel_rms=9.0823e-04 max_abs=8.6248e-02
+[FLINT-TT-STAGING] L46  sh_gate    [1,1024] n=1024 sum_tt=     7616.368538 sum_cpu=     7585.981178 sq_tt=2.608299e+05 sq_cpu=2.591418e+05 rel_rms=1.0830e-02 max_abs=1.0000e+00
+[FLINT-TT-STAGING] L46  sh_up      [1,1024] n=1024 sum_tt=    -1489.029999 sum_cpu=    -1453.276093 sq_tt=2.219443e+06 sq_cpu=2.206632e+06 rel_rms=1.0588e-02 max_abs=2.0000e+00
+[FLINT-TT-STAGING] L46  sh_silu    [1,1024] n=1024 sum_tt=    -2138.459463 sum_cpu=    -2075.796988 sq_tt=9.995963e+06 sq_cpu=9.805086e+06 rel_rms=1.7655e-02 max_abs=3.2000e+01
+[FLINT-TT-STAGING] L46  sh_down    [1,2048] n=2048 sum_tt=      -15.494564 sum_cpu=      -17.293491 sq_tt=2.448429e+03 sq_cpu=2.423581e+03 rel_rms=1.6385e-02 max_abs=7.0312e-02
+[flint-tt-w0] greedy chain match=2/8 dev=[ 10444 332 269 332 269 269 269 6963 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+===============================================================================
+[doctest] test cases:  2 |  2 passed | 0 failed | 0 skipped
+[doctest] assertions: 18 | 18 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-02 21:08:18.870 | info     |    BuildKernels | JIT cache stats: 169/169 hits (100.0%) [169 cached, 339 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:197)
+2026-11-02 21:08:18.870 | info     |    BuildKernels | JIT telemetry: 3 registered TelemetryTokens (build_cache_telemetry.cpp:230)
+2026-11-02 21:08:18.882 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:513)
+2026-11-02 21:08:18.882 | info     |             UMD | Closing devices in cluster (cluster.cpp:1197)
+2026-11-02 21:08:18.917 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1206)
+2026-11-02 21:08:18.917 | info     |             UMD | Cluster destructor started. (cluster.cpp:912)
+2026-11-02 21:08:18.917 | info     |             UMD | Cluster destructor completed. (cluster.cpp:915)
