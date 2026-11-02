@@ -295,6 +295,11 @@ if(VLLM_CPP_TENSTORRENT)
   # operand micro-probe.
   vllm_cpp_add_test(test_flint_tt_w2_micro vllm/models/test_flint_tt_w2_micro.cpp)
   target_include_directories(test_flint_tt_w2_micro PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH staging-order repro (row FLINT-TT-DENSE-MLP-STAGING): the minimal
+  # two-tensor staging test the spec's stop condition names — one down-proj
+  # matmul whose out block's pool history is the only variable.
+  vllm_cpp_add_test(test_flint_tt_staging_repro vllm/models/test_flint_tt_staging_repro.cpp)
+  target_include_directories(test_flint_tt_staging_repro PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # SCRATCH W3 diagnostic (operator-run under the gpu.lock mutex, evidence
   # in docs/bench-evidence/tt-matmul-noise-20261025/): the substrate
   # matmul-noise map (spec .agents/specs/tt-matmul-noise.md).
