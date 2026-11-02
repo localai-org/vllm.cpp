@@ -808,8 +808,16 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
     if (tracked_base && s->device_current && s->device.has_value()) {
       if (s->dev_rows == rows && s->dev_cols == cols) {
         const auto ls = s->device->logical_shape();
-        if (ls.rank() == 2 && ls[0] == rows && ls[1] == cols)
+        if (ls.rank() == 2 && ls[0] == rows && ls[1] == cols) {
+          // FLINT-TT-DENSE-MLP-STAGING: the exact-shape serve. Trace it
+          // (default off) — this is the arm whose stale-serve the row's
+          // one-consumer-per-forward poison rides.
+          if (std::getenv("VT_STAGING_TRACE") != nullptr)
+            std::fprintf(stderr,
+                         "[TT-EXACT-SERVE] ptr=%p [%u,%u] bf16 shadow serve\n",
+                         t.data, rows, cols);
           return *s->device;
+        }
         // ONE chain in BOTH passes (W4 doctrine; ISSUE-LOCAL-01M3JXEFQKSZP2
         // 3PP2HWY9G0VQ). The tt_capture_active() arm this replaced ran a bare
         // ttnn::reshape on the TILED shadow, a program the eager pass never
@@ -901,6 +909,17 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
         s->device_current = true;
         s->host_current = false;
         s->device_reserved = false;
+        // FLINT-TT-DENSE-MLP-STAGING: the arm this row chases. A reservation
+        // serve hands the consumer the PREVIOUS tenant's buffer (aliased in
+        // place) with NO staging — correct only when the pending op WRITES
+        // the full geometry. When the consumer instead READS, the value is
+        // whatever the previous tenant left. Trace it (default off).
+        if (std::getenv("VT_STAGING_TRACE") != nullptr)
+          std::fprintf(stderr,
+                       "[TT-RESERVE-SERVE] ptr=%p [%u,%u] bf16 — served %s, "
+                       "no staging\n",
+                       t.data, rows, cols,
+                       s->persistent.has_value() ? "persistent" : "empty");
         StagingAvoidedReservation().fetch_add(1, std::memory_order_relaxed);
         served = true;
       }

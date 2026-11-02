@@ -1,0 +1,8 @@
+[FLINT-TT-STAGING] L0   down       [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -12.464300 sq_tt=0.000000e+00 sq_cpu=2.675163e+01 rel_rms=5.1112e-02 max_abs=1.7422e+00
+[FLINT-TT-STAGING] L0   down|aTT   [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -12.438910 sq_tt=0.000000e+00 sq_cpu=2.671891e+01 rel_rms=5.1081e-02 max_abs=1.7422e+00
+[FLINT-TT-STAGING] L0   down|recomp [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -11.865345 sq_tt=0.000000e+00 sq_cpu=2.675666e+01 rel_rms=5.1117e-02 max_abs=1.7500e+00
+[FLINT-TT-STAGING] L0   down|live  [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -11.865345 sq_tt=0.000000e+00 sq_cpu=2.675666e+01 rel_rms=5.1117e-02 max_abs=1.7500e+00
+[flint-tt-w0] first-token logits: max_abs=5.092e+01 rms=1.320e+01 rel_rms=5.741e-01 (n=750720)
+[FLINT-TT-STAGING] L0   down       [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -12.464300 sq_tt=0.000000e+00 sq_cpu=2.675163e+01 rel_rms=5.1112e-02 max_abs=1.7422e+00
+[FLINT-TT-STAGING] L0   down|aTT   [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -12.438910 sq_tt=0.000000e+00 sq_cpu=2.671891e+01 rel_rms=5.1081e-02 max_abs=1.7422e+00
+[FLINT-TT-STAGING] L0   down|recomp [5,2048] n=10240 sum_tt=        0.000000 sum_cpu=      -11.865345 sq_tt=0.000000e+00 sq_cpu=2.675666e+01 rel_rms=5.1117e-02 max_abs=1.7500e+00
