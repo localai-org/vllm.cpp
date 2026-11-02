@@ -484,6 +484,10 @@ ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
                                                 TileSpecOf(rows, cols),
                                                 /*device=*/nullptr);
     ttnn::copy_to_device(host, *persistent);
+    if (std::getenv("VT_STAGING_TRACE") != nullptr)
+      std::fprintf(stderr,
+                   "[TT-UP-PERSIST] ptr=%p [%u,%u] in-place CQ write\n",
+                   t.data, rows, cols);
     StagingPersistentWrites().fetch_add(1, std::memory_order_relaxed);
     StagingPersistentBytes().fetch_add(static_cast<uint64_t>(n) * 2,
                                        std::memory_order_relaxed);
@@ -494,6 +498,10 @@ ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
   // buffer. The stale resident buffer, if any, is released here.
   ttnn::Tensor dev = ttnn::Tensor::from_span(ttsl::Span<const bfloat16>(src, n),
                                              TileSpecOf(rows, cols), &device);
+  if (std::getenv("VT_STAGING_TRACE") != nullptr)
+    std::fprintf(stderr,
+                 "[TT-UP-ALLOC] ptr=%p [%u,%u] from_span alloc arm\n",
+                 t.data, rows, cols);
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     BufferSlot* s = FindSlot(t.data);
@@ -935,9 +943,14 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
   // shadow before reading them.
   EnsureHostBytes(t.data);
   ttnn::Tensor dev;
+  const bool stg_trace = std::getenv("VT_STAGING_TRACE") != nullptr;
   if (t.dtype == DType::kBF16) {
     // W4 lever 1 (#2107): contiguous bf16 masters skip the f32 intermediate
     // entirely — the raw window bytes go to the device in one from_span.
+    if (stg_trace)
+      std::fprintf(stderr,
+                   "[TT-STAGE-UPLOAD] ptr=%p [%u,%u] bf16 bulk upload\n",
+                   t.data, rows, cols);
     dev = UploadRowsBf16(t, rows, cols, device);
     StagingBulkUploads().fetch_add(1, std::memory_order_relaxed);
     StagingBulkBytes().fetch_add(static_cast<uint64_t>(rows) * cols * 2,
@@ -962,6 +975,10 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
   std::lock_guard<std::mutex> g(SlotMutex());
   BufferSlot* s = FindSlot(t.data);
   if (s != nullptr && t.data == s->host) {
+    if (stg_trace)
+      std::fprintf(stderr,
+                   "[TT-STAGE-INSTALL] ptr=%p [%u,%u] slot installed\n",
+                   t.data, rows, cols);
     s->device = dev;
     s->dev_rows = rows;
     s->dev_cols = cols;
@@ -1417,15 +1434,29 @@ void EnsureHostBytes(void* host) {
       s->host_current = true;
       return;
     }
-    // Device results are f32 via to_vector. Host Alloc is typically
-    // numel*sizeof(float) (tests/f32 path) or numel*2 (bf16 activations).
-    if (bytes >= n * sizeof(float)) {
+    // Device results are f32 via to_vector. The HOST write width is the
+    // SHADOW's dtype — the format the content is actually in — never the
+    // slot's registered capacity. FLINT-TT-DENSE-MLP-STAGING slot-serve fix:
+    // the #1922 best-fit lend hands a DBuf a block UP TO 2x its request (a
+    // [5,2048] bf16 activation in a 40960-B class), so a capacity test
+    // `bytes >= n*4` fired on an ordinary bf16 slot and the download wrote
+    // n*4 f32 bytes into a buffer the bf16 reader then consumed word-halved —
+    // the recycled-out-block poison whose first-token band moved 2.683e-1 <->
+    // 7.224e-1 with functionally neutral DBuf-lifetime edits (every such edit
+    // shifts WHICH requests borrow). The shadow's dtype is authoritative: an
+    // f32 shadow writes f32, a bf16 shadow writes bf16, whatever the capacity.
+    // The conv-transposed arm above keeps its own layout contract.
+    if (dev.dtype() == ttnn::DataType::FLOAT32) {
+      VT_CHECK(bytes >= n * sizeof(float),
+               "tenstorrent: EnsureHostBytes host buffer too small for the "
+               "f32 shadow");
       std::memcpy(base, result.data(), n * sizeof(float));
-    } else if (bytes >= n * sizeof(uint16_t)) {
+    } else {
+      VT_CHECK(bytes >= n * sizeof(uint16_t),
+               "tenstorrent: EnsureHostBytes host buffer too small for the "
+               "shadow dtype");
       auto* dst = static_cast<uint16_t*>(base);
       for (size_t i = 0; i < n; ++i) dst[i] = F32ToBF16(result[i]);
-    } else {
-      VT_CHECK(false, "tenstorrent: EnsureHostBytes host buffer too small");
     }
     s->host_current = true;
   }

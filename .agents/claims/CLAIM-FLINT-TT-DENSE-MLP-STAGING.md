@@ -6,12 +6,32 @@
 | Worktree | `/tmp/flint-p150-attn` |
 | Branch | `row/FLINT-TT-DENSE-MLP-STAGING` (base: FLINT-P150-ATTENTION content, spec+issue committed `ed1f3d919`) |
 | Owner | Maki (zai-glm-5.3-flash), fresh implementer per the committed spec |
-| State | `RUNNING` — diagnose MEASURED (attribution table below), fix NOT landed |
-| Last update | 2026-11-01 (leg (a) landed-order running) |
+| State | `DONE` — diagnose MEASURED, fix LANDED (band order-insensitive, gates green) |
+| Last update | 2026-11-02 (fix stage complete) |
 
 Owes: per-tensor rel_rms at L0/L46 under three staging orders, the fix that
 makes the W0 band allocation-order-insensitive, the standing gates, and the
 evidence dir `docs/bench-evidence/flint-tt-dense-mlp-staging-20261101/`.
+
+## Session handoff (2026-11-02, fix LANDED)
+
+FIX (this session): the mechanism is `EnsureHostBytes`
+(tenstorrent_residency.cpp) picking the download's host write width from the
+slot's REGISTERED CAPACITY (`s->bytes`, padded by the #1922 best-fit borrow)
+instead of the shadow's dtype — a bf16 activation whose DBuf borrowed a 2x
+block downloaded as f32 bytes and the bf16 reader consumed them word-halved.
+The fix writes the shadow's own dtype and demotes the capacity to a size
+check. The three-matmul probe (leg-l) pinned it: same input slot, same
+weight, three consecutive matmuls — correct (fresh out), WRONG (the recycled
+borrowed out), correct (fresh out). A persistent-buffer retire in
+`MarkScratchAcquired` was tried FIRST and did NOT move the band (leg-g) —
+reverted; the probe matrix disproved the "buffer the program still
+references" hypothesis.
+
+Permutation matrix AFTER the fix: landed / reversed / extended / oproj-scoped
+ALL 2.683e-1 (the spread is gone). Standing gates: attention probe 64/64 both
+window modes, test_flint_paged 208/208, test_flint_gguf 184/184,
+test_flint_forward 110/110, W0 device case 18/18 in every leg.
 
 ## Session handoff (2026-11-02, diagnose measured, fix NOT landed)
 
