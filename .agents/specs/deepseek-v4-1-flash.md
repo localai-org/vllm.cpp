@@ -10,9 +10,23 @@ Issues, one per row, all canonical-local:
 `ISSUE-LOCAL-01M29AV2VX9RBRF409F6YVX3MK` on `QUANT-GGUF-Q1_0` for the reader
 correction this scope uncovered.
 Base SHA: `a2532471b`
-Matrices: [model-matrix.md](../model-matrix.md) (the two registry arches),
-[kernel-matrix.md](../kernel-matrix.md) (the two checkpoint campaigns),
+Matrices: [model-matrix.md](../model-matrix.md) (the two registry arches, the
+DSpark draft row, and the two checkpoint campaigns below),
 [quantization-matrix.md](../quantization-matrix.md) (`QUANT-GGUF-Q1_0`).
+**CORRECTED 2026-09-27: the two checkpoint campaigns are in `model-matrix.md`,
+not `kernel-matrix.md`,** and this line used to say otherwise. Two rows decided
+it. `MODEL-SPEC-deepseek-v4-1-dspark-v41-draft-model` — this spec's own
+sibling row, same wave, same 2026-09-11 scoping pass — is declared in
+`model-matrix.md`, as is `MODEL-DSV4-EXL3`, the V4 campaign row these two are
+the successors of. `kernel-matrix.md` also pins its row count in two places
+(`## Count invariants`: "exactly 52 practical kernel-family rows" and the
+lifecycle tally, with `scripts/check-agent-record.py` holding the total), so
+neither of these two rows can be added there without a second change to that
+contract — which is a claim about cost, not a reason to file a model campaign
+as a kernel family. Both rows were named by this header and by an open
+canonical-local issue while appearing in NO matrix, so their issue records
+failed `validate_issue_record` with "row is not canonical and claimable" and
+`agent-issue-index.py` could not validate a single record.
 
 This spec landed as records only and carries the campaign's product code from
 W1 onwards; no row here is `READY`. The header names **five** rows. Of the four
