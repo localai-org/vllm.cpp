@@ -1237,6 +1237,7 @@ void VecDotTQ1_0Q8_K(int n, float* s, size_t bs, const void* vx, size_t bx,
 // immune to the VT_CPU_Q4K_DOT selection (see the quant.h comment beside
 // SelectQuantQ4KVecDot).
 VecDotFn QuantQ4KPortableVecDot() { return &VecDotQ4_KQ8_K; }
+VecDotFn QuantQ6KPortableVecDot() { return &VecDotQ6_KQ8_K; }
 
 VecDotFn BlockVecDot(DType dtype) {
   switch (dtype) {
@@ -1250,7 +1251,8 @@ VecDotFn BlockVecDot(DType dtype) {
     case DType::kQ4_K:
       return SelectQuantQ4KVecDot(&VecDotQ4_KQ8_K);  // quants.c:645 + NEON tier
     case DType::kQ5_K: return &VecDotQ5_KQ8_K;        // quants.c:720
-    case DType::kQ6_K: return &VecDotQ6_KQ8_K;        // quants.c:800
+    case DType::kQ6_K:
+      return SelectQuantQ6KVecDot(&VecDotQ6_KQ8_K);  // quants.c:800 + NEON tier
     case DType::kIQ2_XXS: return &VecDotIQ2_XXSQ8_K;  // quants.c:855
     case DType::kIQ3_S: return &VecDotIQ3_SQ8_K;      // quants.c:1094
     case DType::kIQ3_XXS: return &VecDotIQ3_XXSQ8_K;  // quants.c:999
