@@ -1,0 +1,5 @@
+# CLAIM-FLINT-SLIDING-PAGESCAN
+
+| Claim | Row IDs | Agent | Worktree / remote dir | Branch | Owned scope | State | Last update |
+|---|---|---|---|---|---|---|---|
+| `CLAIM-FLINT-SLIDING-PAGESCAN` | `KERNEL-ATTN-PAGED-SLIDING` (`ACTIVE`) — spec/issue row `FLINT-SLIDING-PAGESCAN` | zai/glm-5-3-flash (maki), fresh implementer per the committed spec `.agents/specs/flint-sliding-pagescan.md` | local linked worktree `/tmp/flint-pagescan`, base SHA `be8b8cfd7` (commit 1 = spec + issue) | `row/FLINT-SLIDING-PAGESCAN` | Diagnose the residual sequence-length growth in the sliding paged attention kernel (`src/vt/cpu/cpu_paged_attn.cpp`) — discriminate M-A (per-key btab walk) / M-B (arena scatter) / M-C (timer scope includes KV append or RoPE) — then fix the attributed mechanism through the shared kernel. Gates: test_ops_paged_attn_dtype (windowed leg HARD bit-identity), test_flint_paged 208/208, test_flint_gguf keep-quant serving gate, MiMoV2 sink gates. Evidence: `docs/bench-evidence/flint-sliding-pagescan-20261101/`. EXCLUDES TT-path, quant formats, window semantics. | `ACTIVE` | 2026-11-04 — diagnose phase started |
