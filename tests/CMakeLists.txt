@@ -276,6 +276,15 @@ if(VLLM_CPP_TENSTORRENT)
   # docs/bench-evidence/flint-tt-w0-20261025/).
   vllm_cpp_add_test(test_flint_tt_w0 vllm/models/test_flint_tt_w0.cpp)
   target_include_directories(test_flint_tt_w0 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # FLINT-P150-STAGE2-GATE (spec .agents/specs/flint-p150-stage2-gate.md,
+  # issue ISSUE-LOCAL-01M6HF07NW0NQPVC5V21EGZJ8M): the MODEL-LEVEL
+  # device-attention gate — the keep-quant paged recipe run TWICE (host arm,
+  # VT_FLINT_TT_DEVICE_ATTN unset; device arm, =1) asserting the SAME
+  # drift-tolerant band for the device arm and recording both arms' numbers
+  # + chains (the adoption inputs). Card + operator-run under the gpu.lock
+  # mutex.
+  vllm_cpp_add_test(test_flint_tt_stage2_gate vllm/models/test_flint_tt_stage2_gate.cpp)
+  target_include_directories(test_flint_tt_stage2_gate PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # Flint keep-quant device arm (spec .agents/specs/flint-keepquant.md,
   # issue ISSUE-LOCAL-01M5WCPZC4TWR9GZVJHH73E1XE): the loader-arm host gates
   # (admission census, refusal by name, re-derived budget) plus the
