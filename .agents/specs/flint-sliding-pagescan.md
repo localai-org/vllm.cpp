@@ -93,3 +93,89 @@ logged, 3-rep medians, NO timeout guards.
 
 One pull request, `row/FLINT-SLIDING-PAGESCAN`, spec committed first,
 diagnose commit before any fix commit.
+
+## Record
+
+Matrix record: `KERNEL-ATTN-PAGED-SLIDING` (kernel-matrix), owned by
+`CLAIM-FLINT-SLIDING-PAGESCAN` while this row runs.
+
+## Work breakdown
+
+- W1: reproduce the residual growth at the row head (attention-sliding,
+  seq ~20 vs ~200, 3 reps, VT_FLINT_PHASE_TIMING=1).
+- W2: discriminate M-A / M-B / M-C with counters and timer-scope reading.
+- W3: fix the attributed mechanism through `src/vt/cpu/cpu_paged_attn.cpp`
+  (or the timer scope in `flint.cpp` for M-C).
+- W4: verify — gates, the residual ratio, the serving tok/s at 16/32t.
+
+## Risks/decisions
+
+- The windowed dtype bit-identity (test_ops_paged_attn_dtype:352-359) is
+  HARD: any kernel change keeps the per-key order.
+- M-B's fix is invasive and may defer with recorded evidence.
+- M-C is behavior-neutral: timers only.
+
+## Port map
+
+- `vllm/v1/attention/backends/flash_attention.py` sliding-window metadata
+  and the windowed mask (window semantics this kernel mirrors).
+- The windowed paged decode path (`vt::PagedAttention`, window_size).
+- No new upstream surface: this row diagnoses and tunes the already-ported
+  kernel; the reference behavior is unchanged.
+
+## Tests to port
+
+- None new: the windowed leg of `tests/vt/test_ops_paged_attn_dtype.cpp`
+  (:352-359) already pins the bit-identity contract this row must hold.
+- `tests/vllm/models/test_flint_paged.cpp` and the `test_flint_gguf`
+  keep-quant serving gate re-run unchanged.
+
+## Dependencies
+
+- `src/vt/cpu/cpu_paged_attn.cpp` (the kernel),
+  `src/vllm/model_executor/models/flint.cpp` (the phase timers, M-C only).
+- No dependency change.
+
+## Scope
+
+Diagnose the residual ~1.11x sequence-length growth of the sliding paged
+attention phase post-FLINT-SLIDING-ATTN, attribute it to exactly one of
+M-A (per-key btab walk) / M-B (arena scatter) / M-C (timer scope), then fix
+the attributed mechanism. Excluded: TT path, quant formats, window semantics.
+
+## Upstream chain
+
+- vLLM sliding-window attention metadata and the windowed mask
+  (`vllm/v1/attention/backends/flash_attention.py`) at the parity pin
+  recorded in `.agents/upstream-sync.md`.
+- The pinned-vLLM paged attention is the behavioral reference; this row
+  changes no reference behavior.
+
+## Our baseline
+
+- Residual growth ~1.11x (seq ~20 → ~200) post-FLINT-SLIDING-ATTN at 16t;
+  the routed phase is flat (0.994). Prior evidence:
+  `docs/bench-evidence/flint-sliding-attn-20261031/` and
+  `docs/bench-evidence/tt-nonrouted-attribution-20261031/`.
+- Gates at base: test_ops_paged_attn_dtype 172/172, test_flint_paged
+  208/208, test_flint_gguf keep-quant 53/60 (0 hard, worst 2.486).
+
+## Outcome
+
+Attribution verdict (2026-11-04, evidence
+[flint-sliding-pagescan-20261101](../../docs/bench-evidence/flint-sliding-pagescan-20261101/)):
+the residual ~1.14x growth is the UNCLIPPED-WINDOW key count (29 → 208 keys
+below the seq-513 clip), not pages; M-B is refuted by the flat clipped regime
+(attn_sliding slope −0.00001 ms/step over steps 520–690 with keys constant at
+513), M-C by reading the timer scope (flint.cpp:1063 — every non-kernel term
+is O(batch)) plus the equal growth of the RoPE-free attn_full phase. The M-A
+hoist (per-unit page-slice + page-major walk, bit-identical) landed and
+measured PERF-NEUTRAL: the per-key cost is the dot/exp/V math, so the ratio
+does not drop (1.14 → 1.14 @16t; tok/s 7.35 → 7.38 @16t, 6.94 → 6.84 @32t,
+noise). The row stops per its stop condition: the diagnosis is the delivery;
+the growth plateaus at seq 513 by correct window behavior. Gates unchanged:
+dtype 172/172 incl. the windowed leg, test_ops_paged_attn 1838/1838, NEON
+15,200,901 assertions, test_flint_paged 208/208, keep-quant 53/60 (0 hard,
+worst 2.486), MiMoV2 sink gates 178/51/67. Rejected: whole-process perf stat
+as scatter evidence (model load contaminates the counters); the invasive M-B
+arena fix (mechanism refuted, nothing to fix).
