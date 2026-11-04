@@ -670,9 +670,17 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
           score[static_cast<size_t>(n)] = {
               1.0f / (1.0f + std::exp(-lg)), n};
         }
+        // FLINT-ROUTER-TOTALORDER: the comparator is a TOTAL order — score
+        // descending, lowest expert index wins an exact f32 tie. partial_sort
+        // leaves the order among equal elements unspecified when the
+        // comparator orders by score only, so the selected expert set (and
+        // every token downstream of the gather) was implementation-defined on
+        // tie inputs. With a total order every correct selection algorithm
+        // produces the same top-k in the same order.
         std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
                           [](const auto& a, const auto& b) {
-                            return a.first > b.first;
+                            return a.first != b.first ? a.first > b.first
+                                                      : a.second < b.second;
                           });
         double sum = 0.0;
         for (int64_t kk = 0; kk < top_k; ++kk) sum += score[static_cast<size_t>(kk)].first;
@@ -861,10 +869,10 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
     std::vector<float> hw(static_cast<size_t>(t * top_k));
     std::vector<int32_t> hi(static_cast<size_t>(t * top_k));
     // FLINT-CPU-DESCENT-2: the score workspace is hoisted out of the token
-    // loop. The selection is UNCHANGED — std::partial_sort with the same
-    // comparator over the same score values — so the routing output stays
-    // bit-identical (partial_sort's order among exact float ties is
-    // unspecified, and any tie-order change would move gathered tokens).
+    // loop. FLINT-ROUTER-TOTALORDER: the comparator is a TOTAL order —
+    // score descending, lowest expert index wins an exact f32 tie (the
+    // score-only comparator left the order among equal elements — and so the
+    // selected expert set — unspecified on tie inputs).
     std::vector<std::pair<float, int64_t>> score(static_cast<size_t>(e));
     for (int64_t i = 0; i < t; ++i) {
       for (int64_t n = 0; n < e; ++n) {
@@ -872,7 +880,10 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
         score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
       }
       std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
-                        [](const auto& a, const auto& b) { return a.first > b.first; });
+                        [](const auto& a, const auto& b) {
+                          return a.first != b.first ? a.first > b.first
+                                                    : a.second < b.second;
+                        });
       double sum = 0.0;
       for (int64_t kk = 0; kk < top_k; ++kk)
         sum += score[static_cast<size_t>(kk)].first;

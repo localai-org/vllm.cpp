@@ -47,8 +47,43 @@ uint32_t Xorshift32(uint32_t* state) {
 
 float Sigmoid(float lg) { return 1.0f / (1.0f + std::exp(-lg)); }
 
-// The PREVIOUS path: full score vector + partial_sort.
+// The LANDED production path: full score vector + partial_sort under the
+// TOTAL order (FLINT-ROUTER-TOTALORDER) — score descending, lowest expert
+// index wins an exact f32 tie. This mirrors flint.cpp's router block after
+// the comparator fix; the superset the tie-fix supersedes (the score-only
+// comparator, whose tie order partial_sort leaves UNSPECIFIED) is kept as
+// UnspecifiedRouting below for the boundary-tie adjudication cases only.
 Routing ReferenceRouting(const std::vector<float>& hlog, int t) {
+  Routing r;
+  r.weights.assign(static_cast<size_t>(t * kTopK), 0.0f);
+  r.ids.assign(static_cast<size_t>(t * kTopK), -1);
+  for (int i = 0; i < t; ++i) {
+    std::vector<std::pair<float, int64_t>> score(kE);
+    for (int n = 0; n < kE; ++n) {
+      score[static_cast<size_t>(n)] = {Sigmoid(hlog[static_cast<size_t>(i) * kE + n]), n};
+    }
+    std::partial_sort(score.begin(), score.begin() + kTopK, score.end(),
+                      [](const auto& a, const auto& b) {
+                        return a.first != b.first ? a.first > b.first
+                                                  : a.second < b.second;
+                      });
+    double sum = 0.0;
+    for (int kk = 0; kk < kTopK; ++kk) sum += score[static_cast<size_t>(kk)].first;
+    for (int kk = 0; kk < kTopK; ++kk) {
+      r.weights[static_cast<size_t>(i * kTopK + kk)] = static_cast<float>(
+          score[static_cast<size_t>(kk)].first / sum);
+      r.ids[static_cast<size_t>(i * kTopK + kk)] =
+          static_cast<int32_t>(score[static_cast<size_t>(kk)].second);
+    }
+  }
+  return r;
+}
+
+// The superset comparator this row replaces: score only, tie order
+// unspecified. Kept so the harness can demonstrate that tie inputs move
+// under it (the falsification record) while every total-order selection
+// agrees.
+Routing UnspecifiedRouting(const std::vector<float>& hlog, int t) {
   Routing r;
   r.weights.assign(static_cast<size_t>(t * kTopK), 0.0f);
   r.ids.assign(static_cast<size_t>(t * kTopK), -1);
@@ -71,7 +106,11 @@ Routing ReferenceRouting(const std::vector<float>& hlog, int t) {
   return r;
 }
 
-// The NEW path: bounded top-k insertion against the same comparator.
+// The second CORRECT algorithm against the same total order: bounded top-k
+// insertion (a heap-shaped selection with a different traversal than
+// partial_sort). Under the total order it MUST agree with ReferenceRouting
+// bit-for-bit, ties included — that agreement is the equivalence property the
+// parallel top-k (the row's third algorithm) inherits.
 Routing CandidateRouting(const std::vector<float>& hlog, int t) {
   Routing r;
   r.weights.assign(static_cast<size_t>(t * kTopK), 0.0f);
@@ -175,4 +214,51 @@ TEST_CASE("flint router top-k: tie-saturated logits are bit-identical") {
     }
     CheckEquivalence(hlog, 1, "saturated rep=" + std::to_string(rep));
   }
+}
+
+TEST_CASE("flint router top-k: boundary ties select the lowest index") {
+  // The top-k BOUNDARY tie is the selection-changing case: expert j and a
+  // LOWER-indexed expert share the k-th score exactly. The total order must
+  // admit the lower index; the old score-only comparator had no defined
+  // answer. Also: tie-saturated BATCHES, not only single tokens.
+  std::vector<float> hlog(kE, 0.25f);
+  hlog[0] = 0.5f;   // rank 0
+  hlog[7] = 0.4f;   // rank 1
+  hlog[300] = 0.3f; // ranks 2-3, then the whole remaining mass ties at
+  hlog[301] = 0.3f; // sigmoid(0.25) — ranks 4..5 select the LOWEST indices
+  const Routing got = CandidateRouting(hlog, 1);
+  const int32_t want[6] = {0, 7, 300, 301, 1, 2};
+  for (int kk = 0; kk < kTopK; ++kk) REQUIRE(got.ids[static_cast<size_t>(kk)] == want[kk]);
+
+  uint32_t rng = 0x5A5A5A5AU;
+  for (int rep = 0; rep < 64; ++rep) {
+    const int t = 1 + static_cast<int>(Xorshift32(&rng) % 16);
+    std::vector<float> bhlog(static_cast<size_t>(t * kE));
+    for (float& v : bhlog) {
+      v = static_cast<float>(static_cast<int>(Xorshift32(&rng) % 3));  // 3 distinct values: mass ties
+    }
+    CheckEquivalence(bhlog, t, "tie batch rep=" + std::to_string(rep));
+  }
+}
+
+TEST_CASE("flint router top-k: the unspecified comparator moves on tie inputs (record)") {
+  // DOCUMENTATION, NOT A GATE: counts how often the superseded score-only
+  // comparator disagrees with the total order over the tie corpus. This is
+  // the falsification the FLINT-CPU-DESCENT-2 harness recorded, now quantified
+  // per libstdc++ partial_sort; a zero here would mean no tie was
+  // selection-changing in this sample, not that the order is defined.
+  uint32_t rng = 0xABCDEF03U;
+  int moved = 0, reps = 0;
+  for (int rep = 0; rep < 128; ++rep) {
+    std::vector<float> hlog(kE);
+    for (float& v : hlog) v = static_cast<float>(static_cast<int>(Xorshift32(&rng) % 5)) - 2.0f;
+    const Routing ref = ReferenceRouting(hlog, 1);
+    const Routing uns = UnspecifiedRouting(hlog, 1);
+    ++reps;
+    for (int kk = 0; kk < kTopK; ++kk) {
+      if (ref.ids[static_cast<size_t>(kk)] != uns.ids[static_cast<size_t>(kk)]) { ++moved; break; }
+    }
+  }
+  MESSAGE("unspecified-order selections differing from the total order on tie inputs: "
+          << moved << "/" << reps << " reps");
 }
