@@ -273,15 +273,15 @@ still host-bound. This is an active correctness backend, not a performance
 backend. See [README](../README.md) and the
 [Tenstorrent backend spec](../.agents/specs/tenstorrent-backend.md).
 
-On the Tenstorrent device arm, `VT_FLINT_TT_DEVICE_ATTN=1` moves the Flint
-attention legs (per-head QK RMSNorm, RoPE, the sliding window and the
-per-head sinks) onto the device attention path; the default runs attention
-in the host `SinksAttention` shadow. The device arm holds the same
-correctness band (row `FLINT-P150-ATTENTION`, spec
-`.agents/specs/flint-p150-attention.md`), and the serving trace
-(`docs/bench-evidence/flint-p150-attention-20261031/`) records the
-MoE-dominated step times where attention is a minor share — the env stays
-off by default.
+On the Tenstorrent device arm, the Flint attention legs (per-head QK RMSNorm,
+RoPE, the sliding window and the per-head sinks) run on the device attention
+path by default; `VT_FLINT_TT_DEVICE_ATTN=0` opts out to the host
+`SinksAttention` shadow. The adoption (row `FLINT-P150-STAGE2-GATE`, spec
+`.agents/specs/flint-p150-stage2-gate.md`) rests on the model-level gate: the
+device arm held the host arm's drift-tolerant band at 3/3 reps
+(`docs/bench-evidence/flint-p150-stage2-gate-20261101/`), and the serving
+trace (`docs/bench-evidence/flint-p150-attention-20261031/`) records the
+MoE-dominated step times where attention is a minor share.
 
 
 A Vulkan build (`-DVLLM_CPP_VULKAN=ON`) adds three kernel-measurement binaries.

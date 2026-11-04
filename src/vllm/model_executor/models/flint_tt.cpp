@@ -100,12 +100,17 @@ int64_t Bf16Numel(const OwnedTensor& t) {
 
 bool DumpOn() { return std::getenv("FLINT_TT_W0_DUMP") != nullptr; }
 
-// FLINT-P150-ATTENTION: the device-attention switch. Default OFF — the host
-// `SinksAttention` stays the shadow and the fallback; stage 3's serving trace
-// decides whether the default flips (the spec forces no adoption verdict).
+// FLINT-P150-STAGE2-GATE (adoption, 2026-11-03): the device attention is
+// the DEFAULT — the model-level gate (test_flint_tt_stage2_gate.cpp) measured
+// the device arm INSIDE the host arm's drift-tolerant band at 3/3 reps
+// (rel_rms 2.200e-1, max_abs 3.956e+1 vs the 0.50 / 64.0 fence; evidence
+// docs/bench-evidence/flint-p150-stage2-gate-20261101/), and the stage-3
+// serving trace is roughly neutral (53.0 vs 55.2 s/step). VT_FLINT_TT_DEVICE_
+// ATTN=0 opts OUT to the host `SinksAttention` shadow (the same-binary
+// rollback).
 bool DeviceAttnEnabled() {
   const char* e = std::getenv("VT_FLINT_TT_DEVICE_ATTN");
-  return e != nullptr && e[0] == '1';
+  return e == nullptr || e[0] != '0';
 }
 
 // NeoX-style (rotate_half) RoPE over full head_dim — the CPU reference's own

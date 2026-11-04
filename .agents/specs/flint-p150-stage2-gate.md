@@ -62,3 +62,32 @@ test_flint_paged 208/208; the single-layer probe 64/64.
 ## Git integration
 
 One pull request, `row/FLINT-P150-STAGE2-GATE`, spec committed first.
+
+## Outcome
+
+DONE 2026-11-03. Measured (3 reps, bit-identical per arm, P150, keep-quant
+paged recipe): host arm rel_rms 2.198e-1 / max_abs 3.335e+1, chain
+`269 ×8`; device arm rel_rms 2.200e-1 / max_abs 3.956e+1, chain
+`12834 332 269 284 1978 877 3087 90562` — both under the 0.50 / 64.0
+drift-tolerant fence, so the spec's default flip fired: DeviceAttnEnabled()
+is default ON, `=0` opts out. Rejected: keeping default-off — the numbers
+gave it no basis (band holds; serving trace roughly neutral at 53.0 vs
+55.2 s/step from stage 3, no new perf claim). Why the fence keeps its
+value: the absolute 0.50/64.0 band is the W0 drift-tolerant fence, and this
+run reproduced the epoch drift record (2.198e-1 here vs 2.683e-1 on the
+pre-blocker base) — a tighter band measures the epoch, not the code.
+Finding recorded, not a gap: the keep-quant kernel include dir is
+`__FILE__`-derived and `-ffile-prefix-map` makes it relative, so TT test
+processes must run with CWD = the building worktree's source root, else
+every forward throws `kernel.cpp:106`. Second finding, named for the next
+wave: identical device-attention forwards measure different distances
+depending on the pool/slot history their predecessors left (a
+device-after-device history measured 5.050e-1, 1 percent over the fence;
+device-first measured 2.540e-2) — the gate therefore pins both arms
+explicitly (`=0` / `=1`) so the flip cannot move its measurements; no
+serving history toggles arms. Evidence:
+`docs/bench-evidence/flint-p150-stage2-gate-20261101/`. Gates: the new gate
+case 3/3 green, host W0 unchanged green, single-layer probe 3/3,
+`test_flint_paged` 208/208, check-agent-record, check-env-doc, commit style,
+trailers, preflight (the named host failure check-windows-portability.py
+dotnet only).

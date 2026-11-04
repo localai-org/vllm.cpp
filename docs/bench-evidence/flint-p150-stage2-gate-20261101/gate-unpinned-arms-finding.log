@@ -1,0 +1,72 @@
++ exec
++ flock -x 9
++ /home/lu_zero/Sources/tt/luwen/target/release/reset
+Found 1 chips to reset
+Resetting chips
+Waiting for reset to complete
+New chip! We now have 1 chips
+Chip initialization complete (found )
+Chip initializing complete...
+ ARC
+
+ [8/8] DRAM
+
+ [14/14] ETH
+
+ [4/4] CPU
+
+Chip detection complete (found )
++ sleep 15
++ rm -f /dev/shm/TT_UMD_LOCK.ARC_MSG /dev/shm/TT_UMD_LOCK.ARC_MSG_0_PCIe /dev/shm/TT_UMD_LOCK.CHIP_IN_USE_0_PCIe /dev/shm/TT_UMD_LOCK.MEM_BARRIER_0_PCIe /dev/shm/TT_UMD_LOCK.PCIE_DMA_0_PCIe /dev/shm/TT_UMD_LOCK.REMOTE_ARC_MSG_0_PCIe /dev/shm/tt_device_10696379123398373860_memory
+++ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
++ echo 'governor-before: performance'
+governor-before: performance
++ export LD_LIBRARY_PATH=/tmp/umdtrial-install/lib64:/tmp/umdtrial-install/libexec/tt-metalium
++ LD_LIBRARY_PATH=/tmp/umdtrial-install/lib64:/tmp/umdtrial-install/libexec/tt-metalium
++ export TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/tt-metalium
++ TT_METAL_RUNTIME_ROOT=/tmp/umdtrial-install/libexec/tt-metalium
++ export TT_METAL_HOME=/home/lu_zero/Sources/tt/tt-metal-pin
++ TT_METAL_HOME=/home/lu_zero/Sources/tt/tt-metal-pin
++ export VT_FLINT_KEEP_QUANT=1
++ VT_FLINT_KEEP_QUANT=1
++ export FLINT_TT_W0_MODEL=/mnt/models/flint-GGUF/flint-Q4_K_M.gguf
++ FLINT_TT_W0_MODEL=/mnt/models/flint-GGUF/flint-Q4_K_M.gguf
++ cd /tmp/flint-p150-stage2
++ echo '=== W0 with opt-out VT_FLINT_TT_DEVICE_ATTN=0 (host arm) ==='
+=== W0 with opt-out VT_FLINT_TT_DEVICE_ATTN=0 (host arm) ===
++ VT_FLINT_TT_DEVICE_ATTN=0
++ taskset -c 32-63 /tmp/build-p150stage2/tests/test_flint_tt_w0 '-tc=*dispatch*'
++ /usr/bin/grep -E 'w0\]|Status|assertions|ERROR'
+[flint-tt-w0] dispatch: the kTENSTORRENT case was EXERCISED (counter 0 -> 1)
+[flint-tt-w0] mode=keep-quant quant_dispatch_calls=5138
+[flint-tt-w0] first-token logits: max_abs=3.335e+01 rms=5.053e+00 rel_rms=2.198e-01 (n=750720)
+[flint-tt-w0] greedy chain match=1/8 dev=[ 269 269 269 269 269 269 269 269 ] cpu=[ 12834 332 269 764 32 13 3529 198 ]
+[doctest] assertions: 9 | 9 passed | 0 failed |
+[doctest] Status: SUCCESS!
++ echo '=== stage2 gate with ADOPTED default (env unset) ==='
+=== stage2 gate with ADOPTED default (env unset) ===
++ unset VT_FLINT_TT_DEVICE_ATTN
++ taskset -c 32-63 /tmp/build-p150stage2/tests/test_flint_tt_stage2_gate '-tc=*stage-2*'
++ /usr/bin/grep -E 'stage2-gate|Status|assertions|ERROR'
+[flint-tt-stage2-gate] arm=host rel_rms=2.540e-02 max_abs=2.841e+00 chain=[ 330 16 8 12834 330 17 8 65432 ] forward_calls=9
+[flint-tt-stage2-gate] arm=device rel_rms=5.050e-01 max_abs=6.210e+01 chain=[ 269 3705 297 12834 13 450 6021 70317 ] forward_calls=18
+./tests/vllm/models/test_flint_tt_stage2_gate.cpp:229: ERROR: CHECK( device.rel_rms < kBandRelRms ) is NOT correct!
+[doctest] assertions: 11 | 10 passed | 1 failed |
+[doctest] Status: FAILURE!
++ echo '=== single-layer probe (default) ==='
+=== single-layer probe (default) ===
++ taskset -c 32-63 /tmp/build-p150stage2/tests/test_flint_tt_attention_probe
++ /usr/bin/grep -E 'Status|assertions'
+[doctest] assertions: 4 | 4 passed | 0 failed |
+[doctest] Status: SUCCESS!
++ echo '=== paged (default build) ==='
+=== paged (default build) ===
++ taskset -c 64-127 /tmp/build-p150stage2/tests/test_flint_paged
++ /usr/bin/grep -E 'Status|assertions'
+[doctest] assertions: 208 | 208 passed | 0 failed |
+[doctest] Status: SUCCESS!
+++ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
++ echo 'governor-after: performance'
+governor-after: performance
++ echo VERIFY-DONE
+VERIFY-DONE
