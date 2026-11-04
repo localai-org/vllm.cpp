@@ -116,6 +116,10 @@ struct FlintPhaseTotals {
   double moe_router = 0;   // router matmul + host top-k
   double moe_routed = 0;   // the per-expert gather/SiLU-mul/scatter loop
   double moe_shared = 0;   // shared expert + MoeCombine
+  double shared_expert = 0; // FLINT-CPU-DESCENT-2 sub-attribution: the shared
+                            // expert GEMVs alone (subset of moe_shared)
+  double moe_combine = 0;   // FLINT-CPU-DESCENT-2 sub-attribution: MoeCombine
+                            // alone (subset of moe_shared)
   double lm_head = 0;      // logits gather + untied head matmul
   double other = 0;        // sink casts, per-layer slot mapping, post-MoE residual
 };
@@ -156,10 +160,11 @@ void FlintPhasePrint(int64_t batch, const FlintPhaseTotals& t, double wall_ms) {
                "[FLINT-PHASE] batch=%lld embed=%.3f attn_sliding=%.3f "
                "attn_full=%.3f norms=%.3f dense_mlp=%.3f moe_router=%.3f "
                "moe_routed=%.3f moe_shared=%.3f lm_head=%.3f other=%.3f "
-               "fwd_wall_ms=%.3f\n",
+               "shared_expert=%.3f moe_combine=%.3f fwd_wall_ms=%.3f\n",
                static_cast<long long>(batch), t.embed, t.attn_sliding,
                t.attn_full, t.norms, t.dense_mlp, t.moe_router, t.moe_routed,
-               t.moe_shared, t.lm_head, t.other, wall_ms);
+               t.moe_shared, t.lm_head, t.other, t.shared_expert,
+               t.moe_combine, wall_ms);
 }
 
 }  // namespace
@@ -855,8 +860,13 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
     dlog.Download(d, hlog.data());
     std::vector<float> hw(static_cast<size_t>(t * top_k));
     std::vector<int32_t> hi(static_cast<size_t>(t * top_k));
+    // FLINT-CPU-DESCENT-2: the score workspace is hoisted out of the token
+    // loop. The selection is UNCHANGED — std::partial_sort with the same
+    // comparator over the same score values — so the routing output stays
+    // bit-identical (partial_sort's order among exact float ties is
+    // unspecified, and any tie-order change would move gathered tokens).
+    std::vector<std::pair<float, int64_t>> score(static_cast<size_t>(e));
     for (int64_t i = 0; i < t; ++i) {
-      std::vector<std::pair<float, int64_t>> score(static_cast<size_t>(e));
       for (int64_t n = 0; n < e; ++n) {
         const float lg = hlog[static_cast<size_t>(i) * e + n];
         score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
@@ -928,9 +938,19 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
 
   ph_routed.Stop();
   FlintPhaseScope ph_shared(FlintPhaseDst(&g_flint_phase->moe_shared));
-  DBuf shared = FlintSharedExpert(d, w.shared_expert, x);
+  DBuf shared;
+  {
+    // FLINT-CPU-DESCENT-2 sub-attribution: the shared expert GEMVs alone.
+    // The same weights serve every token, so this bucket separates the
+    // shared-expert cost from the combine scatter before either is touched.
+    FlintPhaseScope ph_se(FlintPhaseDst(&g_flint_phase->shared_expert));
+    shared = FlintSharedExpert(d, w.shared_expert, x);
+  }
   DBuf out(d, DType::kBF16, {t, p.hidden_size});
-  vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared.t());
+  {
+    FlintPhaseScope ph_cb(FlintPhaseDst(&g_flint_phase->moe_combine));
+    vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared.t());
+  }
   return out;
 }
 

@@ -1084,6 +1084,9 @@ target_include_directories(test_flint_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # registry-entered mixed-batch paged gate against the reference forward.
 vllm_cpp_add_test(test_flint_paged vllm/models/test_flint_paged.cpp)
 target_include_directories(test_flint_paged PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# FLINT-CPU-DESCENT-2: the host router top-k selection equivalence suite
+# (bounded insertion vs the previous partial_sort path, bit-identical).
+vllm_cpp_add_test(test_flint_router_topk_equiv vllm/models/test_flint_router_topk_equiv.cpp)
 # W-c: the REAL-WEIGHTS paged-engine gate — the published Q4_K_M through the
 # full LLMEngine stack with continuous arrival, chains adjudicated against the
 # reference forward (checkpoint-gated: skips loudly without the container).
@@ -3448,6 +3451,10 @@ target_include_directories(test_ops_quant_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # includes cpu_quant_blocks.h from src/, hence the same private include.
 vllm_cpp_add_test(test_neon_q4k_dot vt/test_neon_q4k_dot.cpp)
 target_include_directories(test_neon_q4k_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# FLINT-CPU-DESCENT-2: the NEON Q6_K x Q8_K dot bit-identity suite (the
+# keep-quant flint lm_head's class). Same private include as the q4_K suite.
+vllm_cpp_add_test(test_neon_q6k_dot vt/test_neon_q6k_dot.cpp)
+target_include_directories(test_neon_q6k_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-DSV4-EXL3 W1a: the EXL3 (exllamav3) trellis reference dequant. Gated by
 # tiles the TEST packs itself off the ENCODE side (tests/test_quant_fn.py:83-128
 # + pack.cu:29-57), so the fixture never shares code with the decode under test,

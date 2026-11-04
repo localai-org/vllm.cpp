@@ -60,3 +60,21 @@ gate unmoved at 53/60) — same-binary A/B on the loaded shared box measured
 16t 5.57 -> 5.93 tok/s median (+6.5%), 32t noise-bound
 ([evidence](../bench-evidence/flint-neon-q4k-dot-20261031/README.md)). The
 table above keeps the pre-port record; a quiet-box re-pin is owed.
+
+Update 2026-11-04 (`FLINT-CPU-DESCENT-2`): the lm_head lever landed. The
+untied `output.weight` in this container is [V, H] Q6_K, which the NEON q4_K
+dot does not cover; a NEON `vec_dot_q6_K_q8_K` tier (`VT_CPU_Q6K_DOT=auto`,
+bit-identical to the scalar kernel, 6370 asserts; keep-quant token gate
+unmoved at 53/60, 0 hard, worst 2.48648) cut the in-situ lm_head phase 5.74 ->
+4.55 ms at 16t. Same-binary interleaved A/B on a CONTENDED shared box (a peer
+session benched the same zone; absolutes are not comparable to the records):
+16t 5.12 -> 5.44 tok/s median (+6.3%), 32t 5.73 -> 5.83 (+1.7%), direction
+consistent in 6/6 pairs. The row's re-attribution also split the old
+"shared expert + combine" bucket: combine is 0.34 ms (0.2%); the shared
+expert's three bf16 GEMVs are the bucket, and a bf16-dot tier for them is a
+numerics change owed to a separate row. Router top-k (2.6-4.6%) cannot move
+without a tie-order decision: `std::partial_sort`'s order among exact float
+ties is unspecified, so a replacement selection cannot be proven
+bit-identical (equivalence suite records the finding). Routed-expert loop
+32-37% keeps its grouped-GEMM row. No ceiling declared.
+[evidence](../bench-evidence/flint-cpu-descent-2-20261101/README.md).

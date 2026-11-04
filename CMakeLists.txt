@@ -1484,6 +1484,7 @@ add_library(vllm STATIC
   src/vt/cpu/cpu_quant_dot.cpp
   src/vt/cpu/cpu_quant_dot_sdot.cpp
   src/vt/cpu/cpu_quant_dot_q4k_neon.cpp
+  src/vt/cpu/cpu_quant_dot_q6k_neon.cpp
   src/vt/cpu/cpu_quant_dot_arm.cpp
   src/vt/cpu/cpu_paged_attn_bfdot_arm.cpp
   src/vt/cpu/cpu_quant_repack.cpp
@@ -1565,6 +1566,13 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   set_source_files_properties(
     src/vt/cpu/cpu_quant_dot_q4k_neon.cpp PROPERTIES
     COMPILE_DEFINITIONS VT_CPU_ARM_Q4K_DOT=1
+    COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+dotprod+fp16>")
+  # FLINT-CPU-DESCENT-2: the Q6_K x Q8_K NEON DotProd tier (the keep-quant
+  # flint lm_head's class) needs the same surgical per-file +dotprod build and
+  # the same runtime HWCAP probe (VT_CPU_Q6K_DOT, default auto).
+  set_source_files_properties(
+    src/vt/cpu/cpu_quant_dot_q6k_neon.cpp PROPERTIES
+    COMPILE_DEFINITIONS VT_CPU_ARM_Q6K_DOT=1
     COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+dotprod+fp16>")
   # KERNEL-CPU-A76-Q8-DOT is Linux-only because its dispatch uses HWCAP/MIDR
   # and the hand-written file carries ELF assembler directives. Other arm64
