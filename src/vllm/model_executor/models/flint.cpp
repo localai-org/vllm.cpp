@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -166,6 +167,92 @@ void FlintPhasePrint(int64_t batch, const FlintPhaseTotals& t, double wall_ms) {
                t.moe_shared, t.lm_head, t.other, t.shared_expert,
                t.moe_combine, wall_ms);
 }
+
+// ---- FLINT-ROUTER-TOTALORDER (VT_FLINT_ROUTER_TIE_STATS): the tie-frequency
+// counter. Counts, per router call (one token's sigmoid score vector), the
+// exact f32 duplicates among ALL e scores and within the top-k head, and the
+// BOUNDARY tie (score[k-1] == score[k]) — the only tie class that can change
+// the selected expert set. Aggregated over the process and printed once at
+// exit, so one serving leg yields one summary line. Read-only: an unset env
+// pays one static getenv and the counters are never touched.
+struct FlintTieStats {
+  uint64_t calls = 0;         // router calls (tokens × layers)
+  uint64_t tie_tokens = 0;    // calls with >= 1 duplicate anywhere
+  uint64_t ties_anywhere = 0; // duplicate scores beyond the first, all e
+  uint64_t ties_topk = 0;     // duplicate scores beyond the first, top-k head
+  uint64_t ties_boundary = 0; // score[k-1] == score[k] (selection-changing)
+  std::vector<std::string> boundary_samples;  // first 16, "expert_a=expert_b@bits"
+};
+
+FlintTieStats& FlintTieStatsRef() {
+  static FlintTieStats s;
+  return s;
+}
+
+void FlintTieStatsPrint() {
+  const FlintTieStats& s = FlintTieStatsRef();
+  std::fprintf(stderr,
+               "[FLINT-ROUTER-TIE-STATS] calls=%llu tie_tokens=%llu "
+               "ties_anywhere=%llu ties_topk=%llu ties_boundary=%llu\n",
+               static_cast<unsigned long long>(s.calls),
+               static_cast<unsigned long long>(s.tie_tokens),
+               static_cast<unsigned long long>(s.ties_anywhere),
+               static_cast<unsigned long long>(s.ties_topk),
+               static_cast<unsigned long long>(s.ties_boundary));
+  for (const std::string& sm : s.boundary_samples)
+    std::fprintf(stderr, "[FLINT-ROUTER-TIE-STATS] boundary %s\n", sm.c_str());
+}
+
+inline bool FlintTieStatsOn() {
+  static const bool on = [] {
+    if (std::getenv("VT_FLINT_ROUTER_TIE_STATS") == nullptr) return false;
+    std::atexit(FlintTieStatsPrint);
+    return true;
+  }();
+  return on;
+}
+
+// Records one router call from the FULLY total-order-sorted score array (in
+// stats mode the caller finishes the sort partial_sort started; the head is
+// identical — the total order admits exactly one).
+void FlintTieStatsRecord(const std::vector<std::pair<float, int64_t>>& sorted,
+                         int64_t top_k) {
+  FlintTieStats& s = FlintTieStatsRef();
+  ++s.calls;
+  bool any = false;
+  for (size_t n = 1; n < sorted.size(); ++n) {
+    if (sorted[n].first == sorted[n - 1].first) {
+      ++s.ties_anywhere;
+      any = true;
+    }
+  }
+  if (any) ++s.tie_tokens;
+  for (int64_t n = 1; n < top_k; ++n) {
+    if (sorted[static_cast<size_t>(n)].first ==
+        sorted[static_cast<size_t>(n - 1)].first)
+      ++s.ties_topk;
+  }
+  if (sorted[static_cast<size_t>(top_k)].first ==
+      sorted[static_cast<size_t>(top_k - 1)].first) {
+    ++s.ties_boundary;
+    if (s.boundary_samples.size() < 16) {
+      const uint32_t bits = [f = sorted[static_cast<size_t>(top_k - 1)].first] {
+        uint32_t b;
+        std::memcpy(&b, &f, 4);
+        return b;
+      }();
+      s.boundary_samples.push_back(
+          "expert_" + std::to_string(sorted[static_cast<size_t>(top_k - 1)].second) +
+          "=expert_" + std::to_string(sorted[static_cast<size_t>(top_k)].second) +
+          "@bits_" + std::to_string(bits));
+    }
+  }
+}
+
+// The total order, shared by every selection site and the stats scan.
+constexpr auto kFlintScoreOrder = [](const auto& a, const auto& b) {
+  return a.first != b.first ? a.first > b.first : a.second < b.second;
+};
 
 }  // namespace
 
@@ -678,10 +765,11 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
         // tie inputs. With a total order every correct selection algorithm
         // produces the same top-k in the same order.
         std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
-                          [](const auto& a, const auto& b) {
-                            return a.first != b.first ? a.first > b.first
-                                                      : a.second < b.second;
-                          });
+                          kFlintScoreOrder);
+        if (FlintTieStatsOn()) {
+          std::sort(score.begin(), score.end(), kFlintScoreOrder);
+          FlintTieStatsRecord(score, top_k);
+        }
         double sum = 0.0;
         for (int64_t kk = 0; kk < top_k; ++kk) sum += score[static_cast<size_t>(kk)].first;
         std::vector<float> expert_in(normed.begin() + static_cast<std::ptrdiff_t>(i) * h,
@@ -880,10 +968,11 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
         score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
       }
       std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
-                        [](const auto& a, const auto& b) {
-                          return a.first != b.first ? a.first > b.first
-                                                    : a.second < b.second;
-                        });
+                        kFlintScoreOrder);
+      if (FlintTieStatsOn()) {
+        std::sort(score.begin(), score.end(), kFlintScoreOrder);
+        FlintTieStatsRecord(score, top_k);
+      }
       double sum = 0.0;
       for (int64_t kk = 0; kk < top_k; ++kk)
         sum += score[static_cast<size_t>(kk)].first;
