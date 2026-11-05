@@ -1,0 +1,8 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   45711  300  0.0  10944  5184 ?        R    17:14   0:00 ps aux --sort=-%cpu
+lu_zero   45564  116  0.0  25216 18112 ?        R    17:14   0:00 /usr/lib/python-exec/python3.13/python3 scripts/check-fp4-resident-consistency.py
+lu_zero   43142  1.4  0.2 6207616 565888 pts/5  Sl+  Nov04  18:49 claude
+lu_zero   72204  1.0  0.7 21426816 1936384 pts/0 Sl+ Nov01  63:04 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   59982  0.7  0.2 6248000 544704 pts/1  Sl+  Oct27 103:55 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero    4737  0.6  1.9 29992576 5169856 pts/5 Sl+ Nov04   8:41 /usr/bin/rust-analyzer
+lu_zero  105003  0.2  0.0 6178368 258944 pts/4  Sl+  Nov04   2:56 claude --resume 322c3400-690e-4309-a759-11ea7c703477

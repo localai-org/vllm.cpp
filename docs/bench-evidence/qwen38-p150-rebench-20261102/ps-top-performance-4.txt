@@ -1,0 +1,8 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   48667  108  0.0 268544 124160 ?       Sl   20:07   0:00 /home/lu_zero/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo --config build.target-dir="/home/lu_zero/Sources/portage-cli/target" doc --workspace --no-deps
+lu_zero   48534 63.1  0.0 8767872 73024 ?       Sl   20:07   0:00 /home/lu_zero/.cargo/bin/mbx doc --workspace --no-deps
+lu_zero   48533  4.8  0.0  22336 15104 ?        Ss   20:07   0:00 /usr/lib/python-exec/python3.13/python3 .claude/hooks/check_rustdoc.py
+lu_zero   43142  1.5  0.2 6207616 592064 pts/5  Sl+  Nov04  22:11 claude
+lu_zero   72204  1.0  0.7 21426432 1951808 pts/0 Sl+ Nov01  66:11 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   59982  0.7  0.2 6248000 546816 pts/1  Sl+  Oct27 105:31 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero    4737  0.6  1.9 29992576 5294144 pts/5 Sl+ Nov04   9:36 /usr/bin/rust-analyzer

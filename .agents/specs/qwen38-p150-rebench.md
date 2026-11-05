@@ -1,6 +1,6 @@
 # SPEC — `QWEN38-P150-REBENCH` — the qwen3.8-27B P150 re-bench: the first current-head measurement since the 09-14 end-to-end pass
 
-- Owning row: `QWEN38-P150-REBENCH`
+- Owning row: `QWEN38-P150-REBENCH` — record ID `BACKEND-TENSTORRENT-QWEN38-REBENCH` in the backend matrix
 - Kind: benchmark (measurement; the first re-measurement of qwen3.8-27B on the P150 since 2026-09-14)
 - Issue: created in the same flow (row-scoped local issue)
 
@@ -81,3 +81,60 @@ host dotnet failure), claims file RUNNING→DONE.
 ## Git integration
 
 One pull request, `row/QWEN38-P150-REBENCH`, spec committed first.
+
+## Scope
+
+Measure the qwen3.8-27B Q4_K_M P150 serving path at current head and
+compare against the 09-14 record. Non-goals (unchanged): no CPU-path
+change, no TT kernel change, no new quant arms.
+
+## Upstream chain
+
+vLLM has no Tenstorrent backend; the oracle for this path is the
+recorded 09-14 self-baseline. The bench exercises the production
+AsyncLLM entry point (see reachability in
+`.agents/reachability.md`).
+
+## Our baseline
+
+The 2026-09-14 measurement (row `BACKEND-TT-KEEPQUANT-W3`): TTFT 1389 s,
+TPOT 29.7 s, 0.03 tok/s output, 0.14 tok/s total, duration 2326 s, JIT
+912/916 (99.6%), RC=0 — a single un-swept leg. This row re-measures the
+identical workload at head and sweeps the governor.
+
+## Port map
+
+No port. Measurement-only row: the bench is the 09-14 `vllm-bench`
+invocation via the production AsyncLLM path, unchanged.
+
+## Tests to port
+
+None. No upstream tests apply to a benchmark campaign; the gate is the
+3-rep median comparison against the recorded 09-14 numbers, with the
+stop conditions above.
+
+## Dependencies
+
+- `BACKEND-TENSTORRENT` (the TT backend row) and the 09-14 W3 campaign's
+  bench recipe (`docs/benchmarks/tt-keepquant-27b-decode.md`). The
+  artifact, substrate, and `VT_TT_KEEPQUANT_INT8DOT=1` requirement are
+  inherited unchanged. Depends on nothing new.
+
+## Work breakdown
+
+- W1 (this whole row): reconstruct the recipe, build at head, run the
+  governor sweep (performance r1-r3, schedutil r1-r3, performance
+  return-pin r4), record the comparison, write the evidence dir and the
+  public docs rows, run the gates.
+
+## Risks/decisions
+
+- The 09-14 baseline is a single un-swept leg under an unrecorded
+  governor — the sweep exists to answer exactly that (decision: report
+  both governor medians, never a single leg).
+- The warm/cold `~/.cache/tt-metal-cache` state changes the JIT hit rate
+  (20.3% cold vs 100% warm); decision: report the cold leg for the
+  record and compare against the warm cell, which is the state the
+  09-14 99.6% figure was measured in.
+- Per-lever attribution is bounded by the whole-path bench, not isolated;
+  the README states expected effects and says so.
