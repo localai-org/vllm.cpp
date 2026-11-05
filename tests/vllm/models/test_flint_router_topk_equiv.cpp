@@ -106,41 +106,57 @@ Routing UnspecifiedRouting(const std::vector<float>& hlog, int t) {
   return r;
 }
 
-// The second CORRECT algorithm against the same total order: bounded top-k
-// insertion (a heap-shaped selection with a different traversal than
-// partial_sort). Under the total order it MUST agree with ReferenceRouting
-// bit-for-bit, ties included — that agreement is the equivalence property the
-// parallel top-k (the row's third algorithm) inherits.
+// The PARALLEL-shaped algorithm the total order unlocks: the expert axis is
+// partitioned into fixed chunks; each chunk computes a LOCAL top-k with
+// bounded insertion; the merge selects the final top-k from the chunk heads
+// with partial_sort under the SAME total order. This is the merge step a
+// host parallel selection must get right — under the total order the merged
+// answer is unique, so the candidate MUST equal ReferenceRouting
+// bit-for-bit, heavy ties included. (The production site runs the serial
+// per-row body across token rows through host_parallel::ForOutputRows, which
+// is bit-identical by the seam's construction contract; THIS candidate is the
+// harder claim — a selection algorithm whose combine could in principle
+// differ — proven equal by the total order.)
 Routing CandidateRouting(const std::vector<float>& hlog, int t) {
   Routing r;
   r.weights.assign(static_cast<size_t>(t * kTopK), 0.0f);
   r.ids.assign(static_cast<size_t>(t * kTopK), -1);
-  std::vector<std::pair<float, int64_t>> top;
-  top.reserve(kTopK + 1);
+  constexpr int kChunks = 6;              // 384/6 = 64 experts per chunk
+  constexpr int kChunkE = kE / kChunks;
+  static_assert(kChunks * kChunkE == kE);
   const auto before = [](const std::pair<float, int64_t>& x,
                          const std::pair<float, int64_t>& y) {
     return x.first > y.first || (x.first == y.first && x.second < y.second);
   };
+  std::vector<std::pair<float, int64_t>> heads;
+  heads.reserve(static_cast<size_t>(kChunks * kTopK));
+  std::vector<std::pair<float, int64_t>> top;
+  top.reserve(kTopK + 1);
   for (int i = 0; i < t; ++i) {
-    top.clear();
-    for (int n = 0; n < kE; ++n) {
-      const std::pair<float, int64_t> cand{
-          Sigmoid(hlog[static_cast<size_t>(i) * kE + n]), n};
-      auto pos = std::lower_bound(top.begin(), top.end(), cand, before);
-      if (pos == top.end()) {
-        if (static_cast<int>(top.size()) < kTopK) top.push_back(cand);
-        continue;
+    heads.clear();
+    for (int c = 0; c < kChunks; ++c) {
+      top.clear();
+      for (int n = c * kChunkE; n < (c + 1) * kChunkE; ++n) {
+        const std::pair<float, int64_t> cand{
+            Sigmoid(hlog[static_cast<size_t>(i) * kE + n]), n};
+        auto pos = std::lower_bound(top.begin(), top.end(), cand, before);
+        if (pos == top.end()) {
+          if (static_cast<int>(top.size()) < kTopK) top.push_back(cand);
+          continue;
+        }
+        top.insert(pos, cand);
+        if (static_cast<int>(top.size()) > kTopK) top.pop_back();
       }
-      top.insert(pos, cand);
-      if (static_cast<int>(top.size()) > kTopK) top.pop_back();
+      heads.insert(heads.end(), top.begin(), top.end());
     }
+    std::partial_sort(heads.begin(), heads.begin() + kTopK, heads.end(), before);
     double sum = 0.0;
-    for (int kk = 0; kk < kTopK; ++kk) sum += top[static_cast<size_t>(kk)].first;
+    for (int kk = 0; kk < kTopK; ++kk) sum += heads[static_cast<size_t>(kk)].first;
     for (int kk = 0; kk < kTopK; ++kk) {
       r.weights[static_cast<size_t>(i * kTopK + kk)] = static_cast<float>(
-          top[static_cast<size_t>(kk)].first / sum);
+          heads[static_cast<size_t>(kk)].first / sum);
       r.ids[static_cast<size_t>(i * kTopK + kk)] =
-          static_cast<int32_t>(top[static_cast<size_t>(kk)].second);
+          static_cast<int32_t>(heads[static_cast<size_t>(kk)].second);
     }
   }
   return r;
