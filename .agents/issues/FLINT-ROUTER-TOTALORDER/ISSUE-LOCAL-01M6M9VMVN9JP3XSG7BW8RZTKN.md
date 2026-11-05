@@ -17,3 +17,15 @@ The Flint router selects top-6-of-384 via std::partial_sort with a comparator on
 ## Resolution
 
 -
+
+2026-11-04 (implementer record): the comparator total order, the
+VT_FLINT_ROUTER_TIE_STATS measurement, and the parallel top-k (host row seam
++ chunked-merge equivalence proof) have landed on
+`row/FLINT-ROUTER-TOTALORDER` (f88dcfa12, 96fbb5335, baf44d49e). The
+keep-quant serving gate is UNMOVED on the parallel build (53/60, 0 hard,
+worst 2.48648). The serving legs MEASURE boundary ties (2 per ~895k router
+calls on the 200-completion 32-concurrency leg), so the lowest-index pin is
+a re-adjudication, not a provable no-op — FLAGGED for the operator with the
+counts, the affected-position samples and the gate outcome in
+`docs/bench-evidence/flint-router-totalorder-20261101/README.md`. The issue
+stays OPEN for that adjudication; close it with the operator's decision.
