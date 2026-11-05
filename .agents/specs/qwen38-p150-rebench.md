@@ -138,3 +138,23 @@ stop conditions above.
   09-14 99.6% figure was measured in.
 - Per-lever attribution is bounded by the whole-path bench, not isolated;
   the README states expected effects and says so.
+
+## Outcome
+
+Measured 2026-11-05 at head `702b19167` (closing commit `d893ad6a3`),
+7 legs, RC=0 each. Performance median (r1-r3): TTFT 1203.6 s, TPOT
+25.2 s, 0.03 tok/s output, 0.16 tok/s total, duration 1996 s, JIT
+819/819 warm. Schedutil median: 1215.5 s / 25.5 s (+1.0%). vs the
+09-14 baseline: TTFT −13.4%, TPOT −15.0%, duration −14.2%.
+
+Rejected: reading the cold-cache leg (166/819 JIT hits, 2131 s) as a
+regression — the first leg after a build compiles the
+`~/.cache/tt-metal-cache` from scratch; the 09-14 99.6% figure was
+warm-cache, so the warm 100% cell is the comparable one.
+
+Defaults and why: medians of 3 per governor cell (the kolibri1
+anchoring method, because the 09-14 leg was a single un-swept
+measurement); the governor sweep answered the spec's open question at
++1.0% for schedutil; per-lever attribution stays expected-effect-only
+in the evidence README because a whole-path bench cannot isolate a
+lever, and inventing per-lever numbers would be fabrication.
