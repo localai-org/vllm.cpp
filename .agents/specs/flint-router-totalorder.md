@@ -97,3 +97,13 @@ adversarial corpus.
 One pull request, `row/FLINT-ROUTER-TOTALORDER`, spec committed first:
 the comparator commit, the tie-frequency evidence commit, the parallel
 top-k commit (or your coherent split).
+
+## Now
+
+`IMPLEMENTING` — the comparator (f88dcfa12), the tie-frequency measurement
+(96fbb5335), and the parallel top-k (baf44d49e) have landed on
+`row/FLINT-ROUTER-TOTALORDER`; the serving gate is UNMOVED (53/60, 0 hard,
+worst 2.48648); ties occur in the real serving run (2 boundary ties per
+~900k router calls), so the lowest-index pin is a measured re-adjudication
+FLAGGED for the operator in
+`docs/bench-evidence/flint-router-totalorder-20261101/README.md`.
