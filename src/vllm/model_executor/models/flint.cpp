@@ -43,7 +43,8 @@
 #include <utility>
 #include <vector>
 
-#include "vllm/model_executor/models/dense_attn_block.h"  // Dev/DBuf/paged glue
+#include "vllm/model_executor/models/dense_attn_block.h"
+#include "vllm/model_executor/models/host_parallel.h"  // Dev/DBuf/paged glue
 #include "vllm/model_executor/models/model_registry.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits
 #include "vllm/model_executor/models/qwen3_5_common.h"  // HostLogits
@@ -185,8 +186,11 @@ struct FlintTieStats {
 };
 
 FlintTieStats& FlintTieStatsRef() {
-  static FlintTieStats s;
-  return s;
+  // Leaky on purpose: the printer runs from atexit, and a function-local
+  // static here would be destroyed FIRST (reverse construction order) —
+  // the summary counters would survive but the sample strings would not.
+  static FlintTieStats* s = new FlintTieStats();
+  return *s;
 }
 
 void FlintTieStatsPrint() {
@@ -960,29 +964,39 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
     // loop. FLINT-ROUTER-TOTALORDER: the comparator is a TOTAL order —
     // score descending, lowest expert index wins an exact f32 tie (the
     // score-only comparator left the order among equal elements — and so the
-    // selected expert set — unspecified on tie inputs).
-    std::vector<std::pair<float, int64_t>> score(static_cast<size_t>(e));
-    for (int64_t i = 0; i < t; ++i) {
-      for (int64_t n = 0; n < e; ++n) {
-        const float lg = hlog[static_cast<size_t>(i) * e + n];
-        score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
+    // selected expert set — unspecified on tie inputs) — which is what makes
+    // the PARALLEL selection provable: the row seam partitions token rows
+    // only, each row runs the identical serial instruction sequence, so the
+    // parallel result is bit-identical to the serial one by construction
+    // (host_parallel.h's determinism contract), and a row of top-k under a
+    // total order has exactly one answer for any correct algorithm.
+    const auto select_rows = [&](int64_t r0, int64_t r1) {
+      std::vector<std::pair<float, int64_t>> score(static_cast<size_t>(e));
+      for (int64_t i = r0; i < r1; ++i) {
+        for (int64_t n = 0; n < e; ++n) {
+          const float lg = hlog[static_cast<size_t>(i) * e + n];
+          score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
+        }
+        std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
+                          kFlintScoreOrder);
+        if (FlintTieStatsOn()) {
+          std::sort(score.begin(), score.end(), kFlintScoreOrder);
+          FlintTieStatsRecord(score, top_k);
+        }
+        double sum = 0.0;
+        for (int64_t kk = 0; kk < top_k; ++kk)
+          sum += score[static_cast<size_t>(kk)].first;
+        for (int64_t kk = 0; kk < top_k; ++kk) {
+          hw[static_cast<size_t>(i * top_k + kk)] = static_cast<float>(
+              score[static_cast<size_t>(kk)].first / sum);
+          hi[static_cast<size_t>(i * top_k + kk)] =
+              static_cast<int32_t>(score[static_cast<size_t>(kk)].second);
+        }
       }
-      std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
-                        kFlintScoreOrder);
-      if (FlintTieStatsOn()) {
-        std::sort(score.begin(), score.end(), kFlintScoreOrder);
-        FlintTieStatsRecord(score, top_k);
-      }
-      double sum = 0.0;
-      for (int64_t kk = 0; kk < top_k; ++kk)
-        sum += score[static_cast<size_t>(kk)].first;
-      for (int64_t kk = 0; kk < top_k; ++kk) {
-        hw[static_cast<size_t>(i * top_k + kk)] = static_cast<float>(
-            score[static_cast<size_t>(kk)].first / sum);
-        hi[static_cast<size_t>(i * top_k + kk)] =
-            static_cast<int32_t>(score[static_cast<size_t>(kk)].second);
-      }
-    }
+    };
+    // The size guard runs the SAME body inline below the threshold (decode
+    // batches pay no pool kick); prefill batches parallelize across tokens.
+    host_parallel::ForOutputRows(t, e, select_rows);
     d.b.Copy(d.q, dtw.ptr(), hw.data(), hw.size() * sizeof(float));
     d.b.Copy(d.q, dtid.ptr(), hi.data(), hi.size() * sizeof(int32_t));
   }
