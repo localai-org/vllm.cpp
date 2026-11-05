@@ -122,7 +122,7 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // full RNoPE, MoE 384x6 + shared) with no vLLM registration. W1 gate is:
   // config parses, KV-cache spec builds, model resolves, FP8-block loader
   // reads; the forward refuses until its wave.
-  REQUIRE(registrations.size() == 59);
+  REQUIRE(registrations.size() == 60);
 
   for (const ModelRegistration& registration : registrations) {
     CAPTURE(registration.architecture);
@@ -237,7 +237,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // with the kExampleConfigArchitectures ledger; adding a model appends its two
   // entries here.
   const std::vector<std::string_view> supported = ModelRegistry::SupportedArchs();
-  REQUIRE(supported.size() == 59);
+  REQUIRE(supported.size() == 60);
   CHECK(std::is_sorted(supported.begin(), supported.end()));
   // The full byte-order sequence. Note "MiniCPM3" < "MiniCPMF" and "Phi3" <
   // "PhiF" ('3' 0x33 < 'F' 0x46); "OPT" < "Olmo" ('P' 0x50 < 'l' 0x6C); and among
@@ -1008,7 +1008,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       "Supported architectures: "
       "dict_keys(['BoundaryExtractor', 'ClmModel', 'Cohere2MoeForCausalLM', 'CohereForCausalLM', 'CuaS1Forms', 'DeepseekV2ForCausalLM', "
       "'DeepseekV41ForCausalLM', "
-      "'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
+      "'DeepseekV4ForCausalLM', 'Dots3NoteForCausalLM', 'FlintForCausalLM', 'Gemma2ForCausalLM', 'Gemma3ForCausalLM', "
       "'Gemma4ForConditionalGeneration', 'Gemma4UnifiedForConditionalGeneration', 'GemmaForCausalLM', "
       "'Glm4ForCausalLM', 'Glm4MoeLiteForCausalLM', "
       "'Glm5NextForConditionalGeneration', 'GlmMoeDsaForCausalLM', 'GraniteForCausalLM', "
