@@ -264,6 +264,8 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "DeepseekV41ForCausalLM",
       "DeepseekV4ForCausalLM",
       "Dots3NoteForCausalLM",
+      // "Flint" < "Gemma": 'F' 0x46 < 'G' 0x47.
+      "FlintForCausalLM",
       "Gemma2ForCausalLM",
       "Gemma3ForCausalLM",
       "Gemma4ForConditionalGeneration",
@@ -863,7 +865,7 @@ TEST_CASE("Qwen3.5 SSM cache dtype accepts upstream torch aliases exactly") {
 TEST_CASE("hf_registry_coverage: every registration has an example config fixture") {
   // C++ fixture registry for the currently implemented subset. Keep this list
   // alias-for-alias with the central ordered table, mirroring HF_EXAMPLE_MODELS.
-  constexpr std::array<std::string_view, 59> kExampleConfigArchitectures{
+  constexpr std::array<std::string_view, 60> kExampleConfigArchitectures{
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
@@ -879,6 +881,8 @@ TEST_CASE("hf_registry_coverage: every registration has an example config fixtur
       "DeepseekV41ForCausalLM",
       "DeepseekV4ForCausalLM",
       "Dots3NoteForCausalLM",
+      // "Flint" < "Gemma": 'F' 0x46 < 'G' 0x47.
+      "FlintForCausalLM",
       "Gemma2ForCausalLM",
       "Gemma3ForCausalLM",
       "Gemma4ForConditionalGeneration",
