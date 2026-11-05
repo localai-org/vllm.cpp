@@ -113,6 +113,13 @@ the first pair is the clean one.
 | ab-before-16 (base) | C | 7.163 | 262.6 | 470.8 | — |
 | ab-after-16 (row) | C | 7.335 | 259.1 | 468.7 | **tie (wall −0.4%)** |
 
+Record corrections (fresh review, 2026-11-05): the 1-thread control's
+router-phase gap is **2.13%**, not "within 2%" as an earlier wording had it.
+And the `ab-before-32b` row's printed `moe_router` median (117.880) does NOT
+re-derive from its own log — the leg's phase lines are bimodal (~80 and
+~152 ms modes; recomputed median 83.814), the leg is already excluded from
+evidence above, and it is non-comparable.
+
 **Finding, honest against the spec's premise**: the router phase did NOT
 regress and did NOT improve at 16t/32t serving shapes — a measured tie. The
 spec's "partial_sort doubles at 32t / the parallel lever is worth ~2-5%"

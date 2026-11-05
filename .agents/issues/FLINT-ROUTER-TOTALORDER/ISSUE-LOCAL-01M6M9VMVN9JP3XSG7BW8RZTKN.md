@@ -29,3 +29,16 @@ a re-adjudication, not a provable no-op — FLAGGED for the operator with the
 counts, the affected-position samples and the gate outcome in
 `docs/bench-evidence/flint-router-totalorder-20261101/README.md`. The issue
 stays OPEN for that adjudication; close it with the operator's decision.
+
+2026-11-05 (fresh-review repair, `row/FLINT-ROUTER-TOTALORDER` `445c11f88`):
+the review found a THIRD selection site the row had missed — the production
+TT device arm's own router loop (`flint_tt.cpp:763-767`) still used the
+score-only comparator. It now uses the same total order (score descending,
+lowest expert index wins a tie), and a tree-wide sweep found no other
+score-only selection site. The keep-quant serving gate stayed UNMOVED
+(53/60, 0 hard, worst 2.48648); the TT w0 device-vs-CPU leg is green on the
+card (2/2 cases, 18/18 assertions). The review's two record corrections are
+in the bench-evidence README: the 1-thread control gap is 2.13% (not "within
+2%"), and the `ab-before-32b` printed median (117.880) does not re-derive
+from its log (bimodal; recomputed 83.814; the leg is excluded and
+non-comparable). The issue stays OPEN for the operator adjudication.
