@@ -32,6 +32,27 @@ flock "$HOME/gpu.lock" bash -c '
 '
 ```
 
+## The 2026-11-05 re-bench (row `QWEN38-P150-REBENCH`)
+
+First current-head measurement since the 09-14 leg. Same recipe and
+artifact, `VT_TT_KEEPQUANT_INT8DOT=1`, head `702b19167`, governor swept
+(the kolibri1 anchoring method: 3 reps per cell, medians, idle gate,
+fresh resets), full logs in
+[`../bench-evidence/qwen38-p150-rebench-20261102/`](../bench-evidence/qwen38-p150-rebench-20261102/README.md).
+
+| Leg | Governor | TTFT (s) | TPOT (s) | Output tok/s | Total tok/s | Duration (s) | JIT hits |
+|---|---|---:|---:|---:|---:|---:|---|
+| 2026-09-14 (baseline) | unrecorded | 1389 | 29.7 | 0.03 | 0.14 | 2326 | 912/916 |
+| 2026-11-05 median | performance | 1203.6 | 25.2 | 0.03 | 0.16 | 1996 | 819/819 |
+| 2026-11-05 median | schedutil | 1215.5 | 25.5 | 0.03 | 0.16 | 2015 | 819/819 |
+
+−13.4% TTFT and −15.0% TPOT vs 09-14, far beyond the ≤0.1% warm-cell
+spread; the governor accounts for only ~1.0%, so the delta is real code
+delta (the pool-match, NEON dots, sliding-attention, and slot-serve
+fixes named in the evidence README). Warm JIT hit rate is 100%; the
+first leg after a build measures 20.3% on a cold `~/.cache/tt-metal-cache`
+and is not comparable to a warm baseline.
+
 ## Limitations
 
 - 2 prompts only (smoke test); multi-request throughput not measured

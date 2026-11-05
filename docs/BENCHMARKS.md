@@ -20,7 +20,7 @@ to the file stem.
 | `dwarfstar-gguf` | DwarfStar vs ds4 on DeepSeek-V4-Flash GGUF, GB10, byte-exact | Results | [Detail](benchmarks/dwarfstar-gguf.md) |
 | `speculative-decoding` | MTP / DFlash / n-gram / DSpark rows against vLLM | Results | [Detail](benchmarks/speculative-decoding.md) |
 | `tt-capture-default-decode` | Qwen3-0.6B decode on the P150 with captured decode as the shipped default | Results | [Detail](benchmarks/tt-capture-default-decode.md) |
-| `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150 | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
+| `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150: the 09-14 end-to-end first and the 2026-11-05 governor-swept re-bench (−13.4% TTFT, −15.0% TPOT at head `702b19167`) | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
 | `qwen38-27b-exl3-gb10` | Qwen3.8-27B EXL3 3.5bpw on GB10, with and without its DFlash2 draft | Results | [Detail](benchmarks/qwen38-27b-exl3-gb10.md) |
 | `qwen38-27b-exl3-variadic-gb10` | The same pair under a mixed-length serving load, percentiles over concurrency | Results | [Detail](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
 | `qwen38-tensorfold-gap` | Qwen3.8 TensorFold gap: blocked, missing artifacts, no number | Blocked, no number | [Detail](benchmarks/qwen38-tensorfold-gap.md) |
