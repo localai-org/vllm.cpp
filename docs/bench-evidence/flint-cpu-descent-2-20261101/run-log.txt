@@ -1,0 +1,53 @@
+governor: performance (as found)
+idle-gate: 1m load 17.76 >= 6, waiting
+idle-gate: 1m load 7.72 >= 6, waiting
+idle-gate: passed at load 4.32 Thu Nov  5 13:45:33 CET 2026
+=== leg 16 t portable rep 1 Thu Nov  5 13:45:33 CET 2026 load 4.32
+Output (decode) token throughput (tok/s):  2.26        
+idle-gate: 1m load 15.36 >= 6, waiting
+idle-gate: 1m load 7.04 >= 6, waiting
+idle-gate: passed at load 3.85 Thu Nov  5 13:55:48 CET 2026
+=== leg 16 t neon rep 1 Thu Nov  5 13:55:48 CET 2026 load 3.85
+Output (decode) token throughput (tok/s):  2.31        
+idle-gate: 1m load 15.48 >= 6, waiting
+idle-gate: 1m load 8.13 >= 6, waiting
+idle-gate: 1m load 6.03 >= 6, waiting
+idle-gate: passed at load 4.36 Thu Nov  5 14:07:02 CET 2026
+=== leg 16 t portable rep 2 Thu Nov  5 14:07:02 CET 2026 load 4.36
+Output (decode) token throughput (tok/s):  2.23        
+idle-gate: 1m load 15.85 >= 6, waiting
+idle-gate: 1m load 8.63 >= 6, waiting
+idle-gate: passed at load 5.10 Thu Nov  5 14:17:01 CET 2026
+=== leg 16 t neon rep 2 Thu Nov  5 14:17:01 CET 2026 load 5.10
+Output (decode) token throughput (tok/s):  1.97        
+idle-gate: 1m load 16.37 >= 6, waiting
+idle-gate: 1m load 8.52 >= 6, waiting
+governor performance Thu Nov  5 14:27:45 CET 2026
+=== pair rep 1 old-new Thu Nov  5 14:27:45 CET 2026 load 4.13
+OLD portable: Output (decode) token throughput (tok/s):  2.10        
+NEW portable: Output (decode) token throughput (tok/s):  2.28        
+OLD neon:     Output (decode) token throughput (tok/s):  2.12        
+NEW neon:     Output (decode) token throughput (tok/s):  2.27        
+=== pair rep 2 old-new Thu Nov  5 15:02:27 CET 2026 load 5.87
+OLD portable: Output (decode) token throughput (tok/s):  2.15        
+NEW portable: Output (decode) token throughput (tok/s):  2.26        
+OLD neon:     Output (decode) token throughput (tok/s):  2.10        
+NEW neon:     Output (decode) token throughput (tok/s):  2.33        
+PAIR DONE Thu Nov  5 15:35:47 CET 2026
+=== sweep 16 t portable rep 3 Thu Nov  5 15:36:46 CET 2026 load 7.37
+16 t portable rep 3: Output (decode) token throughput (tok/s):  2.34        
+=== sweep 16 t neon rep 3 Thu Nov  5 15:45:40 CET 2026 load 7.88
+16 t neon rep 3: Output (decode) token throughput (tok/s):  2.31        
+=== sweep 32 t portable rep 1 Thu Nov  5 15:54:43 CET 2026 load 6.46
+32 t portable rep 1: Output (decode) token throughput (tok/s):  2.72        
+=== sweep 32 t neon rep 1 Thu Nov  5 16:04:03 CET 2026 load 6.67
+32 t neon rep 1: Output (decode) token throughput (tok/s):  2.63        
+=== sweep 32 t portable rep 2 Thu Nov  5 16:13:26 CET 2026 load 5.90
+32 t portable rep 2: Output (decode) token throughput (tok/s):  2.76        
+=== sweep 32 t neon rep 2 Thu Nov  5 16:22:45 CET 2026 load 7.81
+32 t neon rep 2: Output (decode) token throughput (tok/s):  2.62        
+=== sweep 32 t portable rep 3 Thu Nov  5 16:36:35 CET 2026 load 5.69
+32 t portable rep 3: Output (decode) token throughput (tok/s):  2.09        
+=== sweep 32 t neon rep 3 Thu Nov  5 16:47:07 CET 2026 load 7.45
+32 t neon rep 3: Output (decode) token throughput (tok/s):  1.98        
+SWEEP DONE Thu Nov  5 16:56:08 CET 2026
