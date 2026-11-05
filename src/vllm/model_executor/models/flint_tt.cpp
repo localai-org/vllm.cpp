@@ -1248,10 +1248,14 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
               rlogits[static_cast<size_t>(i) * p.num_experts + n];
           score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
         }
-        std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
-                          [](const auto& a, const auto& b) {
-                            return a.first > b.first;
-                          });
+        // The total order: score descending, ties to the LOWER expert index.
+        // Identical to flint.cpp's kFlintScoreOrder (flint.cpp:257) — the
+        // selection must not depend on partial_sort's unstable ordering.
+        std::partial_sort(
+            score.begin(), score.begin() + top_k, score.end(),
+            [](const auto& a, const auto& b) {
+              return a.first != b.first ? a.first > b.first : a.second < b.second;
+            });
         double sum = 0.0;
         for (int64_t kk = 0; kk < top_k; ++kk)
           sum += score[static_cast<size_t>(kk)].first;
