@@ -1,0 +1,42 @@
+== leg performance rep1 start 2026-11-05T16:34:26+01:00 ==
+    128 performance
+RC=127 leg performance rep1 end 2026-11-05T16:35:42+01:00
+== leg performance rep2 start 2026-11-05T16:35:42+01:00 ==
+    128 performance
+RC=127 leg performance rep2 end 2026-11-05T16:35:58+01:00
+== leg performance rep3 start 2026-11-05T16:35:58+01:00 ==
+    128 performance
+RC=127 leg performance rep3 end 2026-11-05T16:36:14+01:00
+== leg schedutil rep1 start 2026-11-05T16:36:14+01:00 ==
+    128 performance
+RC=127 leg schedutil rep1 end 2026-11-05T16:36:30+01:00
+== leg schedutil rep2 start 2026-11-05T16:36:30+01:00 ==
+    128 performance
+RC=127 leg schedutil rep2 end 2026-11-05T16:36:47+01:00
+== leg schedutil rep3 start 2026-11-05T16:36:47+01:00 ==
+    128 performance
+RC=127 leg schedutil rep3 end 2026-11-05T16:37:03+01:00
+== leg performance rep4 start 2026-11-05T16:37:03+01:00 ==
+    128 performance
+RC=127 leg performance rep4 end 2026-11-05T16:37:19+01:00
+== leg performance rep1 start 2026-11-05T16:37:44+01:00 ==
+    128 performance
+RC=0 leg performance rep1 end 2026-11-05T17:14:24+01:00
+== leg performance rep2 start 2026-11-05T17:14:24+01:00 ==
+    128 performance
+RC=0 leg performance rep2 end 2026-11-05T17:48:45+01:00
+== leg performance rep3 start 2026-11-05T17:48:45+01:00 ==
+    128 performance
+RC=0 leg performance rep3 end 2026-11-05T18:23:07+01:00
+== leg schedutil rep1 start 2026-11-05T18:23:07+01:00 ==
+    128 performance
+RC=0 leg schedutil rep1 end 2026-11-05T18:57:48+01:00
+== leg schedutil rep2 start 2026-11-05T18:57:48+01:00 ==
+    128 schedutil
+RC=0 leg schedutil rep2 end 2026-11-05T19:32:28+01:00
+== leg schedutil rep3 start 2026-11-05T19:32:28+01:00 ==
+    128 schedutil
+RC=0 leg schedutil rep3 end 2026-11-05T20:07:08+01:00
+== leg performance rep4 start 2026-11-05T20:07:08+01:00 ==
+    128 schedutil
+RC=0 leg performance rep4 end 2026-11-05T20:41:31+01:00
