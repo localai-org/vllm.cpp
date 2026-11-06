@@ -17,8 +17,10 @@
 #include "vllm/model_executor/model_loader/nvfp4_dequant.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
 #include "vllm/model_executor/models/device_pool.h"
+#include "vllm/model_executor/layers/linear.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
+#include "vt/unaligned.h"
 #include "vt/ops.h"
 #include "vt/fused_ops.h"
 
@@ -799,6 +801,45 @@ Gemma4MoeScratch RunGemma4Moe(vt::Queue& q, const Gemma4MoeLayerWeights& moe,
   rargs.top_k = top_k;
   rargs.renormalize = true;
   vt::MoeRouterTopK(d.q, rw.t(), ri.t(), logits.t(), rargs);
+
+
+  if (!moe.experts.compact.empty()) {
+    VT_CHECK(q.device.type == vt::DeviceType::kCPU,
+             "gemma4 CT: compact integer experts are implemented for CPU only");
+    VT_CHECK(moe.experts.compact.size() == static_cast<size_t>(E),
+             "gemma4 CT: compact expert count mismatch");
+    DBuf acc(d, DType::kBF16, {T, H});
+    DBuf y(d, DType::kBF16, {1, H});
+    auto* output = static_cast<uint16_t*>(acc.ptr());
+    const auto* ids = static_cast<const int32_t*>(ri.ptr());
+    const auto* route = static_cast<const float*>(rw.ptr());
+    const auto* scales = moe.per_expert_scale.bytes.data();
+    for (int64_t t = 0; t < T; ++t) {
+      Tensor x = expert_in.Slice(0, t, t + 1);
+      // Routed expert reduction accumulates in F32 before its BF16 output store.
+      std::vector<float> sum(static_cast<size_t>(H), 0.0f);
+      for (int i = 0; i < top_k; ++i) {
+        const int32_t e = ids[t * top_k + i];
+        VT_CHECK(e >= 0 && e < E, "gemma4 CT: routed expert index out of range");
+        const auto& ew = moe.experts.compact[static_cast<size_t>(e)];
+        layers::DenseShardMlpGateUpGeluMethod method(&ew.gate_up, I);
+        DBuf act = method.Apply(d, x);
+        Tensor down = ResidentWeight(d, ew.down);
+        vt::MatmulBT(d.q, y.t(), act.t(), down);
+        const float scale = vt::BF16ToF32(vt::LoadUnaligned<uint16_t>(scales + e * 2));
+        const float weight = route[t * top_k + i] * scale;
+        const auto* result = static_cast<const uint16_t*>(y.ptr());
+        for (int64_t h = 0; h < H; ++h)
+          sum[static_cast<size_t>(h)] += weight * vt::BF16ToF32(result[h]);
+      }
+      for (int64_t h = 0; h < H; ++h)
+        output[t * H + h] = vt::F32ToBF16(sum[static_cast<size_t>(h)]);
+    }
+    Gemma4MoeScratch result;
+    result.tensor = acc.t();
+    result.storage = acc.ReleaseShared();
+    return result;
+  }
 
   const auto& ex = moe.experts;
   const int64_t gu_stride = 2 * I * H;

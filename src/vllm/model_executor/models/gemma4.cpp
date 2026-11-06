@@ -250,17 +250,26 @@ DBuf Gemma4AttnBlock(Dev d, const Gemma4LayerWeights& w, const Gemma4Layout& g,
 
   // Merged QKVParallelLinear: one MatmulBT + QkvSplit (default).
   {
-    Tensor wqkv = ResidentWeight(d, w.attn.qkv_proj);
-    if (MergedQkvEnabled()) {
-      vt::MatmulBT(d.q, qkv.t(), dhn, wqkv);
-      vt::QkvSplit(d.q, q.t(), k.t(), v.t(), qkv.t());
+    if (!w.attn.qkv_parts.empty()) {
+      VT_CHECK(w.attn.qkv_parts.size() == 3, "gemma4 CT: expected three attention shards");
+      Tensor products[] = {q.t(), k.t(), v.t()};
+      Tensor parts[] = {ResidentWeight(d, w.attn.qkv_parts[0]),
+                        ResidentWeight(d, w.attn.qkv_parts[1]),
+                        ResidentWeight(d, w.attn.qkv_parts[2])};
+      vt::MergedGemmDense(d.q, vt::kDenseQkvShards, products, dhn, parts, 3);
     } else {
-      Tensor wq = wqkv.Slice(0, 0, qdim);
-      Tensor wk = wqkv.Slice(0, qdim, qdim + kdim);
-      Tensor wv = wqkv.Slice(0, qdim + kdim, qdim + 2 * kdim);
-      vt::MatmulBT(d.q, q.t(), dhn, wq);
-      vt::MatmulBT(d.q, k.t(), dhn, wk);
-      vt::MatmulBT(d.q, v.t(), dhn, wv);
+      Tensor wqkv = ResidentWeight(d, w.attn.qkv_proj);
+      if (MergedQkvEnabled()) {
+        vt::MatmulBT(d.q, qkv.t(), dhn, wqkv);
+        vt::QkvSplit(d.q, q.t(), k.t(), v.t(), qkv.t());
+      } else {
+        Tensor wq = wqkv.Slice(0, 0, qdim);
+        Tensor wk = wqkv.Slice(0, qdim, qdim + kdim);
+        Tensor wv = wqkv.Slice(0, qdim + kdim, qdim + 2 * kdim);
+        vt::MatmulBT(d.q, q.t(), dhn, wq);
+        vt::MatmulBT(d.q, k.t(), dhn, wk);
+        vt::MatmulBT(d.q, v.t(), dhn, wv);
+      }
     }
   }
 
@@ -353,6 +362,14 @@ DBuf Gemma4AttnBlock(Dev d, const Gemma4LayerWeights& w, const Gemma4Layout& g,
 // GeGLU MLP (gemma4.py::Gemma4MLP).
 DBuf Gemma4MlpBlock(Dev d, const Gemma4MlpWeights& w, int64_t H, int64_t I,
                     const Tensor& dh2, int64_t T) {
+  if (!w.gate_up_parts.empty()) {
+    layers::DenseShardMlpGateUpGeluMethod method(&w.gate_up_parts, I);
+    DBuf act = method.Apply(d, dh2);
+    DBuf out(d, DType::kBF16, {T, H});
+    Tensor wd = ResidentWeight(d, w.down_proj);
+    vt::MatmulBT(d.q, out.t(), act.t(), wd);
+    return out;
+  }
   // Dense GeGLU: TLS reuse of large gate_up [T,2I] + act [T,I] across layers.
   Tensor wgu = ResidentWeight(d, w.gate_up_proj);
   struct MlpTls {
@@ -411,6 +428,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   const int64_t T = inputs_embeds_override != nullptr
                         ? static_cast<int64_t>(positions.size())
                         : static_cast<int64_t>(token_ids.size());
+  VT_CHECK(!weights.compact_ct || d.q.device.type == vt::DeviceType::kCPU,
+           "gemma4 CT: compact group32 integer execution is implemented for CPU only");
   const Gemma4Layout g = MakeLayout(config);
   const int64_t H = g.hidden;
   const int64_t L = g.num_layers;
@@ -749,6 +768,8 @@ DBuf ForwardBody(Dev d, const std::vector<int32_t>& token_ids,
   const int64_t n_out = src.shape[0];
   DBuf logits(d, DType::kF32, {n_out, vocab});
   if (tied)
+    vt::MatmulBT(d.q, logits.t(), src, lm);
+  else if (weights.compact_ct)
     vt::MatmulBT(d.q, logits.t(), src, lm);
   else
     vt::Matmul(d.q, logits.t(), src, lm);

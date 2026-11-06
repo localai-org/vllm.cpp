@@ -27,6 +27,7 @@
 #include "vt/compiled_gemma.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#include "vt/merged_gemm.h"
 
 namespace vllm {
 namespace layers {
@@ -83,6 +84,53 @@ class MlpGateUpMethodBase : public QuantizeMethodBase {
  public:
   virtual DBuf Apply(Dev d, const vt::Tensor& x) const = 0;
   virtual const char* Name() const = 0;
+};
+
+// Original-format dense GGUF gate/up shards use the same MLP contract as the
+// merged operand. The descriptor owns contraction grouping and the epilogue.
+class DenseShardMlpGateUpMethod : public MlpGateUpMethodBase {
+ public:
+  DenseShardMlpGateUpMethod(const std::vector<OwnedTensor>* parts, int64_t intermediate)
+      : parts_(parts), intermediate_(intermediate) {}
+  DBuf Apply(Dev d, const vt::Tensor& x) const override {
+    VT_CHECK(parts_ != nullptr && parts_->size() == 2,
+             "dense gate/up shards require exactly two weights");
+    vt::Tensor weights[] = {ResidentWeight(d, (*parts_)[0]), ResidentWeight(d, (*parts_)[1])};
+    DBuf gate(d, vt::DType::kBF16, {x.shape[0], intermediate_});
+    DBuf up(d, vt::DType::kBF16, {x.shape[0], intermediate_});
+    DBuf out(d, vt::DType::kBF16, {x.shape[0], intermediate_});
+    vt::Tensor products[] = {gate.t(), up.t()};
+    vt::MergedGemmDense(d.q, vt::kDenseGateUpShards, products, x, weights, 2, &out.t());
+    return out;
+  }
+  const char* Name() const override { return "dense-shard-gate-up"; }
+ private:
+  const std::vector<OwnedTensor>* parts_;
+  int64_t intermediate_;
+};
+
+// Original-format GeGLU uses the shared contraction group and activation tail.
+class DenseShardMlpGateUpGeluMethod : public MlpGateUpMethodBase {
+ public:
+  DenseShardMlpGateUpGeluMethod(const std::vector<OwnedTensor>* parts,
+                                int64_t intermediate)
+      : parts_(parts), intermediate_(intermediate) {}
+  DBuf Apply(Dev d, const vt::Tensor& x) const override {
+    VT_CHECK(parts_ != nullptr && parts_->size() == 2 && intermediate_ > 0,
+             "dense GeGLU shards require exactly two weights and a positive width");
+    vt::Tensor weights[] = {ResidentWeight(d, (*parts_)[0]), ResidentWeight(d, (*parts_)[1])};
+    DBuf gate(d, vt::DType::kBF16, {x.shape[0], intermediate_});
+    DBuf up(d, vt::DType::kBF16, {x.shape[0], intermediate_});
+    DBuf out(d, vt::DType::kBF16, {x.shape[0], intermediate_});
+    vt::Tensor products[] = {gate.t(), up.t()};
+    vt::MergedGemmDense(d.q, vt::kDenseGateUpGeluShards, products, x, weights, 2,
+                         &out.t());
+    return out;
+  }
+  const char* Name() const override { return "dense-shard-gate-up-gelu"; }
+ private:
+  const std::vector<OwnedTensor>* parts_;
+  int64_t intermediate_;
 };
 
 // Unquantized (bf16) gate_up: one MatmulBT over the merged [2I,H] weight then
