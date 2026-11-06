@@ -3,8 +3,8 @@ Title: Pin the dflash2-vision tt-model bundle as a vllm-tt-plugin oracle instanc
 Row: TT-PLUGIN-QWEN38-ORACLE
 State: OPEN
 Kind: bug
-GitHub: -
-Mirror: PENDING
+GitHub: 3547
+Mirror: SYNCED
 Availability: FULL
 Created: 2026-11-06
 Updated: 2026-11-06
