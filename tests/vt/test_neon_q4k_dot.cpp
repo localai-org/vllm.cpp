@@ -242,7 +242,13 @@ TEST_CASE("FLINT-NEON-Q4K-DOT: dispatch agrees with the tier") {
   const char* dot_env = std::getenv("VT_CPU_Q4K_DOT");
   const bool forced_portable =
       dot_env != nullptr && std::strcmp(dot_env, "portable") == 0;
-  if (!forced_portable) {
+  // The auto-arm needs a DotProd host: QuantQ4KNeonVecDot() IS the HWCAP
+  // probe and returns nullptr without it (the x86 CI lanes hit exactly
+  // this — 'NEON Q4_K dot tier not live on this host'). On such a host
+  // auto must resolve to the portable tier, which the first CHECK above
+  // already asserts; this arm is meaningful only where the NEON tier
+  // exists.
+  if (!forced_portable && vt::cpu::QuantQ4KNeonVecDot() != nullptr) {
     CHECK(vt::cpu::SelectQuantQ4KVecDot(portable) ==
           vt::cpu::QuantQ4KNeonVecDot());
   }
