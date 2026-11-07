@@ -70,6 +70,7 @@
 #endif
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#include "vt/op_provider.h"  // vt::OpDispatchCount (QWEN38-DFLASH2-STAGE-A step-phase discriminator)
 #include "vt/recipes.h"
 #include "vt/unaligned.h"
 #ifdef VT_MARLIN_NVFP4
@@ -10013,6 +10014,15 @@ struct StepPhaseTrace {
   bool boundary = false;
   int64_t B = 0, S = 0;
   int64_t dram_free = -1;
+  // QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): the dispatch-vs-compute
+  // discriminator fields. `dispatch0` snapshots the op-table counter at Step
+  // entry; `dispatches` is the delta at the emit. A replayed step touches the
+  // host only through warm/staging (a few), an eager step through the whole op
+  // table (hundreds). `segments` is the replayed segment count — 1 for a
+  // whole-graph slot, ~64 for a region-scoped slot (one host replay enqueue
+  // per region) — set by the replay/capture emit sites only.
+  uint64_t dispatch0 = 0;
+  int64_t segments = 0;
 };
 // One line per step, emitted at every return the captured arm takes. The
 // `gap_prev` half of the wall lives in the CALLER's window (sampler + runner
@@ -10029,7 +10039,8 @@ void StepPhaseEmit(const StepPhaseTrace& p, const char* kind) {
   ++n;
   std::fprintf(stderr,
                "[TT-STEP-PHASE] step=%lld kind=%s B=%lld S=%lld boundary=%d "
-               "warm_calls=%lld dram_free_mib=%lld wall_ms=%.1f warms_ms=%.1f "
+               "warm_calls=%lld dram_free_mib=%lld dispatches=%lld segments=%lld "
+               "wall_ms=%.1f warms_ms=%.1f "
                "embed_ms=%.1f pregrow_ms=%.1f cap_begin_ms=%.1f "
                "cap_body_ms=%.1f cap_end_ms=%.1f pin_ms=%.1f replay_ms=%.1f "
                "body_ms=%.1f gap_prev_ms=%.1f\n",
@@ -10037,6 +10048,12 @@ void StepPhaseEmit(const StepPhaseTrace& p, const char* kind) {
                static_cast<long long>(p.S), p.boundary ? 1 : 0,
                static_cast<long long>(p.warm_calls),
                static_cast<long long>(p.dram_free),
+               // QWEN38-DFLASH2-STAGE-A: the op-table delta across this step
+               // (0 with the knob unset — dispatch0 stays 0 and the counter is
+               // not counting), then the replayed segment count.
+               p.on ? static_cast<long long>(vt::OpDispatchCount() - p.dispatch0)
+                    : 0LL,
+               static_cast<long long>(p.segments),
                StepPhaseMsOf(p.t0, now), p.warms_ms, p.embed_ms, p.pregrow_ms,
                p.cap_begin_ms, p.cap_body_ms, p.cap_end_ms, p.pin_ms,
                p.replay_ms, p.body_ms, gap_prev_ms);
@@ -12432,6 +12449,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   sph.B = B;
   if (sph.on && d.q.device.type == vt::DeviceType::kTENSTORRENT)
     sph.dram_free = vt::tenstorrent::DeviceDramFreeBytes() >> 20;
+  // QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): snapshot the op-table dispatch
+  // counter; the emit line prints the delta (the per-step host-touch count).
+  if (sph.on) sph.dispatch0 = vt::OpDispatchCount();
   // #1380: open a fresh demand measurement for this step. `PreGrowForCapture`
   // reads the profile the COLD step at this shape recorded, and a profile is a
   // property of one step, so the boundary is here and not inside a branch.
@@ -12953,6 +12973,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.graph.Replay(impl_->queue);
     if (sph.on) {
       sph.replay_ms = StepPhaseMsOf(sph_tr0, StepPhaseClk::now());
+      // QWEN38-DFLASH2-STAGE-A: the replay round-trip count — 1 whole-graph
+      // segment, or one host replay enqueue PER REGION on the region-scoped slot.
+      sph.segments = static_cast<int64_t>(s.graph.segment_count());
       StepPhaseEmit(sph, "replay");
     }
     ++s.replays;
@@ -13270,6 +13293,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.graph.Replay(impl_->queue);
     if (sph.on) {
       sph.replay_ms = StepPhaseMsOf(sph_tr1, StepPhaseClk::now());
+      sph.segments = static_cast<int64_t>(s.graph.segment_count());
       StepPhaseEmit(sph, "capture");
     }
     record_staged();

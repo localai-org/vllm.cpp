@@ -140,6 +140,16 @@ const char* OpName(OpId op);
 // and the device rather than their integers.
 void* GetOp(OpId op, DeviceType device);
 
+// QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): the eager dispatch counter. Every
+// host-side op dispatch resolves through GetOp, so this counter IS the per-step
+// host-touch count the dispatch-bound vs compute-bound discriminator reads:
+// an eager step resolves hundreds of ops, a replayed step resolves only the
+// warm/staging copies around the replay. Counted only when VT_TT_STEP_PHASES
+// is set (the same gate the step-phase clock uses), so the unset path pays one
+// function-local static bool compare. Monotonic total since process start; the
+// reader takes a delta across its own bracket.
+uint64_t OpDispatchCount();
+
 // DECLINE-AND-FALL-BACK. A provider kernel that cannot serve a particular call
 // looks up the next provider strictly BELOW itself in the selection order and
 // forwards to it. This is the second fallback axis of the tactic registry
