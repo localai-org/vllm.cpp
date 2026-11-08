@@ -1,0 +1,40 @@
+2026-11-08 17:44:11.679 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-08 17:44:11.679 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-08 17:44:11.679 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-08 17:44:11.679 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-08 17:44:11.683 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-08 17:44:11.683 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-08 17:44:11.719 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-08 17:44:11.719 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-08 17:44:11.719 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-08 17:44:11.719 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-08 17:44:11.720 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-08 17:44:11.777 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-08 17:44:11.827 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-08 17:44:11.827 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-08 17:44:11.827 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-08 17:44:11.827 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-08 17:44:11.827 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-08 17:44:12.681 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:3145:
+TEST CASE:  kTENSTORRENT kRmsNormGated serves a [256,6144] committed gate shadow at the batched-prefill [12288,128] geometry
+
+./tests/vt/test_tenstorrent_backend.cpp:3245: MESSAGE: kRmsNormGated committed-shadow [256,6144] -> [12288,128]: max_abs=3.43251 max_rel=1452.01 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3259: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 107 skipped
+[doctest] assertions: 3 | 2 passed | 1 failed |
+[doctest] Status: FAILURE!
+2026-11-08 17:44:13.133 | info     |    BuildKernels | JIT cache stats: 41/41 hits (100.0%) [41 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-08 17:44:13.133 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-08 17:44:13.183 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-08 17:44:13.183 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-08 17:44:13.278 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-08 17:44:13.278 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-08 17:44:13.278 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

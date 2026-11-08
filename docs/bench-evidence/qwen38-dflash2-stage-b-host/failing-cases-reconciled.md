@@ -64,11 +64,19 @@ head where the baseline showed it passing.
   both full-suite runs, passes 3/3 in isolation at head, passed at
   baseline. Order/state-dependent, not random.
 - `kTENSTORRENT kRmsNormGated serves a [256,6144] committed gate shadow at
-  the batched-prefill [12288,128] geometry` (`CHECK(d.within)`): fails
-  deterministically at head — in both full-suite runs AND 3/3 in
-  isolation. The case exists at 9996ce94d and PASSES there. This one is a
-  REAL, reproducible regression introduced between 9996ce94d and this
-  branch head (candidates: bedb24739's VT_TT_SPEC_STATE_SHADOW staging,
-  49f04cb17's replay-tap probe). It is NOT explained by the D2D
-  recorded-geometry fix under repair here; it is recorded as an OPEN item
-  for the operator, not fixed in this repair series.
+  the batched-prefill [12288,128] geometry` (`CHECK(d.within)`): CORRECTED
+  2026-11-08 — the regression claim below is FALSIFIED. An isolated run at
+  the pre-branch baseline 9996ce94d (fresh detached worktree, same durable
+  pin) fails with BYTE-IDENTICAL numbers to head: max_abs=3.43251
+  max_rel=1452.01 tol=0.035 (rms-base.log vs rms-head.log in this
+  directory). The defect is PRE-EXISTING and suite-context dependent: it
+  passed inside the recorded baseline full-suite run and fails in
+  isolation at every revision — the same order/state bucket as the
+  PagedAttention and RAC cases. Not introduced by this branch; filed as
+  ISSUE-LOCAL-01M6Y0TC5D24YGF74H0TQ2VAN5 on row BACKEND-TENSTORRENT-GDN
+  (this row's W2 op family owns the case). Superseded claim, kept for
+  provenance: the case fails deterministically at head; it was called a
+  real, reproducible regression introduced between 9996ce94d and branch
+  head from its absence in the baseline failures-only log — absence of a
+  failure in a failures-only log was never evidence of a pass in suite
+  context, and the isolated baseline run disproves it.
