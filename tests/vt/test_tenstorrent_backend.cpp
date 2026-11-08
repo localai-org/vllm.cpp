@@ -6202,9 +6202,15 @@ TEST_CASE("kTENSTORRENT #2294 capture-lane D2D copy records the served geometry"
 // untouched and the copied bytes must read back at the RECORDED geometry. The
 // defective arm allocates a fresh SRC-shaped clone and installs it as the slot's
 // shadow (clobbering [S, H*taps] to [1, H]), so a later stage at the recorded
-// geometry reads pool residue. The consume-at-declared-geometry matmul below is
-// the same probe the #2294 case uses: with a clobbered record the fast path
-// hands the matmul the wrongly-shaped [1, H] tensor and the compare fails.
+// geometry reads pool residue.
+//
+// Detection contract (fresh-review repair): the matmul consumer is NOT
+// sufficient on its own — the device matmul path serves flat-equal bytes, so it
+// cannot observe a clobbered record. The case asserts DIRECTLY on the slot's
+// served-geometry record (dev_rows/dev_cols, via the DeviceShadowExact probe,
+// tenstorrent_residency.cpp:1089) after the copy: the record must still name
+// [S, TAPS] and must NOT name the source's [1, S*TAPS]. Under the baseline
+// src-shaped install the record flips to [1, 32] and the assertions go red.
 TEST_CASE("kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot's recorded geometry") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
@@ -6274,6 +6280,18 @@ TEST_CASE("kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot'
                 "under an active capture only the capture lane may serve the "
                     "copy, got "
                     << st.stages_avoided_device_copy);
+  // The RECORDED geometry, observed on the slot record itself (the matmul
+  // consumer below cannot detect a clobbered record — the device path serves
+  // flat-equal bytes). The copy must leave dev_rows/dev_cols naming [S, TAPS].
+  CHECK_MESSAGE(vt::tenstorrent::DeviceShadowExact(d, static_cast<uint32_t>(S),
+                                                   static_cast<uint32_t>(TAPS)),
+                "the dst slot's record no longer names the recorded [S, TAPS] "
+                    "geometry after the captured copy — the record was "
+                    "clobbered");
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d, 1, static_cast<uint32_t>(S * TAPS)),
+                "the dst slot's record names the SRC's [1, S*TAPS] geometry — "
+                    "the src-shaped install mutation is live");
   // Consume dst at its RECORDED [S, TAPS] geometry: the served shadow must
   // still be recorded (and hold the copied bytes) at that geometry.
   mm(q, o, d, b4);
