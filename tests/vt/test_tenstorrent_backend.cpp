@@ -12869,3 +12869,91 @@ void FreeGdnStateShadow() {}
 bool GdnStateShadowStaged() { return false; }
 }  // namespace vt::tenstorrent
 #endif
+// QWEN38-DFLASH2-STAGE-B, fresh-review finding 3: the capture/host-free lane
+// must keep the base-pointer guard (tenstorrent_residency.cpp:1529, the
+// ISSUE-LOCAL-01M4JK8 scenario). An INTERIOR destination pointer (dst = base
+// + row*rb, the row-granular expert-gather staging shape) must DECLINE the
+// D2D arm and fall back to the host copy: FindSlot resolves an interior
+// pointer to the base slot, so an unguarded arm would stage a whole-slot
+// device shadow at a foreign offset. With `if (d->host != dst) return false;`
+// mutated out, the D2D arm serves (the safe path's host write and shadow
+// drop never happen) and the assertions below go red.
+TEST_CASE("kTENSTORRENT capture-lane D2D copy declines an interior destination pointer") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  ForceHostFreeDecode host_free;
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  // src [1, 32] bf16 (64 bytes); dst slot recorded [4, 16] (64 elements,
+  // 128 bytes) — larger than the copy, so an unguarded whole-slot arm is
+  // distinguishable from the safe path.
+  constexpr int64_t S = 1, TAPS = 32;
+  constexpr int64_t DR = 4, DC = 16;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  using vt::tenstorrent::GetStagingStats;
+  using vt::tenstorrent::ResetStagingStats;
+  std::vector<uint16_t> sb(S * TAPS), db(DR * DC);
+  for (size_t i = 0; i < sb.size(); ++i) sb[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  for (size_t i = 0; i < db.size(); ++i) db[i] = static_cast<uint16_t>(0x3c00 + (i % 7));
+  void* ma = backend.Alloc(S * TAPS * 2);
+  void* md = backend.Alloc(DR * DC * 2);
+  void* mb4 = backend.Alloc(DC * DC * 2);
+  void* mo = backend.Alloc(DR * DC * 4);
+  Queue q = backend.CreateQueue();
+  const Device dev{DeviceType::kTENSTORRENT, 0};
+  backend.Copy(q, ma, sb.data(), S * TAPS * 2);
+  backend.Copy(q, md, db.data(), DR * DC * 2);
+  std::vector<uint16_t> wb4(DC * DC);
+  for (size_t i = 0; i < wb4.size(); ++i) wb4[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mb4, wb4.data(), wb4.size() * 2);
+  std::vector<float> ob(DR * DC, 1.0f);
+  backend.Copy(q, mo, ob.data(), ob.size() * 4);
+  Tensor d = Tensor::Contiguous(md, vt::DType::kBF16, dev, {DR, DC});
+  Tensor wt = Tensor::Contiguous(mb4, vt::DType::kBF16, dev, {DC, DC});
+  Tensor ost = Tensor::Contiguous(mo, vt::DType::kF32, dev, {DR, DC});
+  auto mm = reinterpret_cast<vt::MatmulFn>(vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  mm(q, ost, d, wt);  // installs the persistent [4, 16] shadow on md's slot
+  // Stage the SRC slot's [1, 32] bf16 shadow (an H2D Copy alone does not
+  // install a device shadow in eager mode).
+  void* mw = backend.Alloc(DC * S * TAPS * 2);
+  void* mostage = backend.Alloc(DC * 4);
+  std::vector<uint16_t> ww(DC * S * TAPS);
+  for (size_t i = 0; i < ww.size(); ++i) ww[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mw, ww.data(), ww.size() * 2);
+  backend.Copy(q, mostage, wb4.data(), DC * 4);
+  Tensor sw = Tensor::Contiguous(ma, vt::DType::kBF16, dev, {S, TAPS});
+  Tensor wst = Tensor::Contiguous(mw, vt::DType::kBF16, dev, {DC, S * TAPS});
+  Tensor osst = Tensor::Contiguous(mostage, vt::DType::kF32, dev, {1, DC});
+  mm(q, osst, sw, wst);  // stages ma's [1, 32] device shadow
+  REQUIRE(vt::tenstorrent::DeviceShadowExact(d, static_cast<uint32_t>(DR),
+                                             static_cast<uint32_t>(DC)));
+  ResetStagingStats();
+  // The interior pointer: dst = base + one row's stride (32 bytes).
+  void* dst_row = static_cast<char*>(md) + TAPS * 2;
+  backend.Copy(q, dst_row, ma, S * TAPS * 2);
+  vt::tenstorrent::StagingStats st = GetStagingStats();
+  CHECK_MESSAGE(st.stages_avoided_device_copy == 0,
+                "the D2D arm must DECLINE an interior dst pointer (host "
+                    "fallback serves it), got "
+                    << st.stages_avoided_device_copy);
+  // The host fallback wrote the src bytes at the interior offset.
+  CHECK_MESSAGE(std::memcmp(static_cast<char*>(md) + TAPS * 2,
+                            sb.data(), TAPS * 2) == 0,
+                "the interior host bytes were not written by the host "
+                    "fallback");
+  // No device shadow may be installed for an interior dst: the safe path
+  // drops the base slot's shadow (MarkHostWritten) and serves from host. A
+  // src-shaped [1, 32] install is the unguarded-arm signature.
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d, static_cast<uint32_t>(S), static_cast<uint32_t>(TAPS)),
+                "the interior copy installed a src-shaped device shadow — "
+                    "the base-pointer guard is out");
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d, static_cast<uint32_t>(DR), static_cast<uint32_t>(DC)),
+                "the interior copy left a whole-slot device shadow behind "
+                    "after a partial host write");
+  backend.Free(ma); backend.Free(md);
+  backend.Free(mb4); backend.Free(mo);
+  backend.Free(mw); backend.Free(mostage);
+}
