@@ -1,0 +1,6 @@
+2026-11-08 12:01:56.030 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-08 12:01:56.074 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-08 12:01:56.074 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-08 12:01:56.095 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-08 12:01:56.095 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-08 12:01:56.095 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

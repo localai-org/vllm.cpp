@@ -1509,6 +1509,8 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
   (void)once;
   ttnn::Tensor src_dev;
   size_t copy_bytes = 0;
+  std::optional<ttnn::Tensor> dst_shadow;
+  uint32_t dst_rows = 0, dst_cols = 0;
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     BufferSlot* s = FindSlot(const_cast<void*>(src));
@@ -1538,6 +1540,20 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
     if (ShadowLogicalBytes(*s->device) != bytes) return false;
     src_dev = *s->device;
     copy_bytes = bytes;
+    // QWEN38-DFLASH2-STAGE-B (the aux-tap seam): when the destination slot
+    // ALREADY holds a device-current shadow of equal logical numel and dtype,
+    // the copy below must go INTO that shadow instead of installing a fresh
+    // SRC-shaped clone — a [1, H] tap clone written into a [S, H*taps] aux slot
+    // must not clobber the slot's recorded dev_rows/dev_cols, because the
+    // captured trace bakes its reads at the recorded geometry. Byte size is
+    // already proven equal above; the shape match is checked on the logical
+    // volume. The no-shadow destination keeps today's src-shaped-install path
+    // (#2294, #1625).
+    if (d->device_current && d->device.has_value()) {
+      dst_shadow = *d->device;
+      dst_rows = d->dev_rows;
+      dst_cols = d->dev_cols;
+    }
   }
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr) {
     void* bt[8];
@@ -1553,6 +1569,59 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
     std::free(sym);
   }
   MeshDevice& device = SharedMeshDevice();
+  // QWEN38-DFLASH2-STAGE-B: the geometry-preserving arm. The destination slot
+  // holds a device-current shadow whose logical volume equals the source's
+  // (bytes equal above; dtype equal here), so reshape the SOURCE shadow view to
+  // the destination shadow's logical shape (no data movement) and ttnn::copy
+  // INTO the existing destination tensor. d->device / dev_rows / dev_cols are
+  // untouched — the record keeps naming the served geometry. When the reshape
+  // declines the shadow's layout at this pin, fall back to allocating a
+  // destination-shaped tensor, copying into it, and installing it with the
+  // RECORDED geometry preserved (never the source's).
+  uint64_t src_vol = 1;
+  {
+    const auto ss = src_dev.logical_shape();
+    for (uint32_t i = 0; i < ss.rank(); ++i) src_vol *= ss[i];
+  }
+  const bool dst_usable = dst_shadow.has_value() &&
+                          dst_shadow->dtype() == src_dev.dtype() &&
+                          dst_rows * static_cast<uint64_t>(dst_cols) == src_vol;
+  if (dst_usable) {
+    bool reshaped = false;
+    ttnn::Tensor src_view;
+    try {
+      src_view = CaptureSafeReshape(src_dev, ttnn::Shape({dst_rows, dst_cols}));
+      reshaped = true;
+    } catch (const std::exception&) {
+      reshaped = false;
+    } catch (...) {
+      reshaped = false;
+    }
+    if (reshaped) {
+      ttnn::copy(src_view, *dst_shadow);  // in place: the shadow's storage
+      StagingAvoidedDeviceCopy().fetch_add(1, std::memory_order_relaxed);
+      return true;
+    }
+    // Fallback arm: fresh DESTINATION-shaped tensor, recorded geometry kept.
+    ttnn::Tensor cloned = ttnn::empty(
+        ttnn::Shape({static_cast<uint32_t>(dst_rows),
+                     static_cast<uint32_t>(dst_cols)}),
+        src_dev.dtype(), src_dev.layout(), &device, src_dev.memory_config());
+    cloned = ttnn::copy(src_dev, cloned);
+    {
+      std::lock_guard<std::mutex> g(SlotMutex());
+      BufferSlot* d = FindSlot(dst);
+      if (d == nullptr) return false;
+      d->device = std::move(cloned);
+      d->dev_rows = dst_rows;  // the RECORDED geometry, not the source's
+      d->dev_cols = dst_cols;
+      d->device_current = true;
+      d->host_current = false;
+      d->device_reserved = false;
+    }
+    StagingAvoidedDeviceCopy().fetch_add(1, std::memory_order_relaxed);
+    return true;
+  }
   // Allocate a destination device tensor matching src's shape/dtype/layout,
   // then copy. No host readback.
   ttnn::Tensor cloned = ttnn::empty(src_dev.logical_shape(), src_dev.dtype(),
@@ -2031,5 +2100,6 @@ void ResetStagingStats() {
   StagingAvoidedMemset().store(0, std::memory_order_relaxed);
   StagingAvoidedDeviceCopy().store(0, std::memory_order_relaxed);
 }
+
 
 }  // namespace vt::tenstorrent

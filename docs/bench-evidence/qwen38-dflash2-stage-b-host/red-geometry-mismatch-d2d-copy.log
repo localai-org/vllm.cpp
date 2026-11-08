@@ -1,0 +1,20 @@
+2026-11-08 11:45:51.940 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-08 11:45:51.940 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-08 11:46:07.024 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:6208:
+TEST CASE:  kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot's recorded geometry
+
+./tests/vt/test_tenstorrent_backend.cpp:6208: ERROR: test case THREW exception: vt: tenstorrent kMatmulBT: a/b inner dimension mismatch at ./src/vt/tenstorrent/tenstorrent_ops.cpp:148
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 109 skipped
+[doctest] assertions: 1 | 1 passed | 0 failed |
+[doctest] Status: FAILURE!
+2026-11-08 11:46:07.024 | info     |    BuildKernels | JIT cache stats: 0/8 hits (0.0%) [0 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-08 11:46:07.024 | info     |    BuildKernels | JIT telemetry: 42 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-08 11:46:07.066 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-08 11:46:07.066 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-08 11:46:07.097 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-08 11:46:07.097 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-08 11:46:07.097 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
