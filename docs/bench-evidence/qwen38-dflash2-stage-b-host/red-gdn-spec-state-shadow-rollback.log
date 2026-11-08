@@ -1,0 +1,30 @@
+TEST CASE:  kTENSTORRENT GDN spec-state shadow restores pre-step bytes on reject and declines on eviction
+
+./tests/vt/test_tenstorrent_backend.cpp:12655: ERROR: CHECK( staged == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+  logged: one cache layer must stage, got 0
+
+./tests/vt/test_tenstorrent_backend.cpp:12656: ERROR: CHECK( vt::tenstorrent::GdnStateShadowStaged() ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:12669: ERROR: CHECK( restored == 2 ) is NOT correct!
+  values: CHECK( 0 == 2 )
+  logged: both slots must restore, got 0
+
+./tests/vt/test_tenstorrent_backend.cpp:12671: ERROR: CHECK( got == pre ) is NOT correct!
+  values: CHECK( {15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363} == {14336, 14337, 14338, 14339, 14340, 14341, 14342, 14343, 14344, 14345, 14346, 14347, 14348, 14336, 14337, 14338, 14339, 14340, 14341, 14342, 14343, 14344, 14345, 14346, 14347, 14348, 14336, 14337, 14338, 14339, 14340, 14341} )
+  logged: ssm must read back the PRE-STEP bytes after the reject restore
+
+./tests/vt/test_tenstorrent_backend.cpp:12674: ERROR: CHECK( got == pre ) is NOT correct!
+  values: CHECK( {15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363} == {14336, 14337, 14338, 14339, 14340, 14341, 14342, 14343, 14344, 14345, 14346, 14347, 14348, 14336, 14337, 14338, 14339, 14340, 14341, 14342, 14343, 14344, 14345, 14346, 14347, 14348, 14336, 14337, 14338, 14339, 14340, 14341} )
+  logged: conv must read back the PRE-STEP bytes after the reject restore
+
+./tests/vt/test_tenstorrent_backend.cpp:12678: ERROR: CHECK( vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1) == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+./tests/vt/test_tenstorrent_backend.cpp:12682: ERROR: CHECK( got == pre ) is NOT correct!
+  values: CHECK( {15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363, 15364, 15365, 15366, 15360, 15361, 15362, 15363} == {14336, 14337, 14338, 14339, 14340, 14341, 14342, 14343, 14344, 14345, 14346, 14347, 14348, 14336, 14337, 14338, 14339, 14340, 14341, 14342, 14343, 14344, 14345, 14346, 14347, 14348, 14336, 14337, 14338, 14339, 14340, 14341} )
+  logged: commit must not roll the step's bytes back
+
+./tests/vt/test_tenstorrent_backend.cpp:12688: ERROR: CHECK( vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1) == 1 ) is NOT correct!
+  values: CHECK( 0 == 1 )

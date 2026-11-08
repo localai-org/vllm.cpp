@@ -6191,6 +6191,108 @@ TEST_CASE("kTENSTORRENT #2294 capture-lane D2D copy records the served geometry"
   backend.Free(mb4); backend.Free(mb5); backend.Free(mos); backend.Free(mo);
 }
 
+// QWEN38-DFLASH2-STAGE-B, red-before for the aux-tap seam fix: a captured
+// host-free copy whose SRC shadow is [1, H] (the per-layer aux-tap clone's
+// shape, qwen3_5.cpp VT_TT_GDN_REPLAY_TAP comment) into a destination slot
+// whose recorded geometry is [S, H*taps] with EQUAL logical numel. The #2294
+// sibling above pins that the record must name the served geometry when the
+// slot had NO shadow; this case pins the stronger contract the DFlash2 drafter
+// needs: when the destination ALREADY holds a persistent device shadow of the
+// same logical volume, the copy must leave the slot's recorded dev_rows/dev_cols
+// untouched and the copied bytes must read back at the RECORDED geometry. The
+// defective arm allocates a fresh SRC-shaped clone and installs it as the slot's
+// shadow (clobbering [S, H*taps] to [1, H]), so a later stage at the recorded
+// geometry reads pool residue. The consume-at-declared-geometry matmul below is
+// the same probe the #2294 case uses: with a clobbered record the fast path
+// hands the matmul the wrongly-shaped [1, H] tensor and the compare fails.
+TEST_CASE("kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot's recorded geometry") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  ForceHostFreeDecode host_free;
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  // 32 elements on both sides: src recorded [1, 32] (the [1, H] tap clone),
+  // dst recorded [4, 8] (the [S, H*taps] aux slot). Equal 64-byte slots, equal
+  // numel, different geometry — exactly the aux-tap seam's mismatch.
+  constexpr int64_t S = 4, TAPS = 8, N = 16;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  using vt::tenstorrent::GetStagingStats;
+  using vt::tenstorrent::ResetStagingStats;
+  std::vector<uint16_t> sb(S * TAPS), db(S * TAPS), wb4(N * TAPS);
+  for (size_t i = 0; i < sb.size(); ++i) sb[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  for (size_t i = 0; i < db.size(); ++i) db[i] = static_cast<uint16_t>(0x3c00 + (i % 7));
+  for (size_t i = 0; i < wb4.size(); ++i) wb4[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  void* ma = backend.Alloc(S * TAPS * 2);
+  void* md = backend.Alloc(S * TAPS * 2);
+  void* mr = backend.Alloc(S * TAPS * 2);
+  void* mb4 = backend.Alloc(N * TAPS * 2);
+  void* mo = backend.Alloc(S * TAPS * N * 4);
+  Queue q = backend.CreateQueue();
+  backend.Copy(q, ma, sb.data(), S * TAPS * 2);
+  backend.Copy(q, md, db.data(), S * TAPS * 2);
+  backend.Copy(q, mr, sb.data(), S * TAPS * 2);  // the copied flat bytes as [S, TAPS]
+  backend.Copy(q, mb4, wb4.data(), N * TAPS * 2);
+  Tensor d = Tensor::Contiguous(md, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {S, TAPS});
+  Tensor r = Tensor::Contiguous(mr, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {S, TAPS});
+  Tensor b4 = Tensor::Contiguous(mb4, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {N, TAPS});
+  Tensor o = Tensor::Contiguous(mo, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {S, N});
+  // Stage the SRC slot's [1, 32] shadow (a mm commit — an H2D Copy alone does
+  // not install a device shadow in eager mode), mirroring how the aux-tap
+  // producer commits its [1, H] clone.
+  void* mw = backend.Alloc(N * S * TAPS * 2);
+  void* mostage = backend.Alloc(N * 4);
+  std::vector<uint16_t> ww(N * S * TAPS);
+  for (size_t i = 0; i < ww.size(); ++i) ww[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mw, ww.data(), ww.size() * 2);
+  Tensor wt = Tensor::Contiguous(mw, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {N, S * TAPS});
+  Tensor ost = Tensor::Contiguous(mostage, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {1, N});
+  Tensor s = Tensor::Contiguous(ma, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {1, S * TAPS});
+  auto mm = reinterpret_cast<vt::MatmulFn>(vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  mm(q, ost, s, wt);  // stages ma's [1, 32] device shadow
+  // Stage dst's PERSISTENT [S, TAPS] shadow: mm(o, d, b4) makes dst's slot own a
+  // device tensor at its recorded geometry (the aux slot's resident state).
+  // The reference r consumes the SAME flat bytes the copy will write, declared
+  // [S, TAPS] — the geometry the record must keep naming.
+  mm(q, o, d, b4);
+  std::vector<float> unused(S * N);
+  // The reference: the same flat bytes declared [S, TAPS], consumed at [S, N].
+  mm(q, o, r, b4);
+  std::vector<float> want(S * N);
+  backend.Copy(q, want.data(), mo, S * N * 4);
+  // Program-cache warm contract (see the #2294 case): run the SAME D2D copy
+  // once eagerly, outside capture, then drop its counter contribution.
+  backend.Copy(q, md, ma, S * TAPS * 2);
+  ResetStagingStats();
+  // Capture region holds only the whole-slot D2D copy.
+  backend.BeginCapture(q);
+  backend.Copy(q, md, ma, S * TAPS * 2);
+  backend.EndCapture(q);
+  backend.Replay(q);
+  vt::tenstorrent::StagingStats st = GetStagingStats();
+  CHECK_MESSAGE(st.stages_avoided_device_copy == 1,
+                "under an active capture only the capture lane may serve the "
+                    "copy, got "
+                    << st.stages_avoided_device_copy);
+  // Consume dst at its RECORDED [S, TAPS] geometry: the served shadow must
+  // still be recorded (and hold the copied bytes) at that geometry.
+  mm(q, o, d, b4);
+  st = GetStagingStats();
+  CHECK_MESSAGE(st.uploads_persistent_bf16 == 0,
+                "dst must serve from its copied shadow at the recorded "
+                    "geometry, got "
+                    << st.uploads_persistent_bf16);
+  std::vector<float> o2(S * N);
+  backend.Copy(q, o2.data(), mo, S * N * 4);
+  for (size_t i = 0; i < want.size(); ++i)
+    CHECK_MESSAGE(want[i] == o2[i], "dst at its RECORDED geometry differs at "
+                            << i << ": " << want[i] << " vs " << o2[i]
+                            << " — the slot's geometry record was clobbered");
+  backend.Free(ma); backend.Free(md); backend.Free(mr);
+  backend.Free(mb4); backend.Free(mo);
+  backend.Free(mw); backend.Free(mostage);
+}
+
 // W7 drift repair (#2282): the reservation must not survive content
 // establishment, and the reserved arm must never discard a live shadow.
 // Captured on the host-free e2e drift (LEG B, prompt[1] tok=0): a pool
@@ -12528,4 +12630,3 @@ TEST_CASE("tt residency: freeing a buffer drops the weight-view shadows "
   backend.Free(host);
   CHECK(vt::tenstorrent::WeightViewShadowCountForTest() == before);
 }
-
