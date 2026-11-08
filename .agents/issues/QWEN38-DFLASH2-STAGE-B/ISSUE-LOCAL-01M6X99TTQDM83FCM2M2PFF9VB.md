@@ -50,4 +50,52 @@ CopyDeviceDeviceIfCapture (tenstorrent_residency.cpp:1490) allocates a fresh src
     eager) — no lease held this session; not waived. The checker battery and
     scripts/agent-preflight.sh --staged run recorded in the row evidence.
 
+- 2026-11-08 (fresh implementer, row/QWEN38-DFLASH2-STAGE-B @ 91622cf06):
+  fresh-review FAIL, four findings, all repaired. Each repair is its own
+  commit; each mutation proof applied the baseline-restoring change in the
+  tree, reran, and restored the source byte-for-byte (git checkout) after
+  the red run.
+  - Finding 1 (blocking), commit 3bf41335f: the committed geometry case
+    detected nothing — its only consumer (the device matmul) serves
+    flat-equal bytes, so a clobbered [1, 32] record still produced an
+    identical result and the case stayed green under the mutation. The case
+    (tests/vt/test_tenstorrent_backend.cpp:6215) now asserts DIRECTLY on the
+    slot's served-geometry record via DeviceShadowExact
+    (tenstorrent_residency.cpp:1089): the record must still name [S, TAPS]
+    and must not name the source's [1, S*TAPS]. Red under the baseline
+    src-shaped-install mutation (tenstorrent_residency.cpp:1552 →
+    `if (false && ...)`): red-recorded-geometry-d2d-copy-mutation.log; green
+    at head: green-recorded-geometry-d2d-copy.log. The stale
+    red-geometry-mismatch-d2d-copy.log / green-focused-tests.log pair is
+    from an earlier test iteration and is superseded (README note).
+  - Finding 2, commit 41aa1e846: the dtype-equality arm
+    (tenstorrent_residency.cpp:1587) had no test. New case stages a
+    persistent f32 [2, 16] dst shadow of equal logical numel and copies a
+    bf16 [1, 32] src: the dtype check must decline the fast path and the
+    record must name the served src-shaped geometry. Red with the dtype
+    check mutated out: red-shadow-dtype-mismatch-mutation.log; green:
+    green-shadow-dtype-decline.log.
+  - Finding 3, commit 059d17be6: the base-pointer guard
+    (tenstorrent_residency.cpp:1529, ISSUE-LOCAL-01M4JK8PT8NF9TQ7M06VS51JJH)
+    had no test. New case copies a 64-byte [1, 32] src into an INTERIOR dst
+    (base + one row's stride) in the capture/host-free lane: the D2D arm
+    must decline (stages_avoided_device_copy == 0), the host fallback must
+    write the interior host bytes, and no device shadow may survive the
+    partial host write. Red with `if (d->host != dst) return false;`
+    mutated out: red-interior-pointer-guard-mutation.log; green:
+    green-interior-pointer-decline.log.
+  - Finding 4, commit 91622cf06: the head/baseline attribution was
+    irreconcilable because the earlier mapping applied baseline error line
+    numbers to the head source. Reconciled (failing-cases-reconciled.md):
+    13 cases fail at BOTH 9996ce94d and the repaired head, 3 fail only at
+    head, 0 only at baseline; head = 16 failing of 112 in BOTH reruns.
+    PagedAttention pure-decode: reproduces in both full-suite runs, passes
+    3/3 in isolation — order/state-dependent, NOT a random flake; open for
+    bisection. kRmsNormGated committed-gate-shadow: a real deterministic
+    regression (passes at 9996ce94d, fails everywhere at head), recorded as
+    an OPEN item, not fixed in this series.
+  - This issue does NOT close: fix 1's seam is correct and now detected, but
+    the two new head-only failures above are unresolved regressions owned by
+    this row, and the P150 token-identity gate remains PENDING.
+
 -

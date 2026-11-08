@@ -19,3 +19,19 @@ Run recipe: `build/tests/test_tenstorrent_backend --test-case="*capture-lane
 D2D copy preserves an equal-numel dst slot's recorded geometry*"` with
 `TT_METAL_HOME`/`TT_METAL_RUNTIME_ROOT` at the local tt-metal pin, under the
 `${HOME}/gpu.lock` mutex, on the P150 (/dev/tenstorrent/0).
+
+## Log index (2026-11-08 fresh-review repair series)
+
+- `green-recorded-geometry-d2d-copy.log` /
+  `red-recorded-geometry-d2d-copy-mutation.log` — finding 1: the rewritten
+  recorded-geometry case (asserts dev_rows/dev_cols via DeviceShadowExact).
+- `green-shadow-dtype-decline.log` /
+  `red-shadow-dtype-mismatch-mutation.log` — finding 2: the dtype-mismatch
+  decline case.
+- `green-interior-pointer-decline.log` /
+  `red-interior-pointer-guard-mutation.log` — finding 3: the interior
+  destination-pointer decline case.
+- `failing-cases-reconciled.md` + `full-suite-head-repaired{,-rep2}.log` —
+  finding 4: the reconciled failing-case attribution. Supersedes the
+  head/baseline pairing presented by `full-suite.log` and
+  `baseline-failing-cases.log` (see the reconciled file for why).
