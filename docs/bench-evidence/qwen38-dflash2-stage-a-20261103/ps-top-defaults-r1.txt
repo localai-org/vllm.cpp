@@ -1,0 +1,6 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   34114 99.8  0.0  37824 31872 ?        R    23:09   0:08 /usr/lib/python-exec/python3.13/python3 tests/scripts/test_check_gate_commands.py
+lu_zero   40913  1.4  0.2 6184960 647616 pts/5  Sl+  07:07  14:02 claude -c
+lu_zero   72204  1.0  0.7 21496064 2060160 pts/0 Sl+ Nov01  97:14 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   42077  0.8  2.2 28813952 6064640 pts/5 Sl+ 07:10   7:45 /usr/bin/rust-analyzer
+lu_zero   59982  0.7  0.2 6248000 571328 pts/1  Sl+  Oct27 127:36 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892

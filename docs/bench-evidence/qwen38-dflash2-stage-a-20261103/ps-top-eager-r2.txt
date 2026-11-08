@@ -1,0 +1,6 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   51515  1.4  0.1 18569536 491200 pts/2 Sl+  Nov07   2:14 maki -c
+lu_zero   40913  1.4  0.2 6184960 633536 pts/5  Sl+  Nov07  16:24 claude -c
+lu_zero   72204  1.0  0.7 21496448 2060288 pts/0 Sl+ Nov01  99:20 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   59982  0.7  0.2 6248000 570496 pts/1  Sl+  Oct27 128:57 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero   42077  0.6  2.2 28813952 6090944 pts/5 Sl+ Nov07   7:51 /usr/bin/rust-analyzer

@@ -1,0 +1,6 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   16153  200  0.0  28608 22720 ?        R    23:36   0:00 /usr/lib/python-exec/python3.13/python3 /tmp/q38-stage-a/scripts/check-windows-portability.py --root /tmp/tmpul9ws036 --test-source-manifest /tmp/tmpul9ws036/.windows-portability-sources.json
+lu_zero   15980  100  0.0 173760 168512 ?       R    23:36   0:05 /usr/lib/python-exec/python3.13/python3 tests/scripts/test_rocm_rank_kernels.py
+lu_zero   15795 14.7  0.0  59520 47104 ?        S    23:36   0:01 /usr/lib/python-exec/python3.13/python3 -m unittest tests.scripts.test_check_windows_portability
+lu_zero   40913  1.5  0.2 6184960 699776 pts/5  Sl+  07:07  14:52 claude -c
+lu_zero   72204  1.0  0.7 21496192 2060288 pts/0 Sl+ Nov01  97:39 maki -r CeRgUcXiFK5bYWGSPS4sy

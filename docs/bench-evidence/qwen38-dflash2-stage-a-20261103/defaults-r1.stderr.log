@@ -1,0 +1,801 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf engine | num_prompts=1 input_len=32 output_len=200 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 289527808 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+INFO auto-fit max_model_len: reduced from 262144 to 992 to fit the KV cache (64 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=2396.164 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=2897.289 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=2899.629 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=3943.543 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=2901.809 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=2905.573 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=2896.043 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=3903.586 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=2899.362 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=2991.976 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=2988.682 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=3909.592 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=3000.636 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=2996.560 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=2897.778 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=4006.261 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=2991.763 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=2897.674 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=2991.658 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=4005.314 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=2894.552 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=2984.637 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=2987.775 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=3911.113 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=2999.900 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=3008.462 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=2912.145 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=4006.453 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=3002.304 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=2905.724 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=2999.731 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=3999.404 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=2904.740 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=2997.911 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=3001.305 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=3909.837 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=3010.739 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=3010.969 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=2914.524 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=4006.378 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=3000.959 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=2903.176 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=2999.393 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=4000.982 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=2910.035 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=3003.563 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=3006.506 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=3910.702 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=3012.644 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=3014.786 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=2916.067 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=4006.934 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=3006.148 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=2909.922 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=3005.571 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=3999.157 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=2919.176 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=2912.527 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=2913.126 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=3902.341 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=2914.731 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=2917.639 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=2914.314 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=3903.617 dev_ms=-1.000
+[TT-STEP-PHASE] sync kind=host-read wait_ms=883.728 read=327680
+[FLINT-STEP] batch=1 fwd_ms=213033.429 step_wall_ms=0.000
+[FLINT-STEP] sample_ms=352.407
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=266.435 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=95.544 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=95.149 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=182.904 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=96.164 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=95.173 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=95.005 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=122.372 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=98.174 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=97.972 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=97.998 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=122.145 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=98.060 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=98.021 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=95.116 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=125.268 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=98.058 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=95.113 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=98.044 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=125.314 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=95.034 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=98.021 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=98.063 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=122.297 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=98.168 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=98.032 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=95.080 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=125.206 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=97.774 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=94.736 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=97.744 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=125.294 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=94.798 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=97.752 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=97.848 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=122.202 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=97.756 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=97.800 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=94.712 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=125.252 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=98.022 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=94.806 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=97.910 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=125.345 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=95.400 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=97.917 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=97.825 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=122.433 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=97.894 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=97.756 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=94.876 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=125.311 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=97.931 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=94.812 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=97.751 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=125.387 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=94.786 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=94.892 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=94.816 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=122.292 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=94.996 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=94.657 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=94.760 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=122.359 dev_ms=-1.000
+[TT-STEP-PHASE] step=1 kind=cold B=1 S=1 boundary=1 warm_calls=20 dram_free_mib=2488 dispatches=964 segments=0 wall_ms=6971.6 warms_ms=86.4 embed_ms=7.5 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=6876.4 gap_prev_ms=-1.0
+[FLINT-STEP] batch=1 fwd_ms=6971.610 step_wall_ms=213385.966
+[FLINT-STEP] sample_ms=357.119
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=20.158 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=12.175 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=11.994 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=10.406 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=11.945 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=9.454 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=8.745 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=6.110 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=8.698 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=8.709 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=8.688 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=6.150 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=8.647 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=8.658 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=8.541 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=6.145 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=8.498 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=8.547 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=8.482 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=6.115 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=8.507 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=8.501 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=8.531 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=6.013 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=8.565 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=8.505 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=8.449 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=6.037 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=8.435 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=8.467 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=8.562 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=6.052 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=8.544 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=8.488 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=8.441 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=5.920 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=8.451 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=8.459 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=8.391 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=5.934 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=8.480 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=8.482 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=8.493 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=5.965 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=8.415 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=8.469 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=8.464 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=5.918 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=8.517 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=8.581 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=8.397 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=5.990 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=8.440 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=8.448 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=8.465 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=5.952 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=8.444 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=8.493 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=8.472 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=5.951 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=8.409 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=8.409 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=8.472 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=5.923 dev_ms=-1.000
+[REGION-CAPTURE] segment 0: 125558784 B staging
+[DenseDecodeGraph] captured Qwen3.5 dense decode graph for padded size S=1 (real B=1)
+[TT-STEP-PHASE] step=2 kind=capture B=1 S=1 boundary=1 warm_calls=20 dram_free_mib=2394 dispatches=963 segments=1 wall_ms=854.5 warms_ms=0.1 embed_ms=0.2 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=534.9 cap_end_ms=316.9 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=357.2
+[FLINT-STEP] batch=1 fwd_ms=854.568 step_wall_ms=7328.815
+[FLINT-STEP] sample_ms=6625.815
+[TT-STEP-PHASE] step=3 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.2 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.9
+[FLINT-STEP] batch=1 fwd_ms=4.277 step_wall_ms=7480.465
+[FLINT-STEP] sample_ms=6625.441
+[TT-STEP-PHASE] step=4 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.6
+[FLINT-STEP] batch=1 fwd_ms=5.836 step_wall_ms=6629.833
+[FLINT-STEP] sample_ms=6627.533
+[TT-STEP-PHASE] step=5 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6627.7
+[FLINT-STEP] batch=1 fwd_ms=3.977 step_wall_ms=6633.458
+[FLINT-STEP] sample_ms=6625.832
+[TT-STEP-PHASE] step=6 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.9
+[FLINT-STEP] batch=1 fwd_ms=5.380 step_wall_ms=6629.880
+[FLINT-STEP] sample_ms=6627.207
+[TT-STEP-PHASE] step=7 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6627.3
+[FLINT-STEP] batch=1 fwd_ms=4.416 step_wall_ms=6632.660
+[FLINT-STEP] sample_ms=6638.844
+[TT-STEP-PHASE] step=8 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=8.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6639.0
+[FLINT-STEP] batch=1 fwd_ms=8.690 step_wall_ms=6643.362
+[FLINT-STEP] sample_ms=6635.723
+[TT-STEP-PHASE] step=9 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=11.4 warms_ms=3.5 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6635.9
+[FLINT-STEP] batch=1 fwd_ms=11.476 step_wall_ms=6644.499
+[FLINT-STEP] sample_ms=6626.842
+[TT-STEP-PHASE] step=10 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6627.0
+[FLINT-STEP] batch=1 fwd_ms=4.846 step_wall_ms=6638.399
+[FLINT-STEP] sample_ms=6638.858
+[TT-STEP-PHASE] step=11 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=8.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6639.0
+[FLINT-STEP] batch=1 fwd_ms=8.075 step_wall_ms=6643.792
+[FLINT-STEP] sample_ms=6631.880
+[TT-STEP-PHASE] step=12 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6632.0
+[FLINT-STEP] batch=1 fwd_ms=4.605 step_wall_ms=6640.050
+[FLINT-STEP] sample_ms=6625.592
+[TT-STEP-PHASE] step=13 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.7
+[FLINT-STEP] batch=1 fwd_ms=4.760 step_wall_ms=6630.301
+[FLINT-STEP] sample_ms=6625.565
+[TT-STEP-PHASE] step=14 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=6.2 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.7
+[FLINT-STEP] batch=1 fwd_ms=6.292 step_wall_ms=6630.434
+[FLINT-STEP] sample_ms=6632.768
+[TT-STEP-PHASE] step=15 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6632.9
+[FLINT-STEP] batch=1 fwd_ms=4.365 step_wall_ms=6639.149
+[FLINT-STEP] sample_ms=6625.519
+[TT-STEP-PHASE] step=16 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.2 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.6
+[FLINT-STEP] batch=1 fwd_ms=4.357 step_wall_ms=6629.978
+[FLINT-STEP] sample_ms=6628.000
+[TT-STEP-PHASE] step=17 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.2 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6628.1
+[FLINT-STEP] batch=1 fwd_ms=4.214 step_wall_ms=6632.451
+[FLINT-STEP] sample_ms=6625.699
+[TT-STEP-PHASE] step=18 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.8
+[FLINT-STEP] batch=1 fwd_ms=4.485 step_wall_ms=6630.008
+[FLINT-STEP] sample_ms=6625.722
+[TT-STEP-PHASE] step=19 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.8
+[FLINT-STEP] batch=1 fwd_ms=4.291 step_wall_ms=6630.297
+[FLINT-STEP] sample_ms=6625.190
+[TT-STEP-PHASE] step=20 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=4.374 step_wall_ms=6629.581
+[FLINT-STEP] sample_ms=6624.564
+[TT-STEP-PHASE] step=21 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=4.333 step_wall_ms=6629.021
+[FLINT-STEP] sample_ms=6627.065
+[TT-STEP-PHASE] step=22 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6627.2
+[FLINT-STEP] batch=1 fwd_ms=4.307 step_wall_ms=6631.480
+[FLINT-STEP] sample_ms=6626.400
+[TT-STEP-PHASE] step=23 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6626.5
+[FLINT-STEP] batch=1 fwd_ms=4.358 step_wall_ms=6630.797
+[FLINT-STEP] sample_ms=6627.810
+[TT-STEP-PHASE] step=24 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6627.9
+[FLINT-STEP] batch=1 fwd_ms=5.423 step_wall_ms=6632.257
+[FLINT-STEP] sample_ms=6625.308
+[TT-STEP-PHASE] step=25 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=4.622 step_wall_ms=6630.826
+[FLINT-STEP] sample_ms=6626.579
+[TT-STEP-PHASE] step=26 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.7
+[FLINT-STEP] batch=1 fwd_ms=4.894 step_wall_ms=6631.291
+[FLINT-STEP] sample_ms=6626.575
+[TT-STEP-PHASE] step=27 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.7
+[FLINT-STEP] batch=1 fwd_ms=4.756 step_wall_ms=6631.581
+[FLINT-STEP] sample_ms=6626.984
+[TT-STEP-PHASE] step=28 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6627.1
+[FLINT-STEP] batch=1 fwd_ms=4.481 step_wall_ms=6631.837
+[FLINT-STEP] sample_ms=6624.986
+[TT-STEP-PHASE] step=29 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=4.461 step_wall_ms=6629.617
+[FLINT-STEP] sample_ms=6624.117
+[TT-STEP-PHASE] step=30 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.3
+[FLINT-STEP] batch=1 fwd_ms=4.036 step_wall_ms=6628.676
+[FLINT-STEP] sample_ms=6626.129
+[TT-STEP-PHASE] step=31 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.3
+[FLINT-STEP] batch=1 fwd_ms=4.105 step_wall_ms=6630.266
+[FLINT-STEP] sample_ms=6626.578
+[TT-STEP-PHASE] step=32 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.7
+[FLINT-STEP] batch=1 fwd_ms=3.699 step_wall_ms=6630.785
+[FLINT-STEP] sample_ms=6626.392
+[TT-STEP-PHASE] step=33 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.5
+[FLINT-STEP] batch=1 fwd_ms=4.179 step_wall_ms=6630.172
+[FLINT-STEP] sample_ms=6626.258
+[TT-STEP-PHASE] step=34 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.4
+[FLINT-STEP] batch=1 fwd_ms=5.509 step_wall_ms=6630.558
+[FLINT-STEP] sample_ms=6624.415
+[TT-STEP-PHASE] step=35 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.591 step_wall_ms=6630.012
+[FLINT-STEP] sample_ms=6624.769
+[TT-STEP-PHASE] step=36 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.680 step_wall_ms=6628.436
+[FLINT-STEP] sample_ms=6625.364
+[TT-STEP-PHASE] step=37 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.5
+[FLINT-STEP] batch=1 fwd_ms=3.706 step_wall_ms=6629.143
+[FLINT-STEP] sample_ms=6625.363
+[TT-STEP-PHASE] step=38 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.5
+[FLINT-STEP] batch=1 fwd_ms=3.715 step_wall_ms=6629.144
+[FLINT-STEP] sample_ms=6626.289
+[TT-STEP-PHASE] step=39 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.4
+[FLINT-STEP] batch=1 fwd_ms=3.670 step_wall_ms=6630.087
+[FLINT-STEP] sample_ms=6624.784
+[TT-STEP-PHASE] step=40 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.658 step_wall_ms=6628.543
+[FLINT-STEP] sample_ms=6624.361
+[TT-STEP-PHASE] step=41 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.575 step_wall_ms=6628.104
+[FLINT-STEP] sample_ms=6626.095
+[TT-STEP-PHASE] step=42 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.3
+[FLINT-STEP] batch=1 fwd_ms=5.080 step_wall_ms=6629.780
+[FLINT-STEP] sample_ms=6626.686
+[TT-STEP-PHASE] step=43 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.8
+[FLINT-STEP] batch=1 fwd_ms=3.998 step_wall_ms=6631.869
+[FLINT-STEP] sample_ms=6625.284
+[TT-STEP-PHASE] step=44 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=3.726 step_wall_ms=6629.366
+[FLINT-STEP] sample_ms=6624.625
+[TT-STEP-PHASE] step=45 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.735 step_wall_ms=6628.436
+[FLINT-STEP] sample_ms=6625.926
+[TT-STEP-PHASE] step=46 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.2 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.1
+[FLINT-STEP] batch=1 fwd_ms=4.288 step_wall_ms=6629.759
+[FLINT-STEP] sample_ms=6625.894
+[TT-STEP-PHASE] step=47 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.1
+[FLINT-STEP] batch=1 fwd_ms=4.882 step_wall_ms=6630.297
+[FLINT-STEP] sample_ms=6626.027
+[TT-STEP-PHASE] step=48 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.2
+[FLINT-STEP] batch=1 fwd_ms=5.653 step_wall_ms=6631.030
+[FLINT-STEP] sample_ms=6624.972
+[TT-STEP-PHASE] step=49 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.1
+[FLINT-STEP] batch=1 fwd_ms=3.965 step_wall_ms=6630.708
+[FLINT-STEP] sample_ms=6625.142
+[TT-STEP-PHASE] step=50 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=5.1 warms_ms=0.2 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=5.154 step_wall_ms=6629.208
+[FLINT-STEP] sample_ms=6624.912
+[TT-STEP-PHASE] step=51 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=4.082 step_wall_ms=6630.138
+[FLINT-STEP] sample_ms=6625.693
+[TT-STEP-PHASE] step=52 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.8
+[FLINT-STEP] batch=1 fwd_ms=3.758 step_wall_ms=6629.880
+[FLINT-STEP] sample_ms=6625.450
+[TT-STEP-PHASE] step=53 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.6
+[FLINT-STEP] batch=1 fwd_ms=3.899 step_wall_ms=6629.285
+[FLINT-STEP] sample_ms=6624.855
+[TT-STEP-PHASE] step=54 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.916 step_wall_ms=6628.848
+[FLINT-STEP] sample_ms=6624.289
+[TT-STEP-PHASE] step=55 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.806 step_wall_ms=6628.287
+[FLINT-STEP] sample_ms=6628.958
+[TT-STEP-PHASE] step=56 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6629.1
+[FLINT-STEP] batch=1 fwd_ms=4.035 step_wall_ms=6632.903
+[FLINT-STEP] sample_ms=6628.598
+[TT-STEP-PHASE] step=57 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6628.7
+[FLINT-STEP] batch=1 fwd_ms=3.841 step_wall_ms=6632.719
+[FLINT-STEP] sample_ms=6627.280
+[TT-STEP-PHASE] step=58 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6627.4
+[FLINT-STEP] batch=1 fwd_ms=3.837 step_wall_ms=6631.224
+[FLINT-STEP] sample_ms=6625.108
+[TT-STEP-PHASE] step=59 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.824 step_wall_ms=6629.023
+[FLINT-STEP] sample_ms=6629.529
+[TT-STEP-PHASE] step=60 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=25.2 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6629.7
+[FLINT-STEP] batch=1 fwd_ms=25.269 step_wall_ms=6633.505
+[FLINT-STEP] sample_ms=6625.519
+[TT-STEP-PHASE] step=61 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=19.0 warms_ms=0.2 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.8
+[FLINT-STEP] batch=1 fwd_ms=19.034 step_wall_ms=6651.042
+[FLINT-STEP] sample_ms=6624.551
+[TT-STEP-PHASE] step=62 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.994 step_wall_ms=6643.677
+[FLINT-STEP] sample_ms=6625.135
+[TT-STEP-PHASE] step=63 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=3.724 step_wall_ms=6629.261
+[FLINT-STEP] sample_ms=6625.352
+[TT-STEP-PHASE] step=64 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.5
+[FLINT-STEP] batch=1 fwd_ms=3.760 step_wall_ms=6629.206
+[FLINT-STEP] sample_ms=6624.984
+[TT-STEP-PHASE] step=65 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.1
+[FLINT-STEP] batch=1 fwd_ms=3.960 step_wall_ms=6628.836
+[FLINT-STEP] sample_ms=6625.140
+[TT-STEP-PHASE] step=66 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=3.919 step_wall_ms=6629.198
+[FLINT-STEP] sample_ms=6625.182
+[TT-STEP-PHASE] step=67 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=3.979 step_wall_ms=6629.187
+[FLINT-STEP] sample_ms=6625.056
+[TT-STEP-PHASE] step=68 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.942 step_wall_ms=6629.149
+[FLINT-STEP] sample_ms=6633.099
+[TT-STEP-PHASE] step=69 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.2 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6633.3
+[FLINT-STEP] batch=1 fwd_ms=4.106 step_wall_ms=6637.160
+[FLINT-STEP] sample_ms=6632.710
+[TT-STEP-PHASE] step=70 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=10.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=3.5 body_ms=0.0 gap_prev_ms=6632.9
+[FLINT-STEP] batch=1 fwd_ms=10.934 step_wall_ms=6636.933
+[FLINT-STEP] sample_ms=6621.288
+[TT-STEP-PHASE] step=71 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6621.5
+[FLINT-STEP] batch=1 fwd_ms=4.144 step_wall_ms=6632.349
+[FLINT-STEP] sample_ms=6624.215
+[TT-STEP-PHASE] step=72 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.926 step_wall_ms=6628.469
+[FLINT-STEP] sample_ms=6624.945
+[TT-STEP-PHASE] step=73 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.1
+[FLINT-STEP] batch=1 fwd_ms=3.992 step_wall_ms=6628.965
+[FLINT-STEP] sample_ms=6624.788
+[TT-STEP-PHASE] step=74 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=4.174 step_wall_ms=6628.876
+[FLINT-STEP] sample_ms=6624.330
+[TT-STEP-PHASE] step=75 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=4.076 step_wall_ms=6628.593
+[FLINT-STEP] sample_ms=6624.444
+[TT-STEP-PHASE] step=76 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=4.335 step_wall_ms=6628.619
+[FLINT-STEP] sample_ms=6626.372
+[TT-STEP-PHASE] step=77 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6626.5
+[FLINT-STEP] batch=1 fwd_ms=3.993 step_wall_ms=6630.800
+[FLINT-STEP] sample_ms=6625.467
+[TT-STEP-PHASE] step=78 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.6
+[FLINT-STEP] batch=1 fwd_ms=3.859 step_wall_ms=6629.554
+[FLINT-STEP] sample_ms=6625.069
+[TT-STEP-PHASE] step=79 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.857 step_wall_ms=6629.023
+[FLINT-STEP] sample_ms=6623.798
+[TT-STEP-PHASE] step=80 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.9
+[FLINT-STEP] batch=1 fwd_ms=3.821 step_wall_ms=6627.756
+[FLINT-STEP] sample_ms=6624.762
+[TT-STEP-PHASE] step=81 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.817 step_wall_ms=6628.687
+[FLINT-STEP] sample_ms=6624.837
+[TT-STEP-PHASE] step=82 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.969 step_wall_ms=6628.756
+[FLINT-STEP] sample_ms=6625.277
+[TT-STEP-PHASE] step=83 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=4.107 step_wall_ms=6629.355
+[FLINT-STEP] sample_ms=6624.493
+[TT-STEP-PHASE] step=84 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=4.079 step_wall_ms=6628.713
+[FLINT-STEP] sample_ms=6623.777
+[TT-STEP-PHASE] step=85 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.9
+[FLINT-STEP] batch=1 fwd_ms=3.880 step_wall_ms=6627.983
+[FLINT-STEP] sample_ms=6623.733
+[TT-STEP-PHASE] step=86 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.9
+[FLINT-STEP] batch=1 fwd_ms=3.724 step_wall_ms=6627.715
+[FLINT-STEP] sample_ms=6625.001
+[TT-STEP-PHASE] step=87 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.888 step_wall_ms=6628.845
+[FLINT-STEP] sample_ms=6625.350
+[TT-STEP-PHASE] step=88 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.5
+[FLINT-STEP] batch=1 fwd_ms=3.819 step_wall_ms=6629.349
+[FLINT-STEP] sample_ms=6624.441
+[TT-STEP-PHASE] step=89 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=3.812 step_wall_ms=6628.380
+[FLINT-STEP] sample_ms=6624.585
+[TT-STEP-PHASE] step=90 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.976 step_wall_ms=6628.517
+[FLINT-STEP] sample_ms=6624.570
+[TT-STEP-PHASE] step=91 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.834 step_wall_ms=6628.656
+[FLINT-STEP] sample_ms=6625.249
+[TT-STEP-PHASE] step=92 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=3.797 step_wall_ms=6629.185
+[FLINT-STEP] sample_ms=6624.759
+[TT-STEP-PHASE] step=93 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.800 step_wall_ms=6628.645
+[FLINT-STEP] sample_ms=6624.261
+[TT-STEP-PHASE] step=94 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=4.054 step_wall_ms=6628.244
+[FLINT-STEP] sample_ms=6623.810
+[TT-STEP-PHASE] step=95 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.962 step_wall_ms=6628.057
+[FLINT-STEP] sample_ms=6623.395
+[TT-STEP-PHASE] step=96 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.6
+[FLINT-STEP] batch=1 fwd_ms=3.535 step_wall_ms=6627.551
+[FLINT-STEP] sample_ms=6624.530
+[TT-STEP-PHASE] step=97 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.618 step_wall_ms=6628.245
+[FLINT-STEP] sample_ms=6624.451
+[TT-STEP-PHASE] step=98 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.563 step_wall_ms=6628.226
+[FLINT-STEP] sample_ms=6624.342
+[TT-STEP-PHASE] step=99 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.555 step_wall_ms=6627.998
+[FLINT-STEP] sample_ms=6623.961
+[TT-STEP-PHASE] step=100 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.742 step_wall_ms=6627.621
+[FLINT-STEP] sample_ms=6624.023
+[TT-STEP-PHASE] step=101 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.606 step_wall_ms=6627.853
+[FLINT-STEP] sample_ms=6624.276
+[TT-STEP-PHASE] step=102 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.581 step_wall_ms=6627.978
+[FLINT-STEP] sample_ms=6624.406
+[TT-STEP-PHASE] step=103 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=3.684 step_wall_ms=6628.079
+[FLINT-STEP] sample_ms=6624.346
+[TT-STEP-PHASE] step=104 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.628 step_wall_ms=6628.139
+[FLINT-STEP] sample_ms=6627.163
+[TT-STEP-PHASE] step=105 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6627.3
+[FLINT-STEP] batch=1 fwd_ms=3.573 step_wall_ms=6630.885
+[FLINT-STEP] sample_ms=6624.632
+[TT-STEP-PHASE] step=106 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.627 step_wall_ms=6628.310
+[FLINT-STEP] sample_ms=6624.266
+[TT-STEP-PHASE] step=107 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.676 step_wall_ms=6627.985
+[FLINT-STEP] sample_ms=6624.416
+[TT-STEP-PHASE] step=108 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=3.426 step_wall_ms=6628.199
+[FLINT-STEP] sample_ms=6623.965
+[TT-STEP-PHASE] step=109 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.592 step_wall_ms=6627.485
+[FLINT-STEP] sample_ms=6624.155
+[TT-STEP-PHASE] step=110 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.3
+[FLINT-STEP] batch=1 fwd_ms=3.721 step_wall_ms=6627.827
+[FLINT-STEP] sample_ms=6624.276
+[TT-STEP-PHASE] step=111 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.769 step_wall_ms=6628.082
+[FLINT-STEP] sample_ms=6624.135
+[TT-STEP-PHASE] step=112 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.3
+[FLINT-STEP] batch=1 fwd_ms=3.732 step_wall_ms=6628.013
+[FLINT-STEP] sample_ms=6625.280
+[TT-STEP-PHASE] step=113 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=3.678 step_wall_ms=6629.137
+[FLINT-STEP] sample_ms=6623.842
+[TT-STEP-PHASE] step=114 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.0
+[FLINT-STEP] batch=1 fwd_ms=3.815 step_wall_ms=6627.600
+[FLINT-STEP] sample_ms=6623.723
+[TT-STEP-PHASE] step=115 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.8
+[FLINT-STEP] batch=1 fwd_ms=3.793 step_wall_ms=6627.614
+[FLINT-STEP] sample_ms=6624.333
+[TT-STEP-PHASE] step=116 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.677 step_wall_ms=6628.200
+[FLINT-STEP] sample_ms=6625.050
+[TT-STEP-PHASE] step=117 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.748 step_wall_ms=6628.825
+[FLINT-STEP] sample_ms=6624.760
+[TT-STEP-PHASE] step=118 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.800 step_wall_ms=6628.605
+[FLINT-STEP] sample_ms=6624.141
+[TT-STEP-PHASE] step=119 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.3
+[FLINT-STEP] batch=1 fwd_ms=3.744 step_wall_ms=6628.017
+[FLINT-STEP] sample_ms=6625.826
+[TT-STEP-PHASE] step=120 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.9
+[FLINT-STEP] batch=1 fwd_ms=3.759 step_wall_ms=6629.656
+[FLINT-STEP] sample_ms=6624.401
+[TT-STEP-PHASE] step=121 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.730 step_wall_ms=6628.268
+[FLINT-STEP] sample_ms=6624.434
+[TT-STEP-PHASE] step=122 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.738 step_wall_ms=6628.241
+[FLINT-STEP] sample_ms=6625.338
+[TT-STEP-PHASE] step=123 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.5
+[FLINT-STEP] batch=1 fwd_ms=3.621 step_wall_ms=6629.154
+[FLINT-STEP] sample_ms=6625.097
+[TT-STEP-PHASE] step=124 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.665 step_wall_ms=6628.804
+[FLINT-STEP] sample_ms=6624.252
+[TT-STEP-PHASE] step=125 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.884 step_wall_ms=6628.026
+[FLINT-STEP] sample_ms=6624.385
+[TT-STEP-PHASE] step=126 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.756 step_wall_ms=6628.366
+[FLINT-STEP] sample_ms=6623.373
+[TT-STEP-PHASE] step=127 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.5
+[FLINT-STEP] batch=1 fwd_ms=3.708 step_wall_ms=6627.226
+[FLINT-STEP] sample_ms=6625.627
+[TT-STEP-PHASE] step=128 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.7
+[FLINT-STEP] batch=1 fwd_ms=3.717 step_wall_ms=6629.418
+[FLINT-STEP] sample_ms=6624.738
+[TT-STEP-PHASE] step=129 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.776 step_wall_ms=6628.549
+[FLINT-STEP] sample_ms=6623.952
+[TT-STEP-PHASE] step=130 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.680 step_wall_ms=6627.826
+[FLINT-STEP] sample_ms=6623.726
+[TT-STEP-PHASE] step=131 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.8
+[FLINT-STEP] batch=1 fwd_ms=3.636 step_wall_ms=6627.494
+[FLINT-STEP] sample_ms=6623.940
+[TT-STEP-PHASE] step=132 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.601 step_wall_ms=6627.663
+[FLINT-STEP] sample_ms=6625.121
+[TT-STEP-PHASE] step=133 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=3.572 step_wall_ms=6628.815
+[FLINT-STEP] sample_ms=6626.205
+[TT-STEP-PHASE] step=134 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.3
+[FLINT-STEP] batch=1 fwd_ms=3.385 step_wall_ms=6629.882
+[FLINT-STEP] sample_ms=6623.547
+[TT-STEP-PHASE] step=135 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.7
+[FLINT-STEP] batch=1 fwd_ms=3.466 step_wall_ms=6627.018
+[FLINT-STEP] sample_ms=6624.231
+[TT-STEP-PHASE] step=136 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.868 step_wall_ms=6627.779
+[FLINT-STEP] sample_ms=6624.433
+[TT-STEP-PHASE] step=137 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.597 step_wall_ms=6628.383
+[FLINT-STEP] sample_ms=6623.896
+[TT-STEP-PHASE] step=138 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.0
+[FLINT-STEP] batch=1 fwd_ms=3.587 step_wall_ms=6627.591
+[FLINT-STEP] sample_ms=6624.880
+[TT-STEP-PHASE] step=139 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.462 step_wall_ms=6628.573
+[FLINT-STEP] sample_ms=6624.453
+[TT-STEP-PHASE] step=140 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=3.618 step_wall_ms=6627.993
+[FLINT-STEP] sample_ms=6624.722
+[TT-STEP-PHASE] step=141 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.555 step_wall_ms=6628.434
+[FLINT-STEP] sample_ms=6625.293
+[TT-STEP-PHASE] step=142 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=3.617 step_wall_ms=6628.935
+[FLINT-STEP] sample_ms=6625.001
+[TT-STEP-PHASE] step=143 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.1
+[FLINT-STEP] batch=1 fwd_ms=3.659 step_wall_ms=6628.715
+[FLINT-STEP] sample_ms=6623.416
+[TT-STEP-PHASE] step=144 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.5
+[FLINT-STEP] batch=1 fwd_ms=3.523 step_wall_ms=6627.165
+[FLINT-STEP] sample_ms=6623.962
+[TT-STEP-PHASE] step=145 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.663 step_wall_ms=6627.571
+[FLINT-STEP] sample_ms=6624.666
+[TT-STEP-PHASE] step=146 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.461 step_wall_ms=6628.420
+[FLINT-STEP] sample_ms=6624.536
+[TT-STEP-PHASE] step=147 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.656 step_wall_ms=6628.080
+[FLINT-STEP] sample_ms=6624.902
+[TT-STEP-PHASE] step=148 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.676 step_wall_ms=6628.660
+[FLINT-STEP] sample_ms=6624.105
+[TT-STEP-PHASE] step=149 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.2
+[FLINT-STEP] batch=1 fwd_ms=3.592 step_wall_ms=6627.867
+[FLINT-STEP] sample_ms=6625.072
+[TT-STEP-PHASE] step=150 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.631 step_wall_ms=6628.754
+[FLINT-STEP] sample_ms=6624.387
+[TT-STEP-PHASE] step=151 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.610 step_wall_ms=6628.100
+[FLINT-STEP] sample_ms=6624.588
+[TT-STEP-PHASE] step=152 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.769 step_wall_ms=6628.288
+[FLINT-STEP] sample_ms=6624.398
+[TT-STEP-PHASE] step=153 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.473 step_wall_ms=6628.264
+[FLINT-STEP] sample_ms=6624.048
+[TT-STEP-PHASE] step=154 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.2
+[FLINT-STEP] batch=1 fwd_ms=3.675 step_wall_ms=6627.596
+[FLINT-STEP] sample_ms=6623.993
+[TT-STEP-PHASE] step=155 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.788 step_wall_ms=6627.772
+[FLINT-STEP] sample_ms=6624.271
+[TT-STEP-PHASE] step=156 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.713 step_wall_ms=6628.163
+[FLINT-STEP] sample_ms=6624.766
+[TT-STEP-PHASE] step=157 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.606 step_wall_ms=6628.559
+[FLINT-STEP] sample_ms=6624.899
+[TT-STEP-PHASE] step=158 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.582 step_wall_ms=6628.597
+[FLINT-STEP] sample_ms=6624.129
+[TT-STEP-PHASE] step=159 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.2
+[FLINT-STEP] batch=1 fwd_ms=3.431 step_wall_ms=6627.799
+[FLINT-STEP] sample_ms=6624.129
+[TT-STEP-PHASE] step=160 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.3
+[FLINT-STEP] batch=1 fwd_ms=3.315 step_wall_ms=6627.664
+[FLINT-STEP] sample_ms=6624.282
+[TT-STEP-PHASE] step=161 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.446 step_wall_ms=6627.700
+[FLINT-STEP] sample_ms=6624.659
+[TT-STEP-PHASE] step=162 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.603 step_wall_ms=6628.204
+[FLINT-STEP] sample_ms=6624.765
+[TT-STEP-PHASE] step=163 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.491 step_wall_ms=6628.464
+[FLINT-STEP] sample_ms=6624.417
+[TT-STEP-PHASE] step=164 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.5
+[FLINT-STEP] batch=1 fwd_ms=3.629 step_wall_ms=6627.993
+[FLINT-STEP] sample_ms=6623.239
+[TT-STEP-PHASE] step=165 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.4
+[FLINT-STEP] batch=1 fwd_ms=3.498 step_wall_ms=6626.964
+[FLINT-STEP] sample_ms=6624.717
+[TT-STEP-PHASE] step=166 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.9
+[FLINT-STEP] batch=1 fwd_ms=3.712 step_wall_ms=6628.311
+[FLINT-STEP] sample_ms=6623.521
+[TT-STEP-PHASE] step=167 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.6
+[FLINT-STEP] batch=1 fwd_ms=3.517 step_wall_ms=6627.322
+[FLINT-STEP] sample_ms=6624.897
+[TT-STEP-PHASE] step=168 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.561 step_wall_ms=6628.488
+[FLINT-STEP] sample_ms=6625.318
+[TT-STEP-PHASE] step=169 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=3.661 step_wall_ms=6628.965
+[FLINT-STEP] sample_ms=6624.571
+[TT-STEP-PHASE] step=170 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.594 step_wall_ms=6628.316
+[FLINT-STEP] sample_ms=6624.543
+[TT-STEP-PHASE] step=171 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.7
+[FLINT-STEP] batch=1 fwd_ms=3.689 step_wall_ms=6628.218
+[FLINT-STEP] sample_ms=6624.529
+[TT-STEP-PHASE] step=172 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=4.026 step_wall_ms=6628.304
+[FLINT-STEP] sample_ms=6625.370
+[TT-STEP-PHASE] step=173 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.5
+[FLINT-STEP] batch=1 fwd_ms=3.647 step_wall_ms=6629.474
+[FLINT-STEP] sample_ms=6624.941
+[TT-STEP-PHASE] step=174 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.798 step_wall_ms=6628.662
+[FLINT-STEP] sample_ms=6623.121
+[TT-STEP-PHASE] step=175 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.2
+[FLINT-STEP] batch=1 fwd_ms=3.678 step_wall_ms=6627.005
+[FLINT-STEP] sample_ms=6625.130
+[TT-STEP-PHASE] step=176 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.734 step_wall_ms=6628.888
+[FLINT-STEP] sample_ms=6624.043
+[TT-STEP-PHASE] step=177 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.2
+[FLINT-STEP] batch=1 fwd_ms=3.634 step_wall_ms=6627.878
+[FLINT-STEP] sample_ms=6626.121
+[TT-STEP-PHASE] step=178 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6626.2
+[FLINT-STEP] batch=1 fwd_ms=3.623 step_wall_ms=6629.853
+[FLINT-STEP] sample_ms=6624.510
+[TT-STEP-PHASE] step=179 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=3.703 step_wall_ms=6628.207
+[FLINT-STEP] sample_ms=6623.741
+[TT-STEP-PHASE] step=180 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.9
+[FLINT-STEP] batch=1 fwd_ms=3.734 step_wall_ms=6627.546
+[FLINT-STEP] sample_ms=6624.523
+[TT-STEP-PHASE] step=181 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.6
+[FLINT-STEP] batch=1 fwd_ms=3.712 step_wall_ms=6628.334
+[FLINT-STEP] sample_ms=6625.135
+[TT-STEP-PHASE] step=182 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.3
+[FLINT-STEP] batch=1 fwd_ms=3.859 step_wall_ms=6628.938
+[FLINT-STEP] sample_ms=6625.092
+[TT-STEP-PHASE] step=183 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.2
+[FLINT-STEP] batch=1 fwd_ms=3.697 step_wall_ms=6629.038
+[FLINT-STEP] sample_ms=6623.561
+[TT-STEP-PHASE] step=184 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.7
+[FLINT-STEP] batch=1 fwd_ms=3.725 step_wall_ms=6627.354
+[FLINT-STEP] sample_ms=6623.267
+[TT-STEP-PHASE] step=185 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6623.4
+[FLINT-STEP] batch=1 fwd_ms=3.674 step_wall_ms=6627.083
+[FLINT-STEP] sample_ms=6624.292
+[TT-STEP-PHASE] step=186 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.519 step_wall_ms=6628.054
+[FLINT-STEP] sample_ms=6624.916
+[TT-STEP-PHASE] step=187 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6625.0
+[FLINT-STEP] batch=1 fwd_ms=3.578 step_wall_ms=6628.526
+[FLINT-STEP] sample_ms=6624.261
+[TT-STEP-PHASE] step=188 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6624.4
+[FLINT-STEP] batch=1 fwd_ms=3.689 step_wall_ms=6627.936
+[FLINT-STEP] sample_ms=6624.650
+[TT-STEP-PHASE] step=189 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.802 step_wall_ms=6628.443
+[FLINT-STEP] sample_ms=6623.198
+[TT-STEP-PHASE] step=190 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.3
+[FLINT-STEP] batch=1 fwd_ms=3.886 step_wall_ms=6627.103
+[FLINT-STEP] sample_ms=6624.624
+[TT-STEP-PHASE] step=191 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.787 step_wall_ms=6628.602
+[FLINT-STEP] sample_ms=6625.268
+[TT-STEP-PHASE] step=192 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.4
+[FLINT-STEP] batch=1 fwd_ms=3.831 step_wall_ms=6629.146
+[FLINT-STEP] sample_ms=6625.491
+[TT-STEP-PHASE] step=193 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6625.6
+[FLINT-STEP] batch=1 fwd_ms=3.821 step_wall_ms=6629.430
+[FLINT-STEP] sample_ms=6623.570
+[TT-STEP-PHASE] step=194 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=4.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.7
+[FLINT-STEP] batch=1 fwd_ms=3.999 step_wall_ms=6627.478
+[FLINT-STEP] sample_ms=6624.039
+[TT-STEP-PHASE] step=195 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.2
+[FLINT-STEP] batch=1 fwd_ms=3.944 step_wall_ms=6628.129
+[FLINT-STEP] sample_ms=6623.948
+[TT-STEP-PHASE] step=196 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.1
+[FLINT-STEP] batch=1 fwd_ms=3.804 step_wall_ms=6627.975
+[FLINT-STEP] sample_ms=6623.093
+[TT-STEP-PHASE] step=197 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.2
+[FLINT-STEP] batch=1 fwd_ms=3.774 step_wall_ms=6626.997
+[FLINT-STEP] sample_ms=6624.657
+[TT-STEP-PHASE] step=198 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6624.8
+[FLINT-STEP] batch=1 fwd_ms=3.760 step_wall_ms=6628.528
+[FLINT-STEP] sample_ms=6623.388
+[TT-STEP-PHASE] step=199 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2235 dispatches=0 segments=1 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6623.5
+[FLINT-STEP] batch=1 fwd_ms=3.771 step_wall_ms=6627.240
+[FLINT-STEP] sample_ms=6622.850
+[FLINT-STEP] sample_ms=0.000
+[DenseDecodeGraph] Qwen3.5 dense decode graph: 198 total replays across 1 captured size(s)

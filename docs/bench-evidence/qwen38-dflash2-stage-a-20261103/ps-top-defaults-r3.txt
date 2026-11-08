@@ -1,0 +1,6 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero  101467  200  0.0  10368  5312 ?        R    00:03   0:00 ps aux --sort=-%cpu
+lu_zero   51515  3.3  0.1 18501888 458816 pts/2 Sl+  Nov07   0:38 maki -c
+lu_zero   40913  1.5  0.2 6184960 660224 pts/5  Sl+  Nov07  15:16 claude -c
+lu_zero   72204  1.0  0.7 21496064 2060288 pts/0 Sl+ Nov01  97:59 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   42077  0.7  2.2 28813952 6090944 pts/5 Sl+ Nov07   7:51 /usr/bin/rust-analyzer

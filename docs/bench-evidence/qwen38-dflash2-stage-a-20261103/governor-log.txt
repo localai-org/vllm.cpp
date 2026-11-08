@@ -1,0 +1,22 @@
+2026-11-07T23:03:02+01:00 smoke-region governor=performance
+2026-11-07T23:08:44+01:00 smoke-region governor-after=performance
+2026-11-07T23:09:59+01:00 series start head=a1a97ae18
+2026-11-07T23:10:00+01:00 defaults-r1 governor=performance
+2026-11-07T23:36:39+01:00 defaults-r1 governor-after=performance
+2026-11-07T23:36:39+01:00 defaults-r2 governor=performance
+2026-11-08T00:03:19+01:00 defaults-r2 governor-after=performance
+2026-11-08T00:03:19+01:00 defaults-r3 governor=performance
+2026-11-08T00:29:58+01:00 defaults-r3 governor-after=performance
+2026-11-08T00:29:58+01:00 region-r1 governor=performance
+2026-11-08T00:56:39+01:00 region-r1 governor-after=performance
+2026-11-08T00:56:39+01:00 region-r2 governor=performance
+2026-11-08T01:23:20+01:00 region-r2 governor-after=performance
+2026-11-08T01:23:20+01:00 region-r3 governor=performance
+2026-11-08T01:50:01+01:00 region-r3 governor-after=performance
+2026-11-08T01:50:01+01:00 eager-r1 governor=performance
+2026-11-08T02:16:50+01:00 eager-r1 governor-after=performance
+2026-11-08T02:16:50+01:00 eager-r2 governor=performance
+2026-11-08T02:43:39+01:00 eager-r2 governor-after=performance
+2026-11-08T02:43:39+01:00 eager-r3 governor=performance
+2026-11-08T03:10:26+01:00 eager-r3 governor-after=performance
+2026-11-08T03:10:26+01:00 series end
