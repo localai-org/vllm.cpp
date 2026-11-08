@@ -182,9 +182,11 @@ after each leg); idle-gate 1-min load recorded per leg in the leg header
 
 ## Raw logs
 
-`defaults-r{1,2,3}.log` + `.stderr.log`, `region-r{1,2,3}.log` +
-`.stderr.log`, `eager-r{1,2,3}.log` + `.stderr.log`, `governor-log.txt`,
-`ps-top-*.txt`, `head-sha.txt`.
+defaults-r1..r3, region-r1..r3 and eager-r1..r3 - each leg carries a bench
+stdout log and a bench stderr log (the TT-STEP-PHASE, FLINT-STEP,
+REGION-CAPTURE and capture-stats lines); plus `governor-log.txt`,
+`ps-top-*.txt`, `head-sha.txt`, and the 6-output-token instrumentation
+smoke leg (`smoke-region`).
 
 ## Deviations
 
