@@ -12630,3 +12630,134 @@ TEST_CASE("tt residency: freeing a buffer drops the weight-view shadows "
   backend.Free(host);
   CHECK(vt::tenstorrent::WeightViewShadowCountForTest() == before);
 }
+
+
+// QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore unit. The
+// captured spec verify bakes content-keyed state gathers, so a rejected step's
+// out-of-place commit must be undone from the PRE-STEP shadows before the next
+// replay. This case drives the seam directly (StageGdnStateShadow /
+// RestoreGdnStateShadow / FreeGdnStateShadow, tenstorrent_device.h): stage ->
+// simulate the step's commit (a fresh upload over the slot) -> restore must
+// bring the pre-step bytes back at the recorded geometry; the commit arm must
+// leave the step's bytes; a slot whose shadow changed dtype/geometry since the
+// stage must DECLINE the restore (the reset lane's precondition), leaving the
+// live shadow untouched. The driver-side wiring lives in
+// Qwen3_5DenseDecodeGraph::Step (qwen3_5.cpp); this case pins the property the
+// wiring depends on, red-before on the head without the seam.
+TEST_CASE("kTENSTORRENT GDN spec-state shadow restores pre-step bytes on reject and declines on eviction") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  const Device dev{DeviceType::kTENSTORRENT, 0};
+  auto mm = reinterpret_cast<vt::MatmulFn>(
+      vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  // The GDN state cache's shadow is an f32 [R, C] TILE (EnsureGdnCacheDevice's
+  // contract). A plain H2D Copy does not install a device shadow in eager
+  // mode, so each "step commit" below is a real kMatmulBT
+  // CommitDeviceLogical2D: an f32 result committed over the state buffer, the
+  // same mechanism the driver's forward uses.
+  // kMatmulBT computes o[M,N] = a[M,K] · w[N,K]ᵀ (B-transposed): the weight
+  // is [N, K], K = 4 here.
+  constexpr int64_t R = 4, C = 8;
+  void* ssm_mem = backend.Alloc(R * C * 4);
+  void* conv_mem = backend.Alloc(R * C * 4);
+  void* ab = backend.Alloc(2 * R * 4 * 2);   // [4,4] bf16 activation (8 rows max)
+  void* wb1 = backend.Alloc(C * 4 * 2);      // [8,4] bf16 weight — commit A
+  void* wb2 = backend.Alloc(C * 4 * 2);      // [8,4] bf16 weight — commit B
+  std::vector<uint16_t> a(R * 4), w1(C * 4), w2(C * 4);
+  for (size_t i = 0; i < a.size(); ++i) a[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  for (size_t i = 0; i < w1.size(); ++i) w1[i] = static_cast<uint16_t>(0x3c00 + (i % 7));
+  for (size_t i = 0; i < w2.size(); ++i) w2[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, ab, a.data(), a.size() * 2);
+  backend.Copy(q, wb1, w1.data(), w1.size() * 2);
+  backend.Copy(q, wb2, w2.data(), w2.size() * 2);
+  Tensor at = Tensor::Contiguous(ab, vt::DType::kBF16, dev, {R, 4});
+  Tensor wt1 = Tensor::Contiguous(wb1, vt::DType::kBF16, dev, {C, 4});
+  Tensor wt2 = Tensor::Contiguous(wb2, vt::DType::kBF16, dev, {C, 4});
+  const auto read_state = [&](void* mem, std::vector<float>& out) {
+    out.resize(static_cast<size_t>(R * C));
+    backend.Copy(q, out.data(), mem, R * C * 4);
+  };
+  // Step 0: commit A over both state slots (the pre-step state).
+  Tensor ssm_t = Tensor::Contiguous(ssm_mem, vt::DType::kF32, dev, {R, C});
+  Tensor conv_t = Tensor::Contiguous(conv_mem, vt::DType::kF32, dev, {R, C});
+  mm(q, ssm_t, at, wt1);
+  mm(q, conv_t, at, wt1);
+  std::vector<float> pre, post, got, conv_pre;
+  read_state(ssm_mem, pre);
+  read_state(conv_mem, conv_pre);
+  REQUIRE(pre.size() == static_cast<size_t>(R * C));
+  const void* ssm_host = ssm_mem;
+  const void* conv_host = conv_mem;
+
+  // STAGE: both slots' live shadows are cloned device-side.
+  const int staged = vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1);
+  CHECK_MESSAGE(staged == 1, "one cache layer must stage, got " << staged);
+  CHECK(vt::tenstorrent::GdnStateShadowStaged());
+
+  // The (rejected) step commits B over both slots at the SAME recorded
+  // geometry: the shadow is replaced, the record's geometry is not.
+  mm(q, ssm_t, at, wt2);
+  mm(q, conv_t, at, wt2);
+  read_state(ssm_mem, post);
+  CHECK_MESSAGE(post != pre, "the rejected step's commit must have landed");
+
+  // RESTORE (the reject arm): the pre-step bytes come back at the recorded
+  // geometry, on the device, with the slot's record untouched.
+  const int restored = vt::tenstorrent::RestoreGdnStateShadow();
+  CHECK_MESSAGE(restored == 2, "both slots must restore, got " << restored);
+  read_state(ssm_mem, got);
+  CHECK_MESSAGE(got == pre, "ssm must read back the PRE-STEP bytes after the "
+                            "reject restore");
+  read_state(conv_mem, got);
+  CHECK_MESSAGE(got == conv_pre,
+                "conv must read back the PRE-STEP bytes after the "
+                "reject restore");
+
+  // COMMIT (the accept arm): free the shadows, the step's own bytes stay.
+  CHECK(vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1) == 1);
+  vt::tenstorrent::FreeGdnStateShadow();
+  CHECK_FALSE(vt::tenstorrent::GdnStateShadowStaged());
+  read_state(ssm_mem, got);
+  CHECK_MESSAGE(got == pre, "commit (free) must not disturb the live state");
+
+  // THE FALLBACK LANE's precondition: a slot whose shadow changed geometry
+  // since the stage (the eviction / foreign-commit case, the W7 tenant-switch
+  // shape) DECLINES the restore — the driver then takes the gdn_idx_changed
+  // full-re-gather reset lane.
+  CHECK(vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1) == 1);
+  {
+    // Foreign [8,4] commit over the same block: a[8,4] · w[4,4]ᵀ.
+    Tensor at8 = Tensor::Contiguous(ab, vt::DType::kBF16, dev, {2 * R, 4});
+    Tensor wt3 = Tensor::Contiguous(wb1, vt::DType::kBF16, dev, {R, 4});
+    Tensor out_t = Tensor::Contiguous(ssm_mem, vt::DType::kF32, dev, {C, R});
+    mm(q, out_t, at8, wt3);
+  }
+  const int declined = vt::tenstorrent::RestoreGdnStateShadow();
+  CHECK_MESSAGE(declined < 0,
+                "a changed-geometry shadow must decline the restore, got "
+                    << declined);
+  vt::tenstorrent::FreeGdnStateShadow();
+  backend.Free(ssm_mem);
+  backend.Free(conv_mem);
+  backend.Free(ab); backend.Free(wb1); backend.Free(wb2);
+}
+
+// RED-BEFORE reproduction aid (QWEN38-DFLASH2-STAGE-B): on the head BEFORE the
+// fix, the seam functions below do not exist and the rollback case cannot
+// link. Compiling this TU with -DVT_TEST_GDN_SHADOW_STUBS supplies inert
+// no-ops instead, so the red run reaches the CHECKs and fails them (stage
+// reports 0 pairs, restore is a no-op) — a runtime red, not a link red.
+// Never define this macro against the fixed library: the definitions would
+// collide at link time.
+#if defined(VT_TEST_GDN_SHADOW_STUBS) && defined(VLLM_CPP_TENSTORRENT)
+namespace vt::tenstorrent {
+int StageGdnStateShadow(const void* const*, const void* const*, int) { return 0; }
+int RestoreGdnStateShadow() { return 0; }
+void FreeGdnStateShadow() {}
+bool GdnStateShadowStaged() { return false; }
+}  // namespace vt::tenstorrent
+#endif

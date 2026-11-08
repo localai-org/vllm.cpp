@@ -11136,6 +11136,22 @@ inline int64_t SpecQueryLenCap() {
   return cap;
 }
 
+// QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore staging knob.
+// DEFAULT ON for the spec arm: before a captured spec step the dense decode
+// driver stages the GDN state slots' device shadows into side copies
+// (vt::tenstorrent::StageGdnStateShadow), frees them on accept, and installs
+// them back over the live slots on reject. The knob exists so the fallback
+// lane (the gdn_idx_changed full-re-gather reset) stays testable: setting it
+// to 0 restores the pre-stage-B behavior where a rejected step can only take
+// the reset lane.
+inline bool SpecStateShadowEnabled() {
+  static const bool on = [] {
+    const char* v = std::getenv("VT_TT_SPEC_STATE_SHADOW");
+    return v == nullptr || v[0] == '\0' || v[0] != '0';
+  }();
+  return on;
+}
+
 // True when capturing `key` would push this driver past `SpecQueryLenCap()`
 // distinct speculative query lengths. A key already in the map is never capped:
 // declining a shape the driver already holds a graph for would strand it.
@@ -12488,6 +12504,8 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
                    lg[0], lg[1], lg[2], lg[3], lg[4]);
       std::fflush(stderr);
     }
+      std::fflush(stderr);
+    }
   };
 
   // Returns the [B,vocab] real-row logits ON DEVICE (no D2H). The captured/warm
@@ -12761,6 +12779,33 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   }
   const bool tt_boundary =
       d.q.device.type == vt::DeviceType::kTENSTORRENT && !seq_continuation;
+  // QWEN38-DFLASH2-STAGE-B: resolve the PREVIOUS spec step's staged GDN state
+  // shadows before this step touches state. This driver runs one step per
+  // call, so the accept/reject outcome of that step reaches the driver as THIS
+  // step's position: a rewound cur_pos (tt_boundary) is the reject signature —
+  // the verify's out-of-place commit must be rolled back, or the next replay's
+  // baked content-keyed state gather reads a dead address (stage A's
+  // all-zero-logits signature). A continuation (no boundary) is the accept
+  // signature: commit = free the shadows and keep the step's own out-of-place
+  // result. A restore that declines (slot evicted, geometry changed) leaves the
+  // live slots untouched and joins the reset lane below — the
+  // full-re-gather fallback the eager path already performs, now gathering
+  // from the pre-step device truth the shadow set holds where it could apply.
+  if (d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
+      vt::tenstorrent::GdnStateShadowStaged()) {
+    if (tt_boundary) {
+      if (SpecStateShadowEnabled()) {
+        const int restored = vt::tenstorrent::RestoreGdnStateShadow();
+        if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+          std::fprintf(stderr,
+                       "[TT-SPEC-STATE] reject restore=%d (negative = declined, "
+                       "reset lane follows)\n", restored);
+      }
+      vt::tenstorrent::FreeGdnStateShadow();  // resolved either way
+    } else if (!gdn_idx_changed) {
+      vt::tenstorrent::FreeGdnStateShadow();  // accept: the commit stays
+    }
+  }
   if (((cols_changed || tt_boundary || gdn_idx_changed) && s.graph.captured()) ||
       (conv_shadow_stale && (s.graph.captured() || s.warm)) ||
       (gdn_idx_changed && s.warm)) {
@@ -12793,6 +12838,28 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // VT_TT_RECAPTURE_EVERY replays; the qwen3 battery runs the identical
   // setting (RC=8) green across 16-prompt cases.
   bool do_replay = s.graph.captured();
+  // QWEN38-DFLASH2-STAGE-B: stage the GDN state slots' shadows BEFORE this
+  // spec step runs — the replay and the capture both commit state through the
+  // step's out-of-place result, and a reject can only be undone from the
+  // pre-step shadows. Device-side clones (ttnn::empty + ttnn::copy), no host
+  // round-trip. Slots without a live device shadow are skipped; the eager
+  // re-gather covers them. Default on for the spec arm (SpecStateShadowEnabled).
+  if (do_replay && spec_step &&
+      d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
+      SpecStateShadowEnabled()) {
+    std::vector<const void*> ssm_hosts(gdn_state.size()),
+        conv_hosts(gdn_state.size());
+    for (size_t e = 0; e < gdn_state.size(); ++e) {
+      ssm_hosts[e] = gdn_state[e].ssm_state.data;
+      conv_hosts[e] = gdn_state[e].conv_state.data;
+    }
+    const int staged = vt::tenstorrent::StageGdnStateShadow(
+        ssm_hosts.data(), conv_hosts.data(),
+        static_cast<int>(gdn_state.size()));
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+      std::fprintf(stderr, "[TT-SPEC-STATE] stage pairs=%zd staged=%d\n",
+                   gdn_state.size(), staged);
+  }
   if (do_replay && d.q.device.type == vt::DeviceType::kTENSTORRENT) {
     const char* rc_env = std::getenv("VT_TT_RECAPTURE_EVERY");
     const int rc_n = rc_env != nullptr ? std::atoi(rc_env) : 0;

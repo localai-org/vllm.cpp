@@ -2102,4 +2102,119 @@ void ResetStagingStats() {
 }
 
 
+// ---- QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore ----------
+// The captured spec verify trace bakes content-keyed state gathers, so a
+// rejected step's out-of-place commit invalidates the next replay's baked
+// read address. STAGE clones each live GDN state slot's device shadow into a
+// side tensor (device-side, no host round-trip); RESTORE reinstalls the side
+// copies over the live slots with the recorded geometry preserved; COMMIT
+// (the accept arm) just drops them. A declined restore (slot evicted,
+// geometry changed, shadow lost) returns a short count and the driver takes
+// the gdn_idx_changed full-re-gather reset lane.
+
+namespace {
+
+struct GdnStateShadowSet {
+  struct Entry {
+    void* host = nullptr;
+    std::optional<ttnn::Tensor> shadow;  // the pre-step clone
+    uint32_t rows = 0, cols = 0;
+  };
+  std::vector<Entry> ssm;
+  std::vector<Entry> conv;
+};
+
+GdnStateShadowSet& GdnShadows() {
+  static GdnStateShadowSet* g = new GdnStateShadowSet();  // never destroyed (#1486)
+  return *g;
+}
+
+}  // namespace
+
+int StageGdnStateShadow(const void* const* ssm_hosts,
+                        const void* const* conv_hosts, int count) {
+  MeshDevice& device = SharedMeshDevice();
+  GdnStateShadowSet& g = GdnShadows();
+  g.ssm.clear();
+  g.conv.clear();
+  int staged = 0;
+  {
+    std::lock_guard<std::mutex> lock(SlotMutex());
+    for (int i = 0; i < count; ++i) {
+      bool pair = true;
+      for (int which = 0; which < 2; ++which) {
+        const void* host = which == 0 ? ssm_hosts[i] : conv_hosts[i];
+        if (host == nullptr) continue;
+        BufferSlot* s = FindSlot(const_cast<void*>(host));
+        if (s == nullptr || !s->device_current || !s->device.has_value()) {
+          pair = false;  // no live shadow — the eager re-gather covers this slot
+          continue;
+        }
+        GdnStateShadowSet::Entry e;
+        e.host = const_cast<void*>(host);
+        e.rows = s->dev_rows;
+        e.cols = s->dev_cols;
+        e.shadow = ttnn::empty(s->device->logical_shape(), s->device->dtype(),
+                               s->device->layout(), &device,
+                               s->device->memory_config());
+        *e.shadow = ttnn::copy(*s->device, *e.shadow);
+        (which == 0 ? g.ssm : g.conv).push_back(std::move(e));
+      }
+      if (pair) ++staged;
+    }
+  }
+  return staged;
+}
+
+int RestoreGdnStateShadow() {
+  GdnStateShadowSet& g = GdnShadows();
+  MeshDevice& device = SharedMeshDevice();
+  int restored = 0;
+  bool declined = false;
+  {
+    std::lock_guard<std::mutex> lock(SlotMutex());
+    for (int which = 0; which < 2; ++which) {
+      const auto& entries = which == 0 ? g.ssm : g.conv;
+      for (const auto& e : entries) {
+        BufferSlot* s = FindSlot(e.host);
+        if (s == nullptr || !s->device_current || !s->device.has_value() ||
+            s->dev_rows != e.rows || s->dev_cols != e.cols ||
+            s->device->dtype() != e.shadow->dtype() ||
+            s->device->logical_shape() != e.shadow->logical_shape()) {
+          declined = true;  // the reset lane must take this slot
+          continue;
+        }
+        // Install a fresh clone of the staged pre-step bytes at the slot's
+        // RECORDED geometry (same shape/dtype/layout — the guards above
+        // proved it). In-place ttnn::copy over a live shadow segfaulted at
+        // this pin (the same hazard that moved the D2D copy to the fallback
+        // arm), so the restored tensor is a fresh clone installed over the
+        // slot rather than a copy into the live storage.
+        ttnn::Tensor cloned =
+            ttnn::empty(e.shadow->logical_shape(), e.shadow->dtype(),
+                        e.shadow->layout(), &device, e.shadow->memory_config());
+        cloned = ttnn::copy(*e.shadow, cloned);
+        s->device = std::move(cloned);
+        // The host master holds the REJECTED step's commit (the forward's
+        // commit downloaded it); the restored device tensor is the truth, so
+        // the slot must read back through a download, never the host master.
+        s->host_current = false;
+        ++restored;
+      }
+    }
+  }
+  return declined ? -1 : restored;
+}
+
+void FreeGdnStateShadow() {
+  GdnStateShadowSet& g = GdnShadows();
+  g.ssm.clear();
+  g.conv.clear();
+}
+
+bool GdnStateShadowStaged() {
+  GdnStateShadowSet& g = GdnShadows();
+  return !g.ssm.empty() || !g.conv.empty();
+}
+
 }  // namespace vt::tenstorrent
