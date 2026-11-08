@@ -12460,7 +12460,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // The probe print, called at every step's return. `logits_ptr` is the step's
   // [S,vocab] f32 logits buffer (null on arms that never materialize one
   // here). All reads are D2H between steps, never during capture.
-  const auto tap_emit = [&](const char* kind, const void* logits_ptr) {
+  const auto tap_emit = [&](const char* kind, const void* logits_ptr,
+                            const void* aux_ptr = nullptr, int64_t aux_rows = 0,
+                            int64_t aux_h = 0, int64_t aux_taps = 0) {
     if (!tap_on) return;
     static std::atomic<int64_t> tap_steps{0};
     const int64_t step = tap_steps.fetch_add(1, std::memory_order_relaxed);
@@ -12504,6 +12506,47 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
                    lg[0], lg[1], lg[2], lg[3], lg[4]);
       std::fflush(stderr);
     }
+    // QWEN38-DFLASH2-STAGE-B: the residual-tap probe. Stage B's geometry
+    // fix in CopyDeviceDeviceIfCapture makes the [S, H*taps] aux slot's
+    // captured writes land at its RECORDED geometry, so a between-steps D2H
+    // readback now carries real tap data — stage A's caveat ("recorded as
+    // defect, not printed as data") is replaced. One FNV-1a checksum per tap
+    // column block plus each block's first bf16 as half-precision float bits,
+    // so a replay writing pool residue over the taps (the old clobber) is
+    // visible as a changing / garbage checksum instead of silent zeros.
+    if (aux_ptr != nullptr && aux_rows > 0 && aux_h > 0 && aux_taps > 0) {
+      const int64_t cols = aux_h * aux_taps;
+      std::vector<uint16_t> ab(static_cast<size_t>(aux_rows * cols));
+      d.b.Copy(d.q, ab.data(), aux_ptr,
+               static_cast<size_t>(ab.size()) * sizeof(uint16_t));
+      d.b.Synchronize(d.q);
+      for (int64_t t = 0; t < aux_taps; ++t) {
+        uint64_t fnv = 1469598103934665603ull;
+        for (int64_t r = 0; r < aux_rows; ++r) {
+          const uint16_t* row = ab.data() + static_cast<size_t>(r * cols) +
+                                static_cast<size_t>(t * aux_h);
+          const auto* bytes = reinterpret_cast<const unsigned char*>(row);
+          for (int64_t c = 0; c < aux_h; ++c) {
+            fnv ^= bytes[c * 2];
+            fnv *= 1099511628211ull;
+            fnv ^= bytes[c * 2 + 1];
+            fnv *= 1099511628211ull;
+          }
+        }
+        // bf16 -> f32 widening for the block's first value (bit shift).
+        const uint32_t half = ab[static_cast<size_t>(t * aux_h)];
+        const uint32_t fbits = half << 16;
+        float first_f;
+        __builtin_memcpy(&first_f, &fbits, sizeof first_f);
+        std::fprintf(stderr,
+                     "[GDN-TAP] kind=%s step=%lld TAP tap=%lld rows=%lld h=%lld "
+                     "fnv=%016llx first=%a\n",
+                     kind, static_cast<long long>(step),
+                     static_cast<long long>(t), static_cast<long long>(aux_rows),
+                     static_cast<long long>(aux_h),
+                     static_cast<unsigned long long>(fnv),
+                     static_cast<double>(first_f));
+      }
       std::fflush(stderr);
     }
   };
@@ -12916,7 +12959,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++s.expected_cur_pos;  // the replay's in-trace plus_one advanced cur_pos
     ++impl_->replays;
     publish_aux();
-    tap_emit("replay", s.logits->ptr());
+    tap_emit("replay", s.logits->ptr(),
+             aux_taps > 0 && s.aux != nullptr ? s.aux->ptr() : nullptr,
+             S, H, aux_taps);
     return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
   }
 
@@ -13232,7 +13277,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++s.expected_cur_pos;  // the capture step's launch ran the trace once
     ++impl_->replays;
     publish_aux();
-    tap_emit("capture", s.logits->ptr());
+    tap_emit("capture", s.logits->ptr(),
+             aux_taps > 0 && s.aux != nullptr ? s.aux->ptr() : nullptr,
+             S, H, aux_taps);
     return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
   }
 
