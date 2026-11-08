@@ -35,3 +35,11 @@ D2D copy preserves an equal-numel dst slot's recorded geometry*"` with
   finding 4: the reconciled failing-case attribution. Supersedes the
   head/baseline pairing presented by `full-suite.log` and
   `baseline-failing-cases.log` (see the reconciled file for why).
+
+- `preflight-staged-repair.log` — `bash scripts/agent-preflight.sh --staged`
+  at the repaired head (d6154b9c4), run to completion (~21 min). Exit 1 on
+  exactly the two KNOWN host gaps, both failing without these changes too:
+  `check-windows-portability.py` (missing dotnet) and
+  `test_check_test_registration` (fetch-site-count). The prior committed
+  `preflight-staged.log` also failed `check-env-doc`/`test_check_env_doc`;
+  both pass at this head. Recorded, not fixed, per the row instructions.
