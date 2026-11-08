@@ -1,0 +1,6 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   76225 50.0  0.0  10496  4480 ?        S    23:03   0:00 bash /tmp/vllm-release-preflight-trace-hb7folkl/scripts/agent-preflight.sh --quiet --no-require-role
+lu_zero   76238 50.0  0.0   9792  4352 ?        Ss   23:03   0:00 bash /tmp/stagea-leg.sh smoke-region 6 VLLM_CPP_REGION_CAPTURE=1 VT_REGION_CENSUS=1
+lu_zero   76224 42.8  0.0  35392 28160 ?        S    23:03   0:00 /usr/lib/python-exec/python3.13/python3 /tmp/tmp2ekwmwyy/scripts/check-release-binary-contract.py --root /tmp/tmp2ekwmwyy
+lu_zero   61738  3.4  0.0  38912 31936 ?        S    23:02   0:00 /usr/lib/python-exec/python3.13/python3 tests/scripts/test_check_release_binary_contract.py
+lu_zero   40913  1.4  0.2 6184960 631232 pts/5  Sl+  07:07  13:52 claude -c

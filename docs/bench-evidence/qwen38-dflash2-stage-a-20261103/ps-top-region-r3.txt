@@ -1,0 +1,6 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   75294  300  0.0   9280  5248 ?        R    01:23   0:00 ps aux --sort=-%cpu
+lu_zero   51515  1.6  0.1 18569536 491200 pts/2 Sl+  Nov07   1:41 maki -c
+lu_zero   40913  1.4  0.2 6184960 633472 pts/5  Sl+  Nov07  15:59 claude -c
+lu_zero   72204  1.0  0.7 21496448 2060288 pts/0 Sl+ Nov01  98:49 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   59982  0.7  0.2 6248000 569152 pts/1  Sl+  Oct27 128:35 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
