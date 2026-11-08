@@ -91,11 +91,16 @@ CopyDeviceDeviceIfCapture (tenstorrent_residency.cpp:1490) allocates a fresh src
     head, 0 only at baseline; head = 16 failing of 112 in BOTH reruns.
     PagedAttention pure-decode: reproduces in both full-suite runs, passes
     3/3 in isolation — order/state-dependent, NOT a random flake; open for
-    bisection. kRmsNormGated committed-gate-shadow: a real deterministic
-    regression (passes at 9996ce94d, fails everywhere at head), recorded as
-    an OPEN item, not fixed in this series.
-  - This issue does NOT close: fix 1's seam is correct and now detected, but
-    the two new head-only failures above are unresolved regressions owned by
-    this row, and the P150 token-identity gate remains PENDING.
+    bisection. kRmsNormGated committed-gate-shadow: CORRECTED 2026-11-08 —
+    NOT a branch regression; it fails byte-identically in isolation at the
+    pre-branch baseline 9996ce94d (rms-base.log), so it is pre-existing and
+    suite-context dependent; filed as ISSUE-LOCAL-01M6Y0TC5D24YGF74H0TQ2VAN5
+    on row BACKEND-TENSTORRENT-GDN, which owns the op family. The three
+    head-only names above are pre-existing suite-context items, not
+    regressions owned by this row.
+  - This issue does NOT close: fix 1's seam is correct and now detected,
+    but the P150 token-identity gate remains PENDING; the kRmsNormGated
+    defect is real but predates this branch and is owned by
+    BACKEND-TENSTORRENT-GDN.
 
 -
