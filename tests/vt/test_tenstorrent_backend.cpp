@@ -6311,6 +6311,96 @@ TEST_CASE("kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot'
   backend.Free(mw); backend.Free(mostage);
 }
 
+// QWEN38-DFLASH2-STAGE-B, fresh-review finding 2: the recorded-geometry arm
+// must also check the SHADOW DTYPE. A destination slot whose existing device
+// shadow is f32 of equal logical numel (an f32 [2, 16] slot, 32 elements)
+// must DECLINE the equal-numel fast path when the source shadow is bf16: a
+// bf16 copy into an f32 shadow of a different geometry would clobber the
+// record. The safe path installs a fresh src-shaped clone and the record
+// names what was actually served ([1, 32]). With the dtype check at
+// tenstorrent_residency.cpp:1587 mutated out, the case takes the fast path
+// into the f32 [2, 16] shadow and the record stays [2, 16] — the assertion
+// below goes red.
+TEST_CASE("kTENSTORRENT capture-lane D2D copy declines an equal-numel dst slot whose shadow dtype differs") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  ForceHostFreeDecode host_free;
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  constexpr int64_t S = 1, TAPS = 32;  // the src [1, 32] bf16 tap clone
+  constexpr int64_t DR = 2, DC = 16;   // the dst f32 [2, 16] shadow, 32 numel
+  constexpr int64_t K = 4;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  using vt::tenstorrent::GetStagingStats;
+  using vt::tenstorrent::ResetStagingStats;
+  std::vector<uint16_t> sb(S * TAPS);
+  for (size_t i = 0; i < sb.size(); ++i) sb[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  void* ma = backend.Alloc(S * TAPS * 2);
+  void* md2 = backend.Alloc(DR * DC * 4);  // f32-sized dst block
+  void* mb2 = backend.Alloc(DC * K * 4);
+  void* mo2 = backend.Alloc(DR * DC * 4);
+  Queue q = backend.CreateQueue();
+  const Device dev{DeviceType::kTENSTORRENT, 0};
+  backend.Copy(q, ma, sb.data(), S * TAPS * 2);
+  // Stage the dst slot's PERSISTENT f32 [2, 16] shadow via an mm commit whose
+  // OUTPUT lands on md2 (the only arm that installs a device shadow eagerly).
+  std::vector<float> ab(DR * K), bb2(DC * K);
+  for (size_t i = 0; i < ab.size(); ++i) ab[i] = 0.5f + static_cast<float>(i % 3);
+  for (size_t i = 0; i < bb2.size(); ++i) bb2[i] = 1.0f + static_cast<float>(i % 5);
+  backend.Copy(q, mo2, ab.data(), ab.size() * 4);
+  backend.Copy(q, mb2, bb2.data(), bb2.size() * 4);
+  Tensor a32 = Tensor::Contiguous(mo2, vt::DType::kF32, dev, {DR, K});
+  Tensor b32 = Tensor::Contiguous(mb2, vt::DType::kF32, dev, {DC, K});
+  Tensor d32 = Tensor::Contiguous(md2, vt::DType::kF32, dev, {DR, DC});
+  Tensor s = Tensor::Contiguous(ma, vt::DType::kBF16, dev, {S, TAPS});
+  auto mm = reinterpret_cast<vt::MatmulFn>(vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  mm(q, d32, a32, b32);  // installs the f32 [2, 16] shadow on md2's slot
+  // Stage the SRC slot's [1, 32] bf16 shadow (an H2D Copy alone does not
+  // install a device shadow in eager mode), mirroring the tap producer.
+  void* mw = backend.Alloc(DC * S * TAPS * 2);
+  void* mostage = backend.Alloc(DC * 4);
+  std::vector<uint16_t> ww(DC * S * TAPS);
+  for (size_t i = 0; i < ww.size(); ++i) ww[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mw, ww.data(), ww.size() * 2);
+  backend.Copy(q, mostage, bb2.data(), DC * 4);
+  Tensor wt = Tensor::Contiguous(mw, vt::DType::kBF16, dev, {DC, S * TAPS});
+  Tensor ost = Tensor::Contiguous(mostage, vt::DType::kF32, dev, {1, DC});
+  mm(q, ost, s, wt);  // stages ma's [1, 32] device shadow
+  // The record must first name the staged f32 geometry (the precondition).
+  REQUIRE(vt::tenstorrent::DeviceShadowExact(d32, static_cast<uint32_t>(DR),
+                                             static_cast<uint32_t>(DC)));
+  // Program-cache warm contract (see the #2294 case): run the SAME D2D copy
+  // once eagerly, outside capture, then drop its counter contribution.
+  backend.Copy(q, md2, ma, S * TAPS * 2);
+  ResetStagingStats();
+  backend.BeginCapture(q);
+  backend.Copy(q, md2, ma, S * TAPS * 2);
+  backend.EndCapture(q);
+  backend.Replay(q);
+  vt::tenstorrent::StagingStats st = GetStagingStats();
+  CHECK_MESSAGE(st.stages_avoided_device_copy == 1,
+                "the copy lane must still serve the copy, got "
+                    << st.stages_avoided_device_copy);
+  // The dtype check must have DECLINED the fast path: the safe arm installs a
+  // fresh src-shaped bf16 clone and the record names [1, 32], NOT the staged
+  // f32 [2, 16].
+  CHECK_MESSAGE(vt::tenstorrent::DeviceShadowExact(
+                    d32, static_cast<uint32_t>(S), static_cast<uint32_t>(TAPS)),
+                "the dst record does not name the served src-shaped [1, 32] "
+                    "geometry — the dtype check failed to decline the fast "
+                    "path");
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d32, static_cast<uint32_t>(DR), static_cast<uint32_t>(DC)),
+                "the dst record still names the f32 [2, 16] geometry — a bf16 "
+                    "copy was served into an f32 shadow of another geometry");
+  backend.Free(ma); backend.Free(md2);
+  backend.Free(mb2); backend.Free(mo2);
+  backend.Free(mw); backend.Free(mostage);
+}
+
+
+
 // W7 drift repair (#2282): the reservation must not survive content
 // establishment, and the reserved arm must never discard a live shadow.
 // Captured on the host-free e2e drift (LEG B, prompt[1] tok=0): a pool
