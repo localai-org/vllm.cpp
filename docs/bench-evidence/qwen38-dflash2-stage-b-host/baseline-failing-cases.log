@@ -1,0 +1,708 @@
+2026-11-08 13:49:30.477 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-08 13:49:30.477 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-08 13:49:30.477 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-08 13:49:30.477 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-08 13:49:30.480 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-08 13:49:30.481 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-08 13:49:30.521 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-08 13:49:30.521 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-08 13:49:30.521 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-08 13:49:30.521 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-08 13:49:30.522 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-08 13:49:30.523 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-08 13:49:30.570 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-08 13:49:30.570 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-08 13:49:30.570 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-08 13:49:30.570 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-08 13:49:30.570 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-08 13:49:31.430 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:259:
+TEST CASE:  kTENSTORRENT kAdd matches a host F32 reference (elementwise + bias broadcast)
+  elementwise, same rank
+
+./tests/vt/test_tenstorrent_backend.cpp:297: ERROR: CHECK( max_abs_diff < 0.1f ) is NOT correct!
+  values: CHECK( 1.4 <  0.1 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:259:
+TEST CASE:  kTENSTORRENT kAdd matches a host F32 reference (elementwise + bias broadcast)
+  rank-1 bias broadcast over the last dim
+
+./tests/vt/test_tenstorrent_backend.cpp:329: ERROR: CHECK( max_abs_diff < 0.1f ) is NOT correct!
+  values: CHECK( 4.98296e+23 <  0.1 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:333:
+TEST CASE:  kTENSTORRENT kRelu matches a host F32 reference
+
+./tests/vt/test_tenstorrent_backend.cpp:366: ERROR: CHECK( max_abs_diff < 0.1f ) is NOT correct!
+  values: CHECK( 4.98305e+23 <  0.1 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:369:
+TEST CASE:  kTENSTORRENT kEmbedding matches a host F32 reference (row gather)
+
+./tests/vt/test_tenstorrent_backend.cpp:422: ERROR: CHECK( max_abs_diff < 0.1f ) is NOT correct!
+  values: CHECK( 4.98318e+23 <  0.1 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:425:
+TEST CASE:  kTENSTORRENT kLayerNorm matches a host F32 reference (affine + plain)
+  elementwise_affine=True (weight + bias)
+
+./tests/vt/test_tenstorrent_backend.cpp:504: ERROR: CHECK( max_abs_diff < 0.5f ) is NOT correct!
+  values: CHECK( 1.908 <  0.5 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:425:
+TEST CASE:  kTENSTORRENT kLayerNorm matches a host F32 reference (affine + plain)
+  elementwise_affine=False (no weight/bias)
+
+./tests/vt/test_tenstorrent_backend.cpp:504: ERROR: CHECK( max_abs_diff < 0.5f ) is NOT correct!
+  values: CHECK( 3.19487 <  0.5 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:741:
+TEST CASE:  kTENSTORRENT kSiluAndMul matches host F32 within BF16 envelope
+
+./tests/vt/test_tenstorrent_backend.cpp:782: ERROR: CHECK( max_abs_diff < 0.05f ) is NOT correct!
+  values: CHECK( 2.31785 <  0.05 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:790:
+TEST CASE:  kTENSTORRENT kMoeSiluMul matches host F32 within BF16 envelope
+
+./tests/vt/test_tenstorrent_backend.cpp:837: ERROR: CHECK( max_abs_diff < 0.05f ) is NOT correct!
+  values: CHECK( 8.5998e+07 <  0.05 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:1330:
+TEST CASE:  kTENSTORRENT kQkvSplit device path matches host within BF16 envelope
+
+./tests/vt/test_tenstorrent_backend.cpp:1394: ERROR: CHECK( max_abs < 0.05f ) is NOT correct!
+  values: CHECK( 4.98302e+23 <  0.05 )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:2571:
+TEST CASE:  kTENSTORRENT batched decode PagedAttention is capture-safe (num_reqs=2)
+
+./tests/vt/test_tenstorrent_backend.cpp:2794: MESSAGE: replay mismatch i=1024 eagerB=-0.04 replay=0.04
+
+./tests/vt/test_tenstorrent_backend.cpp:2794: MESSAGE: replay mismatch i=1025 eagerB=0.02 replay=0.1
+
+./tests/vt/test_tenstorrent_backend.cpp:2794: MESSAGE: replay mismatch i=1026 eagerB=0.08 replay=-0.1
+
+./tests/vt/test_tenstorrent_backend.cpp:2794: MESSAGE: replay mismatch i=1027 eagerB=-0.12 replay=-0.04
+
+./tests/vt/test_tenstorrent_backend.cpp:2799: MESSAGE: replay-vs-eagerB mismatched elems: 1024/2048
+
+./tests/vt/test_tenstorrent_backend.cpp:2800: ERROR: CHECK( bad == 0 ) is NOT correct!
+  values: CHECK( 1024 == 0 )
+
+2026-11-08 13:49:31.715 | warning  |           Metal | Allocating device buffers is potentially unsafe due to the existence of an active trace. These buffers may be corrupted once a trace is executed if they are not released before then. Use the trace allocation tracker to verify. (allocator.cpp:140)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:3013:
+TEST CASE:  kTENSTORRENT kL2Norm matches the CPU f32 oracle (GDN q/k row shape)
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=3 H=2 rows=6: max_abs=0.737538 max_rel=404.596 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=3 H=8 rows=24: max_abs=0.300321 max_rel=76.1477 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=64 H=2 rows=128: max_abs=0.326624 max_rel=121.906 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=64 H=8 rows=512: max_abs=0.318346 max_rel=130.76 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=65 H=2 rows=130: max_abs=0.314147 max_rel=128.657 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=65 H=8 rows=520: max_abs=0.32616 max_rel=147.874 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=200 H=2 rows=400: max_abs=0.316202 max_rel=140.758 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3050: MESSAGE: kL2Norm T=200 H=8 rows=1600: max_abs=0.321906 max_rel=154.548 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:3053: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:3058:
+TEST CASE:  kTENSTORRENT kRmsNormGated matches the CPU f32 oracle (silu + sigmoid, padded gate stride)
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=3 Hv=2 sigmoid=false rows=6: max_abs=1.33039 max_rel=597.567 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=3 Hv=2 sigmoid=true rows=6: max_abs=1.96312 max_rel=292.944 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=3 Hv=8 sigmoid=false rows=24: max_abs=1.7524 max_rel=487.839 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=3 Hv=8 sigmoid=true rows=24: max_abs=2.13339 max_rel=256.906 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=64 Hv=2 sigmoid=false rows=128: max_abs=2.17517 max_rel=629.565 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=64 Hv=2 sigmoid=true rows=128: max_abs=2.36774 max_rel=935.937 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=64 Hv=8 sigmoid=false rows=512: max_abs=2.22447 max_rel=695.637 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=64 Hv=8 sigmoid=true rows=512: max_abs=2.59292 max_rel=886.46 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=65 Hv=2 sigmoid=false rows=130: max_abs=2.05262 max_rel=514.311 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=65 Hv=2 sigmoid=true rows=130: max_abs=2.26693 max_rel=657.847 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=65 Hv=8 sigmoid=false rows=520: max_abs=2.37344 max_rel=1146.46 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=65 Hv=8 sigmoid=true rows=520: max_abs=2.45103 max_rel=828.388 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=200 Hv=2 sigmoid=false rows=400: max_abs=2.22236 max_rel=1161.11 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=200 Hv=2 sigmoid=true rows=400: max_abs=2.78325 max_rel=1001.64 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=200 Hv=8 sigmoid=false rows=1600: max_abs=2.51458 max_rel=1260.33 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:3128: MESSAGE: kRmsNormGated T=200 Hv=8 sigmoid=true rows=1600: max_abs=2.62304 max_rel=934.62 tol=0.035
+
+./tests/vt/test_tenstorrent_backend.cpp:3132: ERROR: CHECK( d.within ) is NOT correct!
+  values: CHECK( false )
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:3921:
+TEST CASE:  kTENSTORRENT kGdnDecode matches the CPU f32 oracle (rank-1 step, both state_idx forms, NULL slot)
+
+./tests/vt/test_tenstorrent_backend.cpp:4032: MESSAGE: kGdnDecode B=1 Hk=2 Hv=8: out max_abs=2.79397e-09 max_rel=1.07319e-06 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4032: MESSAGE: kGdnDecode B=1 Hk=2 Hv=2: out max_abs=2.79397e-09 max_rel=7.48661e-07 state max_abs=7.45058e-09 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4032: MESSAGE: kGdnDecode B=3 Hk=2 Hv=8: out max_abs=2.79397e-09 max_rel=1.70824e-06 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4032: MESSAGE: kGdnDecode B=3 Hk=2 Hv=2: out max_abs=2.09548e-09 max_rel=7.73201e-07 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4121: MESSAGE: kGdnDecode wide-range state: state rel_rms=3.21276e-08 out rel_rms=2.15802e-07 max_rel(|ref|<0.1)=0.0366045 state tol=0.002 abs_floor=1e-05 state max_abs=1.52588e-05 max_rel=0.000905375
+
+./tests/vt/test_tenstorrent_backend.cpp:4149: MESSAGE: kGdnDecode indexed: out max_abs=4.55789e-06 cache max_abs=3.67537e-05 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4164: MESSAGE: kGdnDecode indexed NULL: out max_abs=4.16115e-06 cache max_abs=3.81283e-05
+
+./tests/vt/test_tenstorrent_backend.cpp:4200: MESSAGE: kGdnDecode wide-state (row 262144) + NULL: out max_abs=3.51202e-06 cache max_abs=3.65041e-05 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4272: MESSAGE: kGdnDecode traffic: steps=3 h2d=1048576 d2h=0 (state bytes=1048576)
+
+./tests/vt/test_tenstorrent_backend.cpp:4375: MESSAGE: kGdnDecode bf16-state step=0: out max_abs=0 (0 = storage semantics honored)
+
+./tests/vt/test_tenstorrent_backend.cpp:4375: MESSAGE: kGdnDecode bf16-state step=1: out max_abs=0 (0 = storage semantics honored)
+
+./tests/vt/test_tenstorrent_backend.cpp:4375: MESSAGE: kGdnDecode bf16-state step=2: out max_abs=0 (0 = storage semantics honored)
+
+./tests/vt/test_tenstorrent_backend.cpp:3921: ERROR: test case THREW exception: vt: tenstorrent: EnsureHostBytes host buffer too small for the f32 shadow at ./src/vt/tenstorrent/tenstorrent_residency.cpp:1450
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:5068:
+TEST CASE:  kTENSTORRENT kGdnPostConv matches the CPU f32 oracle (fused split + l2norm + g/beta)
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=f32 ab=f32 out=f32: q[max_abs=1.08043] k[max_abs=0.282776] v[max_abs=1.82122] g[max_abs=0 max_rel=0] beta[max_abs=0 max_rel=0]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=f32 ab=bf16 out=f32: q[max_abs=1.06836] k[max_abs=0.282411] v[max_abs=1.7999] g[max_abs=0 max_rel=0] beta[max_abs=0 max_rel=0]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=bf16 ab=f32 out=f32: q[max_abs=1.06645] k[max_abs=0.301433] v[max_abs=1.6787] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=6.01017e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=bf16 ab=bf16 out=f32: q[max_abs=1.09864] k[max_abs=0.262207] v[max_abs=1.98143] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=5.96303e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=f32 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=2.71051e-20 max_rel=0] beta[max_abs=1.86265e-09 max_rel=7.8321e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=f32 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=6.22235e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=bf16 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=3.72529e-09 max_rel=7.26637e-08] beta[max_abs=0 max_rel=0]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=1 Hk=2 Hv=2 conv=bf16 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=7.85072e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=f32 ab=f32 out=f32: q[max_abs=0.30423] k[max_abs=0.305076] v[max_abs=1.93961] g[max_abs=5.96046e-08 max_rel=9.98477e-08] beta[max_abs=5.96046e-08 max_rel=1.0638e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=f32 ab=bf16 out=f32: q[max_abs=0.297971] k[max_abs=0.304694] v[max_abs=1.94887] g[max_abs=4.76837e-07 max_rel=1.00406e-07] beta[max_abs=5.96046e-08 max_rel=8.77599e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=bf16 ab=f32 out=f32: q[max_abs=0.304264] k[max_abs=0.300058] v[max_abs=1.92771] g[max_abs=2.38419e-07 max_rel=1.02948e-07] beta[max_abs=5.96046e-08 max_rel=1.0252e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=bf16 ab=bf16 out=f32: q[max_abs=0.302946] k[max_abs=0.299211] v[max_abs=1.97167] g[max_abs=1.49012e-08 max_rel=8.5113e-08] beta[max_abs=5.96046e-08 max_rel=1.07312e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=f32 ab=f32 out=bf16: q[max_abs=0.00195312] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=2.38419e-07 max_rel=9.95948e-08] beta[max_abs=5.96046e-08 max_rel=1.08831e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=f32 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=4.76837e-07 max_rel=1.82364e-07] beta[max_abs=5.96046e-08 max_rel=1.16936e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=bf16 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=1.09608e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=8 Hv=8 conv=bf16 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=9.31323e-10 max_rel=1.31818e-07] beta[max_abs=5.96046e-08 max_rel=9.40607e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=f32 ab=f32 out=f32: q[max_abs=0.308402] k[max_abs=0.316413] v[max_abs=1.98954] g[max_abs=4.76837e-07 max_rel=1.14298e-07] beta[max_abs=5.96046e-08 max_rel=1.5505e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=f32 ab=bf16 out=f32: q[max_abs=0.312711] k[max_abs=0.305755] v[max_abs=1.99674] g[max_abs=2.32831e-10 max_rel=7.68471e-08] beta[max_abs=5.96046e-08 max_rel=1.46772e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=bf16 ab=f32 out=f32: q[max_abs=0.304792] k[max_abs=0.306138] v[max_abs=1.97361] g[max_abs=5.96046e-08 max_rel=1.16667e-07] beta[max_abs=1.19209e-07 max_rel=1.57143e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=bf16 ab=bf16 out=f32: q[max_abs=0.316747] k[max_abs=0.314737] v[max_abs=1.98232] g[max_abs=1.86265e-09 max_rel=7.51674e-08] beta[max_abs=5.96046e-08 max_rel=1.46772e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=f32 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.00195312] v[max_abs=0] g[max_abs=1.19209e-07 max_rel=1.21421e-07] beta[max_abs=5.96046e-08 max_rel=1.66286e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=f32 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.00195312] v[max_abs=0] g[max_abs=2.98023e-08 max_rel=9.19213e-08] beta[max_abs=5.96046e-08 max_rel=1.91858e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=bf16 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=1.19209e-07 max_rel=1.24757e-07] beta[max_abs=5.96046e-08 max_rel=1.36878e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=65 Hk=2 Hv=2 conv=bf16 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=2.98023e-08 max_rel=9.56601e-08] beta[max_abs=5.96046e-08 max_rel=1.40757e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=f32 ab=f32 out=f32: q[max_abs=0.325703] k[max_abs=0.31772] v[max_abs=1.99892] g[max_abs=9.53674e-07 max_rel=1.5881e-07] beta[max_abs=1.19209e-07 max_rel=1.83263e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=f32 ab=bf16 out=f32: q[max_abs=0.326363] k[max_abs=0.321161] v[max_abs=1.9926] g[max_abs=1.90735e-06 max_rel=1.73886e-07] beta[max_abs=5.96046e-08 max_rel=1.91858e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=bf16 ab=f32 out=f32: q[max_abs=0.321701] k[max_abs=0.318125] v[max_abs=1.99803] g[max_abs=4.76837e-07 max_rel=1.80566e-07] beta[max_abs=1.19209e-07 max_rel=1.86987e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=bf16 ab=bf16 out=f32: q[max_abs=0.321991] k[max_abs=0.32081] v[max_abs=1.99898] g[max_abs=4.76837e-07 max_rel=1.88401e-07] beta[max_abs=8.9407e-08 max_rel=1.91858e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=f32 ab=f32 out=bf16: q[max_abs=0.00195312] k[max_abs=0.00195312] v[max_abs=0] g[max_abs=4.76837e-07 max_rel=1.67722e-07] beta[max_abs=5.96046e-08 max_rel=1.97226e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=f32 ab=bf16 out=bf16: q[max_abs=0.00195312] k[max_abs=0.00195312] v[max_abs=0] g[max_abs=9.53674e-07 max_rel=2.08336e-07] beta[max_abs=8.9407e-08 max_rel=1.91858e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=bf16 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=9.53674e-07 max_rel=1.6994e-07] beta[max_abs=5.96046e-08 max_rel=2.15391e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=64 Hk=32 Hv=32 conv=bf16 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=9.53674e-07 max_rel=1.96968e-07] beta[max_abs=8.9407e-08 max_rel=1.91858e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=f32 ab=f32 out=f32: q[max_abs=0.272645] k[max_abs=0.295092] v[max_abs=1.91466] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=1.12917e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=f32 ab=bf16 out=f32: q[max_abs=0.286175] k[max_abs=0.292005] v[max_abs=1.89204] g[max_abs=3.72529e-09 max_rel=8.8063e-08] beta[max_abs=9.31323e-10 max_rel=9.89444e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=bf16 ab=f32 out=f32: q[max_abs=0.308747] k[max_abs=0.287175] v[max_abs=1.91111] g[max_abs=3.72529e-09 max_rel=6.12191e-08] beta[max_abs=5.96046e-08 max_rel=9.77632e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=bf16 ab=bf16 out=f32: q[max_abs=0.288427] k[max_abs=0.302065] v[max_abs=1.94625] g[max_abs=4.76837e-07 max_rel=1.09518e-07] beta[max_abs=5.96046e-08 max_rel=1.1866e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5247: ERROR: CHECK( dq.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: ERROR: CHECK( dk.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5249: ERROR: CHECK( dv.within ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=f32 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=9.3208e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=f32 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=1.38778e-17 max_rel=0] beta[max_abs=5.96046e-08 max_rel=1.86771e-07]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=bf16 ab=f32 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=9.56878e-08]
+
+./tests/vt/test_tenstorrent_backend.cpp:5241: MESSAGE: kGdnPostConv T=3 Hk=2 Hv=4 conv=bf16 ab=bf16 out=bf16: q[max_abs=0.000976562] k[max_abs=0.000976562] v[max_abs=0] g[max_abs=0 max_rel=0] beta[max_abs=5.96046e-08 max_rel=1.55787e-07]
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:9227:
+TEST CASE:  kTENSTORRENT kMatmulBTQuantGrouped matches the CPU grouped provider inside the ratified envelope
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=3 N=8 K=256 E=1 Pa=3 enc=11 (1): worst bound-ratio vs cpu=0.378085 vs analytic-bf16-ref=0.216692
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=2 N=8 K=256 E=1 Pa=1 enc=11 (1): worst bound-ratio vs cpu=0.468875 vs analytic-bf16-ref=0.325496
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=8 K=512 E=4 Pa=4 enc=11 (1): worst bound-ratio vs cpu=0.371719 vs analytic-bf16-ref=0.441052
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 837.298 <= 23.9505 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=0 tt=679.049 cpu=-158.25 bound=23.9505
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 837.622 <= 23.9505 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=0 tt=679.049 ref=-158.573 bound=23.9505
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 1879.16 <= 55.4036 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=1 tt=-1202.13 cpu=677.024 bound=55.4036
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 1881.28 <= 55.4036 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=1 tt=-1202.13 ref=679.142 bound=55.4036
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 1730.17 <= 61.7922 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=2 tt=-913.041 cpu=817.132 bound=61.7922
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 1714.31 <= 61.7922 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=2 tt=-913.041 ref=801.273 bound=61.7922
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 1158.54 <= 60.8596 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=3 tt=-34.9414 cpu=-1193.48 bound=60.8596
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 1157.76 <= 60.8596 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=3 tt=-34.9414 ref=-1192.7 bound=60.8596
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 2240.54 <= 13.3993 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=4 tt=-2156.13 cpu=84.4177 bound=13.3993
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 2239.1 <= 13.3993 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=4 tt=-2156.13 ref=82.97 bound=13.3993
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 1483.56 <= 68.6174 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=5 tt=-2380.31 cpu=-896.754 bound=68.6174
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 1472.9 <= 68.6174 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=5 tt=-2380.31 ref=-907.416 bound=68.6174
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 425.622 <= 22.8447 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=6 tt=-945.056 cpu=-519.433 bound=22.8447
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 422.804 <= 22.8447 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=6 tt=-945.056 ref=-522.251 bound=22.8447
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 245.734 <= 8.76811 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=7 tt=-279.498 cpu=-33.7643 bound=8.76811
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 245.43 <= 8.76811 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=7 tt=-279.498 ref=-34.0687 bound=8.76811
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 29.4315 <= 9.59685 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=8 tt=0 cpu=-29.4315 bound=9.59685
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 31.1027 <= 9.59685 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=8 tt=0 ref=-31.1027 bound=9.59685
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 2120.1 <= 75.946 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=9 tt=0 cpu=-2120.1 bound=75.946
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 2133.28 <= 75.946 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=9 tt=0 ref=-2133.28 bound=75.946
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 2177.69 <= 75.9995 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=10 tt=0 cpu=-2177.69 bound=75.9995
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 2173.14 <= 75.9995 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=10 tt=0 ref=-2173.14 bound=75.9995
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 2339.79 <= 117.631 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=11 tt=0 cpu=-2339.79 bound=117.631
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 2341.2 <= 117.631 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=11 tt=0 ref=-2341.2 bound=117.631
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 293.737 <= 26.754 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=12 tt=0 cpu=293.737 bound=26.754
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 291.067 <= 26.754 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=12 tt=0 ref=291.067 bound=26.754
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 946.398 <= 42.6656 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=13 tt=0 cpu=-946.398 bound=42.6656
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 948.789 <= 42.6656 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=13 tt=0 ref=-948.789 bound=42.6656
+
+./tests/vt/test_tenstorrent_backend.cpp:9398: ERROR: CHECK( d_cpu <= bound[i] ) is NOT correct!
+  values: CHECK( 275.763 <= 23.3863 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=15 tt=0 cpu=-275.763 bound=23.3863
+
+./tests/vt/test_tenstorrent_backend.cpp:9403: ERROR: CHECK( d_ref <= bound[i] ) is NOT correct!
+  values: CHECK( 277.266 <= 23.3863 )
+  logged: P=1 N=16 K=256 E=2 enc=11 i=15 tt=0 ref=-277.266 bound=23.3863
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=1 N=16 K=256 E=2 Pa=1 enc=11 (1): worst bound-ratio vs cpu=167.214 vs analytic-bf16-ref=167.106
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=33 K=256 E=4 Pa=1 enc=11 (1): worst bound-ratio vs cpu=0.720239 vs analytic-bf16-ref=0.496762
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=3 N=8 K=64 E=2 Pa=3 enc=8 (1): worst bound-ratio vs cpu=0.48784 vs analytic-bf16-ref=0.348505
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=33 K=32 E=4 Pa=4 enc=8 (1): worst bound-ratio vs cpu=0.582883 vs analytic-bf16-ref=0.509898
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=2 N=1024 K=5120 E=1 Pa=2 enc=11 (1): worst bound-ratio vs cpu=0.390167 vs analytic-bf16-ref=0.363453
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=3 N=8 K=256 E=1 Pa=3 enc=12 (1): worst bound-ratio vs cpu=0.487656 vs analytic-bf16-ref=0.200594
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=8 K=512 E=4 Pa=4 enc=12 (1): worst bound-ratio vs cpu=0.340899 vs analytic-bf16-ref=0.24508
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=33 K=256 E=4 Pa=1 enc=12 (1): worst bound-ratio vs cpu=0.507286 vs analytic-bf16-ref=0.514231
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=2 N=1024 K=5120 E=1 Pa=2 enc=12 (1): worst bound-ratio vs cpu=0.491194 vs analytic-bf16-ref=0.454211
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=3 N=8 K=256 E=1 Pa=3 enc=13 (1): worst bound-ratio vs cpu=0.278552 vs analytic-bf16-ref=0.210163
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=8 K=512 E=4 Pa=4 enc=13 (1): worst bound-ratio vs cpu=0.411507 vs analytic-bf16-ref=0.33872
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=4 N=33 K=256 E=4 Pa=1 enc=13 (1): worst bound-ratio vs cpu=0.466227 vs analytic-bf16-ref=0.3899
+
+./tests/vt/test_tenstorrent_backend.cpp:9409: MESSAGE: grouped P=2 N=1024 K=5120 E=1 Pa=2 enc=13 (1): worst bound-ratio vs cpu=0.376211 vs analytic-bf16-ref=0.413665
+
+===============================================================================
+[doctest] test cases:    15 |     2 passed |  13 failed | 93 skipped
+[doctest] assertions: 22147 | 22023 passed | 124 failed |
+[doctest] Status: FAILURE!
+[thalia:84822] *** Process received signal ***
+[thalia:84822] Signal: Segmentation fault (11)
+[thalia:84822] Signal code: Address not mapped (1)
+[thalia:84822] Failing at address: (nil)
+[thalia:84822] [ 0] linux-vdso.so.1(__kernel_rt_sigreturn+0x0) [0xfffbebd20848]
+[thalia:84822] [ 1] /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/libtt_metal.so(_ZNK2tt8tt_metal12GraphTracker10is_enabledEv+0x4c) [0xfffbe8fa26f4]
+[thalia:84822] [ 2] /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/_ttnncpp.so(_ZN4ttnn6Tensor15deallocate_implEb+0x24) [0xfffbeb5a265c]
+[thalia:84822] [ 3] /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/_ttnncpp.so(_ZN4ttnn6TensorD1Ev+0x18) [0xfffbeb5a236c]
+[thalia:84822] [ 4] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe5f950) [0xaaab90c4f950]
+[thalia:84822] [ 5] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe7e350) [0xaaab90c6e350]
+[thalia:84822] [ 6] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe7e370) [0xaaab90c6e370]
+[thalia:84822] [ 7] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe7d044) [0xaaab90c6d044]
+[thalia:84822] [ 8] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe7c888) [0xaaab90c6c888]
+[thalia:84822] [ 9] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe7c654) [0xaaab90c6c654]
+[thalia:84822] [10] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(+0xe5f8ec) [0xaaab90c4f8ec]
+[thalia:84822] [11] /usr/lib64/libc.so.6(+0x401fc) [0xfffbe6b801fc]
+[thalia:84822] [12] /usr/lib64/libc.so.6(+0x4031c) [0xfffbe6b8031c]
+[thalia:84822] [13] /usr/lib64/libc.so.6(+0x22df8) [0xfffbe6b62df8]
+[thalia:84822] [14] /usr/lib64/libc.so.6(__libc_start_main+0x98) [0xfffbe6b62f38]
+[thalia:84822] [15] /tmp/q38-stage-b/build/tests/test_tenstorrent_backend(_start+0x30) [0xaaab90c4cff0]
+[thalia:84822] *** End of error message ***
