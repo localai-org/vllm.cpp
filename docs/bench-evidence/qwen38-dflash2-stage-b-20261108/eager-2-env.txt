@@ -1,0 +1,6 @@
+date: 2026-11-08T20:19:26+01:00
+head: 8a9ee9776b8e2c4fb0b2f14b7d8e158e753bc8d8
+governor: performance
+load1: 2.71
+bench: /tmp/build-q38stageb/examples/vllm-bench
+model sha256: 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169
