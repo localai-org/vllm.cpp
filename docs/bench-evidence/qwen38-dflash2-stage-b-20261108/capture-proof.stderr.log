@@ -1,0 +1,272 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf engine | num_prompts=1 input_len=32 output_len=24 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 289527808 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+INFO auto-fit max_model_len: reduced from 262144 to 992 to fit the KV cache (64 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=2426.774 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=2898.731 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=2899.975 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=3949.653 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=2900.399 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=2896.786 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=2896.930 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=3898.659 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=2894.264 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=2994.646 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=2994.755 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=3911.379 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=2988.653 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=2988.857 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=2893.571 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=4008.299 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=2987.673 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=2892.464 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=2989.016 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=4002.208 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=2895.055 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=2988.779 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=2987.337 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=3909.847 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=2997.384 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=3007.530 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=2911.201 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=4006.281 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=2993.153 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=2897.726 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=2993.031 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=3998.971 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=2905.616 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=3004.384 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=3002.829 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=3908.511 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=3003.338 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=3002.485 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=2911.747 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=4006.597 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=3004.935 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=2911.816 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=3007.437 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=4000.999 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=2906.792 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=3001.413 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=3002.708 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=3910.369 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=3003.458 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=3003.591 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=2906.953 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=4005.506 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=3006.235 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=2912.818 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=3004.376 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=3998.255 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=2910.280 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=2904.761 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=2904.411 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=3900.783 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=2908.468 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=2906.107 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=2905.318 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=3903.439 dev_ms=-1.000
+[TT-STEP-PHASE] sync kind=host-read wait_ms=883.512 read=327680
+[FLINT-STEP] batch=1 fwd_ms=213115.017 step_wall_ms=0.000
+[FLINT-STEP] sample_ms=350.934
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=304.066 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=94.091 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=93.592 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=196.777 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=94.049 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=93.511 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=93.383 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=121.857 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=93.847 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=96.264 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=96.095 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=121.896 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=96.506 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=96.237 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=93.226 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=124.920 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=96.240 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=93.126 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=96.081 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=124.718 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=93.396 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=96.197 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=96.273 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=121.933 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=96.133 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=96.110 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=93.202 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=124.848 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=96.140 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=93.180 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=96.132 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=124.711 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=93.267 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=96.215 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=96.190 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=121.848 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=96.199 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=96.134 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=93.254 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=124.838 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=96.262 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=93.109 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=96.263 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=124.671 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=93.176 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=96.405 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=96.215 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=121.902 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=96.265 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=96.218 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=93.121 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=124.883 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=96.131 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=93.233 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=96.217 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=124.683 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=93.331 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=93.297 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=93.312 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=121.681 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=93.263 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=93.188 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=93.147 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=121.655 dev_ms=-1.000
+[TT-STEP-PHASE] step=1 kind=cold B=1 S=1 boundary=1 warm_calls=20 dram_free_mib=2451 wall_ms=6935.0 warms_ms=84.9 embed_ms=9.3 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=6839.4 gap_prev_ms=-1.0
+[FLINT-STEP] batch=1 fwd_ms=6935.029 step_wall_ms=213466.048
+[FLINT-STEP] sample_ms=358.864
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=16.975 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=10.707 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=10.789 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=9.954 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=10.711 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=10.670 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=10.597 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=7.996 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=10.605 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=10.563 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=8.398 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=5.648 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=7.449 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=7.341 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=7.262 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=5.523 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=7.263 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=7.287 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=7.244 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=5.543 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=7.397 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=7.345 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=7.245 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=5.591 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=7.287 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=7.297 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=7.262 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=5.564 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=7.255 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=7.314 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=7.232 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=5.614 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=7.289 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=7.270 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=7.274 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=5.547 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=7.329 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=7.348 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=7.235 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=5.484 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=7.295 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=7.268 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=7.261 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=5.440 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=7.273 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=7.264 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=7.251 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=5.429 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=7.253 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=7.349 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=7.228 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=5.435 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=7.195 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=7.204 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=7.228 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=5.502 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=7.199 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=7.231 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=7.242 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=5.407 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=7.205 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=7.242 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=7.178 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=5.420 dev_ms=-1.000
+[DenseDecodeGraph] captured Qwen3.5 dense decode graph for padded size S=1 (real B=1)
+[TT-STEP-PHASE] step=2 kind=capture B=1 S=1 boundary=1 warm_calls=20 dram_free_mib=2357 wall_ms=728.3 warms_ms=0.2 embed_ms=0.2 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=481.0 cap_end_ms=244.2 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=359.0
+[FLINT-STEP] batch=1 fwd_ms=728.346 step_wall_ms=7293.983
+[FLINT-STEP] sample_ms=6597.692
+[TT-STEP-PHASE] step=3 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=4.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.8
+[FLINT-STEP] batch=1 fwd_ms=4.099 step_wall_ms=7326.147
+[FLINT-STEP] sample_ms=6598.140
+[TT-STEP-PHASE] step=4 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6598.3
+[FLINT-STEP] batch=1 fwd_ms=3.885 step_wall_ms=6602.341
+[FLINT-STEP] sample_ms=6598.900
+[TT-STEP-PHASE] step=5 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6599.0
+[FLINT-STEP] batch=1 fwd_ms=3.863 step_wall_ms=6602.888
+[FLINT-STEP] sample_ms=6596.128
+[TT-STEP-PHASE] step=6 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6596.3
+[FLINT-STEP] batch=1 fwd_ms=3.944 step_wall_ms=6600.126
+[FLINT-STEP] sample_ms=6597.016
+[TT-STEP-PHASE] step=7 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.1
+[FLINT-STEP] batch=1 fwd_ms=3.755 step_wall_ms=6601.066
+[FLINT-STEP] sample_ms=6596.464
+[TT-STEP-PHASE] step=8 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6596.6
+[FLINT-STEP] batch=1 fwd_ms=3.759 step_wall_ms=6600.322
+[FLINT-STEP] sample_ms=6597.455
+[TT-STEP-PHASE] step=9 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.6
+[FLINT-STEP] batch=1 fwd_ms=3.632 step_wall_ms=6601.322
+[FLINT-STEP] sample_ms=6597.415
+[TT-STEP-PHASE] step=10 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6597.6
+[FLINT-STEP] batch=1 fwd_ms=3.740 step_wall_ms=6601.169
+[FLINT-STEP] sample_ms=6597.745
+[TT-STEP-PHASE] step=11 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=5.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6597.9
+[FLINT-STEP] batch=1 fwd_ms=5.074 step_wall_ms=6601.602
+[FLINT-STEP] sample_ms=6597.072
+[TT-STEP-PHASE] step=12 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=5.2 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6597.2
+[FLINT-STEP] batch=1 fwd_ms=5.270 step_wall_ms=6602.248
+[FLINT-STEP] sample_ms=6599.120
+[TT-STEP-PHASE] step=13 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=4.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6599.3
+[FLINT-STEP] batch=1 fwd_ms=4.942 step_wall_ms=6604.515
+[FLINT-STEP] sample_ms=6597.561
+[TT-STEP-PHASE] step=14 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=5.0 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.7
+[FLINT-STEP] batch=1 fwd_ms=5.058 step_wall_ms=6602.620
+[FLINT-STEP] sample_ms=6597.648
+[TT-STEP-PHASE] step=15 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=4.5 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6597.8
+[FLINT-STEP] batch=1 fwd_ms=4.572 step_wall_ms=6602.824
+[FLINT-STEP] sample_ms=6597.288
+[TT-STEP-PHASE] step=16 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=4.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.2 body_ms=0.0 gap_prev_ms=6597.5
+[FLINT-STEP] batch=1 fwd_ms=4.944 step_wall_ms=6601.997
+[FLINT-STEP] sample_ms=6596.307
+[TT-STEP-PHASE] step=17 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=4.3 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6596.5
+[FLINT-STEP] batch=1 fwd_ms=4.313 step_wall_ms=6601.421
+[FLINT-STEP] sample_ms=6598.242
+[TT-STEP-PHASE] step=18 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6598.4
+[FLINT-STEP] batch=1 fwd_ms=3.939 step_wall_ms=6602.674
+[FLINT-STEP] sample_ms=6597.130
+[TT-STEP-PHASE] step=19 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.3
+[FLINT-STEP] batch=1 fwd_ms=3.468 step_wall_ms=6601.187
+[FLINT-STEP] sample_ms=6597.107
+[TT-STEP-PHASE] step=20 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.4 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.2
+[FLINT-STEP] batch=1 fwd_ms=3.449 step_wall_ms=6600.668
+[FLINT-STEP] sample_ms=6597.727
+[TT-STEP-PHASE] step=21 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.6 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.9
+[FLINT-STEP] batch=1 fwd_ms=3.661 step_wall_ms=6601.287
+[FLINT-STEP] sample_ms=6597.185
+[TT-STEP-PHASE] step=22 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6597.3
+[FLINT-STEP] batch=1 fwd_ms=3.147 step_wall_ms=6600.948
+[FLINT-STEP] sample_ms=6596.731
+[TT-STEP-PHASE] step=23 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2242 wall_ms=3.1 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.1 body_ms=0.0 gap_prev_ms=6596.9
+[FLINT-STEP] batch=1 fwd_ms=3.083 step_wall_ms=6599.996
+[FLINT-STEP] sample_ms=6596.835
+[FLINT-STEP] sample_ms=0.000
+[DenseDecodeGraph] Qwen3.5 dense decode graph: 22 total replays across 1 captured size(s)

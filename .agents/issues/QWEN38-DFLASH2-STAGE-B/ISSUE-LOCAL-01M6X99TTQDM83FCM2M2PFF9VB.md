@@ -99,8 +99,13 @@ CopyDeviceDeviceIfCapture (tenstorrent_residency.cpp:1490) allocates a fresh src
     head-only names above are pre-existing suite-context items, not
     regressions owned by this row.
   - This issue does NOT close: fix 1's seam is correct and now detected,
-    but the P150 token-identity gate remains PENDING; the kRmsNormGated
-    defect is real but predates this branch and is owned by
-    BACKEND-TENSTORRENT-GDN.
+    the P150 token-identity gate LANDED 2026-11-08: six legs
+    (defaults x3 captured, eager x3), byte-identical greedy token stream
+    across all six (sha256 d49c53d2...), warm TPOT within 0.6%
+    (6606.84 vs 6648.14 ms), capture engagement proven by the
+    instrumented proof leg (docs/bench-evidence/qwen38-dflash2-stage-b-20261108/).
+    MiMoV2 sink gates 178/51/67 PASS; preflight green except the two
+    known host gaps. The kRmsNormGated defect is real but predates this
+    branch and is owned by BACKEND-TENSTORRENT-GDN.
 
 -

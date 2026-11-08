@@ -1,0 +1,12 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   40913  1.1  0.2 6184960 601664 pts/5  Sl+  Nov07  24:07 claude -c
+lu_zero   91515  1.1  0.1 6193280 490240 pts/7  Sl+  11:07   5:01 claude
+lu_zero   72204  1.0  0.8 22026688 2163840 pts/0 Sl+ Nov01 111:04 maki -r CeRgUcXiFK5bYWGSPS4sy
+root      27970  0.9  0.0      0     0 ?        I    18:16   0:08 [kworker/u630:2-btrfs-endio-write]
+lu_zero   59982  0.7  0.2 6248000 553024 pts/1  Sl+  Oct27 135:56 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero   59050  0.6  0.1 18940288 272576 pts/2 Sl+  14:20   1:37 maki -c
+lu_zero   42077  0.4  2.4 29002304 6521664 pts/5 Sl+ Nov07   8:46 /usr/bin/rust-analyzer
+root      25173  0.3  0.0      0     0 ?        I    18:15   0:02 [kworker/u630:0-events_unbound]
+root      18605  0.3  0.0      0     0 ?        I    18:13   0:03 [kworker/u546:7-btrfs-endio]
+root      26857  0.2  0.0      0     0 ?        I    18:15   0:01 [kworker/u631:5-btrfs-endio]
+lu_zero   95757  0.2  0.0  11392  6336 ?        Ss   Oct26  38:30 tmux
