@@ -1,8 +1,10 @@
 # Gap analysis: kolibri1 TT captured decode (dispatch batching)
 
-Row: `BACKEND-TENSTORRENT`. Issue:
-`ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR` (in
-`.agents/issues/BACKEND-TENSTORRENT/`). Date: 2026-10-11. Branch:
+Row: `BACKEND-TENSTORRENT` at writing; the campaign now lives on row
+`KOLIBRI1-TT-CAPTURED-DECODE` (spec
+`.agents/specs/kolibri1-tt-captured-decode.md`), which owns issue
+`ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR` (moved to
+`.agents/issues/KOLIBRI1-TT-CAPTURED-DECODE/`). Date: 2026-10-11. Branch:
 `row/tt-kolibri-capture`. Read-only study plus one contained eager
 prototype; no capture wiring landed.
 

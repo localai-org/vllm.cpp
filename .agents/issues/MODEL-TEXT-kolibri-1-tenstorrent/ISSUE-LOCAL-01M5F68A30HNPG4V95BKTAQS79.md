@@ -34,7 +34,9 @@ The Kolibri-1 P150 performance numbers carried by the tree are a second vintage,
   - `docs/gap-kolibri1-tt-captured-decode.md`: the current P150 table in
     front of the 2026-10-11 study table, which stays as the superseded
     vintage.
-  - `.agents/issues/BACKEND-TENSTORRENT/ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR.md`,
+  - `.agents/issues/KOLIBRI1-TT-CAPTURED-DECODE/ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR.md`
+    (moved from `.agents/issues/BACKEND-TENSTORRENT/` when the captured-decode
+    campaign row was filed, 2026-11-09),
     `.agents/issues/MODEL-TEXT-kolibri-1-tenstorrent/ISSUE-LOCAL-01M4NZA9B3DBKS3MD0M4TGRVES.md`
     and `.agents/issues/MODEL-TEXT-kolibri-1-tenstorrent/ISSUE-LOCAL-01M4NS6D2GCD5WXBFN24XGXYQ4.md`:
     a dated pointer from the 2026-10-11 A/B numbers to the current one.
