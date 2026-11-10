@@ -62,6 +62,18 @@ mirror source (oracle registry `vllm-tt-plugin`, gateable = no). Weights:
 incoai/Qwen3.8-27B-DFlash2 (drafter) and the pinned Qwen3.8-27B target —
 stages C pins these in docs/USAGE.md; stage B runs the target only.
 
+## Our baseline
+
+Stage A's verdict is the baseline this row builds on: the region-
+captured arm serves the decode step at 6637.35 ms TPOT median
+(device tail 6623 ms = 99.9%; host wall 3.7 ms/step; zero op
+dispatches; 197+ replays stable; staging 125.5 MB), measured batch 1 /
+input 32 / output 200 on the thalia P150, three-rep medians, idle-
+gated, governor logged (docs/bench-evidence/qwen38-dflash2-stage-a-
+20261103/). The eager arm quantifies the dispatch counterfactual at
+~6.29 s/step of host op dispatch. Numbers current at spec time; the
+device gate below re-measured both arms on this row's head.
+
 ## Port map
 
 | Upstream | Local anchor | Note |
@@ -141,6 +153,31 @@ defect, not printed as data" caveat.
    implementation, STOP. MiMoV2 sink gate mandatory on kernel-region
    changes; dtype bit-identity contract including the windowed leg.
 
+## Work breakdown
+
+W1: the host-build repair (the branch's tt-metal shim targeted an absent
+include subtree; aligned to the durable pin; no behavior change). W2:
+fix 1 — the `CopyDeviceDeviceIfCapture` recorded-geometry arm + the
+red-before test. W3: fix 2 — the GDN two-buffer commit-or-restore seam
++ the rollback unit. W4: arm 3 — the replay-tap probe reading real
+per-tap data. W5: the records/evidence commit + `VT_TT_SPEC_STATE_SHADOW`
+documentation. W6: the fresh-review repair series (rewritten
+recorded-geometry test, dtype and interior-pointer sub-cases, the
+reconciled attribution). W7: the falsification record for the
+pre-existing kRmsNormGated claim + the device-gate evidence commit.
+
+## Dependencies
+
+Device: the local P150 (`${HOME}/gpu.lock` mutex, `luwen` reset +
+15 s + `/dev/shm` lock cleanup per leg, governor performance logged,
+idle gate load < 16), build `/tmp/build-q38stageb` (durable-pin prefix
+`~/Sources/tt/tt-metal-pin-durable`, the topk `-isystem` flag),
+artifacts `/mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf`,
+`VT_TT_KEEPQUANT_INT8DOT=1` mandatory. Depends on stage A's trace
+contract (the `(S, 9, spec=true)` slot key, the captured-arm verdict)
+and on the durable tt-metal pin tree. Stages C/D depend on this row's
+verified capture arm.
+
 ## Risks/decisions
 
 - **The reshape-view copy may not exist for the shadow's layout/memory
@@ -165,18 +202,16 @@ path beyond greedy for this stage's gate.
 
 ## Gates
 
-1. Focused: the two new host tests red-before, green-after (capture the red
-   output in the evidence directory).
-2. Full: `scripts/agent-preflight.sh --staged`, the checker battery,
-   `python3 scripts/agent-integration.py --base origin/main`.
-3. Device: the greedy token-identity gate above, evidence under
-   `docs/bench-evidence/qwen38-dflash2-stage-b-<date>/` (flat per-run
-   layout: `<run-id>/<file>.log`), governor logged per leg, idle gate
-   before each leg (load < 16, `ps aux --sort=-%cpu`).
-4. Reachability: the fixed D2D arm must be reached from the capture path
-   the gate exercises — the reviewer deletes the
-   `tenstorrent_backend.cpp:77` dispatch in a scratch copy and the focused
-   gate must go red.
+All ran and are recorded: the focused doctest/mutation gates (red-before
+captured for the recorded-geometry, dtype, and interior-pointer cases;
+green at head; second-pass mutation review PASS), check-agent-record,
+style, trailers, preflight `--staged` to completion (named host dotnet
+gap), the MiMoV2 sink gates (178/51/67), and the device gate — six
+legs, byte-identical greedy token streams, warm TPOT within 0.6% of
+eager (governor logged, idle gate, resets per leg). Evidence:
+docs/bench-evidence/qwen38-dflash2-stage-b-20261108/ and
+qwen38-dflash2-stage-b-host/. The commands live in the evidence
+run-gate.sh and README, not here: this row is DONE and its gates ran.
 
 ## Git integration
 
@@ -195,3 +230,37 @@ push to `mine`.
   geometry on any lane.
 - Device unavailability (no fleet lease, no idle window): the host gates
   land; the device gate stays PENDING in the issue, never waived silently.
+
+## Outcome
+
+Landed via PR #3553 (merged 2026-11-10). What was measured: the device
+gate — six legs, byte-identical greedy token stream across the captured
+and eager arms (one sha256 across all six `--output-token-ids` files);
+warm TPOT within 0.6% of eager (6606.84 vs 6648.14 ms), so the D2D
+recorded-geometry fix and the GDN commit-or-restore cost nothing
+measurable on the replay path. What was rejected and why: the spec's
+primary reshape-in-place arm — `ttnn::copy` into the live destination
+shadow segfaults at the tt-metal pin, so the spec's named fallback
+shipped (reshape the source, copy into a fresh destination-shaped
+tensor, install with `dev_rows`/`dev_cols` preserved); `VT_SPEC_GRAPH_MAX_QLENS`
+default NOT moved (the spec shape consumes 1 of 2 slots). Why each
+default has its value: `VT_TT_SPEC_STATE_SHADOW` defaults ON for the
+spec arm with the `gdn_idx_changed` reset lane kept as the eviction
+fallback (the knob exists so the fallback lane stays testable). Method
+notes: a first-pass mutation review found the original geometry test
+undetecting; the rewritten test goes red under the baseline-restoring
+mutation, and the second-pass review passed the full series. The
+kRmsNormGated "regression" reported mid-cycle was FALSIFIED
+(pre-existing, suite-context dependent) and re-homed to
+`BACKEND-TENSTORRENT-GDN` (ISSUE-LOCAL-01M6Y0TC5D24YGF74H0TQ2VAN5);
+the falsified claim is kept in the stage-b-host evidence for
+provenance. Still owed by this row's records, not this gate:
+PagedAttention pure-decode order/state dependence and the full-suite
+teardown segfault (owned follow-ups in the issue).
+
+## Now
+
+Stage B is DONE. Stages C (the drafter checkpoint:
+incoai/Qwen3.8-27B-DFlash2, with the docs/USAGE.md weights pin) and D
+(the bucket system with hysteresis) are the next units of row
+`QWEN38-DFLASH2`; both consume this row's captured verify arm.
