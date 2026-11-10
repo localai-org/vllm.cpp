@@ -1,0 +1,13 @@
+/tmp/flint-ubsan/src/vllm/model_executor/models/flint.cpp:540:49: runtime error: load of misaligned address 0xfbfd5e511e4f for type 'const uint16_t', which requires 2 byte alignment
+0xfbfd5e511e4f: note: pointer points here
+ 0e bc 87 be 0f  be 07 be 58 3e 04 3f f0  be bb be 4b be d7 3e 3f  be d2 be 70 3e 91 3e ca  3e c2 3e
+             ^ 
+    #0 0xfffd7bd509bc in vllm::FlintModel::Forward(std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, vllm::FlintWeights const&, vllm::HfConfig const&) src/vllm/model_executor/models/flint.cpp:540
+    #1 0xaaab02d36830 in ReferenceChain tests/vllm/models/test_flint_paged.cpp:397
+    #2 0xaaab02d3cf90 in DOCTEST_ANON_FUNC_3 tests/vllm/models/test_flint_paged.cpp:458
+    #3 0xaaab02e50494 in doctest::Context::run() third_party/doctest/doctest.h:6077
+    #4 0xaaab02e5b548 in main third_party/doctest/doctest.h:6501
+    #5 0xfffda9bb2df0 in __libc_start_call_main (/usr/lib64/libc.so.6+0x22df0) (BuildId: 8abbeadf916a9c08b3799fc3833bbf26cfc0c195)
+    #6 0xfffda9bb2f34 in __libc_start_main (/usr/lib64/libc.so.6+0x22f34) (BuildId: 8abbeadf916a9c08b3799fc3833bbf26cfc0c195)
+    #7 0xaaab02d1fdac in _start (/tmp/flint-build-sanitize/tests/test_flint_paged+0x38fdac) (BuildId: 961a4942ad3964825cf7d2fb857e35935c5eda3b)
+
