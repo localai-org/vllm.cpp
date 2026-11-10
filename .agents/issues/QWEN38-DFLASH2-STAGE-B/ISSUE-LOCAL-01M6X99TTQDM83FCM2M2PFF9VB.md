@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M6X99TTQDM83FCM2M2PFF9VB
 Title: DFlash2 stage B: the TT D2D capture lane clobbers the destination slot's recorded geometry, so residual taps read back pool residue
 Row: QWEN38-DFLASH2-STAGE-B
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-08
 Updated: 2026-11-08
-Closed: -
+Closed: 2026-11-10
 
 ## Problem
 
@@ -109,3 +109,7 @@ CopyDeviceDeviceIfCapture (tenstorrent_residency.cpp:1490) allocates a fresh src
     branch and is owned by BACKEND-TENSTORRENT-GDN.
 
 -
+
+## Resolution
+
+LANDED 2026-11-10 via PR #3553 (merged; evidence commit `34fbb6154` on origin/main, re-verified reachable). Device gate PASS: byte-identical greedy token streams across all six legs (defaults x3 captured, eager x3; one sha256 across the six --output-token-ids files), warm TPOT within 0.6% of eager (6606.84 vs 6648.14 ms). Capture engagement proven by the instrumented proof leg. Mutation-proven detection for both fixes; second-pass review PASS over the full series. Evidence: docs/bench-evidence/qwen38-dflash2-stage-b-20261108/ and qwen38-dflash2-stage-b-host/. Owned follow-ups remain recorded above (PagedAttention order-dependence, teardown segfault; the kRmsNormGated defect re-homed to BACKEND-TENSTORRENT-GDN as 01M6Y0TC5D24YGF74H0TQ2VAN5).
