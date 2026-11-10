@@ -615,3 +615,29 @@ TEST_CASE("flint: the embedding lookup widens bf16 bits, it does not memcpy "
     CHECK(got[static_cast<size_t>(n)] == expect);
   }
 }
+
+TEST_CASE("flint: a misaligned borrowed lm_head reads safely") {
+  // The lm_head of a GGUF-loaded Flint can be a BORROWED view (an mmap span,
+  // or a tied token_embd/lm_head bf16 expansion shared with a second tensor),
+  // and a borrow carries no 2-byte alignment guarantee. A direct uint16_t
+  // dereference over Bf16Data(lm_head) is misaligned-load UB; the read must go
+  // through vt::LoadUnaligned<uint16_t>. This probe builds the whole weights
+  // struct aligned EXCEPT the lm_head, whose payload starts at an ODD byte
+  // offset of its backing buffer — so the lm_head loop in Forward is the first
+  // (and only) misaligned load the sanitizer can see.
+  const FlintParams p = TinyParams();
+  FlintWeights w = TinyWeights(p);
+  const HfConfig c = TinyConfig();
+
+  const size_t n =
+      static_cast<size_t>(p.hidden_size) * static_cast<size_t>(p.vocab_size) * 2u;
+  auto backing = std::make_shared<std::vector<uint8_t>>(n + 1u, uint8_t{0});
+  std::memcpy(backing->data() + 1, w.lm_head.bytes.data(), n);
+  w.lm_head.bytes =
+      vllm::OwnedBytes::Borrow(backing->data() + 1, n, backing);
+
+  const std::vector<float> logits =
+      vllm::FlintModel::Forward({1}, {0}, w, c);
+  CHECK(logits.size() == static_cast<size_t>(p.vocab_size));
+  for (float v : logits) CHECK(std::isfinite(v));
+}
