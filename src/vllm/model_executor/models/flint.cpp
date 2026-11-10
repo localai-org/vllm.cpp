@@ -31,6 +31,7 @@
 #include "vllm/model_executor/models/flint.h"
 #include "vllm/model_executor/models/flint_tt.h"
 #include "vllm/model_executor/models/flint_gguf_weights.h"  // the GGUF arm
+#include "vt/unaligned.h"
 
 #include <algorithm>
 #include <chrono>
@@ -148,8 +149,14 @@ struct FlintPhaseScope {
   ~FlintPhaseScope() { Stop(); }
 };
 
-inline double* FlintPhaseDst(double* bucket) {
-  return g_flint_phase != nullptr ? bucket : nullptr;
+inline double* FlintPhaseDst(FlintPhaseTotals* totals,
+                             double FlintPhaseTotals::*bucket) {
+  // Take the member as a pointer-to-member: `&g_flint_phase->bucket` at the
+  // call sites performed a member access ON A NULL POINTER whenever the
+  // phase clock was off (its thread_local totals pointer is null), which
+  // UBSan's -fno-sanitize-recover=all aborts on
+  // (ISSUE-LOCAL-01M738WXZA9RW5B5AHDZ6F0T4R).
+  return totals != nullptr ? &(totals->*bucket) : nullptr;
 }
 
 inline bool FlintPhaseOn() {
@@ -429,7 +436,8 @@ void MatmulBf16(const float* x, const OwnedTensor& w, int64_t t, float* y) {
       if (xv == 0.0f) continue;
       const uint16_t* wrow = wd + k * n_dim;
       for (int64_t n = 0; n < n_dim; ++n)
-        y[i * n_dim + n] += xv * Bf16(wrow[n]);
+        y[i * n_dim + n] +=
+            xv * Bf16(vt::LoadUnaligned<uint16_t>(wrow + n));
     }
   }
   for (int64_t i = 0; i < t * n_dim; ++i) y[i] = Bf16(ToBf16(y[i]));
@@ -446,7 +454,9 @@ void RmsNormBf16(const float* x, const OwnedTensor& w, int64_t rows,
     const float inv = static_cast<float>(
         1.0 / std::sqrt(ss / double(dim) + eps));
     for (int64_t d = 0; d < dim; ++d)
-      y[i * dim + d] = Bf16(ToBf16(x[i * dim + d] * inv * Bf16(wd[d])));
+      y[i * dim + d] =
+          Bf16(ToBf16(x[i * dim + d] * inv *
+                      Bf16(vt::LoadUnaligned<uint16_t>(wd + d))));
   }
 }
 
@@ -536,8 +546,10 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
       // CONVERT, do not memcpy: the source is bf16 bits and the destination
       // is f32. A raw copy drops each bf16 into the low half of a zero-high
       // float — a ~1e-42 denormal (ISSUE-LOCAL-01M5QBGBM3Z7NT3D9TA0K1HT7T).
+      // LoadUnaligned: the borrowed block payload need not be 2-byte aligned.
       for (int64_t d = 0; d < h; ++d)
-        x[static_cast<size_t>(i) * h + d] = Bf16(emb[tok * h + d]);
+        x[static_cast<size_t>(i) * h + d] = Bf16(vt::LoadUnaligned<uint16_t>(
+            emb + static_cast<size_t>(tok) * h + d));
     }
   }
   if (cpu_dump) {
@@ -592,7 +604,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
               static_cast<float>(1.0 / std::sqrt(ss / double(dh) + p.rms_norm_eps));
           static const bool bf16_head = std::getenv("FLINT_REF_BF16_HEAD") != nullptr;
           for (int64_t d = 0; d < dh; ++d) {
-            head[d] *= inv * Bf16(nw[d]);
+            head[d] *= inv * Bf16(vt::LoadUnaligned<uint16_t>(nw + d));
             // CONTROL ARM: round the head stream through bf16 the way the
             // paged path does, to separate ill-conditioning from defects.
             if (bf16_head) head[d] = Bf16(ToBf16(head[d]));
@@ -638,7 +650,7 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
             s[static_cast<size_t>(j - first)] = dot * scale;
             m = std::max(m, s[static_cast<size_t>(j - first)]);
           }
-          const float sink = Bf16(sinks[hh]);
+          const float sink = Bf16(vt::LoadUnaligned<uint16_t>(sinks + hh));
           double denom = std::exp(static_cast<double>(sink - m));
           for (float sv : s) denom += std::exp(static_cast<double>(sv - m));
           float* out = &attn_out[(i * hq + hh) * dh];
@@ -749,7 +761,8 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
             const float xv = normed[static_cast<size_t>(i) * h + kk];
             const uint16_t* rrow = rd + kk * e;
             for (int64_t n = 0; n < e; ++n)
-              logits[static_cast<size_t>(i) * e + n] += xv * Bf16(rrow[n]);
+              logits[static_cast<size_t>(i) * e + n] +=
+                  xv * Bf16(vt::LoadUnaligned<uint16_t>(rrow + n));
           }
         }
       }
@@ -947,7 +960,7 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
   // own f32 score path, no intermediate bf16 rounding.
   // TT-NONROUTED-ATTRIBUTION: router + host top-k vs the routed expert loop
   // vs the shared expert (null buckets when the phase clock is off).
-  FlintPhaseScope ph_router(FlintPhaseDst(&g_flint_phase->moe_router));
+  FlintPhaseScope ph_router(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::moe_router));
   DBuf dlog(d, DType::kF32, {t, e});
   vt::Matmul(d.q, dlog.t(), x, dense_attn::ResidentWeight(d, w.router_gate));
 
@@ -1004,7 +1017,7 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
   // Routed experts (CPU reference path): download routing, per-expert
   // gather -> gate/up -> SiLU-mul -> down -> scatter.
   ph_router.Stop();
-  FlintPhaseScope ph_routed(FlintPhaseDst(&g_flint_phase->moe_routed));
+  FlintPhaseScope ph_routed(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::moe_routed));
   DBuf expert_out(d, DType::kBF16, {t, top_k, p.hidden_size});
   expert_out.Zero(d);
   std::vector<int32_t> hid(static_cast<size_t>(t * top_k));
@@ -1051,18 +1064,18 @@ DBuf FlintMoeBlock(Dev d, const FlintMoeWeights& w, const FlintParams& p,
   }
 
   ph_routed.Stop();
-  FlintPhaseScope ph_shared(FlintPhaseDst(&g_flint_phase->moe_shared));
+  FlintPhaseScope ph_shared(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::moe_shared));
   DBuf shared;
   {
     // FLINT-CPU-DESCENT-2 sub-attribution: the shared expert GEMVs alone.
     // The same weights serve every token, so this bucket separates the
     // shared-expert cost from the combine scatter before either is touched.
-    FlintPhaseScope ph_se(FlintPhaseDst(&g_flint_phase->shared_expert));
+    FlintPhaseScope ph_se(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::shared_expert));
     shared = FlintSharedExpert(d, w.shared_expert, x);
   }
   DBuf out(d, DType::kBF16, {t, p.hidden_size});
   {
-    FlintPhaseScope ph_cb(FlintPhaseDst(&g_flint_phase->moe_combine));
+    FlintPhaseScope ph_cb(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::moe_combine));
     vt::MoeCombine(d.q, out.t(), expert_out.t(), dtw.t(), &shared.t());
   }
   return out;
@@ -1141,7 +1154,7 @@ ForwardLogits FlintForwardPaged(
   DBuf hidden(d, DType::kBF16, {t, h});
   DBuf ids(d, DType::kI32, {t}, token_ids.data());
   {
-    FlintPhaseScope ph_embed(FlintPhaseDst(&g_flint_phase->embed));
+    FlintPhaseScope ph_embed(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::embed));
     vt::Embedding(d.q, hidden.t(),
                   ResidentWeight(d, w.embed_tokens, {p.vocab_size, h}), ids.t());
     d.b.Synchronize(d.q);
@@ -1160,7 +1173,7 @@ ForwardLogits FlintForwardPaged(
   std::vector<DBuf> sink_f32;
   sink_f32.reserve(static_cast<size_t>(p.num_hidden_layers));
   {
-    FlintPhaseScope ph_other(FlintPhaseDst(&g_flint_phase->other));
+    FlintPhaseScope ph_other(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::other));
     for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
       DBuf s(d, DType::kF32, {hq});
       vt::CastF32(d.q, s.t(),
@@ -1182,7 +1195,7 @@ ForwardLogits FlintForwardPaged(
     DBuf dhn(d, DType::kBF16, {t, h});
     Tensor w_in = ResidentWeight(d, lw.input_layernorm, {h});
     {
-      FlintPhaseScope ph_norms(FlintPhaseDst(&g_flint_phase->norms));
+      FlintPhaseScope ph_norms(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::norms));
       vt::RmsNorm(d.q, dhn.t(), hidden.t(), w_in, vt::RmsNormArgs{eps, false});
     }
 
@@ -1194,8 +1207,9 @@ ForwardLogits FlintForwardPaged(
     // TT-NONROUTED-ATTRIBUTION: the attention half of the layer (qkv
     // projections, head norms, RoPE, cache write, paged attention, o_proj,
     // residual), attributed to the layer's attention group.
-    FlintPhaseScope ph_attn(FlintPhaseDst(is_sliding ? &g_flint_phase->attn_sliding
-                                                     : &g_flint_phase->attn_full));
+    FlintPhaseScope ph_attn(FlintPhaseDst(
+        g_flint_phase, is_sliding ? &FlintPhaseTotals::attn_sliding
+                                  : &FlintPhaseTotals::attn_full));
     DBuf q32 = FlintLinearMatmul(d, dhn.t(), lw.attn.q_proj, DType::kF32);
     DBuf k32 = FlintLinearMatmul(d, dhn.t(), lw.attn.k_proj, DType::kF32);
     DBuf v32 = FlintLinearMatmul(d, dhn.t(), lw.attn.v_proj, DType::kF32);
@@ -1358,7 +1372,7 @@ ForwardLogits FlintForwardPaged(
     DBuf dh2(d, DType::kBF16, {t, h});
     Tensor w_post = ResidentWeight(d, lw.post_attention_layernorm, {h});
     {
-      FlintPhaseScope ph_norms(FlintPhaseDst(&g_flint_phase->norms));
+      FlintPhaseScope ph_norms(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::norms));
       vt::RmsNorm(d.q, dh2.t(), hidden.t(), w_post, vt::RmsNormArgs{eps, false});
     }
 
@@ -1367,7 +1381,7 @@ ForwardLogits FlintForwardPaged(
     const bool is_dense = p.IsDenseLayer(l);
     DBuf ff = [&]() -> DBuf {
       if (is_dense) {
-        FlintPhaseScope ph_dense(FlintPhaseDst(&g_flint_phase->dense_mlp));
+        FlintPhaseScope ph_dense(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::dense_mlp));
         return FlintDenseMlp(d, lw.dense_mlp, dh2.t());
       }
       return FlintMoeBlock(d, lw.moe, p, dh2.t());
@@ -1375,8 +1389,8 @@ ForwardLogits FlintForwardPaged(
     DBuf next(d, DType::kBF16, {t, h});
     {
       FlintPhaseScope ph_add(
-          FlintPhaseDst(is_dense ? &g_flint_phase->dense_mlp
-                                 : &g_flint_phase->other));
+          FlintPhaseDst(g_flint_phase, is_dense ? &FlintPhaseTotals::dense_mlp
+                                                : &FlintPhaseTotals::other));
       vt::Add(d.q, next.t(), hidden.t(), ff.t());
     }
     if (cpu_dump) {
@@ -1389,7 +1403,7 @@ ForwardLogits FlintForwardPaged(
   // Final norm + untied lm_head, f32 logits (the sampler contract).
   DBuf dnorm(d, DType::kBF16, {t, h});
   {
-    FlintPhaseScope ph_norms(FlintPhaseDst(&g_flint_phase->norms));
+    FlintPhaseScope ph_norms(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::norms));
     vt::RmsNorm(d.q, dnorm.t(), hidden.t(), ResidentWeight(d, w.final_norm, {h}),
                 vt::RmsNormArgs{eps, false});
   }
@@ -1407,7 +1421,7 @@ ForwardLogits FlintForwardPaged(
   const int64_t n_out = src.shape[0];
   DBuf logits(d, DType::kF32, {n_out, p.vocab_size});
   {
-    FlintPhaseScope ph_head(FlintPhaseDst(&g_flint_phase->lm_head));
+    FlintPhaseScope ph_head(FlintPhaseDst(g_flint_phase, &FlintPhaseTotals::lm_head));
     // The lm_head rides the same dispatch seam: a keep-quant lm_head is
     // [V, H] nk (MatmulBT), the bf16 lm_head is [H, V] (Matmul) — read the
     // orientation off the tensor, do not reshape a block weight.

@@ -1,0 +1,14 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_paged_engine.cpp:93:
+TEST CASE:  flint paged engine: the published Q4_K_M serves continuous batches matching the reference chains
+
+./tests/vllm/models/test_flint_paged_engine.cpp:100: FATAL ERROR: REQUIRE( gf ) is NOT correct!
+  values: REQUIRE( {?} )
+  logged: goldens not found at tests/vllm/models/flint_goldens_q4_k_m.json
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 0 skipped
+[doctest] assertions: 1 | 0 passed | 1 failed |
+[doctest] Status: FAILURE!
