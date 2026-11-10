@@ -849,7 +849,8 @@ std::vector<float> FlintModel::Forward(const std::vector<int32_t>& token_ids,
         const float xv = normed[static_cast<size_t>(i) * h + kk];
         const uint16_t* lrow = ld + kk * vocab;
         for (int64_t n = 0; n < vocab; ++n)
-          logits[static_cast<size_t>(i) * vocab + n] += xv * Bf16(lrow[n]);
+          logits[static_cast<size_t>(i) * vocab + n] +=
+              xv * Bf16(vt::LoadUnaligned<uint16_t>(lrow + n));
       }
     }
   }

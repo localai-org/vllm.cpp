@@ -1,0 +1,34 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_paged.cpp:442:
+TEST CASE:  flint paged: a mixed two-request batch matches the reference chains
+
+./tests/vllm/models/test_flint_paged.cpp:518: MESSAGE: flint paged: max |paged - reference| logit gap = 0.00576401
+
+./tests/vllm/models/test_flint_paged.cpp:524: MESSAGE: flint paged: req0 chain 1 the reference; req1 chain 1 the reference
+
+./tests/vllm/models/test_flint_paged.cpp:566: MESSAGE: flint paged: worst teacher-forced near-tie gap = 1.33695 nats
+
+===============================================================================
+./tests/vllm/models/test_flint_paged.cpp:577:
+TEST CASE:  flint paged: single 6-token prefill matches the reference logits
+
+./tests/vllm/models/test_flint_paged.cpp:593: MESSAGE: flint paged: single-prefill vs reference gap = 2.34401
+
+./tests/vllm/models/test_flint_paged.cpp:596: MESSAGE: flint paged: single-prefill teacher-forced near-tie gap = 3.65969 nats (recorded; the chains case gates the band)
+
+===============================================================================
+./tests/vllm/models/test_flint_paged.cpp:601:
+TEST CASE:  flint paged: the sliding window masks beyond the window
+
+./tests/vllm/models/test_flint_paged.cpp:677: MESSAGE: flint paged: out-of-window token edit moved logits by 1.18909
+
+./tests/vllm/models/test_flint_paged.cpp:695: MESSAGE: flint paged: windowed step vs reference gap = 1.73658
+
+./tests/vllm/models/test_flint_paged.cpp:698: MESSAGE: flint paged: windowed near-tie gaps = 3.29921 / 2.05635 nats (recorded; the chains case gates the band)
+
+===============================================================================
+[doctest] test cases:   4 |   4 passed | 0 failed | 0 skipped
+[doctest] assertions: 208 | 208 passed | 0 failed |
+[doctest] Status: SUCCESS!

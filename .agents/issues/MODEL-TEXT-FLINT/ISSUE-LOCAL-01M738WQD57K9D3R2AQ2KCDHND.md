@@ -34,3 +34,20 @@ uint16_t bits and `Bf16()` converts them identically. RED evidence:
 construction; `test_flint_paged_engine` could not run locally because
 `tests/vllm/models/flint_golden_q4_k_m.json` is not present on this host
 (missing large fixture, recorded in `green-ubsan-engine-missing-golden.log`).
+
+2026-11-10, `row/FLINT-UBSAN-EMBED-ALIGN`. Fresh-reviewer follow-up: the
+bf16 lm_head loop in `FlintModel::Forward` (the `lrow[n]` scalar load, now
+flint.cpp:853) was the one remaining Bf16Data site still dereferencing
+`uint16_t` directly — the same borrowed-block-payload hazard class, masked
+because the pre-fix UBSan run aborted at :540 before reaching it. Repaired
+in the same flow through `vt::LoadUnaligned<uint16_t>`, mirroring the six
+earlier sites; `Bf16()` conversion untouched. RED:
+`red-lmhead.log` (new doctest probe in `test_flint_forward.cpp` builds a
+borrowed lm_head at an ODD byte offset — the tied-expansion/mmap shape —
+making it the first and only misaligned load; finding at
+flint.cpp:852:66). GREEN under the same sanitize config
+(`address,undefined`, `-fno-sanitize-recover=all`, `VT_POOL_BYPASS=1`):
+`green-lmhead.log` (test_flint_forward 9 cases / 127 assertions, includes
+the new probe) and `green-lmhead-paged.log` (test_flint_paged 208/208),
+zero runtime errors. Grep over flint.cpp confirms zero remaining scalar
+`uint16_t` subscripts over any Bf16Data pointer.
