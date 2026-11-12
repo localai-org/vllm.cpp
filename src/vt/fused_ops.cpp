@@ -1,7 +1,9 @@
 #include "vt/fused_ops.h"
 
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "vt/backend.h"
 #include "vt/dtype.h"
@@ -39,21 +41,41 @@ void DualRmsNormPlusRes(Queue& q, Tensor& out, const Tensor& x1, const Tensor& w
     return;
   }
 #endif
-  // Slow but correct host-side compose using existing ops (allocates temps on device).
-  Tensor n1 = x1;  // shape clone without owning — fall back to sequential RmsNorm+Add
-  // Prefer throw on non-ROCm discrete GPUs without a known-good compose path.
   if (q.device.type != DeviceType::kCPU) {
     throw std::runtime_error("vt::DualRmsNormPlusRes: non-ROCm GPU path not registered");
   }
-  (void)n1;
-  (void)out;
-  (void)w1;
-  (void)x2;
-  (void)w2;
-  (void)w3;
-  (void)residual;
-  (void)args;
-  throw std::runtime_error("vt::DualRmsNormPlusRes: CPU compose not yet wired");
+  VT_CHECK(x1.rank == 2 && x1.shape[0] > 0 && x1.shape[1] > 0 &&
+               (x1.dtype == DType::kBF16 || x1.dtype == DType::kF32),
+           "DualRmsNormPlusRes: expected a nonempty BF16/F32 matrix");
+  // Validate the count before IsContiguous/Numel can multiply signed extents.
+  VT_CHECK(x1.shape[0] <= std::numeric_limits<int64_t>::max() / x1.shape[1],
+           "DualRmsNormPlusRes: matrix element count overflow");
+  const uint64_t elements = static_cast<uint64_t>(x1.shape[0]) *
+                            static_cast<uint64_t>(x1.shape[1]);
+  const size_t element_bytes = SizeOf(x1.dtype);
+  VT_CHECK(elements <= std::numeric_limits<size_t>::max() / element_bytes,
+           "DualRmsNormPlusRes: matrix byte count overflow");
+  const size_t bytes = static_cast<size_t>(elements) * element_bytes;
+  for (const Tensor* t : std::initializer_list<const Tensor*>{&x2, &residual, &out}) {
+    VT_CHECK(t->rank == 2 && t->shape[0] == x1.shape[0] &&
+                 t->shape[1] == x1.shape[1] && t->dtype == x1.dtype &&
+                 t->device == q.device && t->IsContiguous(),
+             "DualRmsNormPlusRes: matrix shape, dtype or device mismatch");
+  }
+  // CPU scratch retains each intermediate's declared dtype rounding. Do not
+  // write out until both inputs and all weights are consumed: out may alias them.
+  const size_t words = bytes / sizeof(uint32_t) +
+                       (bytes % sizeof(uint32_t) != 0);
+  std::vector<uint32_t> storage1(words), storage2(words);
+  Tensor n1 = Tensor::Contiguous(storage1.data(), x1.dtype, q.device,
+                                {x1.shape[0], x1.shape[1]});
+  Tensor n2 = Tensor::Contiguous(storage2.data(), x1.dtype, q.device,
+                                {x1.shape[0], x1.shape[1]});
+  RmsNorm(q, n1, x1, w1, args);
+  RmsNorm(q, n2, x2, w2, args);
+  Add(q, n1, n1, n2);
+  RmsNorm(q, n2, n1, w3, args);
+  Add(q, out, n2, residual);
 }
 
 void GeluMulSeparate(Queue& q, void* out, const void* gate, const void* up, int64_t n,

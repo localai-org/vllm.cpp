@@ -1653,3 +1653,33 @@ ordinary reading. So read any single `rel(sumabs)` ratio as an order of
 magnitude, and confirm a real divergence with `head_dmax` or the sign-sensitive
 `rel_proj` column. Worked example and evidence:
 [`docs/bench-evidence/qwen4exp-layerfp-2999-20260923.md`](bench-evidence/qwen4exp-layerfp-2999-20260923.md).
+
+
+## Gemma4 CPU integer repacks
+
+The Gemma4 safetensors loader accepts symmetric, static, group32 INT4 and INT8
+`compressed-tensors` weights in `pack-quantized` format on the CPU. It reverses
+the converter's integer packing into Q4_0 and Q8_0 blocks without requantization.
+F16 scales retain their original bits, including negative Q4_0 scales.
+The model configuration must include the converter's padded dimensions.
+Marlin padding remains zero; the loader does not infer or remove padding.
+
+The local validation artifacts are listed below. No HuggingFace repository or
+revision was supplied for these repacks; their content hashes identify them.
+The two supplied artifacts match for the recorded 16-token greedy CPU workloads.
+This result does not establish bit-exact logits or performance parity.
+
+| Arm | Local file | Size in bytes | SHA256 |
+|---|---|---:|---|
+| Mixed INT4/INT8 safetensors | `Lumen-3.8-Pulsar-it-qat-w4a16-ct/model.safetensors` | 16363385660 | `1ec184294c1fda2cfe6281f600478f6fd31b87b23d56aff39dd1f89e455792d8` |
+| Source Q4_0 GGUF | `Lumen-3.5-Pulsar_S-LD-Q4_0_XL.gguf` | 13121388640 | `f8428df24ae3961c98ac4137c7cb47c1b6326a45690aa3677601fe2d70b1c69c` |
+
+Run the repack through the public CLI:
+
+```sh
+./build/examples/vllm-cli --device cpu --model /path/to/Lumen-3.8-Pulsar-it-qat-w4a16-ct --prompt Hello --max-tokens 16 --temperature 0
+```
+
+This arm refuses GPU execution, per-layer input embeddings, quantized routers,
+activation quantization, asymmetric schemes, and group sizes other than 32.
+Those formats are outside the validated converter contract.
