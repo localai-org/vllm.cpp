@@ -22,15 +22,20 @@ no per-row change needs to touch this file at all.
 
 Token-exact (or ratified distributional) vs pinned vLLM; ≥ throughput and ≤
 latency/memory on every axis, both gate models, reproduced 2–3x idle. See
-[verification](verification.md). Pin: vLLM <!--pin:commit-->`a7c23ac96d`<!--/pin--> (<!--pin:label-->0.3.0.dev267<!--/pin-->), advanced
-2026-09-26 from `e126687a9a` by sync `4f11dfc10`. The OPT-125m tokengate PASS
-(2026-09-04, `dgx:gpu0`, byte-identical 96/96) ran at the PRIOR pin and
-discharges nothing about the other four strict goldens -- 27B W4A4, 32B-NVFP4A16,
-35B, Coder -- still owed at the target: they live under `## Owed` in
-[the tokengate spec](specs/upstream-sync-headpin-tokengate.md#L569), and the
-benchmark baselines still owe step 6 at `555967922` (#2818). Also
-[oracles/vllm.md](oracles/vllm.md#L93).
-
+[verification](verification.md). Pin: vLLM <!--pin:commit-->`a7c23ac96d`<!--/pin--> (<!--pin:label-->0.3.0.dev267<!--/pin-->) since
+2026-09-22 ([#3320](https://github.com/mudler/vllm.cpp/pull/3320)). **NO gate has run at it** -- the advance carries a sync
+report, no oracle build, no capture, no measurement; its two recorded gates
+(`vllm` library build, `test_scheduler` 48/48) are this tree's own C++.
+**The gate that HAS run and PASSED ran at the PRIOR pin `e126687a9a`**
+(2026-09-03, #2817): OPT-125m token-exact 96/96, `IDS_BYTE_EQUAL True`,
+`TOKENGATE_VERDICT PASS` on 2026-09-04, so the candidate's bytes carry that
+PASS over unchanged. The BENCHMARK baselines still owe step 6 (#2818) at
+`555967922`, **and the other four strict goldens -- 27B W4A4, 32B-NVFP4A16,
+35B, Coder -- are still owed at the target**; the OPT-125m PASS discharges
+none of them. The obligation is unanchored by design (#2794 closed
+`COMPLETED` 2026-09-06), lives under `## Owed` in [the tokengate
+spec](specs/upstream-sync-headpin-tokengate.md); job IDs, verdict fields and
+per-item evidence: [oracles/vllm.md](oracles/vllm.md).
 
 ## Next actions
 
