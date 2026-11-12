@@ -1,0 +1,8 @@
+host: thalia (aarch64, 128 cores)
+date: 2026-10-31
+governor: performance (as found, left unchanged)
+idle gate before every leg: 1-min load < 16 (sleep-poll loop)
+worktree: /tmp/flint-sliding row/FLINT-SLIDING-ATTN
+binary: /tmp/build-sliding/examples/vllm-bench (Release)
+sha256: 20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e  /mnt/models/flint-GGUF/flint-Q4_K_M.gguf

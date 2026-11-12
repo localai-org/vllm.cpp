@@ -1483,6 +1483,8 @@ add_library(vllm STATIC
   src/vt/cpu/cpu_quant_act.cpp
   src/vt/cpu/cpu_quant_dot.cpp
   src/vt/cpu/cpu_quant_dot_sdot.cpp
+  src/vt/cpu/cpu_quant_dot_q4k_neon.cpp
+  src/vt/cpu/cpu_quant_dot_q6k_neon.cpp
   src/vt/cpu/cpu_quant_dot_arm.cpp
   src/vt/cpu/cpu_paged_attn_bfdot_arm.cpp
   src/vt/cpu/cpu_quant_repack.cpp
@@ -1555,6 +1557,22 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   set_source_files_properties(
     src/vt/cpu/cpu_quant_dot_sdot.cpp PROPERTIES
     COMPILE_DEFINITIONS VT_CPU_ARM_Q8_DOT=1
+    COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+dotprod+fp16>")
+  # FLINT-NEON-Q4K-DOT: the Q4_K x Q8_K NEON DotProd tier needs the same
+  # surgical per-file +dotprod build so `vdotq_s32` is exposed; runtime entry is
+  # gated by the same HWCAP dotprod probe (VT_CPU_Q4K_DOT, default auto). The
+  # global -ffp-contract=off keeps its mul-then-add non-fused, which is what
+  # keeps the float stage bit-identical to the portable tier.
+  set_source_files_properties(
+    src/vt/cpu/cpu_quant_dot_q4k_neon.cpp PROPERTIES
+    COMPILE_DEFINITIONS VT_CPU_ARM_Q4K_DOT=1
+    COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+dotprod+fp16>")
+  # FLINT-CPU-DESCENT-2: the Q6_K x Q8_K NEON DotProd tier (the keep-quant
+  # flint lm_head's class) needs the same surgical per-file +dotprod build and
+  # the same runtime HWCAP probe (VT_CPU_Q6K_DOT, default auto).
+  set_source_files_properties(
+    src/vt/cpu/cpu_quant_dot_q6k_neon.cpp PROPERTIES
+    COMPILE_DEFINITIONS VT_CPU_ARM_Q6K_DOT=1
     COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+dotprod+fp16>")
   # KERNEL-CPU-A76-Q8-DOT is Linux-only because its dispatch uses HWCAP/MIDR
   # and the hand-written file carries ELF assembler directives. Other arm64
@@ -3056,6 +3074,27 @@ target_include_directories(vllm_ltx2_connector_gemm_probe SYSTEM PRIVATE
   ${CMAKE_SOURCE_DIR}/third_party)
 target_compile_features(vllm_ltx2_connector_gemm_probe PRIVATE cxx_std_20)
 vllm_cpp_set_warnings(vllm_ltx2_connector_gemm_probe)
+
+# ── FLINT-KQ-CPU-PERF: the routed-expert compute-class A/B micro harness ─────
+# `tools/bench/flint_kq_moe_class_ab.cpp` is the instrument behind spec
+# stage 1 (.agents/specs/flint-kq-cpu-perf.md): the routed-expert phase of the
+# flint keep-quant paged arm timed for the CIQ per-expert dispatch and the
+# dequant-at-load bf16 classes at batch 1 and 8, plus the class (a) profile
+# split (activation quantize, scalar vec_dot, memcpy floor, one bf16 GEMV).
+#
+# CI COMPILES IT AND RUNS NOTHING, the same trade its siblings above record:
+# it loads the ~21 GB published container through the production loader and
+# spends seconds per leg. The build buys that the one file a reader has to
+# compile to re-derive the stage-1 table cannot rot behind an op-signature
+# change.
+add_executable(vllm_flint_kq_moe_class_ab tools/bench/flint_kq_moe_class_ab.cpp)
+target_link_libraries(vllm_flint_kq_moe_class_ab PRIVATE vllm)
+target_include_directories(vllm_flint_kq_moe_class_ab PRIVATE
+  ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/include)
+target_include_directories(vllm_flint_kq_moe_class_ab SYSTEM PRIVATE
+  ${CMAKE_SOURCE_DIR}/third_party)
+target_compile_features(vllm_flint_kq_moe_class_ab PRIVATE cxx_std_20)
+vllm_cpp_set_warnings(vllm_flint_kq_moe_class_ab)
 
 # ── BIT-ROT GUARD: the vt CPU per-element dispatch survey probe ──────────────
 # `tools/bench/vt_cpu_elem_survey_probe.cpp` is the artifact behind the ranking

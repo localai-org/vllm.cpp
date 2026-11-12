@@ -348,7 +348,8 @@ void GdnPrefillKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k_i
         dev_q, dev_k, dev_v, dev_g, dev_b, args.scale, dev_s0,
         /*output_final_state=*/true, static_cast<uint32_t>(kChunk),
         /*use_qk_l2norm=*/false,  // caller pre-normalized q/k
-        /*output_head_major=*/false);
+        /*output_head_major=*/false,
+        /*use_mcast=*/true);  // the tt-metal pin's overload (default)
     VT_CHECK(final_state.has_value(),
              "tenstorrent gdn_prefill: chunk_gated_delta_rule returned no final state");
     std::vector<float> ovec = o.to_vector<float>();             // [bn,len,Hv,Dv]
@@ -877,7 +878,9 @@ void GdnDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k,
       auto [oc, fs] = ttnn::transformer::chunk_gated_delta_rule(
           dq, dk4, dv4, dg, db, args.scale, s0_sl,
           /*output_final_state=*/true, /*chunk_size=*/64,
-          /*use_qk_l2norm=*/false, /*output_head_major=*/false);
+          /*use_qk_l2norm=*/false,
+          /*output_head_major=*/false,
+          /*use_mcast=*/true);  // the tt-metal pin's overload (default)
       VT_CHECK(fs.has_value(),
                "tenstorrent gdn_decode: chunk_gated_delta_rule returned no final state");
       os.push_back(std::move(oc));  // [bn,1,Hv,Dv]

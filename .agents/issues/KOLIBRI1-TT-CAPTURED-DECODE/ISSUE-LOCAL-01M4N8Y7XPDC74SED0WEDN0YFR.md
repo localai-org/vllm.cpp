@@ -1,18 +1,18 @@
 ID: ISSUE-LOCAL-01M4N8Y7XPDC74SED0WEDN0YFR
 Title: kolibri1 TT: enable captured decode / dispatch batching
-Row: BACKEND-TENSTORRENT
+Row: KOLIBRI1-TT-CAPTURED-DECODE
 State: OPEN
 Kind: gap
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-10-11
-Updated: 2026-10-21
+Updated: 2026-11-09
 Closed: -
 
 ## Problem
 
-kolibri1 P150 decode runs eager (~10 device ops/layer x 50 layers, ~960 ms/step, ~1 tok/s) because it lacks the Warm*/capture driver hooks that qwen3.5 implements; both device capture arms decline on kolibri geometry. Produce gap analysis and prototype.
+kolibri1 on the P150 decodes at ~1.82 tok/s (548.5 ms/step median, docs/bench-evidence/kolibri1-tt-p150-refresh-20261021.md) through a per-LAYER host-touch loop: the router downloads its full [t,384] f32 logits to host every layer (kolibri1_tt_forward.cpp:563-564), runs the sigmoid-logit-add top-6 on host (:582), and the routed experts stream from host (dispatch plan :673-677, fetch list :678-680, per-expert H2D stage with a full-slot D2H readback pivot :685-702, bf16 dequant memo :669) — two-plus blocking host round-trips per layer, ~100+ per step, with fresh DBufs every step and no Replay() (docs/gap-kolibri1-tt-captured-decode.md). The qwen3.5 captured-decode template is proven on this card (~12 ms wall / 0.3 ms replay per served step) but kolibri1 implements none of its hooks. The 2026-11-07 drafter study (docs/design/kolibri1-drafter-study-20261107.md) sharpened this: the ordinary capture enablement is ~zero win while the per-layer D2H and the host-built data-dependent expert fetch serialize every layer, and the verified device-router composite measured SLOWER env-gated off — so this is a staged campaign (bound question, capture-shaped loop, then the capture), not a task. Spec: .agents/specs/kolibri1-tt-captured-decode.md
 
 ## Resolution
 

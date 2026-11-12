@@ -1,0 +1,44 @@
+2026-11-08 14:38:48.301 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-08 14:38:48.301 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-08 14:38:48.301 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-08 14:38:48.301 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-08 14:38:48.305 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-08 14:38:48.305 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-08 14:38:48.342 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-08 14:38:48.342 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-08 14:38:48.342 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-08 14:38:48.342 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-08 14:38:48.343 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-08 14:38:48.369 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-08 14:38:48.415 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-08 14:38:48.415 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-08 14:38:48.416 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-08 14:38:48.416 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-08 14:38:48.416 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-08 14:38:49.262 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:6214:
+TEST CASE:  kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot's recorded geometry
+
+./tests/vt/test_tenstorrent_backend.cpp:6286: ERROR: CHECK( vt::tenstorrent::DeviceShadowExact(d, static_cast<uint32_t>(S), static_cast<uint32_t>(TAPS)) ) is NOT correct!
+  values: CHECK( false )
+  logged: the dst slot's record no longer names the recorded [S, TAPS] geometry after the captured copy — the record was clobbered
+
+./tests/vt/test_tenstorrent_backend.cpp:6291: ERROR: CHECK( !vt::tenstorrent::DeviceShadowExact( d, 1, static_cast<uint32_t>(S * TAPS)) ) is NOT correct!
+  values: CHECK( false )
+  logged: the dst slot's record names the SRC's [1, S*TAPS] geometry — the src-shaped install mutation is live
+
+2026-11-08 14:38:49.283 | warning  |           Metal | Allocating device buffers is potentially unsafe due to the existence of an active trace. These buffers may be corrupted once a trace is executed if they are not released before then. Use the trace allocation tracker to verify. (allocator.cpp:140)
+===============================================================================
+[doctest] test cases:  1 |  0 passed | 1 failed | 109 skipped
+[doctest] assertions: 69 | 67 passed | 2 failed |
+[doctest] Status: FAILURE!
+2026-11-08 14:38:49.287 | info     |    BuildKernels | JIT cache stats: 18/18 hits (100.0%) [18 cached, 2 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-08 14:38:49.287 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-08 14:38:49.329 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-08 14:38:49.329 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-08 14:38:49.370 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-08 14:38:49.370 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-08 14:38:49.370 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

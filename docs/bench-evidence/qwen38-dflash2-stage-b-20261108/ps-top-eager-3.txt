@@ -1,0 +1,12 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   98082  300  0.0  10816  5248 ?        R    20:46   0:00 ps aux --sort=-%cpu
+lu_zero   40913  1.1  0.2 6184960 600128 pts/5  Sl+  Nov07  25:11 claude -c
+lu_zero   72204  1.0  0.8 22026688 2163776 pts/0 Sl+ Nov01 112:21 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   91515  0.8  0.1 6193280 497664 pts/7  Tl   11:07   5:11 claude
+lu_zero  121852  0.8  0.1 19958976 270400 pts/8 Sl+  18:36   1:07 maki -c
+lu_zero   59982  0.7  0.2 6248000 554944 pts/1  Sl+  Oct27 136:57 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero   65937  0.6  0.1 11068608 300864 pts/7 Sl+  19:44   0:25 opencode
+lu_zero   59050  0.5  0.1 18944384 281536 pts/2 Sl+  14:20   2:12 maki -c
+lu_zero   42077  0.3  2.3 29002304 6399232 pts/5 Sl+ Nov07   8:46 /usr/bin/rust-analyzer
+root      80527  0.3  0.0      0     0 ?        I    20:34   0:02 [kworker/u546:7-events_unbound]
+lu_zero   83660  0.2  0.1 7255104 407488 ?      Ssl  Nov07   3:18 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service

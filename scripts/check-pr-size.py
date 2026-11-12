@@ -538,6 +538,23 @@ CREATION_MUTATIONS = {
     # attribute at module level, so the cases run and fail individually rather
     # than reporting "Ran 0 tests", which this contract reads as no evidence.
     "scripts/check-deepseek-v4-vision-manifests.py": DISABLED_CREATION_CHECKER,
+    # CHECKER-HARDENING-2. Created in this range, so it has no BASE version to
+    # mutate. Both suites load the checker as a module (importlib) and call into
+    # it (self_test / run -- none of which the stub defines), so every case
+    # raises AttributeError. Measured against the empty stub, not asserted:
+    # tests/scripts/test_check_doc_sha_pins.py reports "Ran 11 tests" then
+    # "FAILED (errors=11)", ZERO cases surviving; the red-first is corrupting a
+    # recorded sha in docs/USAGE.md, which silence cannot satisfy.
+    "scripts/check-doc-sha-pins.py": DISABLED_CREATION_CHECKER,
+    # CHECKER-HARDENING-2. Created in this range, so it has no BASE version to
+    # mutate. Its suite loads the checker as a module (importlib) and calls
+    # distinct_shas / check_pair / run -- none of which the stub defines -- so
+    # every case raises AttributeError. Measured against the empty stub, not
+    # asserted: tests/scripts/test_check_evidence_pin_sha.py reports
+    # "Ran 9 tests" then "FAILED (errors=9)", ZERO cases surviving; the
+    # red-first is corrupting the recorded sha in
+    # docs/bench-evidence/flint-cpu-parity-20261029/report.md.
+    "scripts/check-evidence-pin-sha.py": DISABLED_CREATION_CHECKER,
 }
 SELF_CHECKER = "scripts/check-pr-size.py"
 EVIDENCE_TIMEOUT_SECONDS = 120

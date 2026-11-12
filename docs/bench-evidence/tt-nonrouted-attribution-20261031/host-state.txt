@@ -1,0 +1,7 @@
+host: thalia (aarch64, 128 cores)
+date: 2026-10-31
+governor: performance (as found, left unchanged)
+idle gate before every leg: 1-min load < 16 (sleep-poll loop)
+worktree head: 2a81bdcffb89c95b298db23c90843bb5ad631a0f
+binary: /tmp/build-ttnr/examples/vllm-bench (Release, built from the row worktree)
+sha256: 20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e  /mnt/models/flint-GGUF/flint-Q4_K_M.gguf

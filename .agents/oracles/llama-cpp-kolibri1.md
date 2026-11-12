@@ -129,3 +129,13 @@ pinned_on = 2026-10-22
 gateable = yes
 evidence = docs/bench-evidence/kolibri1-llamacpp-crosscheck-20261020.md
 ```
+
+**2026-10-31, row `LLAMA-CPP-PIN-ADVANCE`: the stock [`llama-cpp`](llama-cpp.md)
+pin advanced onto the SAME object**, release `b11765`. The "Why" paragraph
+above is now historical: its argument was that advancing the stock pin onto
+`b11765` 56 commits after the fact would silently redefine recorded numbers,
+and the advance happened anyway through the ordinary upstream-sync flow, with
+every gate recorded against `62318cd57`/`b11709` left attributed to it. This
+record stays, and keeps its own pin, because the checker admits one pin per
+file and this file's scope stays one architecture. Nothing in this file's
+numbers changes; they were measured at `b11709` and say so.

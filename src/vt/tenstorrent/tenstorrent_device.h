@@ -479,6 +479,43 @@ void GdnShadowProbe(const void* host_ptr, const char* what);
 inline void GdnShadowProbe(const void*, const char*) {}
 #endif
 
+// QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore. The captured
+// verify trace bakes content-keyed state gathers at capture time, so a
+// rejected speculative step's out-of-place commit invalidates the next
+// replay's baked read address. Before a captured spec step the driver stages
+// each live GDN state slot's device shadow into a side copy (STAGE); on a
+// full accept it frees the side copies (COMMIT — the step's own out-of-place
+// result stays); on a reject it installs the side copies back over the live
+// slots with the recorded geometry preserved (RESTORE). RESTORE declines
+// (returns false) when the slot no longer exists, lost its device shadow, or
+// changed geometry since the stage — the caller then takes the
+// gdn_idx_changed full-re-gather reset lane. Implemented in
+// tenstorrent_residency.cpp. All three are no-ops off the TT lane.
+#ifdef VLLM_CPP_TENSTORRENT
+// Stage every live GDN state slot shadow named by the two host-pointer arrays
+// (one entry per cache layer: ssm and conv). Returns the number of LAYER pairs
+// staged; a slot with no device-current shadow is skipped (nothing to restore
+// later — the eager re-gather covers it).
+int StageGdnStateShadow(const void* const* ssm_hosts, const void* const* conv_hosts,
+                        int count);
+// Install the staged copies back over the live slots (the hosts and geometries
+// recorded at stage time). Returns the number of slots restored, or -1 when any
+// slot declined (evicted / geometry changed): the caller must take the
+// gdn_idx_changed reset lane when it does.
+int RestoreGdnStateShadow();
+// Drop the staged copies without touching the live slots (the accept arm).
+void FreeGdnStateShadow();
+// True when staged copies are live (a spec step is pending resolution).
+bool GdnStateShadowStaged();
+#else
+inline int StageGdnStateShadow(const void* const*, const void* const*, int) {
+  return 0;
+}
+inline int RestoreGdnStateShadow() { return 0; }
+inline void FreeGdnStateShadow() {}
+inline bool GdnStateShadowStaged() { return false; }
+#endif
+
 // ---- ttnn mesh-trace capture (Backend graph-capture mapping) --------------
 // Maps vt::Backend::{BeginCapture,EndCapture,Replay} onto
 // ttnn::operations::trace::{begin,end,execute}_trace_capture. Implemented in

@@ -484,6 +484,10 @@ ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
                                                 TileSpecOf(rows, cols),
                                                 /*device=*/nullptr);
     ttnn::copy_to_device(host, *persistent);
+    if (std::getenv("VT_STAGING_TRACE") != nullptr)
+      std::fprintf(stderr,
+                   "[TT-UP-PERSIST] ptr=%p [%u,%u] in-place CQ write\n",
+                   t.data, rows, cols);
     StagingPersistentWrites().fetch_add(1, std::memory_order_relaxed);
     StagingPersistentBytes().fetch_add(static_cast<uint64_t>(n) * 2,
                                        std::memory_order_relaxed);
@@ -494,6 +498,10 @@ ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
   // buffer. The stale resident buffer, if any, is released here.
   ttnn::Tensor dev = ttnn::Tensor::from_span(ttsl::Span<const bfloat16>(src, n),
                                              TileSpecOf(rows, cols), &device);
+  if (std::getenv("VT_STAGING_TRACE") != nullptr)
+    std::fprintf(stderr,
+                 "[TT-UP-ALLOC] ptr=%p [%u,%u] from_span alloc arm\n",
+                 t.data, rows, cols);
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     BufferSlot* s = FindSlot(t.data);
@@ -808,8 +816,16 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
     if (tracked_base && s->device_current && s->device.has_value()) {
       if (s->dev_rows == rows && s->dev_cols == cols) {
         const auto ls = s->device->logical_shape();
-        if (ls.rank() == 2 && ls[0] == rows && ls[1] == cols)
+        if (ls.rank() == 2 && ls[0] == rows && ls[1] == cols) {
+          // FLINT-TT-DENSE-MLP-STAGING: the exact-shape serve. Trace it
+          // (default off) — this is the arm whose stale-serve the row's
+          // one-consumer-per-forward poison rides.
+          if (std::getenv("VT_STAGING_TRACE") != nullptr)
+            std::fprintf(stderr,
+                         "[TT-EXACT-SERVE] ptr=%p [%u,%u] bf16 shadow serve\n",
+                         t.data, rows, cols);
           return *s->device;
+        }
         // ONE chain in BOTH passes (W4 doctrine; ISSUE-LOCAL-01M3JXEFQKSZP2
         // 3PP2HWY9G0VQ). The tt_capture_active() arm this replaced ran a bare
         // ttnn::reshape on the TILED shadow, a program the eager pass never
@@ -901,6 +917,17 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
         s->device_current = true;
         s->host_current = false;
         s->device_reserved = false;
+        // FLINT-TT-DENSE-MLP-STAGING: the arm this row chases. A reservation
+        // serve hands the consumer the PREVIOUS tenant's buffer (aliased in
+        // place) with NO staging — correct only when the pending op WRITES
+        // the full geometry. When the consumer instead READS, the value is
+        // whatever the previous tenant left. Trace it (default off).
+        if (std::getenv("VT_STAGING_TRACE") != nullptr)
+          std::fprintf(stderr,
+                       "[TT-RESERVE-SERVE] ptr=%p [%u,%u] bf16 — served %s, "
+                       "no staging\n",
+                       t.data, rows, cols,
+                       s->persistent.has_value() ? "persistent" : "empty");
         StagingAvoidedReservation().fetch_add(1, std::memory_order_relaxed);
         served = true;
       }
@@ -916,9 +943,14 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
   // shadow before reading them.
   EnsureHostBytes(t.data);
   ttnn::Tensor dev;
+  const bool stg_trace = std::getenv("VT_STAGING_TRACE") != nullptr;
   if (t.dtype == DType::kBF16) {
     // W4 lever 1 (#2107): contiguous bf16 masters skip the f32 intermediate
     // entirely — the raw window bytes go to the device in one from_span.
+    if (stg_trace)
+      std::fprintf(stderr,
+                   "[TT-STAGE-UPLOAD] ptr=%p [%u,%u] bf16 bulk upload\n",
+                   t.data, rows, cols);
     dev = UploadRowsBf16(t, rows, cols, device);
     StagingBulkUploads().fetch_add(1, std::memory_order_relaxed);
     StagingBulkBytes().fetch_add(static_cast<uint64_t>(rows) * cols * 2,
@@ -943,6 +975,10 @@ ttnn::Tensor EnsureDevice2D(const Tensor& t, MeshDevice& device) {
   std::lock_guard<std::mutex> g(SlotMutex());
   BufferSlot* s = FindSlot(t.data);
   if (s != nullptr && t.data == s->host) {
+    if (stg_trace)
+      std::fprintf(stderr,
+                   "[TT-STAGE-INSTALL] ptr=%p [%u,%u] slot installed\n",
+                   t.data, rows, cols);
     s->device = dev;
     s->dev_rows = rows;
     s->dev_cols = cols;
@@ -1398,15 +1434,29 @@ void EnsureHostBytes(void* host) {
       s->host_current = true;
       return;
     }
-    // Device results are f32 via to_vector. Host Alloc is typically
-    // numel*sizeof(float) (tests/f32 path) or numel*2 (bf16 activations).
-    if (bytes >= n * sizeof(float)) {
+    // Device results are f32 via to_vector. The HOST write width is the
+    // SHADOW's dtype — the format the content is actually in — never the
+    // slot's registered capacity. FLINT-TT-DENSE-MLP-STAGING slot-serve fix:
+    // the #1922 best-fit lend hands a DBuf a block UP TO 2x its request (a
+    // [5,2048] bf16 activation in a 40960-B class), so a capacity test
+    // `bytes >= n*4` fired on an ordinary bf16 slot and the download wrote
+    // n*4 f32 bytes into a buffer the bf16 reader then consumed word-halved —
+    // the recycled-out-block poison whose first-token band moved 2.683e-1 <->
+    // 7.224e-1 with functionally neutral DBuf-lifetime edits (every such edit
+    // shifts WHICH requests borrow). The shadow's dtype is authoritative: an
+    // f32 shadow writes f32, a bf16 shadow writes bf16, whatever the capacity.
+    // The conv-transposed arm above keeps its own layout contract.
+    if (dev.dtype() == ttnn::DataType::FLOAT32) {
+      VT_CHECK(bytes >= n * sizeof(float),
+               "tenstorrent: EnsureHostBytes host buffer too small for the "
+               "f32 shadow");
       std::memcpy(base, result.data(), n * sizeof(float));
-    } else if (bytes >= n * sizeof(uint16_t)) {
+    } else {
+      VT_CHECK(bytes >= n * sizeof(uint16_t),
+               "tenstorrent: EnsureHostBytes host buffer too small for the "
+               "shadow dtype");
       auto* dst = static_cast<uint16_t*>(base);
       for (size_t i = 0; i < n; ++i) dst[i] = F32ToBF16(result[i]);
-    } else {
-      VT_CHECK(false, "tenstorrent: EnsureHostBytes host buffer too small");
     }
     s->host_current = true;
   }
@@ -1459,6 +1509,8 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
   (void)once;
   ttnn::Tensor src_dev;
   size_t copy_bytes = 0;
+  std::optional<ttnn::Tensor> dst_shadow;
+  uint32_t dst_rows = 0, dst_cols = 0;
   {
     std::lock_guard<std::mutex> g(SlotMutex());
     BufferSlot* s = FindSlot(const_cast<void*>(src));
@@ -1488,6 +1540,20 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
     if (ShadowLogicalBytes(*s->device) != bytes) return false;
     src_dev = *s->device;
     copy_bytes = bytes;
+    // QWEN38-DFLASH2-STAGE-B (the aux-tap seam): when the destination slot
+    // ALREADY holds a device-current shadow of equal logical numel and dtype,
+    // the copy below must go INTO that shadow instead of installing a fresh
+    // SRC-shaped clone — a [1, H] tap clone written into a [S, H*taps] aux slot
+    // must not clobber the slot's recorded dev_rows/dev_cols, because the
+    // captured trace bakes its reads at the recorded geometry. Byte size is
+    // already proven equal above; the shape match is checked on the logical
+    // volume. The no-shadow destination keeps today's src-shaped-install path
+    // (#2294, #1625).
+    if (d->device_current && d->device.has_value()) {
+      dst_shadow = *d->device;
+      dst_rows = d->dev_rows;
+      dst_cols = d->dev_cols;
+    }
   }
   if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr) {
     void* bt[8];
@@ -1503,6 +1569,59 @@ static size_t ShadowLogicalBytes(const ttnn::Tensor& t) {
     std::free(sym);
   }
   MeshDevice& device = SharedMeshDevice();
+  // QWEN38-DFLASH2-STAGE-B: the geometry-preserving arm. The destination slot
+  // holds a device-current shadow whose logical volume equals the source's
+  // (bytes equal above; dtype equal here), so reshape the SOURCE shadow view to
+  // the destination shadow's logical shape (no data movement) and ttnn::copy
+  // INTO the existing destination tensor. d->device / dev_rows / dev_cols are
+  // untouched — the record keeps naming the served geometry. When the reshape
+  // declines the shadow's layout at this pin, fall back to allocating a
+  // destination-shaped tensor, copying into it, and installing it with the
+  // RECORDED geometry preserved (never the source's).
+  uint64_t src_vol = 1;
+  {
+    const auto ss = src_dev.logical_shape();
+    for (uint32_t i = 0; i < ss.rank(); ++i) src_vol *= ss[i];
+  }
+  const bool dst_usable = dst_shadow.has_value() &&
+                          dst_shadow->dtype() == src_dev.dtype() &&
+                          dst_rows * static_cast<uint64_t>(dst_cols) == src_vol;
+  if (dst_usable) {
+    bool reshaped = false;
+    ttnn::Tensor src_view;
+    try {
+      src_view = CaptureSafeReshape(src_dev, ttnn::Shape({dst_rows, dst_cols}));
+      reshaped = true;
+    } catch (const std::exception&) {
+      reshaped = false;
+    } catch (...) {
+      reshaped = false;
+    }
+    if (reshaped) {
+      ttnn::copy(src_view, *dst_shadow);  // in place: the shadow's storage
+      StagingAvoidedDeviceCopy().fetch_add(1, std::memory_order_relaxed);
+      return true;
+    }
+    // Fallback arm: fresh DESTINATION-shaped tensor, recorded geometry kept.
+    ttnn::Tensor cloned = ttnn::empty(
+        ttnn::Shape({static_cast<uint32_t>(dst_rows),
+                     static_cast<uint32_t>(dst_cols)}),
+        src_dev.dtype(), src_dev.layout(), &device, src_dev.memory_config());
+    cloned = ttnn::copy(src_dev, cloned);
+    {
+      std::lock_guard<std::mutex> g(SlotMutex());
+      BufferSlot* d = FindSlot(dst);
+      if (d == nullptr) return false;
+      d->device = std::move(cloned);
+      d->dev_rows = dst_rows;  // the RECORDED geometry, not the source's
+      d->dev_cols = dst_cols;
+      d->device_current = true;
+      d->host_current = false;
+      d->device_reserved = false;
+    }
+    StagingAvoidedDeviceCopy().fetch_add(1, std::memory_order_relaxed);
+    return true;
+  }
   // Allocate a destination device tensor matching src's shape/dtype/layout,
   // then copy. No host readback.
   ttnn::Tensor cloned = ttnn::empty(src_dev.logical_shape(), src_dev.dtype(),
@@ -1980,6 +2099,122 @@ void ResetStagingStats() {
   StagingAvoidedReservation().store(0, std::memory_order_relaxed);
   StagingAvoidedMemset().store(0, std::memory_order_relaxed);
   StagingAvoidedDeviceCopy().store(0, std::memory_order_relaxed);
+}
+
+
+// ---- QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore ----------
+// The captured spec verify trace bakes content-keyed state gathers, so a
+// rejected step's out-of-place commit invalidates the next replay's baked
+// read address. STAGE clones each live GDN state slot's device shadow into a
+// side tensor (device-side, no host round-trip); RESTORE reinstalls the side
+// copies over the live slots with the recorded geometry preserved; COMMIT
+// (the accept arm) just drops them. A declined restore (slot evicted,
+// geometry changed, shadow lost) returns a short count and the driver takes
+// the gdn_idx_changed full-re-gather reset lane.
+
+namespace {
+
+struct GdnStateShadowSet {
+  struct Entry {
+    void* host = nullptr;
+    std::optional<ttnn::Tensor> shadow;  // the pre-step clone
+    uint32_t rows = 0, cols = 0;
+  };
+  std::vector<Entry> ssm;
+  std::vector<Entry> conv;
+};
+
+GdnStateShadowSet& GdnShadows() {
+  static GdnStateShadowSet* g = new GdnStateShadowSet();  // never destroyed (#1486)
+  return *g;
+}
+
+}  // namespace
+
+int StageGdnStateShadow(const void* const* ssm_hosts,
+                        const void* const* conv_hosts, int count) {
+  MeshDevice& device = SharedMeshDevice();
+  GdnStateShadowSet& g = GdnShadows();
+  g.ssm.clear();
+  g.conv.clear();
+  int staged = 0;
+  {
+    std::lock_guard<std::mutex> lock(SlotMutex());
+    for (int i = 0; i < count; ++i) {
+      bool pair = true;
+      for (int which = 0; which < 2; ++which) {
+        const void* host = which == 0 ? ssm_hosts[i] : conv_hosts[i];
+        if (host == nullptr) continue;
+        BufferSlot* s = FindSlot(const_cast<void*>(host));
+        if (s == nullptr || !s->device_current || !s->device.has_value()) {
+          pair = false;  // no live shadow — the eager re-gather covers this slot
+          continue;
+        }
+        GdnStateShadowSet::Entry e;
+        e.host = const_cast<void*>(host);
+        e.rows = s->dev_rows;
+        e.cols = s->dev_cols;
+        e.shadow = ttnn::empty(s->device->logical_shape(), s->device->dtype(),
+                               s->device->layout(), &device,
+                               s->device->memory_config());
+        *e.shadow = ttnn::copy(*s->device, *e.shadow);
+        (which == 0 ? g.ssm : g.conv).push_back(std::move(e));
+      }
+      if (pair) ++staged;
+    }
+  }
+  return staged;
+}
+
+int RestoreGdnStateShadow() {
+  GdnStateShadowSet& g = GdnShadows();
+  MeshDevice& device = SharedMeshDevice();
+  int restored = 0;
+  bool declined = false;
+  {
+    std::lock_guard<std::mutex> lock(SlotMutex());
+    for (int which = 0; which < 2; ++which) {
+      const auto& entries = which == 0 ? g.ssm : g.conv;
+      for (const auto& e : entries) {
+        BufferSlot* s = FindSlot(e.host);
+        if (s == nullptr || !s->device_current || !s->device.has_value() ||
+            s->dev_rows != e.rows || s->dev_cols != e.cols ||
+            s->device->dtype() != e.shadow->dtype() ||
+            s->device->logical_shape() != e.shadow->logical_shape()) {
+          declined = true;  // the reset lane must take this slot
+          continue;
+        }
+        // Install a fresh clone of the staged pre-step bytes at the slot's
+        // RECORDED geometry (same shape/dtype/layout — the guards above
+        // proved it). In-place ttnn::copy over a live shadow segfaulted at
+        // this pin (the same hazard that moved the D2D copy to the fallback
+        // arm), so the restored tensor is a fresh clone installed over the
+        // slot rather than a copy into the live storage.
+        ttnn::Tensor cloned =
+            ttnn::empty(e.shadow->logical_shape(), e.shadow->dtype(),
+                        e.shadow->layout(), &device, e.shadow->memory_config());
+        cloned = ttnn::copy(*e.shadow, cloned);
+        s->device = std::move(cloned);
+        // The host master holds the REJECTED step's commit (the forward's
+        // commit downloaded it); the restored device tensor is the truth, so
+        // the slot must read back through a download, never the host master.
+        s->host_current = false;
+        ++restored;
+      }
+    }
+  }
+  return declined ? -1 : restored;
+}
+
+void FreeGdnStateShadow() {
+  GdnStateShadowSet& g = GdnShadows();
+  g.ssm.clear();
+  g.conv.clear();
+}
+
+bool GdnStateShadowStaged() {
+  GdnStateShadowSet& g = GdnShadows();
+  return !g.ssm.empty() || !g.conv.empty();
 }
 
 }  // namespace vt::tenstorrent

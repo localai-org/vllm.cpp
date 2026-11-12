@@ -1,0 +1,12 @@
+
+
+Loading model... |0.00.077.280 E llama_model_load: error loading model: unknown model architecture: 'flint'
+0.00.077.289 E llama_model_load_from_file_impl: failed to load model
+0.00.077.315 E common_fit_params: encountered an error while trying to fit params to free device memory: failed to load model
+-0.00.147.598 E llama_model_load: error loading model: unknown model architecture: 'flint'
+0.00.147.607 E llama_model_load_from_file_impl: failed to load model
+0.00.147.611 E cmn  common_init_: failed to load model '/mnt/models/flint-GGUF/flint-Q4_K_M.gguf'
+0.00.147.614 E srv    load_model: failed to load model, '/mnt/models/flint-GGUF/flint-Q4_K_M.gguf'
+0.00.149.525 E srv  llama_server: exiting due to model loading error
+llama_server exited with code 1
+\ Error: the server exited before becoming ready

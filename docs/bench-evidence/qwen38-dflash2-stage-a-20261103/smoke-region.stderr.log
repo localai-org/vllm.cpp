@@ -1,0 +1,305 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf engine | num_prompts=1 input_len=32 output_len=6 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 289527808 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+INFO auto-fit max_model_len: reduced from 262144 to 992 to fit the KV cache (64 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/16694102712729079069/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/16694102712729079069/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/16694102712729079069/brisc/brisc.11275013762920529770_91352.elf
+/tmp/ccZPT51F.s: Assembler messages:
+/tmp/ccZPT51F.s:15760: Warning: ignoring changed section attributes for .text
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/15879607373498115031/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/15879607373498115031/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/15879607373498115031/brisc/brisc.11275013762920529770_91352.elf
+/tmp/ccSTQDxw.s: Assembler messages:
+/tmp/ccSTQDxw.s:15760: Warning: ignoring changed section attributes for .text
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=9624.022 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=2954.879 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=2918.060 dev_ms=-1.000
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/963231975925095548/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/963231975925095548/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/963231975925095548/brisc/brisc.11275013762920529770_91352.elf
+/tmp/ccq5HCAK.s: Assembler messages:
+/tmp/ccq5HCAK.s:15760: Warning: ignoring changed section attributes for .text
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/7717435143169160292/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/7717435143169160292/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/7717435143169160292/brisc/brisc.11275013762920529770_91352.elf
+/tmp/ccnOvzfL.s: Assembler messages:
+/tmp/ccnOvzfL.s:15760: Warning: ignoring changed section attributes for .text
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/15935059069611555325/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/15935059069611555325/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/15935059069611555325/brisc/brisc.11275013762920529770_91352.elf
+/tmp/ccMf8gCC.s: Assembler messages:
+/tmp/ccMf8gCC.s:15760: Warning: ignoring changed section attributes for .text
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/writer_unary_stick_layout_wh_multicore/17239030461018307564/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/writer_unary_stick_layout_wh_multicore/17239030461018307564/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/writer_unary_stick_layout_wh_multicore/17239030461018307564/brisc/brisc.11275013762920529770_91352.elf
+make: jobserver mkfifo: /tmp/GMfifo24718: File exists
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/14132695805043560799/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/14132695805043560799/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/14132695805043560799/brisc/brisc.11275013762920529770_91352.elf
+/tmp/cc68Tymf.s: Assembler messages:
+/tmp/cc68Tymf.s:15758: Warning: ignoring changed section attributes for .text
+[TT-STEP-PHASE] layer=3 type=fa host_ms=12129.580 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=2920.259 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=2959.700 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=2913.271 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=3909.945 dev_ms=-1.000
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/10053206454162061197/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/10053206454162061197/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/10053206454162061197/brisc/brisc.11275013762920529770_91352.elf
+/tmp/cckwEuG6.s: Assembler messages:
+/tmp/cckwEuG6.s:15760: Warning: ignoring changed section attributes for .text
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=4412.485 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=3047.003 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=3006.488 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=3913.476 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=3013.275 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=3006.205 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=2909.155 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=4021.236 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=3006.687 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=2910.542 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=3009.455 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=4004.486 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=2909.989 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=3005.648 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=3000.344 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=3915.592 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=3026.055 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=3033.189 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=2929.902 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=4011.417 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=3026.537 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=2930.233 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=3024.021 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=4005.535 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=2927.681 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=3028.791 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=3022.374 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=3922.207 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=3026.328 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=3030.786 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=2933.888 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=4012.316 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=3033.113 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=2931.024 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=3027.546 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=4006.523 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=2919.478 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=3023.632 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=3024.988 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=3919.574 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=3028.872 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=3026.288 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=2919.067 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=4011.866 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=3028.087 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=2934.573 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=3027.984 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=4002.990 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=2930.155 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=2925.946 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=2927.556 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=3908.110 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=2933.313 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=2934.290 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=2938.458 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=3911.574 dev_ms=-1.000
+[TT-STEP-PHASE] sync kind=host-read wait_ms=883.695 read=327680
+Building brisc, link step:
+cd /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/9723810709615015312/brisc/ && /tmp/umdtrial-install/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O2 -Wl,--just-symbols=/tmp/umdtrial-install/libexec/tt-metalium/tt_metal/pre-compiled/1801534666104373800/brisc/brisc_weakened.elf -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=auto -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -nostartfiles -mcpu=tt-bh -fno-tree-loop-distribute-patterns -Wno-stringop-overflow -T/tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/toolchain/blackhole/kernel_brisc.ld -Wl,--emit-relocs /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/noc.o /tmp/umdtrial-install/libexec/tt-metalium/runtime/hw/lib/blackhole/substitutes.o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/9723810709615015312/brisc/brisck.11275013762920529770_91352.o -o /home/lu_zero/.cache/tt-metal-cache/1801534666104373800/kernels/Kernel_Source_Code/9723810709615015312/brisc/brisc.11275013762920529770_91352.elf
+/tmp/ccC1wiSl.s: Assembler messages:
+/tmp/ccC1wiSl.s:15777: Warning: ignoring changed section attributes for .text
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=5692.879 dev_ms=-1.000
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=96.264 dev_ms=-1.000
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=95.311 dev_ms=-1.000
+[TT-STEP-PHASE] layer=3 type=fa host_ms=201.347 dev_ms=-1.000
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=96.206 dev_ms=-1.000
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=95.090 dev_ms=-1.000
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=95.069 dev_ms=-1.000
+[TT-STEP-PHASE] layer=7 type=fa host_ms=122.644 dev_ms=-1.000
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=98.237 dev_ms=-1.000
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=97.785 dev_ms=-1.000
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=97.690 dev_ms=-1.000
+[TT-STEP-PHASE] layer=11 type=fa host_ms=122.472 dev_ms=-1.000
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=97.934 dev_ms=-1.000
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=97.929 dev_ms=-1.000
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=94.845 dev_ms=-1.000
+[TT-STEP-PHASE] layer=15 type=fa host_ms=125.460 dev_ms=-1.000
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=97.880 dev_ms=-1.000
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=94.773 dev_ms=-1.000
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=97.876 dev_ms=-1.000
+[TT-STEP-PHASE] layer=19 type=fa host_ms=125.537 dev_ms=-1.000
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=95.039 dev_ms=-1.000
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=97.964 dev_ms=-1.000
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=98.190 dev_ms=-1.000
+[TT-STEP-PHASE] layer=23 type=fa host_ms=122.707 dev_ms=-1.000
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=98.322 dev_ms=-1.000
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=98.231 dev_ms=-1.000
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=95.080 dev_ms=-1.000
+[TT-STEP-PHASE] layer=27 type=fa host_ms=125.541 dev_ms=-1.000
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=98.128 dev_ms=-1.000
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=95.372 dev_ms=-1.000
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=99.402 dev_ms=-1.000
+[TT-STEP-PHASE] layer=31 type=fa host_ms=125.893 dev_ms=-1.000
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=96.085 dev_ms=-1.000
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=98.354 dev_ms=-1.000
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=98.177 dev_ms=-1.000
+[TT-STEP-PHASE] layer=35 type=fa host_ms=122.641 dev_ms=-1.000
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=98.446 dev_ms=-1.000
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=98.368 dev_ms=-1.000
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=95.171 dev_ms=-1.000
+[TT-STEP-PHASE] layer=39 type=fa host_ms=125.491 dev_ms=-1.000
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=98.102 dev_ms=-1.000
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=95.028 dev_ms=-1.000
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=99.718 dev_ms=-1.000
+[TT-STEP-PHASE] layer=43 type=fa host_ms=125.640 dev_ms=-1.000
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=95.413 dev_ms=-1.000
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=98.179 dev_ms=-1.000
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=98.129 dev_ms=-1.000
+[TT-STEP-PHASE] layer=47 type=fa host_ms=122.592 dev_ms=-1.000
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=98.234 dev_ms=-1.000
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=98.141 dev_ms=-1.000
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=95.069 dev_ms=-1.000
+[TT-STEP-PHASE] layer=51 type=fa host_ms=125.585 dev_ms=-1.000
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=98.129 dev_ms=-1.000
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=95.063 dev_ms=-1.000
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=97.963 dev_ms=-1.000
+[TT-STEP-PHASE] layer=55 type=fa host_ms=125.674 dev_ms=-1.000
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=95.455 dev_ms=-1.000
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=95.058 dev_ms=-1.000
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=95.032 dev_ms=-1.000
+[TT-STEP-PHASE] layer=59 type=fa host_ms=122.614 dev_ms=-1.000
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=95.711 dev_ms=-1.000
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=95.171 dev_ms=-1.000
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=95.170 dev_ms=-1.000
+[TT-STEP-PHASE] layer=63 type=fa host_ms=122.539 dev_ms=-1.000
+[TT-STEP-PHASE] step=1 kind=cold B=1 S=1 boundary=1 warm_calls=20 dram_free_mib=2488 dispatches=964 segments=0 wall_ms=12435.8 warms_ms=88.0 embed_ms=7.5 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=12339.1 gap_prev_ms=-1.0
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=20.758 dev_ms=-1.000
+[REGION-CAPTURE] segment 0: 2195456 B staging
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=11.512 dev_ms=-1.000
+[REGION-CAPTURE] segment 1: 2154496 B staging
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=10.708 dev_ms=-1.000
+[REGION-CAPTURE] segment 2: 2154496 B staging
+[TT-STEP-PHASE] layer=3 type=fa host_ms=9.438 dev_ms=-1.000
+[REGION-CAPTURE] segment 3: 1392640 B staging
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=10.626 dev_ms=-1.000
+[REGION-CAPTURE] segment 4: 2154496 B staging
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=10.733 dev_ms=-1.000
+[REGION-CAPTURE] segment 5: 2154496 B staging
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=10.595 dev_ms=-1.000
+[REGION-CAPTURE] segment 6: 2154496 B staging
+[TT-STEP-PHASE] layer=7 type=fa host_ms=7.693 dev_ms=-1.000
+[REGION-CAPTURE] segment 7: 1392640 B staging
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=10.654 dev_ms=-1.000
+[REGION-CAPTURE] segment 8: 2154496 B staging
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=10.369 dev_ms=-1.000
+[REGION-CAPTURE] segment 9: 2154496 B staging
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=10.236 dev_ms=-1.000
+[REGION-CAPTURE] segment 10: 2154496 B staging
+[TT-STEP-PHASE] layer=11 type=fa host_ms=7.434 dev_ms=-1.000
+[REGION-CAPTURE] segment 11: 1392640 B staging
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=10.254 dev_ms=-1.000
+[REGION-CAPTURE] segment 12: 2154496 B staging
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=10.172 dev_ms=-1.000
+[REGION-CAPTURE] segment 13: 2154496 B staging
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=10.163 dev_ms=-1.000
+[REGION-CAPTURE] segment 14: 2154496 B staging
+[TT-STEP-PHASE] layer=15 type=fa host_ms=7.367 dev_ms=-1.000
+[REGION-CAPTURE] segment 15: 1392640 B staging
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=10.151 dev_ms=-1.000
+[REGION-CAPTURE] segment 16: 2154496 B staging
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=10.114 dev_ms=-1.000
+[REGION-CAPTURE] segment 17: 2154496 B staging
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=10.117 dev_ms=-1.000
+[REGION-CAPTURE] segment 18: 2154496 B staging
+[TT-STEP-PHASE] layer=19 type=fa host_ms=7.407 dev_ms=-1.000
+[REGION-CAPTURE] segment 19: 1392640 B staging
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=10.244 dev_ms=-1.000
+[REGION-CAPTURE] segment 20: 2154496 B staging
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=10.111 dev_ms=-1.000
+[REGION-CAPTURE] segment 21: 2154496 B staging
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=10.124 dev_ms=-1.000
+[REGION-CAPTURE] segment 22: 2154496 B staging
+[TT-STEP-PHASE] layer=23 type=fa host_ms=7.523 dev_ms=-1.000
+[REGION-CAPTURE] segment 23: 1392640 B staging
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=10.434 dev_ms=-1.000
+[REGION-CAPTURE] segment 24: 2154496 B staging
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=10.389 dev_ms=-1.000
+[REGION-CAPTURE] segment 25: 2154496 B staging
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=10.339 dev_ms=-1.000
+[REGION-CAPTURE] segment 26: 2154496 B staging
+[TT-STEP-PHASE] layer=27 type=fa host_ms=7.482 dev_ms=-1.000
+[REGION-CAPTURE] segment 27: 1392640 B staging
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=10.501 dev_ms=-1.000
+[REGION-CAPTURE] segment 28: 2154496 B staging
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=10.350 dev_ms=-1.000
+[REGION-CAPTURE] segment 29: 2154496 B staging
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=10.475 dev_ms=-1.000
+[REGION-CAPTURE] segment 30: 2154496 B staging
+[TT-STEP-PHASE] layer=31 type=fa host_ms=7.623 dev_ms=-1.000
+[REGION-CAPTURE] segment 31: 1392640 B staging
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=10.694 dev_ms=-1.000
+[REGION-CAPTURE] segment 32: 2154496 B staging
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=10.464 dev_ms=-1.000
+[REGION-CAPTURE] segment 33: 2154496 B staging
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=10.405 dev_ms=-1.000
+[REGION-CAPTURE] segment 34: 2154496 B staging
+[TT-STEP-PHASE] layer=35 type=fa host_ms=7.627 dev_ms=-1.000
+[REGION-CAPTURE] segment 35: 1392640 B staging
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=10.635 dev_ms=-1.000
+[REGION-CAPTURE] segment 36: 2154496 B staging
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=10.403 dev_ms=-1.000
+[REGION-CAPTURE] segment 37: 2154496 B staging
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=10.449 dev_ms=-1.000
+[REGION-CAPTURE] segment 38: 2154496 B staging
+[TT-STEP-PHASE] layer=39 type=fa host_ms=7.705 dev_ms=-1.000
+[REGION-CAPTURE] segment 39: 1392640 B staging
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=10.687 dev_ms=-1.000
+[REGION-CAPTURE] segment 40: 2154496 B staging
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=10.688 dev_ms=-1.000
+[REGION-CAPTURE] segment 41: 2154496 B staging
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=10.512 dev_ms=-1.000
+[REGION-CAPTURE] segment 42: 2154496 B staging
+[TT-STEP-PHASE] layer=43 type=fa host_ms=7.697 dev_ms=-1.000
+[REGION-CAPTURE] segment 43: 1392640 B staging
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=10.803 dev_ms=-1.000
+[REGION-CAPTURE] segment 44: 2154496 B staging
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=10.642 dev_ms=-1.000
+[REGION-CAPTURE] segment 45: 2154496 B staging
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=10.464 dev_ms=-1.000
+[REGION-CAPTURE] segment 46: 2154496 B staging
+[TT-STEP-PHASE] layer=47 type=fa host_ms=7.732 dev_ms=-1.000
+[REGION-CAPTURE] segment 47: 1392640 B staging
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=10.950 dev_ms=-1.000
+[REGION-CAPTURE] segment 48: 2154496 B staging
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=10.581 dev_ms=-1.000
+[REGION-CAPTURE] segment 49: 2154496 B staging
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=10.540 dev_ms=-1.000
+[REGION-CAPTURE] segment 50: 2154496 B staging
+[TT-STEP-PHASE] layer=51 type=fa host_ms=7.617 dev_ms=-1.000
+[REGION-CAPTURE] segment 51: 1392640 B staging
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=10.881 dev_ms=-1.000
+[REGION-CAPTURE] segment 52: 2154496 B staging
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=10.615 dev_ms=-1.000
+[REGION-CAPTURE] segment 53: 2154496 B staging
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=10.636 dev_ms=-1.000
+[REGION-CAPTURE] segment 54: 2154496 B staging
+[TT-STEP-PHASE] layer=55 type=fa host_ms=7.648 dev_ms=-1.000
+[REGION-CAPTURE] segment 55: 1392640 B staging
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=10.805 dev_ms=-1.000
+[REGION-CAPTURE] segment 56: 2154496 B staging
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=10.618 dev_ms=-1.000
+[REGION-CAPTURE] segment 57: 2154496 B staging
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=10.624 dev_ms=-1.000
+[REGION-CAPTURE] segment 58: 2154496 B staging
+[TT-STEP-PHASE] layer=59 type=fa host_ms=7.591 dev_ms=-1.000
+[REGION-CAPTURE] segment 59: 1392640 B staging
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=10.795 dev_ms=-1.000
+[REGION-CAPTURE] segment 60: 2154496 B staging
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=10.593 dev_ms=-1.000
+[REGION-CAPTURE] segment 61: 2154496 B staging
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=10.658 dev_ms=-1.000
+[REGION-CAPTURE] segment 62: 2154496 B staging
+[TT-STEP-PHASE] layer=63 type=fa host_ms=7.666 dev_ms=-1.000
+[REGION-CAPTURE] segment 63: 1392640 B staging
+[REGION-CAPTURE] segment 64: 245760 B staging
+[DenseDecodeGraph] captured Qwen3.5 dense decode graph for padded size S=1 (real B=1)
+[TT-STEP-PHASE] step=2 kind=capture B=1 S=1 boundary=1 warm_calls=20 dram_free_mib=2394 dispatches=963 segments=65 wall_ms=903.8 warms_ms=0.2 embed_ms=0.2 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=900.0 cap_end_ms=0.5 pin_ms=0.0 replay_ms=0.7 body_ms=0.0 gap_prev_ms=357.0
+[TT-STEP-PHASE] step=3 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2234 dispatches=0 segments=65 wall_ms=3.9 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.7 body_ms=0.0 gap_prev_ms=6636.5
+[TT-STEP-PHASE] step=4 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2234 dispatches=0 segments=65 wall_ms=3.7 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.7 body_ms=0.0 gap_prev_ms=6636.0
+[TT-STEP-PHASE] step=5 kind=replay B=1 S=1 boundary=0 warm_calls=20 dram_free_mib=2234 dispatches=0 segments=65 wall_ms=3.8 warms_ms=0.1 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.7 body_ms=0.0 gap_prev_ms=6636.0
+[DenseDecodeGraph] Qwen3.5 dense decode graph: 4 total replays across 1 captured size(s)

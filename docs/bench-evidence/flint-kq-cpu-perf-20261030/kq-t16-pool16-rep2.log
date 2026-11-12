@@ -1,0 +1,20 @@
+Median TTFT (ms):                          886.48      
+P99 TTFT (ms):                             886.48      
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            175.76      
+Median TPOT (ms):                          175.76      
+P99 TPOT (ms):                             175.76      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             175.76      
+Median ITL (ms):                           177.31      
+P99 ITL (ms):                              210.78      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            35861.78    
+Median E2EL (ms):                          35861.78    
+P99 E2EL (ms):                             35861.78    
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 0.25        
+Prefill token throughput (tok/s, in/TTFT): 10.15       
+Output (decode) token throughput (tok/s):  5.58        
+Mean per-stream decode rate (tok/s):       5.69        
+====================================================

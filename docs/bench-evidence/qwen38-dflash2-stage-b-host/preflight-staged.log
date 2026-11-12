@@ -1,0 +1,240 @@
+Session role:
+  [32mok[0m   role=helper row=QWEN38-DFLASH2-STAGE-B session=ppid:85588 branch=row/QWEN38-DFLASH2-STAGE-B
+Record gates:
+  [32mok[0m   check-conflict-markers
+  [32mok[0m   check-evidence-refs
+  [32mok[0m   check-evidence-pin-sha
+  [32mok[0m   check-doc-sha-pins
+  [32mok[0m   check-prompt-contract
+  [32mok[0m   check-agent-record
+  [32mok[0m   check-release-binary-contract
+  [32mok[0m   check-release-workflow
+  [32mok[0m   check-windows-release-state
+  [32mok[0m   check-container-matrix
+  [32mok[0m   check-container-workflow
+  [32mok[0m   check-build-runtime-deps
+  [32mok[0m   check-lease-ccache
+  [32mok[0m   claim-view
+  [32mok[0m   check-readme-structure
+  [32mok[0m   check-quickstart-recipes
+  [32mok[0m   check-benchmark-index
+  [32mok[0m   check-model-checklist
+  [32mok[0m   check-supported-models
+  [31mFAIL[0m check-env-doc
+         ERROR: production env var(s) read from src/+include/ are neither documented in docs/ENVIRONMENT.md nor on scripts/env-doc-allowlist.txt:
+           - VT_TT_SPEC_STATE_SHADOW
+         Document it in docs/ENVIRONMENT.md (if it is a user-facing / behavior-changing knob) or add it to scripts/env-doc-allowlist.txt (if it is a kernel-internal tuning switch).
+  [32mok[0m   check-fusion-consistency
+  [32mok[0m   check-attention-rung-consistency
+  [32mok[0m   check-fp4-resident-consistency
+  [32mok[0m   check-cuda-op-arch-gate
+  [32mok[0m   check-rocm-dp4a-intrinsic
+  [32mok[0m   check-runner-routing-consistency
+  [32mok[0m   check-surface-coverage
+  [32mok[0m   check-test-registration
+  [32mok[0m   check-snapshot-pins
+  [32mok[0m   check-oracle-pins
+  [32mok[0m   check-comparator-pins
+  [32mok[0m   check-oracle-denominator-flags
+  [32mok[0m   check-now-current
+  [32mok[0m   check-gate-commands
+  [32mok[0m   check-symbol-anchors
+  [32mok[0m   ready-for-helper
+  [32mok[0m   upstream-inventory
+  [32mok[0m   audit-live-rows
+Mutation suites:
+  [32mok[0m   test_check_prompt_contract
+  [32mok[0m   test_check_evidence_refs
+  [32mok[0m   test_check_evidence_pin_sha
+  [32mok[0m   test_check_doc_sha_pins
+  [32mok[0m   test_agent_gates
+  [32mok[0m   test_agent_record
+  [32mok[0m   test_check_release_binary_contract
+  [32mok[0m   test_release_manifest
+  [32mok[0m   test_release_archive
+  [32mok[0m   test_release_pipeline
+  [32mok[0m   test_check_windows_release_state
+  [32mok[0m   test_release_postpublish_audit
+  [32mok[0m   test_check_container_matrix
+  [32mok[0m   test_check_container_workflow
+  [32mok[0m   test_check_build_runtime_deps
+  [32mok[0m   test_check_lease_ccache
+  [32mok[0m   test_validate_container_image
+  [32mok[0m   test_release_index
+  [32mok[0m   test_release_metadata
+  [32mok[0m   test_release_accelerator_metadata
+  [32mok[0m   test_release_macos_metadata
+  [32mok[0m   test_release_windows_metadata
+  [32mok[0m   test_cpu_release_gates
+  [32mok[0m   test_agent_role
+  [32mok[0m   test_agent_onboard
+  [32mok[0m   test_agent_start
+  [32mok[0m   test_gate_bringup
+  [32mok[0m   test_env_agnostic_tooling
+  [32mok[0m   test_claim_view
+  [32mok[0m   test_upstream_inventory
+  [32mok[0m   test_check_readme_structure
+  [32mok[0m   test_check_quickstart_recipes
+  [32mok[0m   test_check_benchmark_index
+  [32mok[0m   test_check_model_checklist
+  [32mok[0m   test_check_supported_models
+  [31mFAIL[0m test_check_env_doc
+         ......F.......................
+         ======================================================================
+         FAIL: test_shipped_tree_is_fully_covered (__main__.UndocumentedEnvVarTests.test_shipped_tree_is_fully_covered)
+         ----------------------------------------------------------------------
+         Traceback (most recent call last):
+           File "/tmp/q38-stage-b/tests/scripts/test_check_env_doc.py", line 72, in test_shipped_tree_is_fully_covered
+             self.assertEqual(undocumented(scanned, documented, allowlisted), [])
+             ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         AssertionError: Lists differ: ['VT_TT_SPEC_STATE_SHADOW'] != []
+         
+         First list contains 1 additional elements.
+         First extra element 0:
+  [32mok[0m   test_check_deepseek_v4_vision_manifests
+  [32mok[0m   test_checker_text
+  [32mok[0m   test_check_fusion_consistency
+  [32mok[0m   test_check_attention_rung_consistency
+  [32mok[0m   test_check_fp4_resident_consistency
+  [32mok[0m   test_check_cuda_op_arch_gate
+  [32mok[0m   test_check_rocm_dp4a_intrinsic
+  [32mok[0m   test_rocm_rank_kernels
+  [32mok[0m   test_check_runner_routing_consistency
+  [32mok[0m   test_check_surface_coverage
+  [31mFAIL[0m test_check_test_registration
+         ...F.......................................................................................
+         ======================================================================
+         FAIL: test_every_fetch_content_site_is_pinned_off (__main__.HostPortabilityTests.test_every_fetch_content_site_is_pinned_off)
+         The count is read from the tree, so a fourth site cannot join quietly.
+         ----------------------------------------------------------------------
+         Traceback (most recent call last):
+           File "/tmp/q38-stage-b/tests/scripts/test_check_test_registration.py", line 807, in test_every_fetch_content_site_is_pinned_off
+             self.assertEqual(sites, len(mod.NETWORK_FETCH_OPTIONS))
+             ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         AssertionError: 6 != 3
+         
+         ----------------------------------------------------------------------
+  [32mok[0m   test_check_snapshot_pins
+  [32mok[0m   test_check_oracle_pins
+  [32mok[0m   test_check_comparator_pins
+  [32mok[0m   test_dsv4v_w6_compare
+  [32mok[0m   test_cpu_x86_llamacpp_floor
+  [32mok[0m   test_audit_live_rows
+  [32mok[0m   test_check_gate_commands
+  [32mok[0m   test_gpu_lock_one_truth
+  [32mok[0m   test_main_baseline
+  [32mok[0m   test_agent_preflight_skip_report
+  [32mok[0m   test_agent_pr_body
+  [32mok[0m   test_agent_issue_index
+  [32mok[0m   test_check_symbol_anchors
+  [32mok[0m   test_check_oracle_denominator_flags
+  [32mok[0m   test_rocm_quant_gather_compare
+  [32mok[0m   test_rocm_strix_ourarm_staged
+  [32mok[0m   test_rocm_cooperative_toggles
+  [32mok[0m   test_tokengate_buildreq
+  [32mok[0m   test_check_conflict_markers
+  [32mok[0m   test_check_tree_compiles
+  [32mok[0m   test_msvc_wx_diagnostics
+  [32mok[0m   test_prepush_checker_names
+  [32mok[0m   test_ab_arms_differ
+  [32mok[0m   test_variadic_harness
+  [32mok[0m   test_ltx25_pixel_ab_harness
+  [32mok[0m   test_ltx2_dit_attn_knob_arms
+  [32mok[0m   test_ltx25_ab_memwatch
+  [32mok[0m   test_ltx2_oracle_goldens
+  [32mok[0m   test_ltx2_latent_dump
+  [32mok[0m   test_tower_skip_rss_report
+  [32mok[0m   test_tower_skip_rss_arm
+  [32mok[0m   test_ci_walk_base
+  [32mok[0m   test_rc_stage_checkpoint
+  [32mok[0m   test_sglang_lease_identity
+  [32mok[0m   test_rocprof_attach_preflight
+  [32mok[0m   test_q4exp_layerfp_diff
+  [32mok[0m   test_qwen3_capture_tools
+  [32mok[0m   test_qwen3_capture_outputs
+  [32mok[0m   test_ltx25_render_compare
+  [32mok[0m   test_ltx25_absolute_reference
+  [32mok[0m   test_ltx25_prompt_adherence
+  [32mok[0m   test_ltx25_adherence_detail_loss
+  [32mok[0m   test_convert_glm5_next_gguf
+  [32mok[0m   test_check_windows_portability
+  [32mok[0m   trailer suites
+  [32mok[0m   commit style suites
+  [32mok[0m   tools suites
+  [33mSKIP[0m check-arm-isa-build.py
+         needs arguments preflight does not supply: usage: check-arm-isa-build.py [-h] --compile-commands COMPILE_COMMANDS
+  [32mok[0m   check-attention-rung-consistency.py
+  [32mok[0m   check-benchmark-index.py
+  [32mok[0m   check-build-runtime-deps.py
+  [32mok[0m   check-comparator-pins.py
+  [32mok[0m   check-conflict-markers.py
+  [32mok[0m   check-container-matrix.py
+  [32mok[0m   check-container-workflow.py
+  [33mSKIP[0m check-cpu-isa-build.py
+         needs arguments preflight does not supply: usage: check-cpu-isa-build.py [-h] --compile-commands COMPILE_COMMANDS
+  [33mSKIP[0m check-cuda-fat-gencode.py
+         needs arguments preflight does not supply: usage: check-cuda-fat-gencode.py [-h] --compile-commands COMPILE_COMMANDS
+  [32mok[0m   check-cuda-op-arch-gate.py
+  [32mok[0m   check-deepseek-v4-vision-manifests.py
+  [32mok[0m   check-device-leakage.py
+  [32mok[0m   check-doc-sha-pins.py
+  [32mok[0m   check-dsv4-gguf-namemap.py
+  [32mok[0m   check-env-doc.py
+  [32mok[0m   check-evidence-pin-sha.py
+  [32mok[0m   check-evidence-refs.py
+  [32mok[0m   check-fp4-resident-consistency.py
+  [32mok[0m   check-fusion-consistency.py
+  [32mok[0m   check-gate-commands.py
+  [32mok[0m   check-gemv-invocation-consistency.py
+  [32mok[0m   check-lease-ccache.py
+  [32mok[0m   check-model-checklist.py
+  [32mok[0m   check-oracle-denominator-flags.py
+  [32mok[0m   check-oracle-pins.py
+  [33mSKIP[0m check-pr-size.py
+         needs arguments preflight does not supply: usage: check-pr-size.py [-h] --base BASE --head HEAD [--branch BRANCH]
+  [32mok[0m   check-prompt-contract.py
+  [32mok[0m   check-quickstart-recipes.py
+  [32mok[0m   check-readme-structure.py
+  [32mok[0m   check-release-binary-contract.py
+  [32mok[0m   check-release-workflow.py
+  [32mok[0m   check-rocm-dp4a-intrinsic.py
+  [32mok[0m   check-runner-routing-consistency.py
+  [32mok[0m   check-site.py
+  [32mok[0m   check-snapshot-pins.py
+  [32mok[0m   check-supported-models.py
+  [32mok[0m   check-surface-coverage.py
+  [32mok[0m   check-symbol-anchors.py
+  [32mok[0m   check-test-registration.py
+  [33mSKIP[0m check-triton-aot-multiarch.py
+         needs arguments preflight does not supply: usage: check-triton-aot-multiarch.py [-h] --vendored-root VENDORED_ROOT
+  [31mFAIL[0m check-windows-portability.py
+         ERROR: build-windows-release.ps1: injected fake-tool contract failed: Possible reasons for this include:
+           * You misspelled a built-in dotnet command.
+           * You intended to execute a .NET program, but dotnet--NoProfile does not exist.
+           * You intended to run a global tool, but a dotnet-prefixed executable with this name could not be found on the PATH.
+         Could not execute because the specified command or file was not found.
+         [31;1mException: [0m/tmp/q38-stage-b/scripts/build-windows-release.ps1:39[0m
+         [31;1m[0m[36;1mLine |[0m
+         [31;1m[0m[36;1m[36;1m  39 | [0m         [36;1mthrow "$Program exited with status $exitCode"[0m
+         [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+         [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1m/opt/dotnet-sdk-bin-10.0/dotnet exited with status 1[0m
+  [32mok[0m   check-windows-release-state.py
+Committed range vs origin/main 24f84609f11c6f8d77df8495036888439471f048:
+  [32mok[0m   now-current range
+Tree compiles:
+       compiling what this change reaches. A records-only change returns
+       at once; a wide header change can take minutes.
+  [32mok[0m   tree-compiles
+         check-tree-compiles: 7 of 7 translation unit(s) in scope compiled (3.0s). This checks syntax and semantics only; it does not link, run, or leave the default host configuration.
+Commit trailers vs origin/main 24f84609f11c6f8d77df8495036888439471f048:
+  [32mok[0m   commit-trailers
+  [32mok[0m   commit-style
+Staged change:
+  [32mok[0m   now-current --staged
+
+5 gate(s) SKIPPED: check-arm-isa-build.py check-cpu-isa-build.py check-cuda-fat-gencode.py check-pr-size.py check-triton-aot-multiarch.py
+NOT a green preflight: a skipped gate reported nothing about this tree.
+Each reason is printed beside its SKIP above.
+
+4 gate(s) failed: check-env-doc test_check_env_doc test_check_test_registration check-windows-portability.py
+Repair the record. Never weaken a checker to make a transition pass.

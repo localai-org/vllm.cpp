@@ -152,6 +152,18 @@ void EnsureEnvParsedLocked(DisableList& d) {
   d.live_count.store(d.count, std::memory_order_relaxed);
 }
 
+// QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): the eager dispatch counter. See
+// include/vt/op_provider.h. Same gate the step-phase clock reads, so one knob
+// arms both halves of the discriminator (the driver prints the delta per step).
+std::atomic<uint64_t>& DispatchCounter() {
+  static std::atomic<uint64_t> n{0};
+  return n;
+}
+bool DispatchCountEnabled() {
+  static const bool v = std::getenv("VT_TT_STEP_PHASES") != nullptr;
+  return v;
+}
+
 std::atomic<bool>& CallStatsFlag() {
   static std::atomic<bool> on{[] {
     const char* e = std::getenv("VT_OP_PROVIDER_STATS");
@@ -740,6 +752,10 @@ void RegisterOp(OpId op, DeviceType device, void* fn) {
 
 const char* OpName(OpId op) { return OpNameImpl(op); }
 
+uint64_t OpDispatchCount() {
+  return DispatchCounter().load(std::memory_order_relaxed);
+}
+
 void* GetOp(OpId op, DeviceType device) {
   Slot& slot = At(op, device);
   void* fn = slot.selected.load(std::memory_order_relaxed);
@@ -756,6 +772,10 @@ void* GetOp(OpId op, DeviceType device) {
   if (CallStatsFlag().load(std::memory_order_relaxed)) {
     slot.selections.fetch_add(1, std::memory_order_relaxed);
   }
+  // QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): one resolved dispatch = one host
+  // touch on the eager arm. Counted AFTER Resolve, so a miss counted once is a
+  // dispatch that actually returned a kernel.
+  if (DispatchCountEnabled()) DispatchCounter().fetch_add(1, std::memory_order_relaxed);
   return fn;
 }
 

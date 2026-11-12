@@ -276,6 +276,15 @@ if(VLLM_CPP_TENSTORRENT)
   # docs/bench-evidence/flint-tt-w0-20261025/).
   vllm_cpp_add_test(test_flint_tt_w0 vllm/models/test_flint_tt_w0.cpp)
   target_include_directories(test_flint_tt_w0 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # FLINT-P150-STAGE2-GATE (spec .agents/specs/flint-p150-stage2-gate.md,
+  # issue ISSUE-LOCAL-01M6HF07NW0NQPVC5V21EGZJ8M): the MODEL-LEVEL
+  # device-attention gate — the keep-quant paged recipe run TWICE (host arm,
+  # VT_FLINT_TT_DEVICE_ATTN unset; device arm, =1) asserting the SAME
+  # drift-tolerant band for the device arm and recording both arms' numbers
+  # + chains (the adoption inputs). Card + operator-run under the gpu.lock
+  # mutex.
+  vllm_cpp_add_test(test_flint_tt_stage2_gate vllm/models/test_flint_tt_stage2_gate.cpp)
+  target_include_directories(test_flint_tt_stage2_gate PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # Flint keep-quant device arm (spec .agents/specs/flint-keepquant.md,
   # issue ISSUE-LOCAL-01M5WCPZC4TWR9GZVJHH73E1XE): the loader-arm host gates
   # (admission census, refusal by name, re-derived budget) plus the
@@ -283,11 +292,23 @@ if(VLLM_CPP_TENSTORRENT)
   vllm_cpp_add_test(test_flint_keepquant vllm/models/test_flint_keepquant.cpp)
   target_include_directories(test_flint_keepquant PRIVATE ${CMAKE_SOURCE_DIR}/src
                            ${CMAKE_CURRENT_SOURCE_DIR}/vllm)
+  # FLINT-P150-ATTENTION stage 1 (spec .agents/specs/flint-p150-attention.md,
+  # issue ISSUE-LOCAL-01M687MYRKDS21SBESBG012KN7): the single-layer device
+  # attention probe — sinks + head-dim QK-norm + RoPE-as-configured + the 513
+  # window, both window modes, per-head slices against the W2-derived band.
+  # Card + operator-run under the gpu.lock mutex.
+  vllm_cpp_add_test(test_flint_tt_attention_probe vllm/models/test_flint_tt_attention_probe.cpp)
+  target_include_directories(test_flint_tt_attention_probe PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # SCRATCH W2 diagnostic (operator-run under the gpu.lock mutex, evidence in
   # docs/bench-evidence/flint-tt-w2-20261025/): the ttnn::matmul f32-to-tf32
   # operand micro-probe.
   vllm_cpp_add_test(test_flint_tt_w2_micro vllm/models/test_flint_tt_w2_micro.cpp)
   target_include_directories(test_flint_tt_w2_micro PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # SCRATCH staging-order repro (row FLINT-TT-DENSE-MLP-STAGING): the minimal
+  # two-tensor staging test the spec's stop condition names — one down-proj
+  # matmul whose out block's pool history is the only variable.
+  vllm_cpp_add_test(test_flint_tt_staging_repro vllm/models/test_flint_tt_staging_repro.cpp)
+  target_include_directories(test_flint_tt_staging_repro PRIVATE ${CMAKE_SOURCE_DIR}/src)
   # SCRATCH W3 diagnostic (operator-run under the gpu.lock mutex, evidence
   # in docs/bench-evidence/tt-matmul-noise-20261025/): the substrate
   # matmul-noise map (spec .agents/specs/tt-matmul-noise.md).
@@ -1063,6 +1084,9 @@ target_include_directories(test_flint_forward PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # registry-entered mixed-batch paged gate against the reference forward.
 vllm_cpp_add_test(test_flint_paged vllm/models/test_flint_paged.cpp)
 target_include_directories(test_flint_paged PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# FLINT-CPU-DESCENT-2: the host router top-k selection equivalence suite
+# (bounded insertion vs the previous partial_sort path, bit-identical).
+vllm_cpp_add_test(test_flint_router_topk_equiv vllm/models/test_flint_router_topk_equiv.cpp)
 # W-c: the REAL-WEIGHTS paged-engine gate — the published Q4_K_M through the
 # full LLMEngine stack with continuous arrival, chains adjudicated against the
 # reference forward (checkpoint-gated: skips loudly without the container).
@@ -3423,6 +3447,14 @@ vllm_cpp_add_test(test_ops_embedding_quant vt/test_ops_embedding_quant.cpp)
 # header (SwapForTesting) used by the thread-count determinism case. CPU-only.
 vllm_cpp_add_test(test_ops_quant_dot vt/test_ops_quant_dot.cpp)
 target_include_directories(test_ops_quant_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# FLINT-NEON-Q4K-DOT: the NEON Q4_K x Q8_K dot bit-identity suite. The TU
+# includes cpu_quant_blocks.h from src/, hence the same private include.
+vllm_cpp_add_test(test_neon_q4k_dot vt/test_neon_q4k_dot.cpp)
+target_include_directories(test_neon_q4k_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# FLINT-CPU-DESCENT-2: the NEON Q6_K x Q8_K dot bit-identity suite (the
+# keep-quant flint lm_head's class). Same private include as the q4_K suite.
+vllm_cpp_add_test(test_neon_q6k_dot vt/test_neon_q6k_dot.cpp)
+target_include_directories(test_neon_q6k_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # MODEL-DSV4-EXL3 W1a: the EXL3 (exllamav3) trellis reference dequant. Gated by
 # tiles the TEST packs itself off the ENCODE side (tests/test_quant_fn.py:83-128
 # + pack.cu:29-57), so the fixture never shares code with the decode under test,

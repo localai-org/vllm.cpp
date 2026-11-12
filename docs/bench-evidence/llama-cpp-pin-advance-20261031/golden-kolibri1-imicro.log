@@ -1,0 +1,38 @@
+
+
+Loading model... |-\|/-\|/-\|/-\|/ 
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b1-9df0b73
+model      : /mnt/models/kolibri1-apex-gguf/Kolibri-1-APEX-I-Micro.gguf
+ftype      : IQ1_M - 1.75 bpw
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+
+> The capital of France is
+
+[Start thinking]
+
+1.  **Analyze the Request:** The user is asking for the capital of France.
+2.  **Identify the Entity:** The entity is "France".
+3.  **Retrieve Knowledge:** Access internal knowledge base regarding the capital
+
+[ Prompt: 17.4 t/s | Generation: 11.4 t/s ]
+
+
+Exiting...

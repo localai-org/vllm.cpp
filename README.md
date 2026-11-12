@@ -200,7 +200,7 @@ Decode lands inside llama.cpp's own spread, and the memory gap is 30 MiB. Tokens
 llama.cpp's server is unmeasured.
 
 > **Every llama.cpp denominator here is SUPERSEDED**: they came from `237ad9b96`, our own local-only
-> fork, 65 performance commits deep. The pin is now stock `b10451` and each figure is owed a re-take
+> fork, 65 performance commits deep. The pin is stock `b11765` since 2026-10-31 (earlier figures: `b10451` to 2026-10-20, `62318cd57`/`b11709` to 2026-10-30) and each figure is owed a re-take
 > that can move it either way ([#1003](https://github.com/mudler/vllm.cpp/issues/1003)).
 
 ### vs MLX-LM, on Apple M4, warm b=1

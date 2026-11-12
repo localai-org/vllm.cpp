@@ -40,11 +40,13 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "vllm/model_executor/model_loader/gguf_dequant.h"  // the staging shadow's row dequant
 #include "vllm/model_executor/models/dense_device_glue.h"
 #include "vllm/model_executor/models/dense_attn_block.h"  // ResidentWeight
 #include "vt/dtype.h"
@@ -97,6 +99,19 @@ int64_t Bf16Numel(const OwnedTensor& t) {
 }
 
 bool DumpOn() { return std::getenv("FLINT_TT_W0_DUMP") != nullptr; }
+
+// FLINT-P150-STAGE2-GATE (adoption, 2026-11-03): the device attention is
+// the DEFAULT — the model-level gate (test_flint_tt_stage2_gate.cpp) measured
+// the device arm INSIDE the host arm's drift-tolerant band at 3/3 reps
+// (rel_rms 2.200e-1, max_abs 3.956e+1 vs the 0.50 / 64.0 fence; evidence
+// docs/bench-evidence/flint-p150-stage2-gate-20261101/), and the stage-3
+// serving trace is roughly neutral (53.0 vs 55.2 s/step). VT_FLINT_TT_DEVICE_
+// ATTN=0 opts OUT to the host `SinksAttention` shadow (the same-binary
+// rollback).
+bool DeviceAttnEnabled() {
+  const char* e = std::getenv("VT_FLINT_TT_DEVICE_ATTN");
+  return e == nullptr || e[0] != '0';
+}
 
 // NeoX-style (rotate_half) RoPE over full head_dim — the CPU reference's own
 // RopeNeoxHalfSplit body (flint.cpp:292), a host leg at W0.
@@ -185,6 +200,140 @@ std::vector<float> Widen(const OwnedTensor& t) {
   std::vector<float> out(static_cast<size_t>(Bf16Numel(t)));
   for (size_t i = 0; i < out.size(); ++i) out[i] = Bf16(src[i]);
   return out;
+}
+
+// ---- the dense-MLP staging instrument (FLINT-TT-DENSE-MLP-STAGING) ----------
+//
+// The W2 record (flint-tt-w2-20261025 report.md §3, reading 2) measured the
+// dense gate_proj as an outlier generator on device, and the P150-ATTENTION
+// stage-2 stop measured the W0 model-level band MOVING 2.683e-1 -> 7.224e-1
+// under functionally neutral DBuf-lifetime changes. This instrument measures
+// WHICH staging artifact carries the outlier, per tensor, against a CPU
+// shadow computed from the SAME host weight bytes and the SAME stage input —
+// like-for-like per stage, never the W2 tag-mismatched pair (the CPU arm's
+// "g" is post-activation; the TT arm's raw "g" is pre-activation, the tag
+// contract flint_tt.cpp's dense dump already records).
+//
+// Default OFF. Gated by:
+//   VT_FLINT_TT_STAGING_DUMP=1          enable the dumps
+//   VT_FLINT_TT_STAGING_ORDER=landed|reversed|extended
+//                                       the staging-order leg (default landed)
+//   VT_FLINT_TT_STAGING_LAYERS=0,46     which layers dump (default "0,46")
+
+bool StagingDumpOn() {
+  const char* e = std::getenv("VT_FLINT_TT_STAGING_DUMP");
+  return e != nullptr && e[0] == '1';
+}
+
+// The three staging-order legs the attribution table needs:
+//   kLanded    — gate then up, each DBuf scoped inside (as committed)
+//   kReversed  — up then gate (same lifetimes, swapped enqueue order)
+//   kExtended  — gate, up and the activation buffer ALL held past the down
+//                projection's consume point (the extended-DBuf-lifetime leg)
+//   kOprojScoped — the o_proj operand blocks released before the MLP section
+//                draws (the P150-ATTENTION band-moving variant, re-created)
+enum class StagingOrder { kLanded, kReversed, kExtended, kOprojScoped };
+
+StagingOrder StagingOrderLeg() {
+  const char* e = std::getenv("VT_FLINT_TT_STAGING_ORDER");
+  if (e == nullptr) return StagingOrder::kLanded;
+  const std::string v(e);
+  if (v == "reversed") return StagingOrder::kReversed;
+  if (v == "extended") return StagingOrder::kExtended;
+  if (v == "oproj-scoped") return StagingOrder::kOprojScoped;
+  return StagingOrder::kLanded;
+}
+
+bool StagingLayerDumped(int64_t layer) {
+  const char* e = std::getenv("VT_FLINT_TT_STAGING_LAYERS");
+  const std::string list = (e == nullptr || *e == '\0') ? "0,46" : e;
+  size_t pos = 0;
+  while (pos < list.size()) {
+    size_t comma = list.find(',', pos);
+    if (comma == std::string::npos) comma = list.size();
+    const std::string tok = list.substr(pos, comma - pos);
+    pos = comma + 1;
+    if (tok.empty()) continue;
+    if (std::atoll(tok.c_str()) == layer) return true;
+  }
+  return false;
+}
+
+// THE CPU SHADOW WEIGHT: a block-carrying OwnedTensor dequantizes its packed
+// rows to bf16 (the loader's own DequantGgufRowToBf16, row-by-row through
+// vt::GgmlTypeId); a float tensor copies through. The shadow consumes the
+// same VALUES the device staged, so a deviation here is a device-compute or
+// staging defect, never a weight-mismatch artifact.
+// Returns the weight in the [K,N] Matmul-B layout ShadowMatmulBf16 consumes:
+// a bf16 [K,N] tensor copies through; a block [N,K] nk tensor dequantizes row
+// r (out-feature r's K values) into COLUMN r of the shadow, i.e. transposes.
+std::vector<uint16_t> ShadowWeightBf16(const OwnedTensor& w) {
+  const int64_t n = Bf16Numel(w);
+  std::vector<uint16_t> out(static_cast<size_t>(n));
+  if (vt::IsBlockQuant(w.dtype)) {
+    VT_CHECK(w.rank == 2 && w.nk,
+             "flint TT staging dump: a block weight must be [N,K] nk");
+    const int64_t rows = w.shape[0], k = w.shape[1];
+    const auto row_bytes = static_cast<size_t>(vt::RowSizeBytes(w.dtype, k));
+    for (int64_t r = 0; r < rows; ++r) {
+      const std::vector<uint16_t> row = vllm::DequantGgufRowToBf16(
+          vt::GgmlTypeId(w.dtype),
+          w.bytes.data() + static_cast<size_t>(r) * row_bytes, k);
+      for (int64_t k2 = 0; k2 < k; ++k2)
+        out[static_cast<size_t>(k2) * static_cast<size_t>(rows) +
+            static_cast<size_t>(r)] = row[static_cast<size_t>(k2)];
+    }
+    return out;
+  }
+  std::memcpy(out.data(), w.bytes.data(), static_cast<size_t>(n) * 2);
+  return out;
+}
+
+// THE CPU SHADOW MATMUL: flint.cpp's MatmulBf16 body (the reference's own
+// accumulate-f32-round-bf16 contract), consuming the bf16 shadow weight in
+// its [K,N] Matmul-B layout.
+void ShadowMatmulBf16(const float* x, const std::vector<uint16_t>& w_bf16,
+                      int64_t k_dim, int64_t n_dim, int64_t t, float* y) {
+  for (int64_t i = 0; i < t; ++i)
+    for (int64_t nn = 0; nn < n_dim; ++nn) y[i * n_dim + nn] = 0.0f;
+  for (int64_t i = 0; i < t; ++i) {
+    for (int64_t k = 0; k < k_dim; ++k) {
+      const float xv = x[i * k_dim + k];
+      if (xv == 0.0f) continue;
+      const uint16_t* wrow = w_bf16.data() + k * n_dim;
+      for (int64_t nn = 0; nn < n_dim; ++nn)
+        y[i * n_dim + nn] += xv * Bf16(wrow[nn]);
+    }
+  }
+  for (int64_t i = 0; i < t * n_dim; ++i) y[i] = Bf16(ToBf16(y[i]));
+}
+
+// THE DUMP LINE: name, shape, rel_rms, max_abs — per tensor, not per element.
+// rel_rms = rms(got - want) / rms(want), max_abs = max |got - want|.
+void DumpStaging(const char* tag, int64_t layer, const std::vector<float>& got,
+                 const std::vector<float>& want, int64_t rows, int64_t cols) {
+  double sum = 0.0, sum_sq = 0.0, dev_sq = 0.0, max_abs = 0.0;
+  double want_sum = 0.0, want_sq = 0.0;
+  const size_t n = got.size();
+  for (size_t i = 0; i < n; ++i) {
+    sum += got[i];
+    sum_sq += double(got[i]) * double(got[i]);
+    want_sum += want[i];
+    want_sq += double(want[i]) * double(want[i]);
+    const double d = double(got[i]) - double(want[i]);
+    dev_sq += d * d;
+    max_abs = std::max(max_abs, std::abs(d));
+  }
+  const double rel_rms =
+      std::sqrt(dev_sq / double(n)) /
+      std::sqrt((sum_sq / double(n)) > 0 ? (sum_sq / double(n)) : 1.0);
+  std::fprintf(stderr,
+               "[FLINT-TT-STAGING] L%-3lld %-10s [%lld,%lld] n=%zu "
+               "sum_tt=%16.6f sum_cpu=%16.6f sq_tt=%.6e sq_cpu=%.6e "
+               "rel_rms=%.4e max_abs=%.4e\n",
+               static_cast<long long>(layer), tag,
+               static_cast<long long>(rows), static_cast<long long>(cols), n,
+               sum, want_sum, sum_sq, want_sq, rel_rms, max_abs);
 }
 
 // A weight's RAW resident bytes: the OwnedTensor's own byte length, which is
@@ -323,6 +472,10 @@ struct TtLayerWeights {
   };
   std::vector<TtExpertWeights> experts;
   DBuf ln1{}, ln2{};
+  // The device-attention legs' per-layer scalars (FLINT-P150-ATTENTION):
+  // q/k head-norm gammas bf16 [dh], the per-head sinks f32 [hq] (the
+  // PagedAttention sink contract). Staged once at build.
+  DBuf q_norm_dev{}, k_norm_dev{}, sinks_dev{};
   int64_t dense_inter = 0, shared_inter = 0;
   bool has_rope = false, is_dense = false, is_sliding = false;
   std::vector<float> q_norm, k_norm, sinks;  // widened host copies
@@ -462,10 +615,19 @@ std::unique_ptr<FlintTTDeviceContext> BuildFlintTTDeviceContext(
         }
       }
     }
-    // The host attention leg's widened scalars.
+    // The host attention leg's widened scalars, and the device legs' staged
+    // scalars (norms at their bf16 model values, sinks widened to the f32
+    // the PagedAttention sink contract carries).
     tl.q_norm = Widen(lw.attn.q_norm);
     tl.k_norm = Widen(lw.attn.k_norm);
     tl.sinks = Widen(lw.attn.sinks);
+    // The device-attention scalars stage lazily on the first device-attention
+    // forward (ForwardFlintTT's VT_FLINT_TT_DEVICE_ATTN block), never on the
+    // default arm: an always-on staging shifted the pool/slot sequence and
+    // perturbed the host-shadow arm's band (measured 2.683e-1 -> 7.224e-1 with
+    // the build-time staging, back with it removed). The default arm stays
+    // byte-identical — see the allocation-order hazard note in the row
+    // evidence.
     c.layers.push_back(std::move(tl));
   }
 
@@ -548,7 +710,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
           "flint TT forward: the W0 arm serves ONE contiguous sequence "
           "(the CPU reference arm's same contract)");
 
-  const FlintTTDeviceContext::Impl& c = *ctx.impl_;
+  FlintTTDeviceContext::Impl& c = *ctx.impl_;
   const Dev d = c.d;
   const int64_t h = p.hidden_size;
   const int64_t hq = p.num_attention_heads;
@@ -576,6 +738,48 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
   std::vector<uint16_t> x_bits;
   std::vector<float> q, k, v, attn_out(static_cast<size_t>(t) * hq * dh), ao,
       ff, normed2_host;
+
+  // THE DEVICE-ATTENTION SCRATCH (FLINT-P150-ATTENTION, VT_FLINT_TT_DEVICE_
+  // ATTN=1): the per-forward paged KV page and the step metadata, built once
+  // and reused by every layer — the arm serves ONE contiguous sequence, so
+  // slots are 0..t-1, the block table is the identity, and seq_lens is t.
+  const int64_t attn_bs = 32;
+  const int64_t attn_nblk = (t + attn_bs - 1) / attn_bs;
+  std::optional<PagedKvCache> dev_kv;
+  DBuf cache_dev{}, pos_dev{}, slot_dev{}, bt_dev{}, sl_dev{}, qsl_dev{};
+  if (DeviceAttnEnabled()) {
+    dev_kv.emplace();
+    dev_kv->dtype = vt::DType::kBF16;
+    dev_kv->num_blocks = attn_nblk;
+    dev_kv->block_size = attn_bs;
+    dev_kv->num_kv_heads = hkv;
+    dev_kv->head_size = dh;
+    cache_dev = DBuf(d, vt::DType::kBF16,
+                     {2 * attn_nblk * attn_bs * hkv * dh});
+    dev_kv->data = cache_dev.ptr();
+    pos_dev = DBuf(d, vt::DType::kI32, {t}, positions.data());
+    std::vector<int64_t> slots(static_cast<size_t>(t));
+    for (int64_t i = 0; i < t; ++i) slots[static_cast<size_t>(i)] = i;
+    slot_dev = DBuf(d, vt::DType::kI64, {t}, slots.data());
+    std::vector<int32_t> btab(static_cast<size_t>(attn_nblk));
+    for (int64_t b = 0; b < attn_nblk; ++b)
+      btab[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+    bt_dev = DBuf(d, vt::DType::kI32, {1, attn_nblk}, btab.data());
+    const int32_t slens = static_cast<int32_t>(t);
+    sl_dev = DBuf(d, vt::DType::kI32, {1}, &slens);
+    const int32_t qsl[2] = {0, static_cast<int32_t>(t)};
+    qsl_dev = DBuf(d, vt::DType::kI32, {2}, qsl);
+    for (int64_t l = 0; l < p.num_hidden_layers; ++l) {
+      TtLayerWeights& tl2 = c.layers[static_cast<size_t>(l)];
+      const FlintLayerWeights& lw2 = w.layers[static_cast<size_t>(l)];
+      tl2.q_norm_dev = DBuf(d, vt::DType::kBF16, {Bf16Numel(lw2.attn.q_norm)},
+                            Bf16Data(lw2.attn.q_norm));
+      tl2.k_norm_dev = DBuf(d, vt::DType::kBF16, {Bf16Numel(lw2.attn.k_norm)},
+                            Bf16Data(lw2.attn.k_norm));
+      tl2.sinks_dev = DBuf(d, vt::DType::kF32, {Bf16Numel(lw2.attn.sinks)},
+                           tl2.sinks.data());
+    }
+  }
 
   for (int64_t layer = 0; layer < p.num_hidden_layers; ++layer) {
     const FlintLayerWeights& lw = w.layers[static_cast<size_t>(layer)];
@@ -616,6 +820,66 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       stage("v", v);
     }
 
+    // The o_proj operands, declared at the LAYER scope so the pool-block
+    // lifetimes match the pre-wiring host arm exactly (scoping them to the
+    // else block released the blocks before the MLP section, shifted the
+    // pool-reuse sequence, and moved the default arm's W0 band
+    // 2.683e-1 -> 7.224e-1 — allocation-order-dependent numerics, a latent
+    // default-arm hazard recorded in the row evidence, not reintroduced here).
+    //
+    // THE FOURTH STAGING-ORDER LEG (FLINT-TT-DENSE-MLP-STAGING):
+    // VT_FLINT_TT_STAGING_ORDER=oproj-scoped RE-CREATES the variant that moved
+    // the band — the operands RELEASED before the MLP section draws — so this
+    // row's instrument measures that sensitivity instead of inheriting it as
+    // an anecdote. The landed layer-scope lifetimes stay the default.
+    const bool oproj_scoped = StagingOrderLeg() == StagingOrder::kOprojScoped;
+    DBuf ao_dev{}, aoout_dev{};
+    if (DeviceAttnEnabled()) {
+      // THE DEVICE ATTENTION LEG (FLINT-P150-ATTENTION): per-head QK RMSNorm
+      // (vt::RmsNorm over [T*H, Dh] — the W1 device-norm arm's shape),
+      // RoPE-as-configured, the cache write, and vt::PagedAttention with the
+      // sliding window and the layer's per-head sink. The composition is the
+      // kolibri1 TT AttentionBlock's, plus the sink.
+      vt::Tensor q2 = dense_attn::Reshape(q_dev.t(), {t * hq, dh});
+      vt::Tensor k2 = dense_attn::Reshape(k_dev.t(), {t * hkv, dh});
+      DBuf qn(d, vt::DType::kBF16, {t * hq, dh});
+      DBuf kn(d, vt::DType::kBF16, {t * hkv, dh});
+      vt::RmsNorm(d.q, qn.t(), q2, tl.q_norm_dev.t(),
+                  vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
+      vt::RmsNorm(d.q, kn.t(), k2, tl.k_norm_dev.t(),
+                  vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
+      vt::Tensor q3 = dense_attn::Reshape(qn.t(), {t, hq, dh});
+      vt::Tensor k3 = dense_attn::Reshape(kn.t(), {t, hkv, dh});
+      vt::Tensor v3 = dense_attn::Reshape(v_dev.t(), {t, hkv, dh});
+      if (tl.has_rope) {
+        vt::RopeArgs ra{};
+        ra.base = static_cast<float>(p.rope_theta);
+        ra.rotary_dim = static_cast<int>(dh);
+        ra.is_neox_style = true;
+        vt::RopeNeox(d.q, q3, k3, pos_dev.t(), ra);
+      }
+      vt::Tensor k_cache = dense_attn::KvSlice(*dev_kv, d.q.device, 0);
+      vt::Tensor v_cache = dense_attn::KvSlice(*dev_kv, d.q.device, 1);
+      dense_attn::WriteKvCache(d.q, *dev_kv, k3, v3, k_cache, v_cache,
+                               slot_dev.t());
+      DBuf attn(d, vt::DType::kBF16, {t, hq, dh});
+      vt::Tensor sinks_t = tl.sinks_dev.t();
+      vt::PagedAttentionArgs pa{};
+      pa.scale = scale;
+      pa.causal = true;
+      if (tl.is_sliding)
+        pa.window_size = vt::AttentionWindow{
+            static_cast<int32_t>(p.sliding_window - 1), 0};
+      pa.attn_sink = &sinks_t;
+      vt::PagedAttention(d.q, attn.t(), q3, k_cache, v_cache, bt_dev.t(),
+                         sl_dev.t(), qsl_dev.t(), pa);
+      // o_proj consumes the attention output IN PLACE on device (bf16, the
+      // CPU reference rounds its attn_out to bf16 too) — no host round trip.
+      vt::Tensor o_in = dense_attn::Reshape(attn.t(), {t, hq * dh});
+      aoout_dev = DBuf(d, vt::DType::kBF16, {t, h});
+      MatmulWeight(d.q, aoout_dev.t(), o_in, tl.ow);
+      ao = DownloadBf16AsF32(d, aoout_dev);
+    } else {
     // Host leg: per-head q/k RMSNorm BEFORE RoPE (the CPU reference's own
     // head_norm body, flint.cpp:381-392).
     {
@@ -638,8 +902,9 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     SinksAttention(q.data(), k.data(), v.data(), tl.sinks.data(), t, hq, hkv,
                    dh, tl.is_sliding, p.sliding_window, scale,
                    attn_out.data());
+    }
 
-    if (DumpOn() && layer == 0) {
+    if (!DeviceAttnEnabled() && DumpOn() && layer == 0) {
       auto stage = [](const char* tag, const std::vector<float>& z) {
         double s = 0.0, sq = 0.0;
         for (float w2 : z) {
@@ -651,15 +916,37 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       };
       stage("attn_out", attn_out);
     }
+    if (DeviceAttnEnabled()) {
+      // The device leg already ran o_proj on device (its `ao` is set); the
+      // host shadow's o_proj block below consumes the host attn_out and must
+      // NOT run here.
+    } else {
     // o_proj on device: attn_out is bf16 (the CPU reference rounds it too),
     // output f32.
     std::vector<uint16_t> ao_bits(static_cast<size_t>(t) * hq * dh);
     for (int64_t i = 0; i < t * hq * dh; ++i)
       ao_bits[static_cast<size_t>(i)] = ToBf16(attn_out[static_cast<size_t>(i)]);
-    DBuf ao_dev(d, vt::DType::kBF16, {t, hq * dh}, ao_bits.data());
-    DBuf aoout_dev(d, vt::DType::kBF16, {t, h});
+    ao_dev = DBuf(d, vt::DType::kBF16, {t, hq * dh}, ao_bits.data());
+    aoout_dev = DBuf(d, vt::DType::kBF16, {t, h});
     MatmulWeight(d.q, aoout_dev.t(), ao_dev.t(), tl.ow);
     ao = DownloadBf16AsF32(d, aoout_dev);
+    if (oproj_scoped) {
+      // THE BAND-MOVING VARIANT, MEASURED: return the two o_proj operand
+      // blocks to the pool HERE — before the MLP section draws — the pool-
+      // reuse sequence the P150-ATTENTION row's else-scoped variant produced.
+      // Every downstream MLP staging then runs on REUSED blocks.
+      // THE FIX's SECOND BOUNDARY: the blocks re-enter the pool only AFTER
+      // the queue retires the ops that touched them and their slot shadows
+      // are dropped (the commit-before-hand-off boundary; without it the
+      // recycled block's next tenant inherits a live-but-stale shadow —
+      // the measured one-consumer-per-forward poison). DBuf{} assignment
+      // returns the block; the Synchronize above (ao's download) has
+      // already retired the o_proj op, so the boundary here is the shadow
+      // drop the assignment itself performs.
+      aoout_dev = DBuf{};
+      ao_dev = DBuf{};
+    }
+    }
     if (DumpOn() && layer == 0) {
       auto stage = [](const char* tag, const std::vector<float>& z) {
         double s = 0.0, sq = 0.0;
@@ -675,11 +962,6 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
     for (int64_t i = 0; i < t * h; ++i)
       x[static_cast<size_t>(i)] =
           Bf16(ToBf16(x[static_cast<size_t>(i)] + ao[static_cast<size_t>(i)]));
-    if (DumpOn() && layer == 0) {
-      double s = 0.0;
-      for (float v2 : x) s += v2;
-      std::fprintf(stderr, "[FLINT-TT] layer 0 post-attn x sum=%.6f\n", s);
-    }
 
     // Re-upload the residual stream: ln2 normalises the POST-attention x.
     for (int64_t i = 0; i < t * h; ++i)
@@ -693,11 +975,38 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
                 vt::RmsNormArgs{static_cast<float>(p.rms_norm_eps), false});
     ff.assign(static_cast<size_t>(t) * h, 0.0f);
     if (tl.is_dense) {
+      // THE STAGING-ORDER LEGS (FLINT-TT-DENSE-MLP-STAGING). The three
+      // permutations carry the SAME tensors through the SAME ops; only the
+      // allocation/ordering of the pooled scratch changes:
+      //   kLanded   — g, then u, then a (the committed sequence)
+      //   kReversed — u, then g, then a (enqueue order swapped, lifetimes equal)
+      //   kExtended — g, u and a ALL constructed before ANY consume and held
+      //               past the down projection (extended pool-block lifetimes:
+      //               the three [t,inter] blocks stay live while ff draws)
+      // A device op reads a tensor the pool gave someone else → order-dependent
+      // numerics; a weight/tensor that misreports in EVERY order → upload defect.
+      const StagingOrder leg = StagingOrderLeg();
+      // kOprojScoped keeps the landed staging here — its permutation is the
+      // o_proj operand release above, not the MLP's.
+      const bool mlp_reversed = leg == StagingOrder::kReversed;
+      const bool extended = leg == StagingOrder::kExtended;
+      // kLanded/kReversed/kOprojScoped construct the buffers in the COMMITTED
+      // sequence (g, u, then a after both matmuls) — kExtended alone holds
+      // the activation block live from before both matmuls (a third [t,inter]
+      // block drawn while the gate/up results are still being written).
+      // Same tensors, same ops, different pool-block lifetimes.
       DBuf g(d, vt::DType::kBF16, {t, tl.dense_inter});
       DBuf u(d, vt::DType::kBF16, {t, tl.dense_inter});
-      MatmulWeight(d.q, g.t(), normed2_dev.t(), tl.gate);
-      MatmulWeight(d.q, u.t(), normed2_dev.t(), tl.up);
-      DBuf a(d, vt::DType::kBF16, {t, tl.dense_inter});
+      DBuf a{};  // the empty buffer until its leg's construction point (#1904)
+      if (extended) a = DBuf(d, vt::DType::kBF16, {t, tl.dense_inter});
+      if (mlp_reversed) {
+        MatmulWeight(d.q, u.t(), normed2_dev.t(), tl.up);
+        MatmulWeight(d.q, g.t(), normed2_dev.t(), tl.gate);
+      } else {
+        MatmulWeight(d.q, g.t(), normed2_dev.t(), tl.gate);
+        MatmulWeight(d.q, u.t(), normed2_dev.t(), tl.up);
+      }
+      if (!extended) a = DBuf(d, vt::DType::kBF16, {t, tl.dense_inter});
       vt::MoeSiluMul(d.q, a.t(), g.t(), u.t());
       if (DumpOn() && layer == 0) {
         auto dload = [&d](DBuf& b) {
@@ -727,8 +1036,182 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         // silu'd a is expected, never a defect.
       }
       DBuf ff_dev(d, vt::DType::kBF16, {t, h});
+      // THE COMMIT BOUNDARY (FLINT-TT-DENSE-MLP-STAGING fix). The silu
+      // commits its result device-only (CommitDevice2D: host_current=false),
+      // and the down matmul's EnsureDevice2D(a) then SERVES that shadow —
+      // the measured defect is that this serve is path-dependent: exactly
+      // one consumer per forward reads the PREVIOUS tenant's bytes through
+      // the slot (per-tensor rel_rms 1.1e-2 landed vs 1.8059 oproj-scoped;
+      // the recomputed-from-authoritative-bytes discriminators are clean in
+      // every leg). The kolibri1 host-free pattern's boundary makes the
+      // producer's bytes AUTHORITATIVE before the consumer stages: download
+      // the silu result (retiring the commit), mark the slot host-current
+      // (Backend::Copy's MarkHostWritten → device_current=false), and let
+      // the down matmul's
+      // staging arm re-upload from those bytes. The poisoned exact-shape
+      // serve is no longer reachable on this hand-off, under ANY pool
+      // ordering — the spread the W0 band suffered collapses by
+      // construction, not by measurement luck.
+      // THE PRE-BOUNDARY PROBE (temporary diagnostic, VT_FLINT_TT_DOWN_PROBE):
+      // run the SAME down matmul against `a` BEFORE the boundary — its input
+      // serve is the exact-serve of the silu-committed shadow. If this probe
+      // is correct while the post-boundary model down is wrong, the staging
+      // upload arm (not the shadow) carries the poison.
+      if (std::getenv("VT_FLINT_TT_DOWN_PROBE") != nullptr) {
+        DBuf probe_dev(d, vt::DType::kBF16, {t, h});
+        MatmulWeight(d.q, probe_dev.t(), a.t(), tl.down);
+        const std::vector<float> probe = DownloadBf16AsF32(d, probe_dev);
+        double s = 0.0, sq = 0.0;
+        for (float v : probe) { s += v; sq += double(v) * v; }
+        std::fprintf(stderr,
+                     "[FLINT-TT-STAGING] L%-3lld preprobe [%lld,%lld] "
+                     "sum=%16.6f sq=%.6e\n",
+                     static_cast<long long>(layer),
+                     static_cast<long long>(t),
+                     static_cast<long long>(h), s, sq);
+      }
+      {
+        std::vector<uint16_t> a_bits(a.bytes() / 2);
+        a.Download(d, a_bits.data());  // Copy + Synchronize: the commit retires
+        // The public boundary: write the authoritative bytes back through
+        // the backend Copy, whose MarkHostWritten(dst) drops the slot's
+        // device shadow (device_current=false, host_current=true) — the
+        // down matmul's staging arm then uploads from THESE bytes.
+        d.b.Copy(d.q, a.ptr(), a_bits.data(), a_bits.size() * 2);
+      }
       MatmulWeight(d.q, ff_dev.t(), a.t(), tl.down);
+      // THE REPEAT-SERVE PROBE (temporary diagnostic): re-run the SAME matmul
+      // on the SAME slots after the model down. If the second call differs
+      // from the first, the first call's input serve consumed bytes that the
+      // slot no longer serves — a serve-state or async-upload defect, not a
+      // kernel defect.
+      if (std::getenv("VT_FLINT_TT_DOWN_PROBE") != nullptr) {
+        DBuf ff2_dev(d, vt::DType::kBF16, {t, h});
+        MatmulWeight(d.q, ff2_dev.t(), a.t(), tl.down);
+        const std::vector<float> ff2 = DownloadBf16AsF32(d, ff2_dev);
+        double s = 0.0, sq = 0.0;
+        for (float v : ff2) { s += v; sq += double(v) * v; }
+        std::fprintf(stderr,
+                     "[FLINT-TT-STAGING] L%-3lld repprobe [%lld,%lld] "
+                     "sum=%16.6f sq=%.6e\n",
+                     static_cast<long long>(layer),
+                     static_cast<long long>(t),
+                     static_cast<long long>(h), s, sq);
+      }
+      // THE OUT-SLOT TEST (FLINT-TT-DENSE-MLP-STAGING diagnosis): zero the
+      // out block before the matmul — if the model's ff was contaminated by
+      // the RECYCLED block's previous-tenant bytes (the matmul's
+      // accumulate-into arm), zeroing removes the poison; if not, the read
+      // side is the vehicle. Env-gated: VT_FLINT_TT_ZERO_OUT=1.
+      if (std::getenv("VT_FLINT_TT_ZERO_OUT") != nullptr)
+        ff_dev.Zero(d);
       ff = DownloadBf16AsF32(d, ff_dev);
+      // THE PER-TENSOR STAGING DUMP (default off): every dense-MLP stage at
+      // the dumped layers, TT device buffer vs the CPU shadow computed from
+      // the SAME host weight bytes and the SAME bf16-rounded stage input.
+      // This is the like-for-like pair W2's tag contract asks for.
+      if (StagingDumpOn() && StagingLayerDumped(layer)) {
+        const std::vector<float> n2host = DownloadBf16AsF32(d, normed2_dev);
+        // Shadow weights, dequantized/copy-through once per dump (the dump is
+        // a diagnostic leg; its cost is not on any serving path).
+        const std::vector<uint16_t> gw = ShadowWeightBf16(lw.dense_mlp.gate_proj.w);
+        const std::vector<uint16_t> uw = ShadowWeightBf16(lw.dense_mlp.up_proj.w);
+        const std::vector<uint16_t> dw = ShadowWeightBf16(lw.dense_mlp.down_proj.w);
+        const int64_t inter = tl.dense_inter;
+        std::vector<float> g_s(static_cast<size_t>(t) * inter);
+        std::vector<float> u_s(static_cast<size_t>(t) * inter);
+        ShadowMatmulBf16(n2host.data(), gw, h, inter, t, g_s.data());
+        ShadowMatmulBf16(n2host.data(), uw, h, inter, t, u_s.data());
+        std::vector<float> a_s(static_cast<size_t>(t) * inter);
+        for (size_t i = 0; i < a_s.size(); ++i)
+          a_s[i] = Bf16(ToBf16(
+              g_s[i] / (1.0f + std::exp(-g_s[i])) * u_s[i]));
+        std::vector<float> ff_s(static_cast<size_t>(t) * h);
+        ShadowMatmulBf16(a_s.data(), dw, inter, h, t, ff_s.data());
+        const std::vector<float> g_tt = DownloadBf16AsF32(d, g);
+        const std::vector<float> u_tt = DownloadBf16AsF32(d, u);
+        const std::vector<float> a_tt = DownloadBf16AsF32(d, a);
+        // THE BLOCK MAP: which pool block each stage's DBuf received, per leg
+        // — the allocation-order fingerprint the attribution table reads.
+        std::fprintf(stderr,
+                     "[FLINT-TT-STAGING] L%-3lld blocks n2=%p g=%p u=%p a=%p "
+                     "ff=%p\n",
+                     static_cast<long long>(layer),
+                     const_cast<void*>(normed2_dev.ptr()),
+                     const_cast<void*>(g.ptr()), const_cast<void*>(u.ptr()),
+                     const_cast<void*>(a.ptr()),
+                     const_cast<void*>(ff_dev.ptr()));
+        DumpStaging("gate", layer, g_tt, g_s, t, inter);
+        DumpStaging("up", layer, u_tt, u_s, t, inter);
+        DumpStaging("silu", layer, a_tt, a_s, t, inter);
+        // THE SILU-INPUT DISCRIMINATOR: silu(g_tt)*u_tt — the silu the
+        // DOWNLOADED g/u produce — vs the DOWNLOADED a. If these disagree,
+        // the a slot does not hold the silu of the g/u it was fed: the
+        // poison entered at the gate/up→silu serve, not at the down matmul.
+        {
+          std::vector<float> a_from_gu(static_cast<size_t>(t) * inter);
+          for (size_t i = 0; i < a_from_gu.size(); ++i)
+            a_from_gu[i] = Bf16(ToBf16(
+                g_tt[i] / (1.0f + std::exp(-g_tt[i])) * u_tt[i]));
+          DumpStaging("silu|gu", layer, a_tt, a_from_gu, t, inter);
+        }
+        DumpStaging("down", layer, ff, ff_s, t, h);
+        // THE DISCRIMINATOR: ff from the DOWNLOADED TT `a` bytes (not from
+        // the shadow a_s). If THIS matches the TT ff, the down matmul is
+        // faithful to its input and the corruption sits upstream (silu/its
+        // shadow pair); if it also deviates, the down matmul misreads.
+        std::vector<float> ff_from_tt_a(static_cast<size_t>(t) * h);
+        ShadowMatmulBf16(a_tt.data(), dw, inter, h, t, ff_from_tt_a.data());
+        DumpStaging("down|aTT", layer, ff, ff_from_tt_a, t, h);
+        // THE DEVICE RECOMPUTE: the SAME down matmul re-run on device from
+        // the downloaded `a_tt` bytes, out on a FRESH DBuf. Recompute vs the
+        // model's own ff tells corruption-in-the-buffer (recompute == ff)
+        // apart from corruption-in-the-compute (recompute == shadow).
+        {
+          DBuf a_re(d, vt::DType::kBF16, {t, inter}, nullptr);
+          std::vector<uint16_t> a_bits(static_cast<size_t>(t) * inter);
+          for (size_t i = 0; i < a_bits.size(); ++i)
+            a_bits[i] = ToBf16(a_tt[static_cast<size_t>(i)]);
+          d.b.Copy(d.q, a_re.ptr(), a_bits.data(), a_bits.size() * 2);
+          d.b.Synchronize(d.q);
+          DBuf ff_re(d, vt::DType::kBF16, {t, h});
+          MatmulWeight(d.q, ff_re.t(), a_re.t(), tl.down);
+          const std::vector<float> ff_re_host = DownloadBf16AsF32(d, ff_re);
+          DumpStaging("down|recomp", layer, ff, ff_re_host, t, h);
+          // THE SLICE MAP: per-row sums of the model ff vs the recompute ff
+          // — which ROWS (M) of the activation the model's down matmul
+          // actually consumed. A row that matches pins the read window; a
+          // row that doesn't names the corrupted span.
+          for (int64_t r = 0; r < t; ++r) {
+            double sm = 0.0, sr = 0.0, diffmax = 0.0;
+            for (int64_t c = 0; c < h; ++c) {
+              const double mv = ff[static_cast<size_t>(r * h + c)];
+              const double rv = ff_re_host[static_cast<size_t>(r * h + c)];
+              sm += mv;
+              sr += rv;
+              diffmax = std::max(diffmax, std::abs(mv - rv));
+            }
+            std::fprintf(stderr,
+                         "[FLINT-TT-STAGING] L%-3lld row r=%lld ff_sum=%12.6f "
+                         "recomp_sum=%12.6f maxdev=%.4e\n",
+                         static_cast<long long>(layer),
+                         static_cast<long long>(r), sm, sr, diffmax);
+          }
+          // THE LIVE-INPUT RECOMPUTE: the down matmul re-run against the
+          // model's OWN live `a` DBuf (its slot as the forward left it). If
+          // THIS reproduces the corrupted ff, the slot `a`'s shadow named at
+          // staging time was already wrong — the corruption is in what the
+          // model's down matmul READ; if it matches the clean recompute, the
+          // model's read consumed bytes that later changed under it.
+          DBuf ff_live(d, vt::DType::kBF16, {t, h});
+          MatmulWeight(d.q, ff_live.t(), a.t(), tl.down);
+          const std::vector<float> ff_live_host = DownloadBf16AsF32(d, ff_live);
+          DumpStaging("down|live", layer, ff, ff_live_host, t, h);
+        }
+        // The shared stage input: identical bytes both sides by construction
+        // (the shadow CONSUMES this host copy) — record its sums only.
+        DumpStaging("n2in", layer, n2host, n2host, t, h);
+      }
       if (DumpOn() && layer == 0) {
         auto stage = [](const char* tag, const std::vector<float>& z) {
           double s = 0.0, sq = 0.0;
@@ -747,6 +1230,11 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
       MatmulWeight(d.q, rt_dev.t(), normed2_dev.t(), tl.router);
       const std::vector<float> rlogits = DownloadF32(d, rt_dev);
       normed2_host = DownloadBf16AsF32(d, normed2_dev);
+      // THE MoE-Branch staging dump (L46 and friends): the router plus the
+      // UNGATED shared expert — the SAME MatmulWeight staging the dense
+      // branch runs, at a MoE layer. The routed experts' per-token staging
+      // follows the shared expert in the dump below (token 0 only).
+      const bool moe_dump = StagingDumpOn() && StagingLayerDumped(layer);
 
       // Per token: sigmoid → top-k → renormalise (the CPU reference's own
       // routing body, flint.cpp:491-523), then STREAM the selected experts.
@@ -760,10 +1248,14 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
               rlogits[static_cast<size_t>(i) * p.num_experts + n];
           score[static_cast<size_t>(n)] = {1.0f / (1.0f + std::exp(-lg)), n};
         }
-        std::partial_sort(score.begin(), score.begin() + top_k, score.end(),
-                          [](const auto& a, const auto& b) {
-                            return a.first > b.first;
-                          });
+        // The total order: score descending, ties to the LOWER expert index.
+        // Identical to flint.cpp's kFlintScoreOrder (flint.cpp:257) — the
+        // selection must not depend on partial_sort's unstable ordering.
+        std::partial_sort(
+            score.begin(), score.begin() + top_k, score.end(),
+            [](const auto& a, const auto& b) {
+              return a.first != b.first ? a.first > b.first : a.second < b.second;
+            });
         double sum = 0.0;
         for (int64_t kk = 0; kk < top_k; ++kk)
           sum += score[static_cast<size_t>(kk)].first;
@@ -825,6 +1317,57 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
           const std::vector<float> shost = DownloadBf16AsF32(d, sdown);
           for (int64_t d2 = 0; d2 < h; ++d2)
             combined[static_cast<size_t>(d2)] += shost[static_cast<size_t>(d2)];
+          if (moe_dump && i == 0) {
+            // The shared expert's per-stage shadow, token 0 — the same
+            // like-for-like contract as the dense branch's dump.
+            const std::vector<float> in_row(normed2_host.begin(),
+                                            normed2_host.begin() + h);
+            const int64_t sinter = tl.shared_inter;
+            const std::vector<uint16_t> sgw =
+                ShadowWeightBf16(lw.moe.shared_expert.gate_proj.w);
+            const std::vector<uint16_t> suw =
+                ShadowWeightBf16(lw.moe.shared_expert.up_proj.w);
+            const std::vector<uint16_t> sdw =
+                ShadowWeightBf16(lw.moe.shared_expert.down_proj.w);
+            std::vector<float> sg_s(static_cast<size_t>(sinter));
+            std::vector<float> su_s(static_cast<size_t>(sinter));
+            ShadowMatmulBf16(in_row.data(), sgw, h, sinter, 1, sg_s.data());
+            ShadowMatmulBf16(in_row.data(), suw, h, sinter, 1, su_s.data());
+            std::vector<float> sa_s(static_cast<size_t>(sinter));
+            for (int64_t d2 = 0; d2 < sinter; ++d2)
+              sa_s[static_cast<size_t>(d2)] = Bf16(ToBf16(
+                  sg_s[static_cast<size_t>(d2)] /
+                  (1.0f + std::exp(-sg_s[static_cast<size_t>(d2)])) *
+                  su_s[static_cast<size_t>(d2)]));
+            std::vector<float> sdown_s(static_cast<size_t>(h));
+            ShadowMatmulBf16(sa_s.data(), sdw, sinter, h, 1, sdown_s.data());
+            // The router's shadow: f32 accumulate, NO bf16 round (the score
+            // path's wideness is architecture-owned — flint.cpp:646-659).
+            std::vector<float> rt_s(static_cast<size_t>(p.num_experts));
+            {
+              const std::vector<uint16_t> rw = ShadowWeightBf16(lw.moe.router_gate);
+              for (int64_t nn = 0; nn < p.num_experts; ++nn) rt_s[static_cast<size_t>(nn)] = 0.0f;
+              for (int64_t k2 = 0; k2 < h; ++k2) {
+                const float xv = in_row[static_cast<size_t>(k2)];
+                for (int64_t nn = 0; nn < p.num_experts; ++nn)
+                  rt_s[static_cast<size_t>(nn)] +=
+                      xv * Bf16(rw[static_cast<size_t>(k2) *
+                                       static_cast<size_t>(p.num_experts) +
+                                   static_cast<size_t>(nn)]);
+              }
+            }
+            // Token 0's slice only — rt_s covers one token's [E] logits.
+            const std::vector<float> rt0(rlogits.begin(),
+                                         rlogits.begin() + p.num_experts);
+            DumpStaging("router", layer, rt0, rt_s, 1, p.num_experts);
+            DumpStaging("sh_gate", layer, DownloadBf16AsF32(d, sg), sg_s, 1,
+                        sinter);
+            DumpStaging("sh_up", layer, DownloadBf16AsF32(d, su), su_s, 1,
+                        sinter);
+            DumpStaging("sh_silu", layer, DownloadBf16AsF32(d, sa), sa_s, 1,
+                        sinter);
+            DumpStaging("sh_down", layer, shost, sdown_s, 1, h);
+          }
         }
         for (int64_t d2 = 0; d2 < h; ++d2)
           ff[static_cast<size_t>(i) * h + d2] =

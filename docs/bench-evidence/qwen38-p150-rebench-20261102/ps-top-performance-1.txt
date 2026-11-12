@@ -1,0 +1,8 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   45599 99.1  8.4 41306688 22628800 ?   R    16:36   1:08 /tmp/flint-build/examples/vllm-bench --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf --num-prompts 1 --input-len 8 --output-len 200 --concurrency 1 --seed 0 --temperature 0
+lu_zero   46115  9.0  0.0   8704  4288 ?        Ss   16:37   0:00 bash -c for r in 1 2 3; do /tmp/q38rebench-leg.sh performance $r; done; for r in 1 2 3; do /tmp/q38rebench-leg.sh schedutil $r; done; /tmp/q38rebench-leg.sh performance 4
+lu_zero   43142  1.5  0.2 6207616 574528 pts/5  Sl+  Nov04  18:31 claude
+lu_zero   72204  1.0  0.7 21426560 1910656 pts/0 Sl+ Nov01  62:34 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   59982  0.7  0.2 6248000 549504 pts/1  Sl+  Oct27 103:38 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero    4737  0.7  2.0 29992576 5489920 pts/5 Sl+ Nov04   8:41 /usr/bin/rust-analyzer
+root      10941  0.3  0.0      0     0 ?        I    16:30   0:01 [kworker/u628:1-events_unbound]

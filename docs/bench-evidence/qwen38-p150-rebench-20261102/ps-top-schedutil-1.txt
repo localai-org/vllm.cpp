@@ -1,0 +1,8 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero  111362  102  0.0  27072 19520 ?        R    18:23   0:01 /usr/lib/python-exec/python3.13/python3 scripts/check-runner-routing-consistency.py
+lu_zero   43142  1.4  0.2 6207616 586944 pts/5  Sl+  Nov04  19:23 claude
+lu_zero   72204  1.0  0.7 21426816 1937664 pts/0 Sl+ Nov01  63:48 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   59982  0.7  0.2 6248000 546112 pts/1  Sl+  Oct27 104:26 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero    4737  0.6  1.9 29992576 5170496 pts/5 Sl+ Nov04   8:46 /usr/bin/rust-analyzer
+lu_zero  105003  0.2  0.0 6178368 260352 pts/4  Sl+  Nov04   3:07 claude --resume 322c3400-690e-4309-a759-11ea7c703477
+lu_zero   95757  0.2  0.0  11392  6272 ?        Ss   Oct26  36:55 tmux

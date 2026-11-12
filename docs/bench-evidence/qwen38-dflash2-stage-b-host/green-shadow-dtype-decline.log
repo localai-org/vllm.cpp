@@ -1,0 +1,31 @@
+2026-11-08 14:45:11.020 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-08 14:45:11.021 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-08 14:45:11.021 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-08 14:45:11.021 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-08 14:45:11.024 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-08 14:45:11.024 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-08 14:45:11.053 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-08 14:45:11.053 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-08 14:45:11.053 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-08 14:45:11.053 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-08 14:45:11.054 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-08 14:45:11.147 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-08 14:45:11.192 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-08 14:45:11.192 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-08 14:45:11.192 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-08 14:45:11.193 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-08 14:45:11.193 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-08 14:45:12.061 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+[doctest] test cases: 1 | 1 passed | 0 failed | 111 skipped
+[doctest] assertions: 5 | 5 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-08 14:45:12.082 | info     |    BuildKernels | JIT cache stats: 16/16 hits (100.0%) [16 cached, 2 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-08 14:45:12.082 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-08 14:45:12.117 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-08 14:45:12.117 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-08 14:45:12.148 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-08 14:45:12.148 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-08 14:45:12.148 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

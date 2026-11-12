@@ -16,11 +16,11 @@ to the file stem.
 | `kolibri1-gguf-serving` | Kolibri-1 APEX I-Micro GGUF served on CPU vs the fp8 arm, under the developer-adjudicated quantized-arm gate | Results | [Detail](benchmarks/kolibri1-gguf-serving.md) |
 | `mlx-lm-apple-m4` | MLX-LM on Apple M4, warm, batch 1, 6 interleaved runs | Results | [Detail](benchmarks/mlx-lm-apple-m4.md) |
 | `flint-cpu-paged` | Flint (RecursiveSI) Q4_K_M on CPU through the paged engine: the first prefill/decode numbers | Results | [Detail](benchmarks/flint-cpu-paged.md) |
-| `flint-kq-cpu` | Flint Q4_K_M served PACKED on CPU (`VT_FLINT_KEEP_QUANT=1`) through the paged engine, against the llama.cpp floor | Results | [Detail](benchmarks/flint-kq-cpu.md) |
+| `flint-kq-cpu` | Flint Q4_K_M served PACKED on CPU (`VT_FLINT_KEEP_QUANT=1`) through the paged engine, against the llama.cpp floor; the threadpool-vs-cpu-budget finding; NEON q4_K + q6_K (lm_head) dots, lm_head -21% in-situ, +6.3% @16t A/B on a contended box | Results | [Detail](benchmarks/flint-kq-cpu.md) |
 | `dwarfstar-gguf` | DwarfStar vs ds4 on DeepSeek-V4-Flash GGUF, GB10, byte-exact | Results | [Detail](benchmarks/dwarfstar-gguf.md) |
 | `speculative-decoding` | MTP / DFlash / n-gram / DSpark rows against vLLM | Results | [Detail](benchmarks/speculative-decoding.md) |
 | `tt-capture-default-decode` | Qwen3-0.6B decode on the P150 with captured decode as the shipped default | Results | [Detail](benchmarks/tt-capture-default-decode.md) |
-| `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150 | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
+| `tt-keepquant-27b-decode` | Qwen3.8-27B Q4_K_M keep-quant int8-dot decode on the P150: the 09-14 end-to-end first and the 2026-11-05 governor-swept re-bench (−13.4% TTFT, −15.0% TPOT at head `702b19167`) | Results | [Detail](benchmarks/tt-keepquant-27b-decode.md) |
 | `qwen38-27b-exl3-gb10` | Qwen3.8-27B EXL3 3.5bpw on GB10, with and without its DFlash2 draft | Results | [Detail](benchmarks/qwen38-27b-exl3-gb10.md) |
 | `qwen38-27b-exl3-variadic-gb10` | The same pair under a mixed-length serving load, percentiles over concurrency | Results | [Detail](benchmarks/qwen38-27b-exl3-variadic-gb10.md) |
 | `qwen38-tensorfold-gap` | Qwen3.8 TensorFold gap: blocked, missing artifacts, no number | Blocked, no number | [Detail](benchmarks/qwen38-tensorfold-gap.md) |

@@ -1,0 +1,18 @@
+== governor performance 2026-10-31T06:18:19Z
+== I-Micro t16
+== load-after=6
+== I-Micro t32
+| model                          |       size |     params | backend    | threads |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | --------------: | -------------------: |
+| kolibri1 78B.A3.5B IQ1_M - 1.75 bpw |  20.65 GiB |    78.10 B | CPU        |      32 |           tg128 |         18.41 ± 3.48 |
+
+build: 9df0b73 (1)
+== load-after=19
+== qwen38-q4km t16
+| model                          |       size |     params | backend    | threads |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | --------------: | -------------------: |
+| qwen35 27B Q4_K - Medium       |  15.92 GiB |    27.32 B | CPU        |      16 |            tg64 |          3.44 ± 0.01 |
+
+build: 9df0b73 (1)
+== load-after=21
+== done 2026-10-31T06:22:53Z

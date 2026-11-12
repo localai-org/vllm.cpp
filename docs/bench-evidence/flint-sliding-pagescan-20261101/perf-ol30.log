@@ -1,0 +1,153 @@
+vllm-bench: /mnt/models/flint-GGUF/flint-Q4_K_M.gguf engine | num_prompts=1 input_len=8 output_len=30 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+[FLINT-PHASE] batch=9 embed=0.432 attn_sliding=105.851 attn_full=39.678 norms=4.851 dense_mlp=10.628 moe_router=9.601 moe_routed=419.958 moe_shared=50.582 lm_head=5.767 other=4.098 fwd_wall_ms=651.915
+[FLINT-STEP] batch=1 fwd_ms=651.983 step_wall_ms=0.000
+[FLINT-STEP] sample_ms=0.117
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.157 attn_full=11.830 norms=0.759 dense_mlp=1.471 moe_router=3.752 moe_routed=53.898 moe_shared=11.529 lm_head=5.546 other=2.337 fwd_wall_ms=126.564
+[FLINT-STEP] batch=1 fwd_ms=126.624 step_wall_ms=652.150
+[FLINT-STEP] sample_ms=0.107
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.083 attn_full=11.818 norms=0.756 dense_mlp=1.483 moe_router=3.792 moe_routed=53.771 moe_shared=11.444 lm_head=5.588 other=2.429 fwd_wall_ms=126.438
+[FLINT-STEP] batch=1 fwd_ms=126.498 step_wall_ms=126.780
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.043 attn_full=11.561 norms=0.766 dense_mlp=1.428 moe_router=3.844 moe_routed=54.010 moe_shared=11.533 lm_head=5.515 other=2.349 fwd_wall_ms=127.331
+[FLINT-STEP] batch=1 fwd_ms=127.394 step_wall_ms=126.645
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.513 attn_full=11.821 norms=0.758 dense_mlp=1.489 moe_router=3.800 moe_routed=54.037 moe_shared=11.434 lm_head=5.565 other=2.345 fwd_wall_ms=127.064
+[FLINT-STEP] batch=1 fwd_ms=127.120 step_wall_ms=127.541
+[FLINT-STEP] sample_ms=0.106
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.515 attn_full=11.750 norms=0.758 dense_mlp=1.431 moe_router=3.865 moe_routed=54.363 moe_shared=11.594 lm_head=5.529 other=2.331 fwd_wall_ms=127.414
+[FLINT-STEP] batch=1 fwd_ms=127.476 step_wall_ms=127.264
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=34.990 attn_full=11.525 norms=0.761 dense_mlp=1.443 moe_router=3.778 moe_routed=53.936 moe_shared=11.534 lm_head=5.541 other=2.343 fwd_wall_ms=126.112
+[FLINT-STEP] batch=1 fwd_ms=126.174 step_wall_ms=127.620
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.017 attn_full=11.749 norms=0.763 dense_mlp=1.422 moe_router=3.779 moe_routed=53.909 moe_shared=11.454 lm_head=5.573 other=2.357 fwd_wall_ms=127.308
+[FLINT-STEP] batch=1 fwd_ms=127.366 step_wall_ms=126.318
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.773 attn_full=11.673 norms=0.772 dense_mlp=1.482 moe_router=3.822 moe_routed=54.352 moe_shared=11.567 lm_head=5.567 other=2.343 fwd_wall_ms=127.626
+[FLINT-STEP] batch=1 fwd_ms=127.679 step_wall_ms=127.508
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.657 attn_full=12.038 norms=0.761 dense_mlp=1.441 moe_router=3.799 moe_routed=53.832 moe_shared=11.456 lm_head=5.542 other=2.355 fwd_wall_ms=127.163
+[FLINT-STEP] batch=1 fwd_ms=127.222 step_wall_ms=127.822
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.546 attn_full=11.799 norms=0.755 dense_mlp=1.525 moe_router=3.807 moe_routed=53.873 moe_shared=11.493 lm_head=5.537 other=2.359 fwd_wall_ms=126.959
+[FLINT-STEP] batch=1 fwd_ms=127.021 step_wall_ms=127.365
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.886 attn_full=11.839 norms=0.746 dense_mlp=1.391 moe_router=3.887 moe_routed=55.232 moe_shared=11.746 lm_head=6.581 other=2.339 fwd_wall_ms=129.935
+[FLINT-STEP] batch=1 fwd_ms=129.995 step_wall_ms=127.167
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.568 attn_full=12.005 norms=0.748 dense_mlp=1.445 moe_router=3.769 moe_routed=54.039 moe_shared=11.426 lm_head=5.595 other=2.344 fwd_wall_ms=127.222
+[FLINT-STEP] batch=1 fwd_ms=127.277 step_wall_ms=130.153
+[FLINT-STEP] sample_ms=0.105
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.921 attn_full=11.776 norms=0.755 dense_mlp=1.448 moe_router=3.858 moe_routed=54.489 moe_shared=11.600 lm_head=6.566 other=2.346 fwd_wall_ms=129.022
+[FLINT-STEP] batch=1 fwd_ms=129.086 step_wall_ms=127.424
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.283 attn_full=12.475 norms=0.756 dense_mlp=1.440 moe_router=3.769 moe_routed=54.015 moe_shared=11.536 lm_head=5.585 other=2.344 fwd_wall_ms=128.492
+[FLINT-STEP] batch=1 fwd_ms=128.546 step_wall_ms=129.231
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.574 attn_full=11.468 norms=0.755 dense_mlp=1.449 moe_router=3.786 moe_routed=54.182 moe_shared=11.415 lm_head=5.543 other=2.358 fwd_wall_ms=127.799
+[FLINT-STEP] batch=1 fwd_ms=127.853 step_wall_ms=128.686
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.815 attn_full=11.552 norms=0.761 dense_mlp=1.456 moe_router=3.775 moe_routed=54.009 moe_shared=11.475 lm_head=5.576 other=2.337 fwd_wall_ms=127.013
+[FLINT-STEP] batch=1 fwd_ms=127.065 step_wall_ms=127.995
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.249 attn_full=11.424 norms=0.771 dense_mlp=1.408 moe_router=3.767 moe_routed=54.375 moe_shared=11.616 lm_head=5.572 other=2.329 fwd_wall_ms=127.803
+[FLINT-STEP] batch=1 fwd_ms=127.855 step_wall_ms=127.204
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.021 attn_full=11.594 norms=0.760 dense_mlp=1.497 moe_router=3.808 moe_routed=54.117 moe_shared=11.465 lm_head=5.563 other=2.360 fwd_wall_ms=127.488
+[FLINT-STEP] batch=1 fwd_ms=127.546 step_wall_ms=128.000
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.035 attn_full=12.177 norms=0.763 dense_mlp=1.486 moe_router=3.829 moe_routed=54.447 moe_shared=11.613 lm_head=5.558 other=2.320 fwd_wall_ms=128.519
+[FLINT-STEP] batch=1 fwd_ms=128.575 step_wall_ms=127.688
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.218 attn_full=12.576 norms=0.760 dense_mlp=1.481 moe_router=4.198 moe_routed=56.433 moe_shared=12.315 lm_head=5.743 other=2.349 fwd_wall_ms=132.351
+[FLINT-STEP] batch=1 fwd_ms=132.406 step_wall_ms=128.714
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.914 attn_full=11.775 norms=0.762 dense_mlp=1.480 moe_router=3.741 moe_routed=54.109 moe_shared=11.549 lm_head=5.577 other=2.331 fwd_wall_ms=127.529
+[FLINT-STEP] batch=1 fwd_ms=127.579 step_wall_ms=132.546
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.212 attn_full=11.644 norms=0.761 dense_mlp=1.513 moe_router=3.818 moe_routed=54.503 moe_shared=11.612 lm_head=5.532 other=2.359 fwd_wall_ms=128.243
+[FLINT-STEP] batch=1 fwd_ms=128.298 step_wall_ms=127.719
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.327 attn_full=12.032 norms=0.763 dense_mlp=1.414 moe_router=3.837 moe_routed=54.441 moe_shared=11.623 lm_head=5.537 other=2.351 fwd_wall_ms=128.625
+[FLINT-STEP] batch=1 fwd_ms=128.678 step_wall_ms=128.437
+[FLINT-STEP] sample_ms=0.101
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.126 attn_full=11.853 norms=0.763 dense_mlp=1.417 moe_router=3.785 moe_routed=53.898 moe_shared=11.412 lm_head=5.528 other=2.339 fwd_wall_ms=127.401
+[FLINT-STEP] batch=1 fwd_ms=127.455 step_wall_ms=128.850
+[FLINT-STEP] sample_ms=0.102
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.242 attn_full=11.790 norms=0.779 dense_mlp=1.444 moe_router=3.799 moe_routed=54.058 moe_shared=11.503 lm_head=5.587 other=2.356 fwd_wall_ms=127.854
+[FLINT-STEP] batch=1 fwd_ms=127.907 step_wall_ms=127.594
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.021 attn_full=11.916 norms=0.769 dense_mlp=1.475 moe_router=3.782 moe_routed=53.990 moe_shared=11.505 lm_head=5.554 other=2.333 fwd_wall_ms=127.615
+[FLINT-STEP] batch=1 fwd_ms=127.696 step_wall_ms=128.044
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.966 attn_full=12.080 norms=0.761 dense_mlp=1.426 moe_router=3.822 moe_routed=54.437 moe_shared=11.504 lm_head=5.570 other=2.346 fwd_wall_ms=128.190
+[FLINT-STEP] batch=1 fwd_ms=128.244 step_wall_ms=127.838
+[FLINT-STEP] sample_ms=0.103
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=36.048 attn_full=12.075 norms=0.770 dense_mlp=1.527 moe_router=3.829 moe_routed=54.540 moe_shared=11.630 lm_head=5.552 other=2.348 fwd_wall_ms=128.592
+[FLINT-STEP] batch=1 fwd_ms=128.647 step_wall_ms=128.385
+[FLINT-STEP] sample_ms=0.104
+[FLINT-PHASE] batch=1 embed=0.008 attn_sliding=35.915 attn_full=12.278 norms=0.763 dense_mlp=1.455 moe_router=3.821 moe_routed=54.118 moe_shared=11.443 lm_head=5.574 other=2.362 fwd_wall_ms=128.014
+[FLINT-STEP] batch=1 fwd_ms=128.067 step_wall_ms=128.788
+[FLINT-STEP] sample_ms=0.104
+
+============= vllm.cpp Benchmark Result =============
+Engine frontend:                           AsyncLLM    
+Output wait:                               poll        
+Blocking wait calls:                       0           
+Async scheduling enabled:                  1           
+Pretokenized prompt admission:             1           
+KV cache dtype (requested):                auto
+KV cache dtype (resolved storage):         bf16
+Ignore EOS (requested):                    1           
+Ignore EOS (resolved sampling):            1           
+Chat template:                             skipped (raw prompt)
+Chat template kwargs:                      {}
+Maximum concurrent batches:                2           
+Successful requests:                       1           
+Maximum request concurrency:               1           
+Benchmark duration (s):                    4.37        
+Total input tokens:                        9           
+Total generated tokens:                    30          
+Request throughput (req/s):                0.23        
+Output token throughput (tok/s):           6.87        
+Total token throughput (tok/s):            8.93        
+-------- Time to First Token --------
+Mean TTFT (ms):                            779.16      
+Median TTFT (ms):                          779.16      
+P99 TTFT (ms):                             779.16      
+-------- Time per Output Token (excl. 1st token) --------
+Mean TPOT (ms):                            123.68      
+Median TPOT (ms):                          123.68      
+P99 TPOT (ms):                             123.68      
+-------- Inter-token Latency --------
+Mean ITL (ms):                             123.68      
+Median ITL (ms):                           127.83      
+P99 ITL (ms):                              131.87      
+-------- End-to-end Latency --------
+Mean E2EL (ms):                            4365.84     
+Median E2EL (ms):                          4365.84     
+P99 E2EL (ms):                             4365.84     
+-------- Prefill vs Decode split (gate #1) --------
+Input token throughput (tok/s, over whole run): 2.06        
+Prefill token throughput (tok/s, in/TTFT): 11.55       
+Output (decode) token throughput (tok/s):  6.87        
+Mean per-stream decode rate (tok/s):       8.09        
+====================================================
+
+ Performance counter stats for './examples/vllm-bench --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf --num-prompts 1 --input-len 8 --output-len 30 --concurrency 1 --seed 0 --temperature 0 --ignore-eos':
+
+      262063438691      cycles                                                                
+   <not supported>      ampere_mcu_pmu_0/cycles/                                              
+      271541209465      instructions                                                          
+       60462912341      cache-references                                                      
+         725695201      cache-misses                                                          
+
+      11.046119479 seconds time elapsed
+
+      70.664145000 seconds user
+       6.257580000 seconds sys
+
+

@@ -110,10 +110,12 @@ ttnn::Tensor chunked_scaled_dot_product_attention(
 // The GDN chunked scan (BACKEND-TENSTORRENT-GDN W1): the pinned source tree
 // carries ttnn/cpp/ttnn/operations/transformer/chunk_gated_delta_rule/
 // chunk_gated_delta_rule.hpp; the signature below mirrors it 1:1. The
-// advanced pin (98134127a7b) carried a `bool use_mcast` after
-// output_head_major; the updated tt-metal stack (tt_umd 0.9.12 era,
-// ISSUE-LOCAL-01M4GPEZ987KVAXCYBFB2EVNT7) removed that flag — the exported
-// _ttnncpp.so symbol takes 17 params without it. No call site passed it.
+// `bool use_mcast` after output_head_major is pin-dependent: the local
+// durable install (tt-metal-pin-durable, a585e5744a8) exports the 18-param
+// symbol WITH it; the branch's earlier record called the 17-param arm. The
+// declaration must match the LIBRARY the row links, so it is restored with
+// its default (QWEN38-DFLASH2-STAGE-B host-build repair; no call site
+// changed behavior — every caller passes the default explicitly).
 std::tuple<ttnn::Tensor, std::optional<ttnn::Tensor>> chunk_gated_delta_rule(
     const ttnn::Tensor& q, const ttnn::Tensor& k, const ttnn::Tensor& v,
     const ttnn::Tensor& g, const ttnn::Tensor& beta,
@@ -121,6 +123,7 @@ std::tuple<ttnn::Tensor, std::optional<ttnn::Tensor>> chunk_gated_delta_rule(
     const std::optional<ttnn::Tensor>& initial_state = std::nullopt,
     bool output_final_state = false, uint32_t chunk_size = 64,
     bool use_qk_l2norm = false, bool output_head_major = false,
+    bool use_mcast = true,
     const std::optional<ttnn::MemoryConfig>& memory_config = std::nullopt,
     const std::optional<DeviceComputeKernelConfig>& compute_kernel_config = std::nullopt,
     const std::optional<ttnn::Tensor>& eye = std::nullopt,

@@ -30100,3 +30100,9 @@ name matching `mtp`, `nextn`, `draft`, `eh_proj`, `enorm`, or `hnorm`. This does
 not inspect or characterize the absent TensorFold checkpoint. Evidence:
 `.agents/evidence/bench-qwen38-tensorfold-gap/20260929T180547Z/`; public summary:
 `docs/benchmarks/qwen38-tensorfold-gap.md`.
+
+## Assembly vs compiler SDOT
+
+| Result | Evidence |
+|---|---|
+| leaf wall | [assembly evidence](bench-evidence/rpi5-a76-q8-dot-20260806.md) |

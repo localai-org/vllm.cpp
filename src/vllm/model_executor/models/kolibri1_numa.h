@@ -102,8 +102,20 @@ inline int GetMempolicy(int* mode, unsigned long* nodemask, unsigned long maxnod
   return static_cast<int>(
       syscall(SYS_get_mempolicy, mode, nodemask, maxnode, addr, flags));
 }
+
+// Test seam (CHECKER-HARDENING): when non-null, invoked INSTEAD of the raw
+// `set_mempolicy` syscall, so a unit test can force the refused-policy path
+// in-process — on any host, including one whose kernel would accept the real
+// call. Production code never sets it; the knob-off and best-effort arms
+// read it on every guard construction and the pointer stays null elsewhere.
+inline int (*set_mempolicy_hook)(int mode, const unsigned long* nodemask,
+                                 unsigned long maxnode) = nullptr;
+
 inline int SetMempolicy(int mode, const unsigned long* nodemask,
                         unsigned long maxnode) {
+  if (set_mempolicy_hook != nullptr) {
+    return set_mempolicy_hook(mode, nodemask, maxnode);
+  }
   return static_cast<int>(
       syscall(SYS_set_mempolicy, mode, nodemask, maxnode));
 }

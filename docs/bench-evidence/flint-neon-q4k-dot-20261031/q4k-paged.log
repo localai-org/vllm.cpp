@@ -1,0 +1,38 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_paged_engine.cpp:93:
+TEST CASE:  flint paged engine: the published Q4_K_M serves continuous batches matching the reference chains
+
+./tests/vllm/models/test_flint_paged_engine.cpp:106: MESSAGE: flint paged engine: loading the weights for the reference replay...
+
+./tests/vllm/models/test_flint_paged_engine.cpp:122: MESSAGE: flint paged engine: replaying 3 reference chains...
+
+./tests/vllm/models/test_flint_paged_engine.cpp:144: MESSAGE: flint paged engine: loading the engine stack...
+
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+INFO auto-fit max_model_len: reduced from 262144 to 4064 to fit the KV cache (256 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)
+ENGINE OUT 0: ' Paris is the 
+The capital of France is Paris is the 
+The capital of France is Paris is the 
+The capital'
+REFERENCE 0: ' Paris is the 
+A. subject
+B. predicate
+We need answer. Question: "The capital of France is'
+./tests/vllm/models/test_flint_paged_engine.cpp:179: MESSAGE: flint paged engine: 28 engine steps, 3 requests arrived continuously
+
+./tests/vllm/models/test_flint_paged_engine.cpp:212: MESSAGE: flint paged engine: request 0: first divergence at step 4 (engine 630 vs reference 32), reference-margin gap 0.1141 nats
+
+./tests/vllm/models/test_flint_paged_engine.cpp:212: MESSAGE: flint paged engine: request 1: first divergence at step 0 (engine 11526 vs reference 220), reference-margin gap 0.201501 nats
+
+./tests/vllm/models/test_flint_paged_engine.cpp:212: MESSAGE: flint paged engine: request 2: first divergence at step 0 (engine 220 vs reference 25), reference-margin gap 0.0418556 nats
+
+./tests/vllm/models/test_flint_paged_engine.cpp:221: MESSAGE: flint paged engine: 0/3 chains token-exact vs the reference forward
+
+===============================================================================
+[doctest] test cases:  1 |  1 passed | 0 failed | 0 skipped
+[doctest] assertions: 11 | 11 passed | 0 failed |
+[doctest] Status: SUCCESS!
+EXIT=0

@@ -1,0 +1,93 @@
+Session role:
+  [33m--[0m   role=UNDECLARED session=ppid:15976 branch=row/FLINT-NEON-Q4K-DOT
+       This session has not declared a role. Run scripts/agent-start.py
+       for the canonical role interview and exact next actions.
+Record gates:
+  [32mok[0m   check-conflict-markers
+  [32mok[0m   check-evidence-refs
+  [32mok[0m   check-prompt-contract
+  [32mok[0m   check-agent-record
+  [32mok[0m   check-release-binary-contract
+  [32mok[0m   check-release-workflow
+  [32mok[0m   check-windows-release-state
+  [32mok[0m   check-container-matrix
+  [32mok[0m   check-container-workflow
+  [32mok[0m   check-build-runtime-deps
+  [32mok[0m   check-lease-ccache
+  [32mok[0m   claim-view
+  [32mok[0m   check-readme-structure
+  [32mok[0m   check-quickstart-recipes
+  [32mok[0m   check-benchmark-index
+  [32mok[0m   check-model-checklist
+  [32mok[0m   check-supported-models
+  [31mFAIL[0m check-env-doc
+         ERROR: production env var(s) read from src/+include/ are neither documented in docs/ENVIRONMENT.md nor on scripts/env-doc-allowlist.txt:
+           - VT_CPU_Q4K_DOT
+         Document it in docs/ENVIRONMENT.md (if it is a user-facing / behavior-changing knob) or add it to scripts/env-doc-allowlist.txt (if it is a kernel-internal tuning switch).
+  [32mok[0m   check-fusion-consistency
+  [32mok[0m   check-attention-rung-consistency
+  [32mok[0m   check-fp4-resident-consistency
+  [32mok[0m   check-cuda-op-arch-gate
+  [32mok[0m   check-rocm-dp4a-intrinsic
+  [32mok[0m   check-runner-routing-consistency
+  [32mok[0m   check-surface-coverage
+  [32mok[0m   check-test-registration
+  [32mok[0m   check-snapshot-pins
+  [32mok[0m   check-oracle-pins
+  [32mok[0m   check-comparator-pins
+  [32mok[0m   check-oracle-denominator-flags
+  [32mok[0m   check-now-current
+  [32mok[0m   check-gate-commands
+  [32mok[0m   check-symbol-anchors
+  [32mok[0m   ready-for-helper
+  [32mok[0m   upstream-inventory
+  [32mok[0m   audit-live-rows
+Mutation suites:
+  [32mok[0m   test_check_prompt_contract
+  [32mok[0m   test_check_evidence_refs
+  [32mok[0m   test_agent_gates
+  [32mok[0m   test_agent_record
+  [32mok[0m   test_check_release_binary_contract
+  [32mok[0m   test_release_manifest
+  [32mok[0m   test_release_archive
+  [32mok[0m   test_release_pipeline
+  [32mok[0m   test_check_windows_release_state
+  [32mok[0m   test_release_postpublish_audit
+  [32mok[0m   test_check_container_matrix
+  [32mok[0m   test_check_container_workflow
+  [32mok[0m   test_check_build_runtime_deps
+  [32mok[0m   test_check_lease_ccache
+  [32mok[0m   test_validate_container_image
+  [32mok[0m   test_release_index
+  [32mok[0m   test_release_metadata
+  [32mok[0m   test_release_accelerator_metadata
+  [32mok[0m   test_release_macos_metadata
+  [32mok[0m   test_release_windows_metadata
+  [32mok[0m   test_cpu_release_gates
+  [32mok[0m   test_agent_role
+  [32mok[0m   test_agent_onboard
+  [32mok[0m   test_agent_start
+  [32mok[0m   test_gate_bringup
+  [32mok[0m   test_env_agnostic_tooling
+  [32mok[0m   test_claim_view
+  [32mok[0m   test_upstream_inventory
+  [32mok[0m   test_check_readme_structure
+  [32mok[0m   test_check_quickstart_recipes
+  [32mok[0m   test_check_benchmark_index
+  [32mok[0m   test_check_model_checklist
+  [32mok[0m   test_check_supported_models
+  [32mok[0m   test_check_env_doc
+  [32mok[0m   test_check_deepseek_v4_vision_manifests
+  [32mok[0m   test_checker_text
+  [32mok[0m   test_check_fusion_consistency
+  [32mok[0m   test_check_attention_rung_consistency
+  [32mok[0m   test_check_fp4_resident_consistency
+  [32mok[0m   test_check_cuda_op_arch_gate
+  [32mok[0m   test_check_rocm_dp4a_intrinsic
+  [32mok[0m   test_rocm_rank_kernels
+  [32mok[0m   test_check_runner_routing_consistency
+  [32mok[0m   test_check_surface_coverage
+  [32mok[0m   test_check_test_registration
+  [32mok[0m   test_check_snapshot_pins
+  [32mok[0m   test_check_oracle_pins
+  [32mok[0m   test_check_comparator_pins

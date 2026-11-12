@@ -273,6 +273,17 @@ still host-bound. This is an active correctness backend, not a performance
 backend. See [README](../README.md) and the
 [Tenstorrent backend spec](../.agents/specs/tenstorrent-backend.md).
 
+On the Tenstorrent device arm, the Flint attention legs (per-head QK RMSNorm,
+RoPE, the sliding window and the per-head sinks) run on the device attention
+path by default; `VT_FLINT_TT_DEVICE_ATTN=0` opts out to the host
+`SinksAttention` shadow. The adoption (row `FLINT-P150-STAGE2-GATE`, spec
+`.agents/specs/flint-p150-stage2-gate.md`) rests on the model-level gate: the
+device arm held the host arm's drift-tolerant band at 3/3 reps
+(`docs/bench-evidence/flint-p150-stage2-gate-20261101/`), and the serving
+trace (`docs/bench-evidence/flint-p150-attention-20261031/`) records the
+MoE-dominated step times where attention is a minor share.
+
+
 A Vulkan build (`-DVLLM_CPP_VULKAN=ON`) adds three kernel-measurement binaries.
 They exist so a Vulkan tuning knob can be A/B'd in ONE binary, which is this
 project's benchmark protocol, and each one prints WHICH kernel variant it ran so
@@ -447,7 +458,7 @@ and up rows into one owner, so plan for the whole checkpoint in host memory.
 
 Refused arms:
 
-- **GGUF.** llama.cpp `b10451` defines `cohere2moe`; the loader arm is owed.
+- **GGUF.** llama.cpp `b11765` (the stock release pin since 2026-10-31; `b10451` first defined the architecture) defines `cohere2moe`; the loader arm is owed.
 - **Quantized siblings** (FP8, W4A16, NVFP4, anything with a
   `quantization_config`). Load the bf16 checkpoint.
 - **`use_qk_norm: true`.** The pinned vLLM `cohere2_moe.py` has no q/k norm.
@@ -1010,10 +1021,15 @@ replays the fp8 safetensors goldens under the developer-adjudicated
 quantized-arm record (2026-10-30, Option A — quantized arms are adjudicated on
 their own measured record; the fp8 2.5 band governs same-weights kernel
 comparisons only): I-Micro 37/44 golden greedy positions, worst topk diff
-3.245, 2 hard flips. **No quantization-matched llama.cpp floor exists**: the
-`llama-cpp-kolibri1` pin advance past `b10451` (which predates the kolibri1
-support in PRs #30673/#30865) is a named follow-up, so this arm has no
-quant-matched denominator yet.
+3.245, 2 hard flips. **The quantization-matched llama.cpp floor now EXISTS**
+(row `LLAMA-CPP-PIN-ADVANCE`, 2026-10-31): the stock pin advanced to release
+`b11765` (`9df0b73c`), which loads this artifact, and on the same file, bench
+zone and thread counts it measures **17.98 ± 0.12 tok/s (16t)** and
+**20.18 ± 0.61 tok/s (32t)** against our arm's 4.97 / 6.55 — llama.cpp is
+3.62x / 3.08x ahead
+([evidence](bench-evidence/llama-cpp-pin-advance-20261031/README.md)). The
+gap is recorded, not adjudicated: closing it belongs to the kolibri1 CPU
+performance rows, not the GGUF-arm record.
 
 ## Flint (RecursiveSI) from a GGUF k-quant
 
@@ -1041,6 +1057,17 @@ materialized:
 ```sh
 VT_FLINT_KEEP_QUANT=1 ./build/vllm-server \
   --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+```
+
+Size the CPU threadpool to the cpu budget you give the process: the pool
+defaults to `hardware_concurrency()`, and a 128-thread pool pinned to a
+16-cpu `taskset` collapses on its own barrier (the flint keep-quant arm
+measured 1.20 tok/s that way and 5.51 tok/s with the pool matched — see
+`docs/benchmarks/flint-kq-cpu.md`):
+
+```sh
+VT_FLINT_KEEP_QUANT=1 VLLM_CPP_CPU_THREADS=16 taskset -c 32-47 \
+  ./build/vllm-server --model /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
 ```
 
 Correctness record for the keep-quant arm (`test_flint_gguf`, keep-quant

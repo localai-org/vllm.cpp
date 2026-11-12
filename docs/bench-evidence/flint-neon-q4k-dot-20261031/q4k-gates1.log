@@ -1,0 +1,35 @@
+Test project /tmp/build-flint-q4k
+    Start 209: test_flint_paged
+1/5 Test #209: test_flint_paged .................   Passed    0.30 sec
+    Start 210: test_flint_paged_engine
+2/5 Test #210: test_flint_paged_engine ..........***Failed    0.00 sec
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_flint_paged_engine.cpp:93:
+TEST CASE:  flint paged engine: the published Q4_K_M serves continuous batches matching the reference chains
+
+./tests/vllm/models/test_flint_paged_engine.cpp:100: FATAL ERROR: REQUIRE( gf ) is NOT correct!
+  values: REQUIRE( {?} )
+  logged: goldens not found at tests/vllm/models/flint_goldens_q4_k_m.json
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 0 skipped
+[doctest] assertions: 1 | 0 passed | 1 failed |
+[doctest] Status: FAILURE!
+
+    Start 612: test_ops_quant_dot
+3/5 Test #612: test_ops_quant_dot ...............   Passed    1.33 sec
+    Start 613: test_neon_q4k_dot
+4/5 Test #613: test_neon_q4k_dot ................   Passed    0.02 sec
+    Start 745: test_ops_paged_attn_dtype
+5/5 Test #745: test_ops_paged_attn_dtype ........   Passed    0.04 sec
+
+80% tests passed, 1 tests failed out of 5
+
+Total Test time (real) =   1.70 sec
+
+The following tests FAILED:
+	210 - test_flint_paged_engine (Failed)
+Errors while running CTest
+EXIT=8

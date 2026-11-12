@@ -6191,6 +6191,216 @@ TEST_CASE("kTENSTORRENT #2294 capture-lane D2D copy records the served geometry"
   backend.Free(mb4); backend.Free(mb5); backend.Free(mos); backend.Free(mo);
 }
 
+// QWEN38-DFLASH2-STAGE-B, red-before for the aux-tap seam fix: a captured
+// host-free copy whose SRC shadow is [1, H] (the per-layer aux-tap clone's
+// shape, qwen3_5.cpp VT_TT_GDN_REPLAY_TAP comment) into a destination slot
+// whose recorded geometry is [S, H*taps] with EQUAL logical numel. The #2294
+// sibling above pins that the record must name the served geometry when the
+// slot had NO shadow; this case pins the stronger contract the DFlash2 drafter
+// needs: when the destination ALREADY holds a persistent device shadow of the
+// same logical volume, the copy must leave the slot's recorded dev_rows/dev_cols
+// untouched and the copied bytes must read back at the RECORDED geometry. The
+// defective arm allocates a fresh SRC-shaped clone and installs it as the slot's
+// shadow (clobbering [S, H*taps] to [1, H]), so a later stage at the recorded
+// geometry reads pool residue.
+//
+// Detection contract (fresh-review repair): the matmul consumer is NOT
+// sufficient on its own — the device matmul path serves flat-equal bytes, so it
+// cannot observe a clobbered record. The case asserts DIRECTLY on the slot's
+// served-geometry record (dev_rows/dev_cols, via the DeviceShadowExact probe,
+// tenstorrent_residency.cpp:1089) after the copy: the record must still name
+// [S, TAPS] and must NOT name the source's [1, S*TAPS]. Under the baseline
+// src-shaped install the record flips to [1, 32] and the assertions go red.
+TEST_CASE("kTENSTORRENT capture-lane D2D copy preserves an equal-numel dst slot's recorded geometry") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  ForceHostFreeDecode host_free;
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  // 32 elements on both sides: src recorded [1, 32] (the [1, H] tap clone),
+  // dst recorded [4, 8] (the [S, H*taps] aux slot). Equal 64-byte slots, equal
+  // numel, different geometry — exactly the aux-tap seam's mismatch.
+  constexpr int64_t S = 4, TAPS = 8, N = 16;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  using vt::tenstorrent::GetStagingStats;
+  using vt::tenstorrent::ResetStagingStats;
+  std::vector<uint16_t> sb(S * TAPS), db(S * TAPS), wb4(N * TAPS);
+  for (size_t i = 0; i < sb.size(); ++i) sb[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  for (size_t i = 0; i < db.size(); ++i) db[i] = static_cast<uint16_t>(0x3c00 + (i % 7));
+  for (size_t i = 0; i < wb4.size(); ++i) wb4[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  void* ma = backend.Alloc(S * TAPS * 2);
+  void* md = backend.Alloc(S * TAPS * 2);
+  void* mr = backend.Alloc(S * TAPS * 2);
+  void* mb4 = backend.Alloc(N * TAPS * 2);
+  void* mo = backend.Alloc(S * TAPS * N * 4);
+  Queue q = backend.CreateQueue();
+  backend.Copy(q, ma, sb.data(), S * TAPS * 2);
+  backend.Copy(q, md, db.data(), S * TAPS * 2);
+  backend.Copy(q, mr, sb.data(), S * TAPS * 2);  // the copied flat bytes as [S, TAPS]
+  backend.Copy(q, mb4, wb4.data(), N * TAPS * 2);
+  Tensor d = Tensor::Contiguous(md, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {S, TAPS});
+  Tensor r = Tensor::Contiguous(mr, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {S, TAPS});
+  Tensor b4 = Tensor::Contiguous(mb4, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {N, TAPS});
+  Tensor o = Tensor::Contiguous(mo, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {S, N});
+  // Stage the SRC slot's [1, 32] shadow (a mm commit — an H2D Copy alone does
+  // not install a device shadow in eager mode), mirroring how the aux-tap
+  // producer commits its [1, H] clone.
+  void* mw = backend.Alloc(N * S * TAPS * 2);
+  void* mostage = backend.Alloc(N * 4);
+  std::vector<uint16_t> ww(N * S * TAPS);
+  for (size_t i = 0; i < ww.size(); ++i) ww[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mw, ww.data(), ww.size() * 2);
+  Tensor wt = Tensor::Contiguous(mw, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {N, S * TAPS});
+  Tensor ost = Tensor::Contiguous(mostage, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {1, N});
+  Tensor s = Tensor::Contiguous(ma, vt::DType::kBF16, Device{DeviceType::kTENSTORRENT, 0}, {1, S * TAPS});
+  auto mm = reinterpret_cast<vt::MatmulFn>(vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  mm(q, ost, s, wt);  // stages ma's [1, 32] device shadow
+  // Stage dst's PERSISTENT [S, TAPS] shadow: mm(o, d, b4) makes dst's slot own a
+  // device tensor at its recorded geometry (the aux slot's resident state).
+  // The reference r consumes the SAME flat bytes the copy will write, declared
+  // [S, TAPS] — the geometry the record must keep naming.
+  mm(q, o, d, b4);
+  std::vector<float> unused(S * N);
+  // The reference: the same flat bytes declared [S, TAPS], consumed at [S, N].
+  mm(q, o, r, b4);
+  std::vector<float> want(S * N);
+  backend.Copy(q, want.data(), mo, S * N * 4);
+  // Program-cache warm contract (see the #2294 case): run the SAME D2D copy
+  // once eagerly, outside capture, then drop its counter contribution.
+  backend.Copy(q, md, ma, S * TAPS * 2);
+  ResetStagingStats();
+  // Capture region holds only the whole-slot D2D copy.
+  backend.BeginCapture(q);
+  backend.Copy(q, md, ma, S * TAPS * 2);
+  backend.EndCapture(q);
+  backend.Replay(q);
+  vt::tenstorrent::StagingStats st = GetStagingStats();
+  CHECK_MESSAGE(st.stages_avoided_device_copy == 1,
+                "under an active capture only the capture lane may serve the "
+                    "copy, got "
+                    << st.stages_avoided_device_copy);
+  // The RECORDED geometry, observed on the slot record itself (the matmul
+  // consumer below cannot detect a clobbered record — the device path serves
+  // flat-equal bytes). The copy must leave dev_rows/dev_cols naming [S, TAPS].
+  CHECK_MESSAGE(vt::tenstorrent::DeviceShadowExact(d, static_cast<uint32_t>(S),
+                                                   static_cast<uint32_t>(TAPS)),
+                "the dst slot's record no longer names the recorded [S, TAPS] "
+                    "geometry after the captured copy — the record was "
+                    "clobbered");
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d, 1, static_cast<uint32_t>(S * TAPS)),
+                "the dst slot's record names the SRC's [1, S*TAPS] geometry — "
+                    "the src-shaped install mutation is live");
+  // Consume dst at its RECORDED [S, TAPS] geometry: the served shadow must
+  // still be recorded (and hold the copied bytes) at that geometry.
+  mm(q, o, d, b4);
+  st = GetStagingStats();
+  CHECK_MESSAGE(st.uploads_persistent_bf16 == 0,
+                "dst must serve from its copied shadow at the recorded "
+                    "geometry, got "
+                    << st.uploads_persistent_bf16);
+  std::vector<float> o2(S * N);
+  backend.Copy(q, o2.data(), mo, S * N * 4);
+  for (size_t i = 0; i < want.size(); ++i)
+    CHECK_MESSAGE(want[i] == o2[i], "dst at its RECORDED geometry differs at "
+                            << i << ": " << want[i] << " vs " << o2[i]
+                            << " — the slot's geometry record was clobbered");
+  backend.Free(ma); backend.Free(md); backend.Free(mr);
+  backend.Free(mb4); backend.Free(mo);
+  backend.Free(mw); backend.Free(mostage);
+}
+
+// QWEN38-DFLASH2-STAGE-B, fresh-review finding 2: the recorded-geometry arm
+// must also check the SHADOW DTYPE. A destination slot whose existing device
+// shadow is f32 of equal logical numel (an f32 [2, 16] slot, 32 elements)
+// must DECLINE the equal-numel fast path when the source shadow is bf16: a
+// bf16 copy into an f32 shadow of a different geometry would clobber the
+// record. The safe path installs a fresh src-shaped clone and the record
+// names what was actually served ([1, 32]). With the dtype check at
+// tenstorrent_residency.cpp:1587 mutated out, the case takes the fast path
+// into the f32 [2, 16] shadow and the record stays [2, 16] — the assertion
+// below goes red.
+TEST_CASE("kTENSTORRENT capture-lane D2D copy declines an equal-numel dst slot whose shadow dtype differs") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  ForceHostFreeDecode host_free;
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  constexpr int64_t S = 1, TAPS = 32;  // the src [1, 32] bf16 tap clone
+  constexpr int64_t DR = 2, DC = 16;   // the dst f32 [2, 16] shadow, 32 numel
+  constexpr int64_t K = 4;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  using vt::tenstorrent::GetStagingStats;
+  using vt::tenstorrent::ResetStagingStats;
+  std::vector<uint16_t> sb(S * TAPS);
+  for (size_t i = 0; i < sb.size(); ++i) sb[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  void* ma = backend.Alloc(S * TAPS * 2);
+  void* md2 = backend.Alloc(DR * DC * 4);  // f32-sized dst block
+  void* mb2 = backend.Alloc(DC * K * 4);
+  void* mo2 = backend.Alloc(DR * DC * 4);
+  Queue q = backend.CreateQueue();
+  const Device dev{DeviceType::kTENSTORRENT, 0};
+  backend.Copy(q, ma, sb.data(), S * TAPS * 2);
+  // Stage the dst slot's PERSISTENT f32 [2, 16] shadow via an mm commit whose
+  // OUTPUT lands on md2 (the only arm that installs a device shadow eagerly).
+  std::vector<float> ab(DR * K), bb2(DC * K);
+  for (size_t i = 0; i < ab.size(); ++i) ab[i] = 0.5f + static_cast<float>(i % 3);
+  for (size_t i = 0; i < bb2.size(); ++i) bb2[i] = 1.0f + static_cast<float>(i % 5);
+  backend.Copy(q, mo2, ab.data(), ab.size() * 4);
+  backend.Copy(q, mb2, bb2.data(), bb2.size() * 4);
+  Tensor a32 = Tensor::Contiguous(mo2, vt::DType::kF32, dev, {DR, K});
+  Tensor b32 = Tensor::Contiguous(mb2, vt::DType::kF32, dev, {DC, K});
+  Tensor d32 = Tensor::Contiguous(md2, vt::DType::kF32, dev, {DR, DC});
+  Tensor s = Tensor::Contiguous(ma, vt::DType::kBF16, dev, {S, TAPS});
+  auto mm = reinterpret_cast<vt::MatmulFn>(vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  mm(q, d32, a32, b32);  // installs the f32 [2, 16] shadow on md2's slot
+  // Stage the SRC slot's [1, 32] bf16 shadow (an H2D Copy alone does not
+  // install a device shadow in eager mode), mirroring the tap producer.
+  void* mw = backend.Alloc(DC * S * TAPS * 2);
+  void* mostage = backend.Alloc(DC * 4);
+  std::vector<uint16_t> ww(DC * S * TAPS);
+  for (size_t i = 0; i < ww.size(); ++i) ww[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mw, ww.data(), ww.size() * 2);
+  backend.Copy(q, mostage, bb2.data(), DC * 4);
+  Tensor wt = Tensor::Contiguous(mw, vt::DType::kBF16, dev, {DC, S * TAPS});
+  Tensor ost = Tensor::Contiguous(mostage, vt::DType::kF32, dev, {1, DC});
+  mm(q, ost, s, wt);  // stages ma's [1, 32] device shadow
+  // The record must first name the staged f32 geometry (the precondition).
+  REQUIRE(vt::tenstorrent::DeviceShadowExact(d32, static_cast<uint32_t>(DR),
+                                             static_cast<uint32_t>(DC)));
+  // Program-cache warm contract (see the #2294 case): run the SAME D2D copy
+  // once eagerly, outside capture, then drop its counter contribution.
+  backend.Copy(q, md2, ma, S * TAPS * 2);
+  ResetStagingStats();
+  backend.BeginCapture(q);
+  backend.Copy(q, md2, ma, S * TAPS * 2);
+  backend.EndCapture(q);
+  backend.Replay(q);
+  vt::tenstorrent::StagingStats st = GetStagingStats();
+  CHECK_MESSAGE(st.stages_avoided_device_copy == 1,
+                "the copy lane must still serve the copy, got "
+                    << st.stages_avoided_device_copy);
+  // The dtype check must have DECLINED the fast path: the safe arm installs a
+  // fresh src-shaped bf16 clone and the record names [1, 32], NOT the staged
+  // f32 [2, 16].
+  CHECK_MESSAGE(vt::tenstorrent::DeviceShadowExact(
+                    d32, static_cast<uint32_t>(S), static_cast<uint32_t>(TAPS)),
+                "the dst record does not name the served src-shaped [1, 32] "
+                    "geometry — the dtype check failed to decline the fast "
+                    "path");
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d32, static_cast<uint32_t>(DR), static_cast<uint32_t>(DC)),
+                "the dst record still names the f32 [2, 16] geometry — a bf16 "
+                    "copy was served into an f32 shadow of another geometry");
+  backend.Free(ma); backend.Free(md2);
+  backend.Free(mb2); backend.Free(mo2);
+  backend.Free(mw); backend.Free(mostage);
+}
+
+
+
 // W7 drift repair (#2282): the reservation must not survive content
 // establishment, and the reserved arm must never discard a live shadow.
 // Captured on the host-free e2e drift (LEG B, prompt[1] tok=0): a pool
@@ -12529,3 +12739,221 @@ TEST_CASE("tt residency: freeing a buffer drops the weight-view shadows "
   CHECK(vt::tenstorrent::WeightViewShadowCountForTest() == before);
 }
 
+
+// QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore unit. The
+// captured spec verify bakes content-keyed state gathers, so a rejected step's
+// out-of-place commit must be undone from the PRE-STEP shadows before the next
+// replay. This case drives the seam directly (StageGdnStateShadow /
+// RestoreGdnStateShadow / FreeGdnStateShadow, tenstorrent_device.h): stage ->
+// simulate the step's commit (a fresh upload over the slot) -> restore must
+// bring the pre-step bytes back at the recorded geometry; the commit arm must
+// leave the step's bytes; a slot whose shadow changed dtype/geometry since the
+// stage must DECLINE the restore (the reset lane's precondition), leaving the
+// live shadow untouched. The driver-side wiring lives in
+// Qwen3_5DenseDecodeGraph::Step (qwen3_5.cpp); this case pins the property the
+// wiring depends on, red-before on the head without the seam.
+TEST_CASE("kTENSTORRENT GDN spec-state shadow restores pre-step bytes on reject and declines on eviction") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  const Device dev{DeviceType::kTENSTORRENT, 0};
+  auto mm = reinterpret_cast<vt::MatmulFn>(
+      vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  // The GDN state cache's shadow is an f32 [R, C] TILE (EnsureGdnCacheDevice's
+  // contract). A plain H2D Copy does not install a device shadow in eager
+  // mode, so each "step commit" below is a real kMatmulBT
+  // CommitDeviceLogical2D: an f32 result committed over the state buffer, the
+  // same mechanism the driver's forward uses.
+  // kMatmulBT computes o[M,N] = a[M,K] · w[N,K]ᵀ (B-transposed): the weight
+  // is [N, K], K = 4 here.
+  constexpr int64_t R = 4, C = 8;
+  void* ssm_mem = backend.Alloc(R * C * 4);
+  void* conv_mem = backend.Alloc(R * C * 4);
+  void* ab = backend.Alloc(2 * R * 4 * 2);   // [4,4] bf16 activation (8 rows max)
+  void* wb1 = backend.Alloc(C * 4 * 2);      // [8,4] bf16 weight — commit A
+  void* wb2 = backend.Alloc(C * 4 * 2);      // [8,4] bf16 weight — commit B
+  std::vector<uint16_t> a(R * 4), w1(C * 4), w2(C * 4);
+  for (size_t i = 0; i < a.size(); ++i) a[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  for (size_t i = 0; i < w1.size(); ++i) w1[i] = static_cast<uint16_t>(0x3c00 + (i % 7));
+  for (size_t i = 0; i < w2.size(); ++i) w2[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, ab, a.data(), a.size() * 2);
+  backend.Copy(q, wb1, w1.data(), w1.size() * 2);
+  backend.Copy(q, wb2, w2.data(), w2.size() * 2);
+  Tensor at = Tensor::Contiguous(ab, vt::DType::kBF16, dev, {R, 4});
+  Tensor wt1 = Tensor::Contiguous(wb1, vt::DType::kBF16, dev, {C, 4});
+  Tensor wt2 = Tensor::Contiguous(wb2, vt::DType::kBF16, dev, {C, 4});
+  const auto read_state = [&](void* mem, std::vector<float>& out) {
+    out.resize(static_cast<size_t>(R * C));
+    backend.Copy(q, out.data(), mem, R * C * 4);
+  };
+  // Step 0: commit A over both state slots (the pre-step state).
+  Tensor ssm_t = Tensor::Contiguous(ssm_mem, vt::DType::kF32, dev, {R, C});
+  Tensor conv_t = Tensor::Contiguous(conv_mem, vt::DType::kF32, dev, {R, C});
+  mm(q, ssm_t, at, wt1);
+  mm(q, conv_t, at, wt1);
+  std::vector<float> pre, post, got, conv_pre;
+  read_state(ssm_mem, pre);
+  read_state(conv_mem, conv_pre);
+  REQUIRE(pre.size() == static_cast<size_t>(R * C));
+  const void* ssm_host = ssm_mem;
+  const void* conv_host = conv_mem;
+
+  // STAGE: both slots' live shadows are cloned device-side.
+  const int staged = vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1);
+  CHECK_MESSAGE(staged == 1, "one cache layer must stage, got " << staged);
+  CHECK(vt::tenstorrent::GdnStateShadowStaged());
+
+  // The (rejected) step commits B over both slots at the SAME recorded
+  // geometry: the shadow is replaced, the record's geometry is not.
+  mm(q, ssm_t, at, wt2);
+  mm(q, conv_t, at, wt2);
+  read_state(ssm_mem, post);
+  CHECK_MESSAGE(post != pre, "the rejected step's commit must have landed");
+
+  // RESTORE (the reject arm): the pre-step bytes come back at the recorded
+  // geometry, on the device, with the slot's record untouched.
+  const int restored = vt::tenstorrent::RestoreGdnStateShadow();
+  CHECK_MESSAGE(restored == 2, "both slots must restore, got " << restored);
+  read_state(ssm_mem, got);
+  CHECK_MESSAGE(got == pre, "ssm must read back the PRE-STEP bytes after the "
+                            "reject restore");
+  read_state(conv_mem, got);
+  CHECK_MESSAGE(got == conv_pre,
+                "conv must read back the PRE-STEP bytes after the "
+                "reject restore");
+
+  // COMMIT (the accept arm): free the shadows, the step's own bytes stay.
+  CHECK(vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1) == 1);
+  vt::tenstorrent::FreeGdnStateShadow();
+  CHECK_FALSE(vt::tenstorrent::GdnStateShadowStaged());
+  read_state(ssm_mem, got);
+  CHECK_MESSAGE(got == pre, "commit (free) must not disturb the live state");
+
+  // THE FALLBACK LANE's precondition: a slot whose shadow changed geometry
+  // since the stage (the eviction / foreign-commit case, the W7 tenant-switch
+  // shape) DECLINES the restore — the driver then takes the gdn_idx_changed
+  // full-re-gather reset lane.
+  CHECK(vt::tenstorrent::StageGdnStateShadow(&ssm_host, &conv_host, 1) == 1);
+  {
+    // Foreign [8,4] commit over the same block: a[8,4] · w[4,4]ᵀ.
+    Tensor at8 = Tensor::Contiguous(ab, vt::DType::kBF16, dev, {2 * R, 4});
+    Tensor wt3 = Tensor::Contiguous(wb1, vt::DType::kBF16, dev, {R, 4});
+    Tensor out_t = Tensor::Contiguous(ssm_mem, vt::DType::kF32, dev, {C, R});
+    mm(q, out_t, at8, wt3);
+  }
+  const int declined = vt::tenstorrent::RestoreGdnStateShadow();
+  CHECK_MESSAGE(declined < 0,
+                "a changed-geometry shadow must decline the restore, got "
+                    << declined);
+  vt::tenstorrent::FreeGdnStateShadow();
+  backend.Free(ssm_mem);
+  backend.Free(conv_mem);
+  backend.Free(ab); backend.Free(wb1); backend.Free(wb2);
+}
+
+// RED-BEFORE reproduction aid (QWEN38-DFLASH2-STAGE-B): on the head BEFORE the
+// fix, the seam functions below do not exist and the rollback case cannot
+// link. Compiling this TU with -DVT_TEST_GDN_SHADOW_STUBS supplies inert
+// no-ops instead, so the red run reaches the CHECKs and fails them (stage
+// reports 0 pairs, restore is a no-op) — a runtime red, not a link red.
+// Never define this macro against the fixed library: the definitions would
+// collide at link time.
+#if defined(VT_TEST_GDN_SHADOW_STUBS) && defined(VLLM_CPP_TENSTORRENT)
+namespace vt::tenstorrent {
+int StageGdnStateShadow(const void* const*, const void* const*, int) { return 0; }
+int RestoreGdnStateShadow() { return 0; }
+void FreeGdnStateShadow() {}
+bool GdnStateShadowStaged() { return false; }
+}  // namespace vt::tenstorrent
+#endif
+// QWEN38-DFLASH2-STAGE-B, fresh-review finding 3: the capture/host-free lane
+// must keep the base-pointer guard (tenstorrent_residency.cpp:1529, the
+// ISSUE-LOCAL-01M4JK8 scenario). An INTERIOR destination pointer (dst = base
+// + row*rb, the row-granular expert-gather staging shape) must DECLINE the
+// D2D arm and fall back to the host copy: FindSlot resolves an interior
+// pointer to the base slot, so an unguarded arm would stage a whole-slot
+// device shadow at a foreign offset. With `if (d->host != dst) return false;`
+// mutated out, the D2D arm serves (the safe path's host write and shadow
+// drop never happen) and the assertions below go red.
+TEST_CASE("kTENSTORRENT capture-lane D2D copy declines an interior destination pointer") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  ForceHostFreeDecode host_free;
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  // src [1, 32] bf16 (64 bytes); dst slot recorded [4, 16] (64 elements,
+  // 128 bytes) — larger than the copy, so an unguarded whole-slot arm is
+  // distinguishable from the safe path.
+  constexpr int64_t S = 1, TAPS = 32;
+  constexpr int64_t DR = 4, DC = 16;
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  using vt::tenstorrent::GetStagingStats;
+  using vt::tenstorrent::ResetStagingStats;
+  std::vector<uint16_t> sb(S * TAPS), db(DR * DC);
+  for (size_t i = 0; i < sb.size(); ++i) sb[i] = static_cast<uint16_t>(0x3800 + (i % 13));
+  for (size_t i = 0; i < db.size(); ++i) db[i] = static_cast<uint16_t>(0x3c00 + (i % 7));
+  void* ma = backend.Alloc(S * TAPS * 2);
+  void* md = backend.Alloc(DR * DC * 2);
+  void* mb4 = backend.Alloc(DC * DC * 2);
+  void* mo = backend.Alloc(DR * DC * 4);
+  Queue q = backend.CreateQueue();
+  const Device dev{DeviceType::kTENSTORRENT, 0};
+  backend.Copy(q, ma, sb.data(), S * TAPS * 2);
+  backend.Copy(q, md, db.data(), DR * DC * 2);
+  std::vector<uint16_t> wb4(DC * DC);
+  for (size_t i = 0; i < wb4.size(); ++i) wb4[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mb4, wb4.data(), wb4.size() * 2);
+  std::vector<float> ob(DR * DC, 1.0f);
+  backend.Copy(q, mo, ob.data(), ob.size() * 4);
+  Tensor d = Tensor::Contiguous(md, vt::DType::kBF16, dev, {DR, DC});
+  Tensor wt = Tensor::Contiguous(mb4, vt::DType::kBF16, dev, {DC, DC});
+  Tensor ost = Tensor::Contiguous(mo, vt::DType::kF32, dev, {DR, DC});
+  auto mm = reinterpret_cast<vt::MatmulFn>(vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  mm(q, ost, d, wt);  // installs the persistent [4, 16] shadow on md's slot
+  // Stage the SRC slot's [1, 32] bf16 shadow (an H2D Copy alone does not
+  // install a device shadow in eager mode).
+  void* mw = backend.Alloc(DC * S * TAPS * 2);
+  void* mostage = backend.Alloc(DC * 4);
+  std::vector<uint16_t> ww(DC * S * TAPS);
+  for (size_t i = 0; i < ww.size(); ++i) ww[i] = static_cast<uint16_t>(0x3f00 + (i % 5));
+  backend.Copy(q, mw, ww.data(), ww.size() * 2);
+  backend.Copy(q, mostage, wb4.data(), DC * 4);
+  Tensor sw = Tensor::Contiguous(ma, vt::DType::kBF16, dev, {S, TAPS});
+  Tensor wst = Tensor::Contiguous(mw, vt::DType::kBF16, dev, {DC, S * TAPS});
+  Tensor osst = Tensor::Contiguous(mostage, vt::DType::kF32, dev, {1, DC});
+  mm(q, osst, sw, wst);  // stages ma's [1, 32] device shadow
+  REQUIRE(vt::tenstorrent::DeviceShadowExact(d, static_cast<uint32_t>(DR),
+                                             static_cast<uint32_t>(DC)));
+  ResetStagingStats();
+  // The interior pointer: dst = base + one row's stride (32 bytes).
+  void* dst_row = static_cast<char*>(md) + TAPS * 2;
+  backend.Copy(q, dst_row, ma, S * TAPS * 2);
+  vt::tenstorrent::StagingStats st = GetStagingStats();
+  CHECK_MESSAGE(st.stages_avoided_device_copy == 0,
+                "the D2D arm must DECLINE an interior dst pointer (host "
+                    "fallback serves it), got "
+                    << st.stages_avoided_device_copy);
+  // The host fallback wrote the src bytes at the interior offset.
+  CHECK_MESSAGE(std::memcmp(static_cast<char*>(md) + TAPS * 2,
+                            sb.data(), TAPS * 2) == 0,
+                "the interior host bytes were not written by the host "
+                    "fallback");
+  // No device shadow may be installed for an interior dst: the safe path
+  // drops the base slot's shadow (MarkHostWritten) and serves from host. A
+  // src-shaped [1, 32] install is the unguarded-arm signature.
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d, static_cast<uint32_t>(S), static_cast<uint32_t>(TAPS)),
+                "the interior copy installed a src-shaped device shadow — "
+                    "the base-pointer guard is out");
+  CHECK_MESSAGE(!vt::tenstorrent::DeviceShadowExact(
+                    d, static_cast<uint32_t>(DR), static_cast<uint32_t>(DC)),
+                "the interior copy left a whole-slot device shadow behind "
+                    "after a partial host write");
+  backend.Free(ma); backend.Free(md);
+  backend.Free(mb4); backend.Free(mo);
+  backend.Free(mw); backend.Free(mostage);
+}

@@ -70,6 +70,7 @@
 #endif
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#include "vt/op_provider.h"  // vt::OpDispatchCount (QWEN38-DFLASH2-STAGE-A step-phase discriminator)
 #include "vt/recipes.h"
 #include "vt/unaligned.h"
 #ifdef VT_MARLIN_NVFP4
@@ -10013,6 +10014,15 @@ struct StepPhaseTrace {
   bool boundary = false;
   int64_t B = 0, S = 0;
   int64_t dram_free = -1;
+  // QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): the dispatch-vs-compute
+  // discriminator fields. `dispatch0` snapshots the op-table counter at Step
+  // entry; `dispatches` is the delta at the emit. A replayed step touches the
+  // host only through warm/staging (a few), an eager step through the whole op
+  // table (hundreds). `segments` is the replayed segment count — 1 for a
+  // whole-graph slot, ~64 for a region-scoped slot (one host replay enqueue
+  // per region) — set by the replay/capture emit sites only.
+  uint64_t dispatch0 = 0;
+  int64_t segments = 0;
 };
 // One line per step, emitted at every return the captured arm takes. The
 // `gap_prev` half of the wall lives in the CALLER's window (sampler + runner
@@ -10029,7 +10039,8 @@ void StepPhaseEmit(const StepPhaseTrace& p, const char* kind) {
   ++n;
   std::fprintf(stderr,
                "[TT-STEP-PHASE] step=%lld kind=%s B=%lld S=%lld boundary=%d "
-               "warm_calls=%lld dram_free_mib=%lld wall_ms=%.1f warms_ms=%.1f "
+               "warm_calls=%lld dram_free_mib=%lld dispatches=%lld segments=%lld "
+               "wall_ms=%.1f warms_ms=%.1f "
                "embed_ms=%.1f pregrow_ms=%.1f cap_begin_ms=%.1f "
                "cap_body_ms=%.1f cap_end_ms=%.1f pin_ms=%.1f replay_ms=%.1f "
                "body_ms=%.1f gap_prev_ms=%.1f\n",
@@ -10037,6 +10048,12 @@ void StepPhaseEmit(const StepPhaseTrace& p, const char* kind) {
                static_cast<long long>(p.S), p.boundary ? 1 : 0,
                static_cast<long long>(p.warm_calls),
                static_cast<long long>(p.dram_free),
+               // QWEN38-DFLASH2-STAGE-A: the op-table delta across this step
+               // (0 with the knob unset — dispatch0 stays 0 and the counter is
+               // not counting), then the replayed segment count.
+               p.on ? static_cast<long long>(vt::OpDispatchCount() - p.dispatch0)
+                    : 0LL,
+               static_cast<long long>(p.segments),
                StepPhaseMsOf(p.t0, now), p.warms_ms, p.embed_ms, p.pregrow_ms,
                p.cap_begin_ms, p.cap_body_ms, p.cap_end_ms, p.pin_ms,
                p.replay_ms, p.body_ms, gap_prev_ms);
@@ -11134,6 +11151,22 @@ inline int64_t SpecQueryLenCap() {
     return static_cast<int64_t>(std::strtoll(v, nullptr, 10));
   }();
   return cap;
+}
+
+// QWEN38-DFLASH2-STAGE-B: the GDN two-buffer commit-or-restore staging knob.
+// DEFAULT ON for the spec arm: before a captured spec step the dense decode
+// driver stages the GDN state slots' device shadows into side copies
+// (vt::tenstorrent::StageGdnStateShadow), frees them on accept, and installs
+// them back over the live slots on reject. The knob exists so the fallback
+// lane (the gdn_idx_changed full-re-gather reset) stays testable: setting it
+// to 0 restores the pre-stage-B behavior where a rejected step can only take
+// the reset lane.
+inline bool SpecStateShadowEnabled() {
+  static const bool on = [] {
+    const char* v = std::getenv("VT_TT_SPEC_STATE_SHADOW");
+    return v == nullptr || v[0] == '\0' || v[0] != '0';
+  }();
+  return on;
 }
 
 // True when capturing `key` would push this driver past `SpecQueryLenCap()`
@@ -12416,6 +12449,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   sph.B = B;
   if (sph.on && d.q.device.type == vt::DeviceType::kTENSTORRENT)
     sph.dram_free = vt::tenstorrent::DeviceDramFreeBytes() >> 20;
+  // QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): snapshot the op-table dispatch
+  // counter; the emit line prints the delta (the per-step host-touch count).
+  if (sph.on) sph.dispatch0 = vt::OpDispatchCount();
   // #1380: open a fresh demand measurement for this step. `PreGrowForCapture`
   // reads the profile the COLD step at this shape recorded, and a profile is a
   // property of one step, so the boundary is here and not inside a branch.
@@ -12444,7 +12480,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // The probe print, called at every step's return. `logits_ptr` is the step's
   // [S,vocab] f32 logits buffer (null on arms that never materialize one
   // here). All reads are D2H between steps, never during capture.
-  const auto tap_emit = [&](const char* kind, const void* logits_ptr) {
+  const auto tap_emit = [&](const char* kind, const void* logits_ptr,
+                            const void* aux_ptr = nullptr, int64_t aux_rows = 0,
+                            int64_t aux_h = 0, int64_t aux_taps = 0) {
     if (!tap_on) return;
     static std::atomic<int64_t> tap_steps{0};
     const int64_t step = tap_steps.fetch_add(1, std::memory_order_relaxed);
@@ -12486,6 +12524,49 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
                    lg[static_cast<size_t>(am)] - lg[static_cast<size_t>(am2)],
                    static_cast<long long>(zeros), static_cast<long long>(vocab),
                    lg[0], lg[1], lg[2], lg[3], lg[4]);
+      std::fflush(stderr);
+    }
+    // QWEN38-DFLASH2-STAGE-B: the residual-tap probe. Stage B's geometry
+    // fix in CopyDeviceDeviceIfCapture makes the [S, H*taps] aux slot's
+    // captured writes land at its RECORDED geometry, so a between-steps D2H
+    // readback now carries real tap data — stage A's caveat ("recorded as
+    // defect, not printed as data") is replaced. One FNV-1a checksum per tap
+    // column block plus each block's first bf16 as half-precision float bits,
+    // so a replay writing pool residue over the taps (the old clobber) is
+    // visible as a changing / garbage checksum instead of silent zeros.
+    if (aux_ptr != nullptr && aux_rows > 0 && aux_h > 0 && aux_taps > 0) {
+      const int64_t cols = aux_h * aux_taps;
+      std::vector<uint16_t> ab(static_cast<size_t>(aux_rows * cols));
+      d.b.Copy(d.q, ab.data(), aux_ptr,
+               static_cast<size_t>(ab.size()) * sizeof(uint16_t));
+      d.b.Synchronize(d.q);
+      for (int64_t t = 0; t < aux_taps; ++t) {
+        uint64_t fnv = 1469598103934665603ull;
+        for (int64_t r = 0; r < aux_rows; ++r) {
+          const uint16_t* row = ab.data() + static_cast<size_t>(r * cols) +
+                                static_cast<size_t>(t * aux_h);
+          const auto* bytes = reinterpret_cast<const unsigned char*>(row);
+          for (int64_t c = 0; c < aux_h; ++c) {
+            fnv ^= bytes[c * 2];
+            fnv *= 1099511628211ull;
+            fnv ^= bytes[c * 2 + 1];
+            fnv *= 1099511628211ull;
+          }
+        }
+        // bf16 -> f32 widening for the block's first value (bit shift).
+        const uint32_t half = ab[static_cast<size_t>(t * aux_h)];
+        const uint32_t fbits = half << 16;
+        float first_f;
+        __builtin_memcpy(&first_f, &fbits, sizeof first_f);
+        std::fprintf(stderr,
+                     "[GDN-TAP] kind=%s step=%lld TAP tap=%lld rows=%lld h=%lld "
+                     "fnv=%016llx first=%a\n",
+                     kind, static_cast<long long>(step),
+                     static_cast<long long>(t), static_cast<long long>(aux_rows),
+                     static_cast<long long>(aux_h),
+                     static_cast<unsigned long long>(fnv),
+                     static_cast<double>(first_f));
+      }
       std::fflush(stderr);
     }
   };
@@ -12761,6 +12842,33 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   }
   const bool tt_boundary =
       d.q.device.type == vt::DeviceType::kTENSTORRENT && !seq_continuation;
+  // QWEN38-DFLASH2-STAGE-B: resolve the PREVIOUS spec step's staged GDN state
+  // shadows before this step touches state. This driver runs one step per
+  // call, so the accept/reject outcome of that step reaches the driver as THIS
+  // step's position: a rewound cur_pos (tt_boundary) is the reject signature —
+  // the verify's out-of-place commit must be rolled back, or the next replay's
+  // baked content-keyed state gather reads a dead address (stage A's
+  // all-zero-logits signature). A continuation (no boundary) is the accept
+  // signature: commit = free the shadows and keep the step's own out-of-place
+  // result. A restore that declines (slot evicted, geometry changed) leaves the
+  // live slots untouched and joins the reset lane below — the
+  // full-re-gather fallback the eager path already performs, now gathering
+  // from the pre-step device truth the shadow set holds where it could apply.
+  if (d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
+      vt::tenstorrent::GdnStateShadowStaged()) {
+    if (tt_boundary) {
+      if (SpecStateShadowEnabled()) {
+        const int restored = vt::tenstorrent::RestoreGdnStateShadow();
+        if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+          std::fprintf(stderr,
+                       "[TT-SPEC-STATE] reject restore=%d (negative = declined, "
+                       "reset lane follows)\n", restored);
+      }
+      vt::tenstorrent::FreeGdnStateShadow();  // resolved either way
+    } else if (!gdn_idx_changed) {
+      vt::tenstorrent::FreeGdnStateShadow();  // accept: the commit stays
+    }
+  }
   if (((cols_changed || tt_boundary || gdn_idx_changed) && s.graph.captured()) ||
       (conv_shadow_stale && (s.graph.captured() || s.warm)) ||
       (gdn_idx_changed && s.warm)) {
@@ -12793,6 +12901,28 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
   // VT_TT_RECAPTURE_EVERY replays; the qwen3 battery runs the identical
   // setting (RC=8) green across 16-prompt cases.
   bool do_replay = s.graph.captured();
+  // QWEN38-DFLASH2-STAGE-B: stage the GDN state slots' shadows BEFORE this
+  // spec step runs — the replay and the capture both commit state through the
+  // step's out-of-place result, and a reject can only be undone from the
+  // pre-step shadows. Device-side clones (ttnn::empty + ttnn::copy), no host
+  // round-trip. Slots without a live device shadow are skipped; the eager
+  // re-gather covers them. Default on for the spec arm (SpecStateShadowEnabled).
+  if (do_replay && spec_step &&
+      d.q.device.type == vt::DeviceType::kTENSTORRENT && has_gdn &&
+      SpecStateShadowEnabled()) {
+    std::vector<const void*> ssm_hosts(gdn_state.size()),
+        conv_hosts(gdn_state.size());
+    for (size_t e = 0; e < gdn_state.size(); ++e) {
+      ssm_hosts[e] = gdn_state[e].ssm_state.data;
+      conv_hosts[e] = gdn_state[e].conv_state.data;
+    }
+    const int staged = vt::tenstorrent::StageGdnStateShadow(
+        ssm_hosts.data(), conv_hosts.data(),
+        static_cast<int>(gdn_state.size()));
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+      std::fprintf(stderr, "[TT-SPEC-STATE] stage pairs=%zd staged=%d\n",
+                   gdn_state.size(), staged);
+  }
   if (do_replay && d.q.device.type == vt::DeviceType::kTENSTORRENT) {
     const char* rc_env = std::getenv("VT_TT_RECAPTURE_EVERY");
     const int rc_n = rc_env != nullptr ? std::atoi(rc_env) : 0;
@@ -12843,13 +12973,18 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.graph.Replay(impl_->queue);
     if (sph.on) {
       sph.replay_ms = StepPhaseMsOf(sph_tr0, StepPhaseClk::now());
+      // QWEN38-DFLASH2-STAGE-A: the replay round-trip count — 1 whole-graph
+      // segment, or one host replay enqueue PER REGION on the region-scoped slot.
+      sph.segments = static_cast<int64_t>(s.graph.segment_count());
       StepPhaseEmit(sph, "replay");
     }
     ++s.replays;
     ++s.expected_cur_pos;  // the replay's in-trace plus_one advanced cur_pos
     ++impl_->replays;
     publish_aux();
-    tap_emit("replay", s.logits->ptr());
+    tap_emit("replay", s.logits->ptr(),
+             aux_taps > 0 && s.aux != nullptr ? s.aux->ptr() : nullptr,
+             S, H, aux_taps);
     return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
   }
 
@@ -13158,6 +13293,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     s.graph.Replay(impl_->queue);
     if (sph.on) {
       sph.replay_ms = StepPhaseMsOf(sph_tr1, StepPhaseClk::now());
+      sph.segments = static_cast<int64_t>(s.graph.segment_count());
       StepPhaseEmit(sph, "capture");
     }
     record_staged();
@@ -13165,7 +13301,9 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
     ++s.expected_cur_pos;  // the capture step's launch ran the trace once
     ++impl_->replays;
     publish_aux();
-    tap_emit("capture", s.logits->ptr());
+    tap_emit("capture", s.logits->ptr(),
+             aux_taps > 0 && s.aux != nullptr ? s.aux->ptr() : nullptr,
+             S, H, aux_taps);
     return ViewDeviceLogits(s.logits->ptr(), d.q.device, B, vocab);
   }
 

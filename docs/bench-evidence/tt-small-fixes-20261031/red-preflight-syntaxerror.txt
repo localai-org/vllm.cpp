@@ -1,0 +1,5 @@
+$ python3 scripts/agent-preflight.sh --staged   # at HEAD 762098300, scratch + real worktree
+  File "/tmp/tt-small-fixes/scripts/agent-preflight.sh", line 86
+    --staged) STAGED=1 ;;
+            ^
+SyntaxError: unmatched ')'

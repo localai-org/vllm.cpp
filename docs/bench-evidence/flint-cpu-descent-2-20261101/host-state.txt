@@ -1,0 +1,14 @@
+host: thalia (aarch64, 128 cores)
+date: 2026-11-04
+governor: performance (as found, left unchanged)
+idle gate before every leg: 1-min load < 16 (attribution) / < 6 (A/B legs);
+CONTENDED BOX: peer session flint-p150-serving-bench ran vllm-bench in the
+same zone during this row (1-min load 2-26). Absolute tok/s below quiet-box
+records; all claims are interleaved same-binary A/B ratios + in-situ phase deltas.
+worktree: /tmp/flint-cpu-descent2 branch row/FLINT-CPU-DESCENT-2
+  (rebased onto FLINT-NEON-Q4K-DOT fedc43589 before any measurement)
+binary: /tmp/build-flint-descent2/examples/vllm-bench (Release)
+sha256: 20c89707f762af73f0840f7b2c2911193617e60cac2ae30a96cb2cda7c15927e  /mnt/models/flint-GGUF/flint-Q4_K_M.gguf
+contaminated first sweep: attr-16/attr-32 logs replaced after $TH bug found
+  (loop var lowercase th vs $TH -> pool defaulted 128 -> the documented
+  oversubscription collapse, 1.17 tok/s); those logs deleted, not kept.

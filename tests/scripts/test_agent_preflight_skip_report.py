@@ -1006,5 +1006,37 @@ class BenchmarkIndexRegistrationTests(PreflightHarness):
         )
 
 
+class StagedInvocationTests(PreflightHarness):
+    """`--staged` runs the bash script, and the run reports a parse-clean pass.
+
+    The kolibri1-GGUF implementer report (2026-10-30) read
+    "SyntaxError around scripts/agent-preflight.sh:86" as a defect in inline
+    python inside the --staged branch. The diagnosis the tree gives is
+    different: the script carries NO inline python, and the crash is Python
+    parsing the BASH file after a `python3 scripts/agent-preflight.sh --staged`
+    invocation -- the parser stops at the first bash-only token, the
+    `--staged)` case label on line 86 ("SyntaxError: unmatched ')'"), which is
+    why the report names that line. The non-staged run those instructions
+    compared against was the documented `bash` invocation, hence "clean".
+
+    A bash file cannot defend itself against a python3 parse, so the repairable
+    surface is the documented invocation itself: this case executes it the way
+    AGENTS.md spells it and pins that the --staged branch runs a real report
+    with no interpreter traceback in either stream.
+    """
+
+    def test_staged_run_in_a_scratch_repo_reports_no_syntax_error(self) -> None:
+        report = self.preflight("--staged")
+
+        self.assertNotIn("SyntaxError", report.text)
+        self.assertNotIn("Traceback", report.text)
+        # The run reached the staged branch and answered it, rather than dying
+        # on the way there: the heading, the gate result line under it, and an
+        # exit status from the documented set (0 green, 1 failing gates).
+        self.assertIn("Staged change:", report.text)
+        self.assertIn("now-current --staged", report.text)
+        self.assertIn(report.returncode, (0, 1), str(report))
+
+
 if __name__ == "__main__":
     unittest.main()
