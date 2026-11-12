@@ -18,7 +18,7 @@
 // and extern declarations; vulkan_spirv.cpp carries the data, so adding shaders
 // costs one TU's compile time rather than all of them.
 //
-// Produced by: Glslang Version: 11:16.4.0
+// Produced by: Glslang Version: 11:16.5.0
 // Target environment: vulkan1.1
 #ifndef VT_VULKAN_VULKAN_SPIRV_H_
 #define VT_VULKAN_VULKAN_SPIRV_H_

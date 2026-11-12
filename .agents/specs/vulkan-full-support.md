@@ -613,6 +613,54 @@ gate is a memcmp of the two arms in ONE process, plus the specialization VALUES
 from `PipelineKeys()`, because both arms are the same module and produce
 identical bytes; a numeric check alone could never see the mechanism.
 
+### 6.0b `VK-G` partial: the PREFILL CONV landed — 2026-10-01
+
+`row/BACKEND-VULKAN-CONVFWD`. `kCausalConv1dFwd` is native
+(`vt_causal_conv1d_fwd`); module count 43 -> 44. This updates the closing
+sentence of §6.0a: of the two ops it named as the reference-tier declines on that
+path, `kRopeCosSinCache` remains, by design.
+
+**Why it had been left.** The op computes every output from the OLD conv-state
+window and then overwrites that window in the same call, so a dispatch that
+splits a sequence across invocations reads state another invocation is
+rewriting. `vulkan_ops.cpp` named the two safe shapes: a serial invocation per
+(sequence, channel) over the whole token range, or a buffered old row.
+
+**What landed.** The first of those shapes is the DEFAULT: one invocation per
+(sequence, channel), the CPU kernel's own `ForRows(n * c_dim, ...)` unit, with
+the old window copied into a private array before the write-back (the CPU
+kernel's `old_row`). Per-element arithmetic is ported 1:1 from
+`src/vt/cpu/cpu_ops.cpp` `CausalConv1dFwdKernel`, including its silu spelling.
+
+An OPT-IN token split, `VT_VULKAN_CONV_TARGET_GROUPS`, divides each sequence
+into token blocks in the same dispatch. Only `t < width` reads the carried state;
+the shader gives every such token to block 0, which also writes the state back
+and is the only block that touches `conv_state`. Without that rule the split
+raced: on llvmpipe the wrong elements were exactly the `t < width` tokens that
+fell outside block 0. It is off by default; whether a split is worth anything is
+a property of the device.
+
+Shapes the shader does not serve DECLINE to the reference tier through
+`GetOpFallback`, the seam §6.0 uses: K = 1, a kernel width past its 8-slot
+window, `conv_state` rows wider than K-1 (the CPU reference addresses rows with
+stride K-1 while the op layer admits wider rows; declining keeps the reference's
+answer instead of choosing), storage dtypes outside f32/f16/bf16, a
+`has_initial_state` that is neither i8 nor i32, a grid past the device's
+`maxComputeWorkGroupCount[0]`, and any index that would not fit the shader's
+uint32 arithmetic. The native path does not read `query_start_loc` on the host;
+the shader's guard keeps every access in bounds but does not validate the table,
+so a malformed table that the CPU reference would reject gives unspecified
+output here.
+
+**Gates.** `test_vulkan_backend`, against the CPU oracle: the default mapping
+and the split on a varlen batch (lengths 5, 1, 9, one sequence without initial
+state), with the specialization value asserted; i8 flags at byte offsets 1-3, no
+bias, silu off, bf16 and f16 operands with bf16 or f32 output, a zero-length
+sequence and a padded `x` row stride; a bf16
+`conv_state` against the f32 arm; and the K = 10 and widened-row declines.
+Outputs to the GDN NMSE tolerance, rolled state bit-exact.
+`VT_VULKAN_CONV_FWD=0` keeps the op on the reference tier for a same-binary A/B.
+
 ### 6.0a `VK-G` partial: the FUSED ATTN PREAMBLE landed — 2026-08-09
 
 `row/BACKEND-VULKAN-QKNORM`. `kAttnQkNormRopeGate` — gemma-RMSNorm(q) +
