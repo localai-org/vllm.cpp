@@ -190,8 +190,8 @@ no gate and no plan can schedule this backlog without a human reading all 352.
 
 ### 2.2 A gate defect found while counting, and it under-reports this backlog
 
-`owed_issues()` in `scripts/check-agent-record.py:2002-2017` reads the backlog
-with two bugs:
+`owed_issues()` - the record checker's backlog reader, retired by the
+local-issue-authority cutover (`a9f6186c2`) - read the backlog with two bugs:
 
 ```python
 if "\n## Owed" not in text:
@@ -736,7 +736,7 @@ a cluster of nine and was published as one item**; §6.1 carries all nine.
 | **D7** | **The campaign `Out` list is stale in five of its entries.** The temporal upsampler, LoRA fusion, multishot, `KeyframeInterpolation` and `TI2VidTwoStages` have all landed or been retired | `ltx-2-5.md:288-296` | S |
 | **D8** | **Three stale blocker bullets** assert what §5 falsifies, plus two propagated copies. They also carry the two wrong anchors this spec inherited (`hdr_ic_lora.py:229` at `:986`, `ltx2_lora.cpp:246` at `:987`; true values 217 and 255) and a third, the reference-audio refusal cited at `ltx2_video.cpp:1991-2004` when it is at `:2754-2766` | `ltx-2-5.md:973-996` (**not** `:962-991`, which is an unrelated #1458 paragraph), `ltx25-retake.md:212,499` | S |
 | **D9** | The copy-pasteable render command omits `--checkpoint-class` and refuses as written | `docs/models/ltx-2-5.md:105-118` | S |
-| **D10** | **The owed-backlog gate misses 7 of the 166 issue numbers under an owed heading** — a numbered or differently-worded heading is skipped entirely (`:2012`), and only the first section is read (`:2014`). Measured in the gate's OWN unit: `owed_issues()` returns `set[str]` of issue numbers and never counts items, so this row's earlier "~74 of 299 items" measured a quantity the function does not compute. §2.2 | `scripts/check-agent-record.py:2002-2017` | S, needs a red-first test |
+| **D10** | **The owed-backlog gate misses 7 of the 166 issue numbers under an owed heading** — a numbered or differently-worded heading is skipped entirely (`:2012`), and only the first section is read (`:2014`). Measured in the gate's OWN unit: `owed_issues()` returns `set[str]` of issue numbers and never counted items, so this row's earlier "~74 of 299 items" measured a quantity the function does not compute. §2.2 | the record checker's `owed_issues()` reader (retired, `a9f6186c2`) | S, needs a red-first test |
 | **D11** | **NINE in-tree statements describe as unported or owed something this tree ships.** Published as one until review; the table below carries all nine with the tree's falsifier beside each. §A.5 | nine sites, listed below | S each, but see the note |
 | **D12** | **The campaign carries no ratification of the GGUF k-quant exemption**, which five specs assert independently. §A.3. This is records debt only in that no record arbitrates; the decision itself is the developer's | five `ltx25-*.md` specs; no arbitrating record found | decision |
 
@@ -1130,7 +1130,7 @@ files = [f for f in sorted(set(glob.glob(".agents/specs/ltx25-*.md")) | {".agent
 tot = secs = blind = 0; agg = {}; specs = set(); issues = set(); seen = set()
 for f in files:
     lines = open(f, encoding='utf-8').read().split("\n"); txt = "\n".join(lines)
-    # exactly what scripts/check-agent-record.py:2012-2014 reads, and no more
+    # exactly the two rules `owed_issues()` read the owed section with, and no more
     gate = txt.split("\n## Owed", 1)[1].split("\n## ", 1)[0] if "\n## Owed" in txt else ""
     seen |= set(ISSUE.findall(gate))
     i = 0
