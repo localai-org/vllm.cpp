@@ -1,0 +1,43 @@
+2026-11-13 14:04:49.989 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-13 14:04:49.989 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-13 14:04:49.989 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-13 14:04:49.989 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-13 14:04:49.992 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-13 14:04:49.992 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-13 14:04:50.020 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-13 14:04:50.020 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-13 14:04:50.020 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-13 14:04:50.020 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-13 14:04:50.021 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-13 14:04:50.093 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-13 14:04:50.137 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-13 14:04:50.137 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-13 14:04:50.138 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-13 14:04:50.138 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-13 14:04:50.138 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-13 14:04:50.935 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:12970:
+TEST CASE:  kTENSTORRENT Q8_K keep-quant staging: 80 padded words, byte-exact
+
+./tests/vt/test_tenstorrent_backend.cpp:12970: ERROR: test case THREW exception: vt: tenstorrent EnsureKeepQuantWords: unsupported encoding at ./src/vt/tenstorrent/tenstorrent_keepquant.cpp:112
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:13047:
+TEST CASE:  kTENSTORRENT Q8_K keep-quant composite matmul matches the CPU dequant oracle
+
+./tests/vt/test_tenstorrent_backend.cpp:13047: ERROR: test case THREW exception: vt: tenstorrent kMatmulBTQuant: kQ8_K has no keep-quant decode on TENSTORRENT; the registered set is kQ4_K/kQ5_K/kQ6_K/kQ8_0/kIQ3_XXS/kIQ2_XXS/kIQ2_S/kQ3_K/kIQ3_S/kIQ4_XS/kIQ2_XS/kQ2_K/kIQ1_S/kIQ1_M (BACKEND-TENSTORRENT-KEEPQUANT, QUANT-GGUF-IQ-TENSTORRENT) at ./src/vt/tenstorrent/tenstorrent_keepquant.cpp:907
+
+===============================================================================
+[doctest] test cases: 2 | 0 passed | 2 failed | 112 skipped
+[doctest] assertions: 0 | 0 passed | 0 failed |
+[doctest] Status: FAILURE!
+2026-11-13 14:04:50.936 | info     |    BuildKernels | JIT cache stats: 8/8 hits (100.0%) [8 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-13 14:04:50.936 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-13 14:04:50.974 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-13 14:04:50.974 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-13 14:04:50.994 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-13 14:04:50.994 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-13 14:04:50.994 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

@@ -1,0 +1,2 @@
+af36ecb6b5db1407953345b746c14ac93f0657dda413910b4348683a2d990377  /mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q8_K_XL.gguf
+done

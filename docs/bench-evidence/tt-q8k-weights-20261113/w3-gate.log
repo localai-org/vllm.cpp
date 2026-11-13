@@ -1,0 +1,52 @@
+Found 1 chips to reset
+Resetting chips
+Waiting for reset to complete
+New chip! We now have 1 chips
+Chip initialization complete (found )
+Chip initializing complete...
+ ARC
+
+ [8/8] DRAM
+
+ [14/14] ETH
+
+ [4/4] CPU
+
+Chip detection complete (found )
+=== q8k-1 start 2026-11-13T14:32:58+01:00 load=5.75 ===
+=== q8k-1 end 2026-11-13T14:36:42+01:00 exit=0 ===
+Found 1 chips to reset
+Resetting chips
+Waiting for reset to complete
+New chip! We now have 1 chips
+Chip initialization complete (found )
+Chip initializing complete...
+ ARC
+
+ [8/8] DRAM
+
+ [14/14] ETH
+
+ [4/4] CPU
+
+Chip detection complete (found )
+=== q8k-2 start 2026-11-13T14:36:58+01:00 load=4.35 ===
+=== q8k-2 end 2026-11-13T14:39:26+01:00 exit=0 ===
+Found 1 chips to reset
+Resetting chips
+Waiting for reset to complete
+New chip! We now have 1 chips
+Chip initialization complete (found )
+Chip initializing complete...
+ ARC
+
+ [8/8] DRAM
+
+ [14/14] ETH
+
+ [4/4] CPU
+
+Chip detection complete (found )
+=== q8k-3 start 2026-11-13T14:39:42+01:00 load=3.90 ===
+=== q8k-3 end 2026-11-13T14:42:10+01:00 exit=0 ===
+ALL LEGS DONE 2026-11-13T14:42:10+01:00

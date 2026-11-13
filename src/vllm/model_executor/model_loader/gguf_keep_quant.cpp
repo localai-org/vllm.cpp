@@ -248,8 +248,16 @@ bool DeviceKeepQuantSupported(vt::DType dt, vt::DeviceType dev) {
       // grid), dispatched on the DEFAULT path. The GSQ-RCO Qwen3.8-27B
       // vehicle's 4 + 4 IQ1 tensors (ffn tail) are the artifacts this
       // admits; this closes the file's block-quant census.
+      // TT-KEEPQUANT-Q8K-WEIGHTS: kQ8_K joins the TT GEMM set — the
+      // UD-Q8_K_XL checkpoint's weights arm. It stages at 80 padded words
+      // per 292-B block_q8_K and serves the DEQUANT-COMPOSITE arm (the E=1
+      // grouped chain; NO int8-dot kernel — none exists for Q8_K weights,
+      // and the fused INT8-dot arm is a separate PERF row). The
+      // DeviceKeepQuantSupported contract holds: this predicate widens only
+      // in the same change as the serve it names.
       return dt == vt::DType::kQ4_K || dt == vt::DType::kQ5_K ||
              dt == vt::DType::kQ6_K || dt == vt::DType::kQ8_0 ||
+             dt == vt::DType::kQ8_K ||
              dt == vt::DType::kIQ3_XXS || dt == vt::DType::kIQ2_XXS ||
              dt == vt::DType::kIQ2_S || dt == vt::DType::kQ3_K ||
              dt == vt::DType::kIQ3_S || dt == vt::DType::kIQ4_XS ||
@@ -258,7 +266,14 @@ bool DeviceKeepQuantSupported(vt::DType dt, vt::DeviceType dev) {
     default:
       // CUDA falls back to the CPU kernel for anything it lacks
       // (cuda_quant_dot.cu:1841-1846); the CPU list IS the CPU capability.
-      return true;
+      // TT-KEEPQUANT-Q8K-WEIGHTS scopes the kQ8_K weights arm to the devices
+      // that name its composite serve: CPU (the to_float fallthrough IS the
+      // oracle) and TENSTORRENT (the composite chain). CUDA keeps its
+      // pre-arm behavior — its provider has no Q8_K-weight serve of its own,
+      // so widening here would be an admitted-but-unimplemented encoding,
+      // the exact failure the predicate exists to prevent.
+      return dt != vt::DType::kQ8_K || dev == vt::DeviceType::kCPU ||
+             dev == vt::DeviceType::kTENSTORRENT;
   }
 }
 
@@ -316,9 +331,13 @@ bool DeviceQuantGatherSupported(vt::DeviceType dev) {
 bool KeepQuantDType(uint32_t ggml_type, vt::DType* out) {
   vt::DType dt = vt::DType::kF32;
   if (!vt::BlockDTypeFromGgmlTypeId(ggml_type, &dt)) return false;
-  // Q8_K is the K-quants' ACTIVATION encoding and has no weight-side vec_dot, so
-  // it is not keep-quant capable, although a file CAN carry it (reader case 15).
-  if (!vt::cpu::HasQuantDotKernel(dt)) return false;
+  // TT-KEEPQUANT-Q8K-WEIGHTS: kQ8_K joins the GEMM set. It has no weight-side
+  // vec_dot (the selector at cpu_quant_dot.cpp returns nullptr), so it serves
+  // the DEQUANT-COMPOSITE arm — the tree-standard for Q8_K weights, on the
+  // CPU oracle (cpu_quant_gemm.cpp's ComposeChunk fallthrough) and on the
+  // device (the TT composite chain) alike. Every other encoding still needs
+  // a real vec_dot; the kQ8_K exception is named, not silent.
+  if (dt != vt::DType::kQ8_K && !vt::cpu::HasQuantDotKernel(dt)) return false;
   if (out != nullptr) *out = dt;
   return true;
 }

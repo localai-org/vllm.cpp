@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M7ADZAKNZTC45QPEE1WGW2DV
 Title: TT keepquant: the Q8_K weights arm — serve UD-Q8_K_XL-class GGUF checkpoints on the P150
 Row: TT-KEEPQUANT-Q8K-WEIGHTS
-State: OPEN
+State: CLOSED
 Kind: feature
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-13
 Updated: 2026-11-13
-Closed: -
+Closed: 2026-11-13
 
 ## Problem
 
@@ -16,4 +16,4 @@ The developer pinned unsloth/Qwen3.8-27B-GGUF @ ce331efc48d5722b4b8041f72793e530
 
 ## Resolution
 
--
+W1+W2 shipped green (loader + 80-word staging + dequant-composite serve; red-before captured; 337/337 device assertions; full loader suite 63/63; Q4_K/Q6_K byte-identity holds — the lone subset failure is the pre-existing kGdnPostConv gap, fails identically on build-q6k). W3 STOP CONDITION MET: the pinned UD-Q8_K_XL artifact (sha256 af36ecb6... verified) OOMs deterministically at the 8-block KV floor in all 3 legs (TT_FATAL 178257920 B, 7.5 MB free, ~171 MB short, inside MatmulBTQuantInt8DotKernel in Qwen3_5DenseModel::ForwardDevice) — unservable-on-P150 at the standing recipe; recorded in docs/bench-evidence/tt-q8k-weights-20261113/.

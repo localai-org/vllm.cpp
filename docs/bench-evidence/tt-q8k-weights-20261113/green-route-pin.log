@@ -1,0 +1,23 @@
+2026-11-13 14:14:13.341 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-13 14:14:13.341 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-13 14:14:13.341 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-13 14:14:13.341 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-13 14:14:38.128 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-13 14:14:38.128 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-13 14:14:38.157 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-13 14:14:38.157 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-13 14:14:38.157 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-13 14:14:38.157 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-13 14:14:38.158 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-13 14:14:38.245 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  1 |  1 passed | 0 failed | 62 skipped
+[doctest] assertions: 18 | 18 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-13 14:14:38.289 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-13 14:14:38.289 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-13 14:14:38.344 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-13 14:14:38.344 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-13 14:14:38.344 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

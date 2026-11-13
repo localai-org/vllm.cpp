@@ -203,6 +203,13 @@ void KeepQuantChunkRowsOverrideForTest(int64_t rows);
 //    (the vehicle's tied head shares the table: its GATHER keeps the twin,
 //    its MATMUL stages only the packed words).
 bool KeepQuantWordShadowPresentForTest(const void* host);
+// TT-KEEPQUANT-Q8K-WEIGHTS: read the staged PACKED i32 word shadow back to
+// the host (a blocking to_vector read, the EnsureHostBytes precedent). The
+// staging test's byte-exact observable: the words the device resident holds,
+// not the bytes the host packed. False (and *out untouched) when no shadow
+// is staged for `host`.
+bool KeepQuantWordShadowWordsForTest(const void* host,
+                                     std::vector<int32_t>* out);
 bool DecodedWeightShadowPresentForTest(const void* host);
 bool EmbedTableShadowPresentForTest(const void* host);
 // W4d W0 (#3042): device-side allocation trace — interleaves
@@ -286,6 +293,10 @@ inline void ResetKeepQuantCaptureStagingWritesForTest() {}
 inline int64_t LastTraceBytesForTest() { return 0; }
 inline void KeepQuantChunkRowsOverrideForTest(int64_t) {}
 inline bool KeepQuantWordShadowPresentForTest(const void*) { return false; }
+inline bool KeepQuantWordShadowWordsForTest(const void*,
+                                            std::vector<int32_t>*) {
+  return false;
+}
 inline bool DecodedWeightShadowPresentForTest(const void*) { return false; }
 inline bool EmbedTableShadowPresentForTest(const void*) { return false; }
 inline void AllocTraceSnapshot(MeshDevice&, const char*) {}

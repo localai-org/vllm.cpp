@@ -38,9 +38,16 @@ namespace vt {
 //     :305-310 (block_q3_K), :317-327 (block_q4_K), :334-345 (block_q5_K),
 //     :352-357 (block_q6_K), :361-365 (block_q8_K), :371-374 (block_iq2_xxs),
 //     :385-400 (block_iq3_xxs)
-// kQ8_K is ACTIVATION-ONLY: it is the `vec_dot_type` of the K-quants and has no
-// weight-side `vec_dot`, so it is never keep-quant capable — although a GGUF
-// file can carry it, and only the decode-only embedding gather takes it packed.
+// kQ8_K is ACTIVATION-ONLY as a DOT operand: it is the `vec_dot_type` of the
+// K-quants and has no weight-side `vec_dot`, so no keep-quant DOT serves it.
+// As a WEIGHT encoding it is keep-quant capable since TT-KEEPQUANT-Q8K-WEIGHTS
+// (2026-11-13): a GGUF file can carry it (the unsloth/Qwen3.8-27B-GGUF
+// UD-Q8_K_XL checkpoint does), the loader keeps its blocks COMPRESSED, and it
+// serves through the DEQUANT-COMPOSITE arm — the tree-standard for Q8_K
+// weights (cpu_quant_dot.cpp's selector returns nullptr by design; the CPU
+// oracle path is cpu_quant_gemm.cpp's to_float fallthrough, staged at 80
+// padded words per 292-B block_q8_K on the TT device path). The
+// decode-only embedding gather also takes it packed, as before.
 //
 // kQ2_K, kIQ2_XXS and kIQ3_XXS are the ~2-3-bit storage encodings the `unsloth/
 // DeepSeek-V4-Flash-GGUF UD-IQ2_XXS/UD-Q2_K_XL` checkpoints use (the real

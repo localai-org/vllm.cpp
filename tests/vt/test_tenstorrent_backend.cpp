@@ -12957,3 +12957,175 @@ TEST_CASE("kTENSTORRENT capture-lane D2D copy declines an interior destination p
   backend.Free(mb4); backend.Free(mo);
   backend.Free(mw); backend.Free(mostage);
 }
+// TT-KEEPQUANT-Q8K-WEIGHTS W2, test 1: the Q8_K staging geometry. block_q8_K
+// is 292 B per 256 elements (cpu_quant_blocks.h:129-134: f32 d + int8
+// qs[256] + int16 bsums[16]) — 73 words, ZERO-PADDED to the standing
+// 64-B-multiple grid (tenstorrent_keepquant.cpp:62-68 pad rule) = 80 words
+// (320 B) per super-block. The staged words must be byte-exact against the
+// host packed layout: word 0 IS the f32 d's bits (whole word,
+// little-endian), words 1..64 are qs[256], words 65..72 the bsums pair
+// packing, words 73..79 the zero pad. RED-BEFORE: with no Q8_K arm
+// registered, EnsureKeepQuantWords refuses (KeepQuantWordsPerBlock == 0) and
+// both legs throw.
+TEST_CASE("kTENSTORRENT Q8_K keep-quant staging: 80 padded words, byte-exact") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  constexpr int64_t kN = 2, kNb = 2;  // K = 512, two weights x two blocks
+  constexpr int64_t kBB = 292;        // sizeof(BlockQ8_K), static_assert'ed
+  std::mt19937 rng(20261113);
+  auto rand_byte = [&rng]() {
+    return static_cast<uint8_t>(rng() % 256);
+  };
+
+  // Deterministic packed blocks: PRNG bytes everywhere, then a finite f32 d
+  // at offset 0 (the one field the decode multiplies by).
+  std::vector<uint8_t> packed(kN * kNb * kBB);
+  std::vector<float> ds(kN * kNb);
+  for (int64_t b = 0; b < kN * kNb; ++b) {
+    uint8_t* blk = packed.data() + b * kBB;
+    for (int i = 0; i < kBB; ++i) blk[i] = rand_byte();
+    const float d = (0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f) *
+                    ((rng() % 2) != 0 ? 1.0f : -1.0f);
+    std::memcpy(blk, &d, 4);
+    ds[b] = d;
+  }
+
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  void* mem_b = backend.Alloc(packed.size());
+  backend.Copy(q, mem_b, packed.data(), packed.size());
+  Tensor b_t = Tensor::Contiguous(mem_b, vt::DType::kQ8_K,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0},
+                                  {kN, kNb * 256});
+
+  // The production staging entry (the residency pre-pass qwen3_5.cpp:9279
+  // uses): a capture-time-safe eager stage of the whole packed tensor.
+  vt::tenstorrent::StageKeepQuantWordsFor(b_t);
+  REQUIRE_MESSAGE(
+      vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
+      "Q8_K-STAGED: the Q8_K weight staged no resident i32 word shadow");
+  std::vector<int32_t> words;
+  REQUIRE(vt::tenstorrent::KeepQuantWordShadowWordsForTest(b_t.data, &words));
+  CHECK_MESSAGE(words.size() == static_cast<size_t>(kN * kNb * 80),
+                "Q8_K row must stage at 80 padded words (292 B -> 73 -> "
+                    "64-B grid), got "
+                << words.size() / (kN * kNb));
+
+  // Byte-exact: reconstruct the expected word row from the HOST bytes.
+  auto word_at = [&](int64_t blk, int w) {
+    const uint8_t* p = packed.data() + blk * kBB + w * 4;
+    return static_cast<int32_t>(static_cast<uint32_t>(p[0]) |
+                                (static_cast<uint32_t>(p[1]) << 8) |
+                                (static_cast<uint32_t>(p[2]) << 16) |
+                                (static_cast<uint32_t>(p[3]) << 24));
+  };
+  for (int64_t b = 0; b < kN * kNb; ++b) {
+    for (int w = 0; w < 73; ++w)  // the true block bytes: 292 B = 73 words
+      CHECK_MESSAGE(words[b * 80 + w] == word_at(b, w),
+                    "Q8_K word " << w << " of block " << b << " mismatch");
+    for (int w = 73; w < 80; ++w)  // the pad: always zero
+      CHECK_MESSAGE(words[b * 80 + w] == 0,
+                    "Q8_K pad word " << w << " of block " << b << " not zero");
+    float d;
+    const int32_t w0 = words[b * 80];
+    std::memcpy(&d, &w0, 4);
+    CHECK_MESSAGE(d == ds[b], "Q8_K block " << b << " f32 d mismatch");
+  }
+  backend.Free(mem_b);
+  MESSAGE("Q8_K staging: 80 words/block, byte-exact incl. f32 d and zero pad");
+}
+
+// TT-KEEPQUANT-Q8K-WEIGHTS W2, test 2: the composite correctness arm. Q8_K
+// has NO vec_dot anywhere in the tree (cpu_quant_dot.cpp's selector returns
+// nullptr — the dequant-composite is the tree-standard for Q8_K weights, on
+// the CPU oracle AND the device). The device serve is the E=1 grouped chain
+// (decode to f32 on-core from the resident words, f32 dot at decode shapes)
+// — never the int8-dot kernel. Oracle: vt::cpu::BlockToFloat(kQ8_K) then an
+// f64-accumulated f32 dot over the SAME widened bf16 activation.
+TEST_CASE("kTENSTORRENT Q8_K keep-quant composite matmul matches the CPU "
+          "dequant oracle") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  constexpr int64_t kN = 4, kNb = 2;  // K = 512
+  constexpr int64_t K = kNb * 256;
+  constexpr int64_t kBB = 292;
+  std::mt19937 rng(777);
+  auto rand_byte = [&rng]() {
+    return static_cast<uint8_t>(rng() % 256);
+  };
+
+  std::vector<uint8_t> packed(kN * kNb * kBB);
+  for (int64_t b = 0; b < kN * kNb; ++b) {
+    uint8_t* blk = packed.data() + b * kBB;
+    for (int i = 0; i < kBB; ++i) blk[i] = rand_byte();
+    const float d = (0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f) *
+                    ((rng() % 2) != 0 ? 1.0f : -1.0f);
+    std::memcpy(blk, &d, 4);
+  }
+  std::vector<uint16_t> a_bf(K);
+  for (auto& v : a_bf)
+    v = vt::F32ToBF16((static_cast<float>(rng() % 401) - 200.0f) / 100.0f);
+
+  // CPU dequant-composite oracle: decode exactly (d * qs, f32), f64 dot.
+  std::vector<float> w_f32(kN * K);
+  vt::cpu::BlockToFloat(vt::DType::kQ8_K)(packed.data(), w_f32.data(), kN * K);
+  std::vector<double> ref(kN, 0.0);
+  for (int64_t n = 0; n < kN; ++n) {
+    double acc = 0.0;
+    for (int64_t k = 0; k < K; ++k) {
+      uint32_t bits = static_cast<uint32_t>(a_bf[k]) << 16;
+      float af;
+      std::memcpy(&af, &bits, 4);
+      acc += static_cast<double>(af) *
+             static_cast<double>(w_f32[n * K + k]);
+    }
+    ref[n] = acc;
+  }
+
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+  void* mem_b = backend.Alloc(packed.size());
+  void* mem_o = backend.Alloc(kN * sizeof(float));
+  backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_b, packed.data(), packed.size());
+  Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {1, K});
+  Tensor b_t = Tensor::Contiguous(mem_b, vt::DType::kQ8_K,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, K});
+  Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                  Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kN});
+
+  vt::MatmulBT(q, o_t, a_t, b_t);
+  vt::MatmulBT(q, o_t, a_t, b_t);  // warm pair: stage once, serve forever
+
+  // COMPOSITE-ONLY: the int8-dot kernel must never take a Q8_K weight — the
+  // serve goes through the word shadow and the decode, not a dot arm.
+  REQUIRE_MESSAGE(
+      vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
+      "Q8_K composite: no resident word shadow staged");
+  CHECK_FALSE_MESSAGE(
+      vt::tenstorrent::DecodedWeightShadowPresentForTest(b_t.data),
+      "Q8_K composite: a decoded bf16 twin was built — the composite arm "
+          "must decode per call, not cache a twin");
+
+  std::vector<float> out(kN, 0.0f);
+  backend.Copy(q, out.data(), mem_o, out.size() * sizeof(float));
+  backend.Free(mem_a);
+  backend.Free(mem_b);
+  backend.Free(mem_o);
+  for (int64_t n = 0; n < kN; ++n) {
+    CHECK(std::isfinite(out[n]));
+    // The chain is exact decode + f32 accumulation vs the f64 oracle; the
+    // K=512 sum of f32 products sits far below this relative envelope.
+    const double tol = 1e-3 * (std::fabs(ref[n]) + 1.0);
+    CHECK_MESSAGE(std::fabs(static_cast<double>(out[n]) - ref[n]) <= tol,
+                  "Q8_K composite out[" << n << "]=" << out[n] << " ref="
+                                        << ref[n]);
+  }
+  MESSAGE("Q8_K composite matmul: matches the CPU dequant oracle");
+}

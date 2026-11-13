@@ -1,0 +1,30 @@
+2026-11-13 14:04:49.664 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-13 14:04:49.664 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-13 14:04:49.665 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-13 14:04:49.665 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-13 14:04:49.668 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-13 14:04:49.668 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-13 14:04:49.708 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-13 14:04:49.708 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-13 14:04:49.708 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-13 14:04:49.708 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-13 14:04:49.709 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-13 14:04:49.793 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/test_gguf_keep_quant.cpp:340:
+TEST CASE:  keep-quant routing on TENSTORRENT admits exactly the registered decodes (KEEPQUANT W3)
+
+./tests/vllm/test_gguf_keep_quant.cpp:417: ERROR: CHECK( route(kQ8_K) == GgufResidency::kKeepQuant ) is NOT correct!
+  values: CHECK( 0 == 1 )
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed | 1 failed | 62 skipped
+[doctest] assertions: 18 | 17 passed | 1 failed |
+[doctest] Status: FAILURE!
+2026-11-13 14:04:49.839 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-13 14:04:49.839 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-13 14:04:49.894 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-13 14:04:49.894 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-13 14:04:49.894 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
