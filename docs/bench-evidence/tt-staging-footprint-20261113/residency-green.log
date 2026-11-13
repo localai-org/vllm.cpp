@@ -1,0 +1,43 @@
+2026-11-13 21:07:57.850 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-13 21:07:57.850 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-13 21:07:57.850 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-13 21:07:57.850 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-13 21:07:57.853 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-13 21:07:57.853 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-13 21:07:57.883 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-13 21:07:57.883 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-13 21:07:57.883 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-13 21:07:57.883 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-13 21:07:57.883 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-13 21:07:57.944 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-13 21:07:57.989 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-13 21:07:57.989 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-13 21:07:57.989 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-13 21:07:57.990 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-13 21:07:57.990 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-13 21:07:58.786 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:10994:
+TEST CASE:  kTENSTORRENT dense keep-quant matmul stages PACKED words and builds NO twin (all four encodings)
+
+./tests/vt/test_tenstorrent_backend.cpp:11132: MESSAGE: dense keep-quant residency switch 1: twin absent, words staged, envelope ok
+
+./tests/vt/test_tenstorrent_backend.cpp:11132: MESSAGE: dense keep-quant residency switch 1: twin absent, words staged, envelope ok
+
+./tests/vt/test_tenstorrent_backend.cpp:11132: MESSAGE: dense keep-quant residency switch 1: twin absent, words staged, envelope ok
+
+./tests/vt/test_tenstorrent_backend.cpp:11132: MESSAGE: dense keep-quant residency switch 1: twin absent, words staged, envelope ok
+
+===============================================================================
+[doctest] test cases:  1 |  1 passed | 0 failed | 112 skipped
+[doctest] assertions: 81 | 81 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-13 21:07:58.804 | info     |    BuildKernels | JIT cache stats: 16/16 hits (100.0%) [16 cached, 1 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-13 21:07:58.804 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-13 21:07:58.846 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-13 21:07:58.846 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-13 21:07:58.945 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-13 21:07:58.945 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-13 21:07:58.945 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

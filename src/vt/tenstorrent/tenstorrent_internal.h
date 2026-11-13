@@ -489,6 +489,26 @@ inline std::map<const void*, KeepQuantWordShadow>& KeepQuantWordShadows() {
   return *m;
 }
 
+// TT-STAGING-FOOTPRINT: the ROW-PACKED word shadow — one weight row per
+// accessor page (nb GGML blocks tight, zero-padded to the 64-B page
+// multiple). Same keying and mutex discipline as the legacy map above; the
+// two maps coexist by design, because the consumers that need per-block
+// word rows (the decode chains, the grouped/E=1 arm) stage legacy words on
+// demand while the dense int8-dot arm and the load-time pre-pass stage
+// this tight form.
+struct KeepQuantRowShadow {
+  ttnn::Tensor words;  // {rows, row_words} INT32 ROW_MAJOR — one page per row
+  int64_t rows = 0;
+  int64_t nb = 0;
+  int row_words = 0;
+};
+
+inline std::map<const void*, KeepQuantRowShadow>& KeepQuantRowShadows() {
+  static std::map<const void*, KeepQuantRowShadow>* m =
+      new std::map<const void*, KeepQuantRowShadow>();  // never destroyed (#1486)
+  return *m;
+}
+
 // dense keep-quant matmul no longer inserts (it serves packed words through
 // the E=1 grouped arm), so a populated entry for a matmul weight is exactly
 // the regression the probe names. Same collision discipline as before: the
@@ -536,6 +556,11 @@ inline std::map<uintptr_t, GroupedActShadow>& GroupedActShadows() {
 // ---- moved declarations (definitions in tenstorrent_keepquant.cpp) ----
 ttnn::Tensor EnsureKeepQuantWords(const Tensor& packed, DType enc, int64_t rows,
                                   int64_t nb, MeshDevice& device);
+bool KeepQuantRowPacked(DType enc);
+int64_t KeepQuantRowBytes(DType enc, int64_t nb);
+ttnn::Tensor EnsureKeepQuantRowWords(const Tensor& packed, DType enc,
+                                     int64_t rows, int64_t nb,
+                                     MeshDevice& device);
 void TTReclaimPlanes(MeshDevice& device, std::vector<ttnn::Tensor>& planes);
 void KeepQuantDecodeKernel(Queue&, Tensor& out, const Tensor& packed);
 void MatmulBTQuantKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b);

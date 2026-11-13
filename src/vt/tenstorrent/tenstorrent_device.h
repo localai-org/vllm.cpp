@@ -210,6 +210,9 @@ bool KeepQuantWordShadowPresentForTest(const void* host);
 // is staged for `host`.
 bool KeepQuantWordShadowWordsForTest(const void* host,
                                      std::vector<int32_t>* out);
+// TT-STAGING-FOOTPRINT: the ROW-PACKED shadow probe (one 64-B-multiple page
+// per weight row) — the dense int8-dot arm's residency for kQ8_0/kQ6_K.
+bool KeepQuantRowWordsPresentForTest(const void* host);
 bool DecodedWeightShadowPresentForTest(const void* host);
 bool EmbedTableShadowPresentForTest(const void* host);
 // W4d W0 (#3042): device-side allocation trace — interleaves
@@ -297,6 +300,7 @@ inline bool KeepQuantWordShadowWordsForTest(const void*,
                                             std::vector<int32_t>*) {
   return false;
 }
+inline bool KeepQuantRowWordsPresentForTest(const void*) { return false; }
 inline bool DecodedWeightShadowPresentForTest(const void*) { return false; }
 inline bool EmbedTableShadowPresentForTest(const void*) { return false; }
 inline void AllocTraceSnapshot(MeshDevice&, const char*) {}

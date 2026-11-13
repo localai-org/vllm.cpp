@@ -8,8 +8,8 @@
 namespace vt::tenstorrent {
 
 // ---- KEEPQUANT W3: the resident i32 word shadow -----------------------------
-// Words per staged packed block: the GGML block bytes (Q4_K 144 B -> 36
-// words, Q5_K 176 -> 44, Q6_K 210 -> 53, Q8_0 32 -> 9; the 2-byte tails of
+// Words per staged packed block: the GGML block bytes (Q4_K 144 B -> 48
+// words, Q5_K 176 -> 48, Q6_K 210 -> 64, Q8_0 32 -> 16; the 2-byte tails of
 // Q6_K/Q8_0 zero-fill) ZERO-PADDED UP so the staged row is a 64-B multiple:
 // the tensor's logical page size then EQUALS the device accessor's aligned
 // page size, and the host write and the kernel read share one stride (leg33:
@@ -89,6 +89,115 @@ void DropKeepQuantWordShadow(void* host) {
   if (host == nullptr) return;
   std::lock_guard<std::mutex> g(KeepQuantWordMutex());
   KeepQuantWordShadows().erase(host);
+  KeepQuantRowShadows().erase(host);
+}
+
+// ---- TT-STAGING-FOOTPRINT: the row-page staging geometry --------------------
+// The legacy grid pads EVERY block to a 64-B row (Q8_0 34 -> 64 B = x1.88,
+// Q6_K 210 -> 256 B = x1.22), which staged UD-Q6_K_XL to ~36.9 GiB against
+// a 34 GB board. The row-page form packs ONE WEIGHT ROW per accessor page —
+// the row's nb blocks copied tightly at their exact GGML block bytes,
+// zero-padded to the 64-B page multiple — so the leg33 constraint (staged
+// rows must be 64-B multiples; see the W1 finding in
+// .agents/specs/tt-staging-footprint.md) holds by construction and the pad
+// amortizes to <=63 B per ROW. Geometry committed spec-first
+// (722fa1d6d); Q4_K/Q5_K stay legacy — that is the existing-arm
+// byte-identity gate.
+bool KeepQuantRowPacked(DType enc) {
+  return enc == DType::kQ8_0 || enc == DType::kQ6_K;
+}
+
+int64_t KeepQuantRowBytes(DType enc, int64_t nb) {
+  const int64_t raw = nb * static_cast<int64_t>(BlockBytes(enc));
+  return (raw + 63) / 64 * 64;
+}
+
+ttnn::Tensor EnsureKeepQuantRowWords(const Tensor& packed, DType enc,
+                                     int64_t rows, int64_t nb,
+                                     MeshDevice& device) {
+  VT_CHECK(packed.rank == 2 && packed.IsContiguous(),
+           "tenstorrent EnsureKeepQuantRowWords: contiguous rank-2 packed");
+  VT_CHECK(KeepQuantRowPacked(enc),
+           "tenstorrent EnsureKeepQuantRowWords: encoding has no row-page "
+           "staging (registered set: kQ8_0/kQ6_K)");
+  const int64_t row_bytes = KeepQuantRowBytes(enc, nb);
+  const int row_words = static_cast<int>(row_bytes / 4);
+  {
+    std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+    auto it = KeepQuantRowShadows().find(packed.data);
+    if (it != KeepQuantRowShadows().end() && it->second.rows == rows &&
+        it->second.nb == nb && it->second.row_words == row_words) {
+      return it->second.words;
+    }
+  }
+  // MISS = the one staging write this weight ever pays. Same capture-time
+  // refusal as the legacy shadow: a captured graph pins capture-time bytes
+  // its replay cannot refresh (#2812), so the engine's pre-capture eager
+  // step (and the StageKeepQuantWordsFor load pre-pass) warms this first.
+  if (tt_capture_active()) {
+    KeepQuantCaptureStagingWritesCounter()++;
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+      std::fprintf(stderr,
+                   "[TT-KQ] EnsureKeepQuantRowWords row staging during "
+                   "capture\n");
+  }
+  VT_CHECK(!tt_capture_active(),
+           "tenstorrent: keep-quant row-word-shadow miss during trace "
+           "capture (" + std::string(Name(enc)) +
+               ") — warm the keep-quant arm eagerly first");
+  EnsureHost(packed);
+  const uint8_t* bytes = packed.Ptr<uint8_t>();
+  const int64_t block_bytes = BlockBytes(enc);
+  std::vector<int32_t> words;
+  words.reserve(static_cast<size_t>(rows) * static_cast<size_t>(row_words));
+  std::vector<uint8_t> page(static_cast<size_t>(row_bytes), 0u);
+  for (int64_t r = 0; r < rows; ++r) {
+    // nb blocks tight, then the zero pad to the 64-B page multiple. The pad
+    // never reaches a decode: the kernel reads exactly nb blocks per row at
+    // the exact block strides.
+    std::memcpy(page.data(), bytes + r * nb * block_bytes,
+                static_cast<size_t>(nb * block_bytes));
+    for (int wj = 0; wj < row_words; ++wj) {
+      const uint8_t* p = page.data() + wj * 4;
+      words.push_back(static_cast<int32_t>(
+          static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+          (static_cast<uint32_t>(p[2]) << 16) |
+          (static_cast<uint32_t>(p[3]) << 24)));
+    }
+  }
+  AllocTraceSnapshot(device, "EnsureKeepQuantRowWords/pre");
+  ttnn::Tensor staged = ttnn::Tensor::from_vector<int32_t>(
+      std::move(words),
+      SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(rows),
+                                  static_cast<uint32_t>(row_words)}),
+             ttnn::DataType::INT32, ttnn::Layout::ROW_MAJOR),
+      &device);
+  {
+    std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+    KeepQuantRowShadows()[packed.data] =
+        KeepQuantRowShadow{staged, rows, nb, row_words};
+  }
+  AllocTraceSnapshot(device, "EnsureKeepQuantRowWords/post");
+  // W4d W3 (#3042), mirrored from EnsureKeepQuantWords: the weight's bf16
+  // TILE staging is dead weight once the row-word shadow exists. Same
+  // SlotMutex nesting discipline (scoped AFTER KeepQuantWordMutex).
+  if (!tt_capture_active()) {
+    std::vector<ttnn::Tensor> dead;
+    {
+      std::lock_guard<std::mutex> g_slot(SlotMutex());
+      if (BufferSlot* s = FindSlot(packed.data);
+          s != nullptr && packed.data == s->host &&
+          (s->device.has_value() || s->persistent.has_value())) {
+        if (s->device) dead.push_back(*s->device);
+        if (s->persistent) dead.push_back(*s->persistent);
+        s->device.reset();
+        s->persistent.reset();
+        s->device_current = false;
+      }
+    }
+    if (!dead.empty()) TTReclaimPlanes(device, dead);
+  }
+  return staged;
 }
 
 // TT-KEEPQUANT-Q8K-WEIGHTS staging probe: the resident word shadow read back
@@ -1794,7 +1903,13 @@ constexpr uint32_t CARG_QB_PAD = 10;   // 16B-aligned activation-quant row bytes
 constexpr uint32_t CARG_ENC = 11;      // 0..13, the enc-select dispatch below
 constexpr uint32_t CARG_TCOLS = 12;    // padded tile width: groups_per_core*4
 constexpr uint32_t CARG_GRID_X = 13;   // core-grid width: c = y*grid_x + x
-constexpr uint32_t kNumCommonArgs = 14;
+// TT-STAGING-FOOTPRINT: nonzero = ROW-PACKED staging (one 64-B-multiple
+// page per weight row, blocks at their exact GGML strides — the value IS
+// the per-block byte stride). 0 = the legacy per-block-page grid: each
+// block is one accessor page and the dot strides wpb*4. Q4_K/Q5_K and the
+// GSQ/IQ set pass 0 — their path is byte-identical to before.
+constexpr uint32_t CARG_BLK_BYTES = 14;
+constexpr uint32_t kNumCommonArgs = 15;
 
 // CB scratch (self-cycled: reserve -> use -> push -> pop; no consumer core).
 constexpr uint32_t CB_F32 = 0;  // one activation row widened to f32 (K*4 B)
@@ -1831,6 +1946,7 @@ void kernel_main() {
   const uint32_t enc = get_common_arg_val<uint32_t>(CARG_ENC);
   const uint32_t tcols = get_common_arg_val<uint32_t>(CARG_TCOLS);  // padded tile width
   const uint32_t grid_x = get_common_arg_val<uint32_t>(CARG_GRID_X);
+  const uint32_t blk_bytes = get_common_arg_val<uint32_t>(CARG_BLK_BYTES);
   // The per-core slice, derived from the core coordinate instead of a
   // per-core SetRuntimeArgs word (the 27B trace-fit fix): c enumerates the
   // grid row-major, exactly the host's {c % grid.x, c / grid.x} mapping.
@@ -1894,10 +2010,23 @@ void kernel_main() {
     // residency, not the math.
     for (uint32_t n = 0; n < rowc; ++n) {
       const uint32_t grow = row0 + n;
-      for (uint32_t b = 0; b < nb; ++b)
-        noc_async_read(acc_w.get_noc_addr(grow * nb + b),
-                       wp + b * word_bytes, word_bytes);
+      if (blk_bytes != 0u) {
+        // ROW-PACKED (TT-STAGING-FOOTPRINT): the whole weight row is ONE
+        // accessor page (a 64-B multiple — the leg33 contract the staging
+        // side guarantees); the nb blocks sit at exact blk_bytes strides
+        // inside it.
+        noc_async_read(acc_w.get_noc_addr(grow), wp, word_bytes);
+      } else {
+        // LEGACY grid: each block is one page, word_bytes per page.
+        for (uint32_t b = 0; b < nb; ++b)
+          noc_async_read(acc_w.get_noc_addr(grow * nb + b),
+                         wp + b * word_bytes, word_bytes);
+      }
       noc_async_read_barrier();
+      // The dot's x stride: the exact block bytes for row-packed staging,
+      // the padded wpb*4 for the legacy grid (identical value there —
+      // blk_bytes is 0 and the expression folds to word_bytes).
+      const uint32_t xstride = blk_bytes != 0u ? blk_bytes : word_bytes;
       float* out_tile = reinterpret_cast<float*>(op);
       for (uint32_t r = 0; r < mr; ++r) {
         const uint8_t* xw = reinterpret_cast<const uint8_t*>(wp);
@@ -1905,35 +2034,35 @@ void kernel_main() {
             reinterpret_cast<const uint8_t*>(q8_base) + r * qb_pad;
         float v = 0.0f;
         if (enc == 0)
-          v = kq_vec_dot_q4_K_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_q4_K_q8_K(xw, xstride, yq, nb);
         else if (enc == 1)
-          v = kq_vec_dot_q5_K_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_q5_K_q8_K(xw, xstride, yq, nb);
         else if (enc == 2)
-          v = kq_vec_dot_q6_K_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_q6_K_q8_K(xw, xstride, yq, nb);
         else if (enc == 3)
-          v = kq_vec_dot_q8_0_q8_0(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_q8_0_q8_0(xw, xstride, yq, nb);
         else if (enc == 4)
-          v = kq_vec_dot_iq3_xxs_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq3_xxs_q8_K(xw, xstride, yq, nb);
         else if (enc == 5)
-          v = kq_vec_dot_iq2_xxs_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq2_xxs_q8_K(xw, xstride, yq, nb);
         else if (enc == 6)
           v = kq_vec_dot_iq2_s_q8_K(xw, word_bytes, yq, nb);
         else if (enc == 7)
-          v = kq_vec_dot_q3_k_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_q3_k_q8_K(xw, xstride, yq, nb);
         else if (enc == 8)
-          v = kq_vec_dot_iq3_s_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq3_s_q8_K(xw, xstride, yq, nb);
         else if (enc == 9)
-          v = kq_vec_dot_iq4_xs_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq4_xs_q8_K(xw, xstride, yq, nb);
         else if (enc == 10)
-          v = kq_vec_dot_iq2_xs_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq2_xs_q8_K(xw, xstride, yq, nb);
         else if (enc == 11)
-          v = kq_vec_dot_q2_k_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_q2_k_q8_K(xw, xstride, yq, nb);
         else if (enc == 12)
-          v = kq_vec_dot_iq1_s_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq1_s_q8_K(xw, xstride, yq, nb);
         else if (enc == 13)
-          v = kq_vec_dot_iq1_m_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq1_m_q8_K(xw, xstride, yq, nb);
         else
-          v = kq_vec_dot_iq2_s_q8_K(xw, word_bytes, yq, nb);
+          v = kq_vec_dot_iq2_s_q8_K(xw, xstride, yq, nb);
         out_tile[r * tcols + n] = v;
       }
     }
@@ -2419,9 +2548,26 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
   const int64_t nb = K / elems;
   if (M == 0 || N == 0) return;
 
-  // PACKED words: the resident i32 shadow ([N*nb, wpb]), staged once per
-  // weight and refused on a capture-time miss (the warm-first contract).
-  const ttnn::Tensor words = EnsureKeepQuantWords(b, enc, N, nb, device);
+  // PACKED words: the resident i32 shadow, staged once per weight and
+  // refused on a capture-time miss (the warm-first contract).
+  // TT-STAGING-FOOTPRINT: kQ8_0/kQ6_K serve the ROW-PACKED shadow (one
+  // 64-B-multiple page per weight row, blocks at their exact GGML strides;
+  // the legacy per-block 64-B grid's x1.88/x1.22 inflation is what OOM'd
+  // UD-Q6_K_XL). The load-time pre-pass stages the SAME form, so the warm
+  // call hits. Every other encoding stages legacy — byte-identical.
+  const bool row_packed = KeepQuantRowPacked(enc);
+  const ttnn::Tensor words =
+      row_packed ? EnsureKeepQuantRowWords(b, enc, N, nb, device)
+                 : EnsureKeepQuantWords(b, enc, N, nb, device);
+  // TT-STAGING-FOOTPRINT: row-packed arms pass row_words (the whole row is
+  // one accessor page) plus the per-block byte stride; legacy arms keep
+  // wpb and pass stride 0 (the kernel's per-block page walk, unchanged).
+  const uint32_t wpb =
+      row_packed
+          ? static_cast<uint32_t>(KeepQuantRowBytes(enc, nb) / 4)
+          : static_cast<uint32_t>(KeepQuantWordsPerBlock(enc));
+  const uint32_t blk_bytes =
+      row_packed ? static_cast<uint32_t>(BlockBytes(enc)) : 0u;
 
   // Activation: ROW_MAJOR flat bytes in the declared dtype (f32 stays f32 —
   // the quantizer consumes the master's own values; bf16 stays bf16, widened
@@ -2577,8 +2723,12 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
   // m-tile: keep the per-core q8 residency inside the L1 budget.
   const uint32_t mtile =
       std::max(1u, std::min(8u, (160u << 10) / std::max(qb_pad, 1u)));
-  const uint32_t weight_row_bytes = static_cast<uint32_t>(
-      KeepQuantWordsPerBlock(enc) * 4 * nb);
+  // TT-STAGING-FOOTPRINT: row-packed arms stage one 64-B-multiple page per
+  // weight row (wpb = row words), so the CB_W page is the row page and the
+  // L1 weight term shrinks vs the legacy grid. Legacy arms keep wpb and
+  // stride 0 (the kernel's per-block page walk, unchanged).
+  const uint32_t weight_row_bytes =
+      row_packed ? wpb * 4u : static_cast<uint32_t>(wpb * 4u * nb);
   const uint64_t l1_bytes = static_cast<uint64_t>(K) * 6 +
                             static_cast<uint64_t>(mtile) * qb_pad +
                             weight_row_bytes +
@@ -2622,7 +2772,6 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
                            : enc == DType::kIQ1_S  ? 12
                            : enc == DType::kIQ1_M  ? 13
                                                   : 0;
-  const uint32_t wpb = static_cast<uint32_t>(KeepQuantWordsPerBlock(enc));
   const uint32_t act_f32 = a.dtype == DType::kF32 ? 1u : 0u;
   const std::string workload_key =
       std::to_string(static_cast<int>(enc)) + "x" + std::to_string(act_f32) +
@@ -2641,7 +2790,8 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
         static_cast<uint32_t>(dev_out.mesh_buffer().address()),
         static_cast<uint32_t>(M), static_cast<uint32_t>(K),
         static_cast<uint32_t>(N), static_cast<uint32_t>(nb), wpb, act_f32,
-        mtile, qb_pad, enc_sel, tcols, static_cast<uint32_t>(grid.x)};
+        mtile, qb_pad, enc_sel, tcols, static_cast<uint32_t>(grid.x),
+        blk_bytes};
   };
   auto& workload_cache = Int8DotWorkloadCache();
   auto workload_it = workload_cache.find(workload_key);
@@ -2827,6 +2977,13 @@ bool KeepQuantWordShadowPresentForTest(const void* host) {
   if (host == nullptr) return false;
   std::lock_guard<std::mutex> g(KeepQuantWordMutex());
   return KeepQuantWordShadows().find(host) != KeepQuantWordShadows().end();
+}
+
+// TT-STAGING-FOOTPRINT: the row-packed shadow's residency probe.
+bool KeepQuantRowWordsPresentForTest(const void* host) {
+  if (host == nullptr) return false;
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  return KeepQuantRowShadows().find(host) != KeepQuantRowShadows().end();
 }
 bool DecodedWeightShadowPresentForTest(const void* host) {
   if (host == nullptr) return false;
