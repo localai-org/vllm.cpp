@@ -475,6 +475,16 @@ void StageKeepQuantWordsFor(const Tensor& packed) {
   const int64_t nb =
       static_cast<int64_t>(packed.shape[1]) /
       static_cast<int64_t>(BlockElems(packed.dtype));
+  // TT-STAGING-FOOTPRINT: kQ8_0/kQ6_K stage the ROW-PACKED form at load —
+  // the tight page-per-row layout the dense int8-dot arm serves (the legacy
+  // grid's x1.88/x1.22 inflation is what OOM'd UD-Q6_K_XL on one P150).
+  // Q4_K/Q5_K and every other registered encoding keep the legacy grid.
+  if (KeepQuantRowPacked(packed.dtype)) {
+    (void)EnsureKeepQuantRowWords(packed, packed.dtype,
+                                  static_cast<int64_t>(packed.shape[0]), nb,
+                                  SharedMeshDevice());
+    return;
+  }
   (void)EnsureKeepQuantWords(packed, packed.dtype,
                              static_cast<int64_t>(packed.shape[0]), nb,
                              SharedMeshDevice());

@@ -11085,11 +11085,35 @@ TEST_CASE("kTENSTORRENT dense keep-quant matmul stages PACKED words and builds N
         "TWIN-ABSENCE (" << vt::Name(enc) << "): the dense keep-quant matmul "
                          "built a decoded bf16 twin — the wave-2 twin "
                          "residency survived the wave-3b-1 switch");
-    REQUIRE_MESSAGE(
-        vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
-        "PACKED-WORDS (" << vt::Name(enc) << "): the dense keep-quant matmul "
-                         "staged no resident i32 word shadow — the chunked "
-                         "E=1 arm's residency did not engage");
+    // TT-STAGING-FOOTPRINT: the residency map per encoding — kQ8_0/kQ6_K
+    // stage the ROW-PACKED shadow (the tight page-per-row form the dense
+    // int8-dot arm serves; the legacy grid's x1.88/x1.22 inflation OOM'd
+    // UD-Q6_K_XL), kQ4_K/kQ5_K keep the legacy grid byte-identical.
+    if (enc == vt::DType::kQ8_0 || enc == vt::DType::kQ6_K) {
+      REQUIRE_MESSAGE(
+          vt::tenstorrent::KeepQuantRowWordsPresentForTest(b_t.data),
+          "ROW-PACKED-WORDS (" << vt::Name(enc)
+                               << "): the dense keep-quant matmul staged no "
+                                  "row-packed word shadow");
+      CHECK_FALSE_MESSAGE(
+          vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
+          "ROW-PACKED-ONLY (" << vt::Name(enc)
+                              << "): the dense keep-quant matmul staged the "
+                                 "legacy per-block grid beside the row-packed "
+                                 "shadow — the staging inflation this row "
+                                 "removes is back");
+    } else {
+      REQUIRE_MESSAGE(
+          vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
+          "PACKED-WORDS (" << vt::Name(enc) << "): the dense keep-quant matmul "
+                           << "staged no resident i32 word shadow — the "
+                              "chunked E=1 arm's residency did not engage");
+      CHECK_FALSE_MESSAGE(
+          vt::tenstorrent::KeepQuantRowWordsPresentForTest(b_t.data),
+          "LEGACY-ONLY (" << vt::Name(enc) << "): the dense keep-quant matmul "
+                          << "staged a row-packed shadow — the legacy arm "
+                             "must stay byte-identical");
+    }
 
     std::vector<float> out(kN, 0.0f);
     backend.Copy(q, out.data(), mem_o, out.size() * sizeof(float));
@@ -11107,6 +11131,132 @@ TEST_CASE("kTENSTORRENT dense keep-quant matmul stages PACKED words and builds N
     }
     MESSAGE("dense keep-quant residency switch ", vt::Name(enc),
             ": twin absent, words staged, envelope ok");
+  }
+}
+
+// TT-STAGING-FOOTPRINT: the ROW-PACKED staging + read geometry. kQ8_0/kQ6_K
+// stage one 64-B-multiple page per weight row (nb blocks tight at their
+// exact GGML strides) and the int8-dot kernel reads that page whole, dotting
+// at the blk_bytes stride. RED-first (mutation target): corrupt the row-page
+// stride on either side — the staging row_words rounding, the kernel's
+// CARG_BLK_BYTES walk, or the page index — and the dot reads page r's bytes
+// at wrong offsets (the leg33 signature) and this leg goes red, because the
+// rows here span MULTIPLE blocks so every block after the first sits at an
+// interior offset the legacy per-block geometry never produced. The
+// envelope oracle is the W3 dot's shape (decode -> ONE bf16 RNE -> f32
+// ascending accumulation; 1.05 * 2^-8 bf16-operand bound).
+TEST_CASE("kTENSTORRENT dense keep-quant matmul serves ROW-PACKED rows (Q8_0/Q6_K, multi-block)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuant, vt::DeviceType::kTENSTORRENT));
+
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  constexpr int64_t kN = 8;   // weight rows
+  constexpr int64_t kNb = 4;  // FOUR blocks per row — interior strides live
+  std::mt19937 rng(20261113u);
+  auto rand_byte = [&rng]() { return static_cast<uint8_t>(rng() & 0xFF); };
+  auto put_f16 = [](uint8_t* blk, int64_t off, float v) {
+    const uint16_t bits = vt::F32ToF16(v);
+    std::memcpy(blk + off, &bits, sizeof(bits));
+  };
+
+  const vt::DType encodings[] = {vt::DType::kQ8_0, vt::DType::kQ6_K};
+  for (const vt::DType enc : encodings) {
+    const int64_t bb = vt::BlockBytes(enc);
+    const int64_t be = vt::BlockElems(enc);
+    const int64_t K = kNb * be;
+    // The row-page geometry this row commits: nb*bb tight, ceil64 page.
+    const int64_t row_bytes = (kNb * bb + 63) / 64 * 64;
+    REQUIRE(row_bytes % 64 == 0);
+    REQUIRE(row_bytes < kNb * bb + 64);
+
+    std::vector<uint8_t> packed(kN * kNb * bb);
+    for (int64_t b = 0; b < kN * kNb; ++b) {
+      uint8_t* blk = packed.data() + b * bb;
+      for (int i = 0; i < bb; ++i) blk[i] = rand_byte();
+      const float d = (0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f) *
+                      ((rng() % 2) != 0 ? 1.0f : -1.0f);
+      if (enc == vt::DType::kQ6_K) {
+        put_f16(blk, 208, d);
+      } else {
+        put_f16(blk, 0, d);
+      }
+    }
+    std::vector<uint16_t> a_bf(K);
+    for (auto& v : a_bf)
+      v = vt::F32ToBF16((static_cast<float>(rng() % 401) - 200.0f) / 100.0f);
+
+    std::vector<float> w_f32(kN * K);
+    vt::cpu::BlockToFloat(enc)(packed.data(), w_f32.data(), kN * K);
+    auto widen = [](uint16_t u) {
+      uint32_t bits = static_cast<uint32_t>(u) << 16;
+      float f;
+      std::memcpy(&f, &bits, 4);
+      return f;
+    };
+    std::vector<float> ref(kN), bound(kN);
+    for (int64_t n = 0; n < kN; ++n) {
+      float acc = 0.0f, mag = 0.0f;
+      for (int64_t k = 0; k < K; ++k) {
+        const float p = widen(a_bf[static_cast<size_t>(k)]) *
+                        widen(vt::F32ToBF16(w_f32[static_cast<size_t>(n) * K + k]));
+        acc += p;
+        mag += std::fabs(p);
+      }
+      ref[static_cast<size_t>(n)] = acc;
+      bound[static_cast<size_t>(n)] = 1.05f * std::ldexp(1.0f, -8) * (mag + std::fabs(acc));
+    }
+
+    void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+    void* mem_b = backend.Alloc(packed.size());
+    void* mem_o = backend.Alloc(kN * sizeof(float));
+    backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_b, packed.data(), packed.size());
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, K});
+    Tensor b_t = Tensor::Contiguous(mem_b, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, K});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kN});
+
+    vt::MatmulBT(q, o_t, a_t, b_t);
+    vt::MatmulBT(q, o_t, a_t, b_t);  // warm pair: eager stage, then hit
+
+    CHECK_FALSE_MESSAGE(
+        vt::tenstorrent::DecodedWeightShadowPresentForTest(b_t.data),
+        "ROW-TWIN-ABSENCE (" << vt::Name(enc)
+                             << "): the row-packed arm built a decoded twin");
+    REQUIRE_MESSAGE(
+        vt::tenstorrent::KeepQuantRowWordsPresentForTest(b_t.data),
+        "ROW-PACKED-WORDS (" << vt::Name(enc)
+                             << "): the multi-block row staged no row-packed "
+                                "shadow — the row-page staging did not engage");
+    CHECK_FALSE_MESSAGE(
+        vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
+        "ROW-PACKED-ONLY (" << vt::Name(enc)
+                            << "): a legacy per-block grid shadow appeared "
+                               "beside the row-packed one");
+
+    std::vector<float> out(kN, 0.0f);
+    backend.Copy(q, out.data(), mem_o, out.size() * sizeof(float));
+    backend.Free(mem_a);
+    backend.Free(mem_b);
+    backend.Free(mem_o);
+    for (int64_t n = 0; n < kN; ++n) {
+      const float diff = std::fabs(out[static_cast<size_t>(n)] -
+                                   ref[static_cast<size_t>(n)]);
+      CHECK(std::isfinite(out[static_cast<size_t>(n)]));
+      CHECK_MESSAGE(diff <= bound[static_cast<size_t>(n)],
+                    vt::Name(enc) << " out[" << n <<"]=" << out[n]
+                                  << " ref=" << ref[n]
+                                  << " bound=" << bound[n]);
+    }
+    MESSAGE("row-packed staging leg ", vt::Name(enc), " nb=", kNb,
+            " row_bytes=", row_bytes, ": envelope ok");
   }
 }
 
