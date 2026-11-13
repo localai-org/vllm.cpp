@@ -24,7 +24,7 @@ path) in v1; a fused Q8_KxQ8_K INT8-dot kernel is a PERF row of its own
 ## Waves
 
 - **W1 — loader**: the GGUF weights loader accepts `Q8_K` weight tensors for the qwen35 family and stages them through the keepquant path. Update the activation-only comment in include/vt/dtype.h:41 to name the weights arm (the comment is the record; do not delete the constraint silently). Refuse-by-name stays for anything outside {Q4_K, Q5_K, Q6_K, Q8_0, Q8_K, F32/BF16}.
-- **W2 — keepquant staging**: word-count + zero-pad treatment for Q8_K (9 words, no pad), and the decode kernel arm: Q8_K-weight × Q8_K-activation INT8 dot (scale `d` f32 per block) with the same accuracy contract as the Q4_K/Q6_K arms (CPU f32 reference oracle, numeric envelope per the standing kernel-matrix discipline).
+- **W2 — keepquant staging + composite**: stage Q8_K rows at 80 padded words (292 B -> 73 -> 64-B grid) and serve through the dequant-composite arm (tree-standard for Q8_K weights; bsums stage-carried, never decoded). NO new INT8-dot kernel — the fused Q8_KxQ8_K arm is a separate perf row under M5 adjudication, gated on the composite's measured cost.
 - **W3 — device gate**: e2e serving of the pinned UD-Q8_K_XL artifact on the P150 — greedy token run at the standing recipe (batch 1 / input 32 / output 200 / seed 0), KV pool sized to fit (the Q6 legs proved 64 blocks OOM at 25.3 GB; 31.5 GB needs `--num-blocks 16` or smaller — measure and record the largest pool that fits). Token gate: byte-identical across 3 reps of the SAME arm (determinism), plus the CPU-reference token comparison if the reference forward covers Q8_K (if not, the determinism gate + focused-kernel envelope gate stand in, with the gap named).
 
 ## Scope
@@ -43,7 +43,7 @@ Pinned: `/mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q8_K_XL.gguf`, u
 
 ## Tests
 
-1. Focused keepquant staging test for Q8_K (word count, no-pad, byte-exact staging) — red-before on the absent arm, green after.
+1. Focused keepquant staging test for Q8_K (80 words, byte-exact incl. pad words) — red-before on the absent arm, green after. Note: the loader guarantee is guarded by the route-pin test, not the staging test (the staging/composite cases construct the tensor directly).
 2. Kernel envelope test vs the CPU f32 oracle (the standing pattern in test_tenstorrent_backend.cpp).
 3. e2e W3 device gate with determinism x3.
 4. Existing Q4_K_M/Q6_K arms byte-identical (the dtype-selection change must not perturb them).
@@ -56,3 +56,22 @@ One pull request, `row/TT-KEEPQUANT-Q8K-WEIGHTS`, worktree `/tmp/tt-q8k`, push t
 
 - 8 KV blocks don't fit beside 31.5 GB weights: STOP, record unservable-on-P150.
 - Byte-identity of existing arms breaks: STOP (the change is wrong, not the arms).
+
+## Outcome
+
+Landed as PR (this row): W1 loader (KeepQuantDType admits kQ8_K with the
+composite exception; TT admits, CUDA refuses — admitted-but-unimplemented
+prevented), W2 staging at 80 words + composite decode (bsums carried,
+never decoded), tests 337/337 device + 63/63,12179 loader suite with
+three justified re-groundings. W3 STOP CONDITION MET: the pinned
+UD-Q8_K_XL artifact is UNSERVABLE on one P150 — deterministic DRAM OOM
+at every KV pool (8/16/64 blocks), ~171 MB short at the floor, in the
+mixed-quant working set. What was rejected and why: a fused Q8_KxQ8_K
+INT8-dot kernel (M5 adjudication; the composite is tree-standard for
+Q8_K weights and ships first); an unpadded 73-word staging row (the
+64-B pad rule is load-bearing — the mutation test proves it detects the
+violation). Review: PASS with a claim nuance (the loader guarantee is
+guarded by the route pin, not the staging tests) and spec-residue fixes
+in this commit. The staging-footprint investigation (the 64-B grid
+inflates Q6_K x1.52 / Q8_0 x1.88 and is why the new unsloth artifacts
+do not fit one P150) is its own follow-up row.
