@@ -23,6 +23,29 @@
 - **Design A — tighter grid** (**KILLED by W1, 2026-11-13**): the 32-B grid (Q6_K 210→224 B) violates the 64-B accessor-stride constraint (leg33), and every encoding already sits at its ceil-64 minimum, so no legal tightening exists — see the W1 finding above.
 - **Design B — plugin-shaped load-time repack (SELECTED by W1, 2026-11-13)**: convert GGUF blocks at load time into tight device-native quant tiles (the staged copy IS the tile layout; no host-row inheritance), eliminating the grid's overhead for every dtype at once — Q8_0 included, which is the decisive case given the measured mixes. Tile rows are accessor pages sized as 64-B multiples, so the leg33 constraint is satisfied by construction; the kernel-side read-geometry change is M5-adjudicated.
 
+## Design B — the row-page repack (W2 geometry, committed BEFORE implementation)
+
+**The geometry.** For `kQ8_0` and `kQ6_K` — the two encodings whose combined payload is 95.7% of UD-Q6_K_XL — the load-time staging (`EnsureKeepQuantRowWords`, a new shadow map beside `EnsureKeepQuantWords`) packs ONE WEIGHT ROW per accessor page: the page is the row's `nb` GGML blocks copied tightly (`nb × block_bytes`, 34 B / 210 B, no per-block pad), zero-padded to the 64-B page multiple:
+
+> `row_bytes = ceil64(nb × block_bytes)`, staged tensor `{rows, row_words}` with `row_words = row_bytes / 4`.
+
+This amortizes the leg33 64-B alignment over the whole row (pad ≤ 63 B per ROW, not per block), so the W1 constraint holds by construction: the accessor's aligned page stride equals `row_bytes` exactly. The Q4_K and Q5_K grids stay on `EnsureKeepQuantWords` untouched — that is the byte-identity gate 3/4, and their residual inflation (Q5_K ×1.09 ≈ 1.09 GiB staged) is immaterial. Block-internal strides inside the page are the exact GGML block bytes, so the int8-dot kernel's decode offsets are unchanged; only the page walk changes (`grow` = one page per weight row; the dot's `block_word_bytes` stride becomes the natural `block_bytes`). Consumers that need per-block word rows — the decode chains (`DecodeKeepQuantWordsF32`), the grouped/E=1 arm, the `=0` opt-out — keep calling `EnsureKeepQuantWords` and stage their own legacy words on demand; the dense default path never reaches them, and the double-staging cost lands only in the explicit rollback scenario. `StageKeepQuantWordsFor` (the W4d W6 load-time pre-pass) routes `kQ8_0`/`kQ6_K` to the row-packed staging so the words exist once, at load, in the tight form.
+
+**Why not fixed multi-block tiles:** a uniform tile of `bpt` blocks needs `bpt × block_bytes ≡ 0 (mod 64)` — for Q6_K that forces `32 | bpt` (210 = 2·3·5·7) — AND `bpt | nb`. Measured `nb = K / 256` values in UD-Q6_K_XL are 20 (K=5120), 24, 40 (K=10240), 68 (K=17408), … — never divisible by 32, so a zero-waste fixed tile does not exist for this artifact's dims, and a padded uniform tile wastes up to a full tile per row (52 KB × 17408 rows ≈ 0.9 GiB on ffn_up alone). The whole-row page has no `nb` divisibility requirement at all.
+
+**Footprint arithmetic for UD-Q6_K_XL (measured off the artifact header, dims verified against the file size):**
+
+| dtype | payload | staged (row-page) | staged (legacy grid) |
+|---|---|---|---|
+| Q8_0 | 12.596 GiB | 12.596 GiB + ~0.2 MiB row pad (K=48 GDN rows pad 32 B × 5120 rows) | ×1.88 ≈ 23.7 GiB |
+| Q6_K | 9.931 GiB | 9.931 GiB + ~6 MiB row pad (only K=5120 rows: 4200 → 4224 B, 24 B × ~250k rows) | ×1.22 ≈ 12.1 GiB |
+| Q5_K | 0.997 GiB | (legacy ×1.09) 1.09 GiB | 1.09 GiB |
+| f32 (norms) | 0.010 GiB | 0.010 GiB | 0.010 GiB |
+
+**Total staged ≈ 23.6 GiB against the 34 GB board** — under the ~32 GB bar with ~10 GB of headroom for the bf16 embed twin (~2.4 GiB), activations, and a 16-block KV pool. The legacy grid staged ≈ 36.9 GiB (W1's corrected arithmetic) and OOM'd at every pool. Largest staged row page: `210 × (17408/256) = 14,280 B` (ffn rows), well inside the CB page and L1 budgets (the CB_W page SHRINKS vs legacy: 14,280 B vs 17,408 B for the same row). All served `nb × block_bytes` values in the artifact are 64-B-exact except the two 48-column GDN rows, so the inflation is ×1.001 overall — the row's footprint lever is exhausted at ×1.0; no tighter legal geometry exists under the W1 constraint.
+
+**The kernel change (M5), localized.** One new common arg (`CARG_BLK_BYTES`, 14; `kNumCommonArgs` 14 → 15). 0 = legacy per-block-page geometry (Q4_K/Q5_K and every GSQ/IQ encoding — byte-identical path); nonzero = row-packed, and the kernel reads ONE page per weight row (`acc_w.get_noc_addr(grow)`) and dots with `block_word_bytes = blk_bytes`. The 14-arm dot chain is untouched (it already takes the stride as a parameter); for legacy arms the stride argument evaluates to the same `word_bytes` as before. `wpb`/`weight_row_bytes`/the CB_W page derive from the row geometry on the host side per encoding.
+
 ## Gates
 
 1. W1's written constraint + which design it selects (records).
