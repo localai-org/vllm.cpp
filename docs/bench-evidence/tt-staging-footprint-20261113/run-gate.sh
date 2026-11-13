@@ -49,7 +49,7 @@ leg() {  # $1 = arm tag, $2 = rep
 
 if [ "${1:-}" = "q4km" ]; then
   MODEL=/mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf
-  BLOCKS=8
+  BLOCKS=64
   leg q4km 1
 else
   MODEL=/mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q6_K_XL.gguf
