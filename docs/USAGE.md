@@ -283,6 +283,22 @@ device arm held the host arm's drift-tolerant band at 3/3 reps
 trace (`docs/bench-evidence/flint-p150-attention-20261031/`) records the
 MoE-dominated step times where attention is a minor share.
 
+The Tenstorrent keep-quant arm serves GGUF block-quantized weights compressed.
+Besides Q4_K/Q5_K/Q6_K/Q8_0 and the IQ set, **Q8_K weight tensors are served
+since row `TT-KEEPQUANT-Q8K-WEIGHTS`** (2026-11-13): the loader keeps their
+blocks packed (80 padded words per 292-byte `block_q8_K`), and the device
+serves them through the dequant-composite arm — decode-to-f32 on-core, then an
+f32 dot; there is no fused Q8_K×Q8_K INT8-dot kernel yet (a separate perf row).
+Gated against
+`/mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q8_K_XL.gguf`
+(unsloth/Qwen3.8-27B-GGUF @ `ce331efc48d5722b4b8041f72793e530eae18d9b`, LFS
+sha256 `af36ecb6b5db1407953345b746c14ac93f0657dda413910b4348683a2d990377`,
+31,457,991,680 B). The 31.5 GB weight set plus working set does NOT fit a
+34 GB P150 at the standing decode recipe: the KV pool floor for the recipe
+(8 blocks) OOMs deterministically (~171 MB short; see
+`docs/bench-evidence/tt-q8k-weights-20261113/`). The arm is servable code on
+smaller checkpoints; this pinned artifact is recorded unservable-on-P150.
+
 
 A Vulkan build (`-DVLLM_CPP_VULKAN=ON`) adds three kernel-measurement binaries.
 They exist so a Vulkan tuning knob can be A/B'd in ONE binary, which is this

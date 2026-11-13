@@ -1,0 +1,62 @@
+2026-11-13 14:29:15.040 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-13 14:29:15.040 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-13 14:29:15.040 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-13 14:29:15.040 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-13 14:29:39.830 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-13 14:29:39.830 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-13 14:29:39.860 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-13 14:29:39.860 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-13 14:29:39.860 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-13 14:29:39.860 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-13 14:29:39.861 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-13 14:29:39.946 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/test_gguf_keep_quant.cpp:522:
+TEST CASE:  KeepQuantDType covers the executable encodings
+
+./tests/vllm/test_gguf_keep_quant.cpp:551: ERROR: CHECK_FALSE( KeepQuantDType(id, &dt) ) is NOT correct!
+  values: CHECK_FALSE( true )
+  logged: id := 15
+
+===============================================================================
+./tests/vllm/test_gguf_keep_quant.cpp:676:
+TEST CASE:  routing table is TOTAL: every role x every encoding is explicit
+
+./tests/vllm/test_gguf_keep_quant.cpp:905: ERROR: CHECK( kept == gemm_kept + gather_kept ) is NOT correct!
+  values: CHECK( 57 == 55 )
+  logged: std::string(vt::DeviceTypeName(kRouteDev)) := cpu
+
+./tests/vllm/test_gguf_keep_quant.cpp:906: ERROR: CHECK( expanded == 22 * 36 - (gemm_kept + gather_kept) ) is NOT correct!
+  values: CHECK( 735 == 737 )
+  logged: std::string(vt::DeviceTypeName(kRouteDev)) := cpu
+
+===============================================================================
+./tests/vllm/test_gguf_keep_quant.cpp:1056:
+TEST CASE:  Q8_K embedding loader retains decoder-only blocks and preserves matrix refusal
+
+./tests/vllm/test_gguf_keep_quant.cpp:1067: ERROR: CHECK_FALSE( vllm::KeepQuantDType(packed.ggml_type, nullptr) ) is NOT correct!
+  values: CHECK_FALSE( true )
+
+./tests/vllm/test_gguf_keep_quant.cpp:1069: ERROR: CHECK( vllm::RouteGgufTensor(true, false, false, false, vllm::GgufTensorRole::kMatmulWeight, packed.ggml_type, packed.shape, vt::DeviceType::kCPU) == vllm::GgufResidency::kExpandBf16 ) is NOT correct!
+  values: CHECK( 1 == 0 )
+
+./tests/vllm/test_gguf_keep_quant.cpp:1072: ERROR: CHECK_THROWS_WITH_AS( vllm::OwnGgufQuantBlocks(packed, 128, 256), "non-keep-quant encoding", std::runtime_error ) did NOT throw at all!
+
+2026-11-13 14:29:40.003 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-13 14:29:40.003 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-13 14:29:40.003 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-13 14:29:40.003 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-13 14:29:40.003 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+===============================================================================
+[doctest] test cases:    63 |    60 passed | 3 failed | 0 skipped
+[doctest] assertions: 12178 | 12172 passed | 6 failed |
+[doctest] Status: FAILURE!
+2026-11-13 14:29:40.949 | info     |    BuildKernels | JIT cache stats: 8/8 hits (100.0%) [8 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-13 14:29:40.949 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-13 14:29:40.991 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-13 14:29:40.991 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-13 14:29:41.047 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-13 14:29:41.048 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-13 14:29:41.048 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

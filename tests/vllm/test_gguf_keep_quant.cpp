@@ -408,6 +408,13 @@ TEST_CASE("keep-quant routing on TENSTORRENT admits exactly the registered decod
   // nothing; the device sweep carries the red).
   CHECK(route(kIQ1_S) == GgufResidency::kKeepQuant);
   CHECK(route(kIQ1_M) == GgufResidency::kKeepQuant);
+  // TT-KEEPQUANT-Q8K-WEIGHTS: Q8_K joins the GEMM set — the weights arm the
+  // UD-Q8_K_XL checkpoint needs. Q8_K has NO vec_dot anywhere in the tree
+  // (cpu_quant_dot.cpp's selector returns nullptr), so it keeps blocks and
+  // serves the DEQUANT-COMPOSITE arm (the tree-standard for Q8_K weights,
+  // staged at 80 padded words per 292-B block_q8_K). This check redded
+  // against the unchanged predicate (kExpandBf16) before the loader widened.
+  CHECK(route(kQ8_K) == GgufResidency::kKeepQuant);
   // The loader boolean flips only when the op is registered, so a host with a
   // P150 resolves keep-quant on by default; without the card the default arm
   // stays false and the load is unchanged.
@@ -533,16 +540,20 @@ TEST_CASE("KeepQuantDType covers the executable encodings") {
     CHECK(KeepQuantDType(id, &dt));
     CHECK(vt::cpu::HasQuantDotKernel(dt));
   }
-  // Unquantized file types, the activation-only encoding, and the encodings that
-  // DECODE but have no keep-quant `vec_dot` are NOT keep-quant capable. Q8_K is
-  // now the ONLY member of that middle class: IQ2_XS and IQ4_XS were in it
-  // between #2245 and #2247 and have left it. Q1_0 (41) carries the OLDEST
-  // shape — the reader tabulates it and nothing in this tree decodes it — so it
-  // is here to keep the two failure modes separately observable.
-  for (uint32_t id : {kF32, kF16, kBF16, kQ8_K, kQ1_0}) {
+  // Unquantized file types and the encodings that DECODE but have no
+  // keep-quant serve are NOT keep-quant capable. Q8_K left this list with
+  // TT-KEEPQUANT-Q8K-WEIGHTS (it serves the dequant composite — no vec_dot
+  // appeared, but a GEMM arm is a GEMM arm), leaving it the FIRST list in
+  // a while with no decoder member; Q1_0 (41) carries the OLDEST failure
+  // shape — the reader tabulates it and nothing in this tree decodes it.
+  for (uint32_t id : {kF32, kF16, kBF16, kQ1_0}) {
     CAPTURE(id);
     CHECK_FALSE(KeepQuantDType(id, &dt));
   }
+  // Q8_K keeps blocks through the composite: admitted WITHOUT a vec_dot row,
+  // which is exactly what makes it the composite arm and not a dot arm.
+  CHECK(KeepQuantDType(kQ8_K, &dt));
+  CHECK_FALSE(vt::cpu::HasQuantDotKernel(dt));
 }
 
 namespace {
@@ -740,7 +751,13 @@ TEST_CASE("routing table is TOTAL: every role x every encoding is explicit") {
             type == kQ6_K || type == kIQ2_XXS || type == kIQ2_XS ||
             type == kIQ3_XXS || type == kIQ1_S || type == kIQ4_NL ||
             type == kIQ2_S || type == kIQ4_XS || type == kIQ3_S ||
-            type == kMXFP4 || type == kIQ1_XXXS;
+            type == kMXFP4 || type == kIQ1_XXXS ||
+            // TT-KEEPQUANT-Q8K-WEIGHTS: Q8_K joins the CPU GEMM arm through
+            // the dequant composite (cpu_quant_gemm.cpp's to_float
+            // fallthrough) — no vec_dot row appeared, the composite IS the
+            // serve. It leaves the gather-only surplus it held alone since
+            // IQ3_S dotted.
+            type == kQ8_K;
         const bool rocm = kRouteDev == vt::DeviceType::kROCM;
         // QUANT-GGUF-IQ4_NL adds kIQ4_NL to the ROCm set. It is the one entry
         // here whose activation encoding is Q8_0 rather than Q8_K, and it is
@@ -751,11 +768,16 @@ TEST_CASE("routing table is TOTAL: every role x every encoding is explicit") {
         // the GROUPED provider, so this row is what stops those experts from
         // expanding to bf16 on a ROCm box.
         const bool device_capable =
-            !rocm || type == kQ8_0 || type == kQ2_K || type == kQ3_K ||
-            type == kQ4_K || type == kQ5_K || type == kQ6_K ||
-            type == kIQ2_XXS || type == kIQ3_XXS || type == kIQ2_S ||
-            type == kIQ1_S || type == kIQ1_XXXS || type == kIQ4_NL ||
-            type == kIQ4_XS;
+            (!rocm || type == kQ8_0 || type == kQ2_K || type == kQ3_K ||
+             type == kQ4_K || type == kQ5_K || type == kQ6_K ||
+             type == kIQ2_XXS || type == kIQ3_XXS || type == kIQ2_S ||
+             type == kIQ1_S || type == kIQ1_XXXS || type == kIQ4_NL ||
+             type == kIQ4_XS) &&
+            // TT-KEEPQUANT-Q8K-WEIGHTS scopes the Q8_K weights arm to CPU +
+            // TENSTORRENT: the CUDA provider has no Q8_K-weight serve of its
+            // own, so its default admission refuses it (DeviceKeepQuantSupported's
+            // default case names the exception).
+            !(kRouteDev == vt::DeviceType::kCUDA && type == kQ8_K);
         const bool block_capable = cpu_capable && device_capable;
         const int64_t blk = (type == kQ4_0 || type == kQ5_0 || type == kQ8_0 ||
                              type == kMXFP4 || type == kIQ4_NL)
@@ -763,13 +785,12 @@ TEST_CASE("routing table is TOTAL: every role x every encoding is explicit") {
                                 : 256;
         // MODEL-MM-QWEN4-EXP W6a: the GATHER role is now keep-capable too, and
         // it asks a DIFFERENT question. Its admission is the row decoder, so
-        // everything with a `to_float` keeps, INCLUDING encodings the GEMM arm
-        // rejects for want of a `vec_dot`. Since #2247 that surplus is Q8_K
-        // ALONE: IQ2_XS and IQ4_XS were the other two members between #2245 and
-        // #2247, and they left the moment they got a dot kernel. The two
-        // predicates still differ — this term is still not `cpu_capable` — but
-        // Q8_K is now the only encoding that can prove it, which is worth saying
-        // out loud rather than discovering when Q8_K changes.
+        // everything with a `to_float` keeps. Since #2247 the GEMM arm's
+        // surplus was Q8_K ALONE (IQ2_XS and IQ4_XS left the moment they got a
+        // dot kernel); TT-KEEPQUANT-Q8K-WEIGHTS moved Q8_K onto the GEMM arm
+        // through the dequant composite, so the two predicates now agree
+        // across the block census and the `|| type == kQ8_K` term below is
+        // redundant — kept as the historical shape, the surplus now empty.
         //
         // The DEVICE term is a REGISTRY QUERY since KGATHER, and it is asked of
         // `OpRegistered` rather than of `DeviceQuantGatherSupported` on purpose.
@@ -882,7 +903,17 @@ TEST_CASE("routing table is TOTAL: every role x every encoding is explicit") {
   // 34 -> 36 and left the ROCm and gather terms where they were: IQ3_S gained
   // a CPU `vec_dot`, so it joined the GEMM arm (one encoding x two keep-capable
   // GEMM roles) on the devices that cover the CPU list.
-  const int gemm_kept = kRouteDev == vt::DeviceType::kROCM ? 26 : 36;
+  //
+  // TT-KEEPQUANT-Q8K-WEIGHTS moves the CPU GEMM term 36 -> 38 (Q8_K, one
+  // encoding x two keep-capable GEMM roles, through the dequant composite).
+  // CUDA stays at 36: its default admission names the Q8_K exception and
+  // refuses it — the CUDA provider has no Q8_K-weight serve of its own, and
+  // widening its number would be an admitted-but-unimplemented encoding. The
+  // gather terms are unchanged (Q8_K was already gather-kept; the composite
+  // moves only GEMM roles).
+  const int gemm_kept = kRouteDev == vt::DeviceType::kROCM  ? 26
+                        : kRouteDev == vt::DeviceType::kCUDA ? 36
+                                                             : 38;
   const int gather_kept =
       vt::OpRegistered(vt::OpId::kEmbeddingQuant, kRouteDev) ? 19 : 0;
   CHECK(kept == gemm_kept + gather_kept);
@@ -996,15 +1027,16 @@ TEST_CASE("the gather table's admission is the DECODER, not the vec_dot") {
     REQUIRE(vllm::KeepQuantGatherDType(type, &dt));
     REQUIRE(vt::cpu::BlockToFloat(dt) != nullptr);
   }
-  // Q8_K passes the line above and FAILS the GEMM predicate, which is the whole
-  // point of the two predicates being separate. It is the LAST encoding that
-  // can prove that: IQ2_XS and IQ4_XS stood here between #2245 and #2247 and
-  // left when they got their `vec_dot` rows, and Q8_K cannot follow them
-  // because it is the K-quants' activation encoding and upstream gives it no
-  // `vec_dot` row at all. If Q8_K ever leaves too, this case stops
-  // discriminating and has to be re-grounded rather than deleted.
+  // Q8_K passed this line and, between #2247 and TT-KEEPQUANT-Q8K-WEIGHTS
+  // (2026-11-13), FAILED the GEMM predicate — the pair of predicates was
+  // distinct exactly while Q8_K was the one decoder with no vec_dot. It left
+  // the same way IQ2_XS and IQ4_XS left #2247: it gained a GEMM arm, the
+  // dequant-COMPOSITE one (no vec_dot appeared; the composite is the serve).
+  // With every decoder now admitted on both arms the discriminator is
+  // historical; it is re-grounded, not deleted, per its own contract.
   REQUIRE(vllm::KeepQuantGatherDType(kQ8_K, &dt));
-  CHECK_FALSE(vllm::KeepQuantDType(kQ8_K, &dt));
+  CHECK(vllm::KeepQuantDType(kQ8_K, &dt));
+  CHECK_FALSE(vt::cpu::HasQuantDotKernel(dt));  // the composite arm, still
   // And the pair that MOVED: both predicates now admit them.
   for (uint32_t type : {kIQ2_XS, kIQ4_XS}) {
     CAPTURE(type);
@@ -1035,9 +1067,15 @@ TEST_CASE("Q8_K GGUF reader preserves block geometry and packed bytes") {
   CHECK(std::memcmp(tensor.data, packed.data(), tensor.nbytes) == 0);
 }
 
-TEST_CASE("Q8_K embedding loader retains decoder-only blocks and preserves matrix refusal") {
+TEST_CASE("Q8_K embedding loader retains decoder-only blocks; the matrix arm "
+          "now admits the composite") {
   // BACKEND-ROCM-QUANT-GATHER (#3093): the ordinary materializer must follow
   // the tensor role already resolved by the loader, including decoder-only Q8_K.
+  // TT-KEEPQUANT-Q8K-WEIGHTS moved Q8_K onto the GEMM arm through the
+  // dequant composite, so the matrix-refusal legs this case carried are gone:
+  // a Q8_K matrix now keeps its blocks (the legs below assert the ADMISSION,
+  // and the throw legs keep only the repack refusal, which is role-shaped and
+  // not encoding-shaped).
   const auto& format = rocm_gather_test::kFormats[8];
   REQUIRE(format.dtype == vt::DType::kQ8_K);
   const TempFile file(rocm_gather_test::BuildModel(format, false));
@@ -1046,13 +1084,12 @@ TEST_CASE("Q8_K embedding loader retains decoder-only blocks and preserves matri
   auto policy = KeepQuantOn();
   policy.device = vt::DeviceType::kCPU;
   const auto& packed = gguf.Get("token_embd.weight");
-  CHECK_FALSE(vllm::KeepQuantDType(packed.ggml_type, nullptr));
+  CHECK(vllm::KeepQuantDType(packed.ggml_type, nullptr));
   CHECK(vllm::KeepQuantGatherDType(packed.ggml_type, nullptr));
   CHECK(vllm::RouteGgufTensor(true, false, false, false,
           vllm::GgufTensorRole::kMatmulWeight, packed.ggml_type, packed.shape,
-          vt::DeviceType::kCPU) == vllm::GgufResidency::kExpandBf16);
-  CHECK_THROWS_WITH_AS(vllm::OwnGgufQuantBlocks(packed, 128, 256),
-                       doctest::Contains("non-keep-quant encoding"), std::runtime_error);
+          vt::DeviceType::kCPU) == vllm::GgufResidency::kKeepQuant);
+  CHECK_NOTHROW(vllm::OwnGgufQuantBlocks(packed, 128, 256));
   for (const bool cuda_align : {false, true}) {
     CHECK_THROWS_WITH_AS(vllm::OwnGgufQuantBlocks(packed, 128, 256, 0, nullptr,
                          !cuda_align, cuda_align, true, vllm::GgufTensorRole::kEmbeddingTable),

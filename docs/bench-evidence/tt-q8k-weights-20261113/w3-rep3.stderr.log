@@ -1,0 +1,113 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q8_K_XL.gguf engine | num_prompts=1 input_len=32 output_len=200 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 569284608 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+INFO auto-fit max_model_len: reduced from 262144 to 96 to fit the KV cache (8 blocks, one of them the null block, shared by 2 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+engine-fatal: EngineCore busy loop threw: TT_FATAL @ /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/impl/allocator/bank_manager.cpp:495: false
+info:
+Out of Memory: Not enough space to allocate 178257920 B DRAM buffer across 8 banks, where each bank needs to store 22282240 B, but bank size is 4272341376 B (allocated: 4264775936 B, free: 7565440 B, largest free block: 2097152 B)
+backtrace:
+ --- void tt::assert::detail::tt_throw<unsigned long, std::basic_string_view<char, std::char_traits<char> >, unsigned int, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&, std::basic_string_view<char, std::char_traits<char> > const&, unsigned int const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&>::t, unsigned long const&, std::basic_string_view<char, std::char_traits<char> > const&, unsigned int const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&)
+ --- tt::tt_metal::BankManager::allocate_buffer(unsigned long, unsigned long, bool, tt::tt_metal::CoreRangeSet const&, std::optional<unsigned int>, ttsl::StrongType<unsigned int, tt::tt_metal::AllocatorIDTag>, std::vector<std::pair<unsigned long, unsigned long>, std::allocator<std::pair<unsigned long, unsigned long> > > const&, std::optional<std::unordered_set<unsigned int, std::hash<unsigned int>, std::equal_to<unsigned int>, std::allocator<unsigned int> > > const&)
+ --- tt::tt_metal::AllocatorImpl::allocate_buffer(tt::tt_metal::Buffer*)
+ --- tt::tt_metal::BufferImpl::allocate_impl(tt::tt_metal::Buffer&)
+ --- tt::tt_metal::BufferImpl::create(tt::tt_metal::IDevice*, unsigned long, unsigned long, tt::tt_metal::BufferType, tt::tt_metal::BufferShardingArgs const&, std::optional<bool>, std::optional<ttsl::StrongType<unsigned char, tt::tt_metal::SubDeviceIdTag> >)
+ --- tt::tt_metal::distributed::MeshBuffer::create(std::variant<tt::tt_metal::distributed::ReplicatedBufferConfig, tt::tt_metal::distributed::ShardedBufferConfig> const&, tt::tt_metal::distributed::DeviceLocalBufferConfig const&, tt::tt_metal::distributed::MeshDevice*, std::optional<unsigned long>)
+ --- tt::tt_metal::tensor_impl::allocate_device_buffer(tt::tt_metal::distributed::MeshDevice*, tt::tt_metal::TensorSpec const&)
+ --- tt::tt_metal::allocate_mesh_tensor_on_device_with_topology(tt::tt_metal::distributed::MeshDevice&, tt::tt_metal::TensorSpec, tt::tt_metal::TensorTopology)
+ --- tt::tt_metal::distributed::MeshCommandQueue::enqueue_write_tensor(tt::tt_metal::HostTensor const&, tt::tt_metal::MemoryConfig const&)
+ --- tt::tt_metal::to_device(ttnn::Tensor const&, tt::tt_metal::distributed::MeshDevice*, ttsl::optional_reference<tt::tt_metal::MemoryConfig const>, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >)
+ --- ttnn::Tensor ttnn::Tensor::from_vector<int>(std::vector<int, std::allocator<int> >&&, tt::tt_metal::TensorSpec const&, tt::tt_metal::distributed::MeshDevice*, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >, int)
+ --- vt::tenstorrent::EnsureKeepQuantWords(vt::Tensor const&, vt::DType, long, long, tt::tt_metal::distributed::MeshDevice&)
+ --- vt::tenstorrent::MatmulBTQuantInt8DotKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- vt::tenstorrent::MatmulBTQuantKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- /tmp/build-q8k/examples/vllm-bench(+0x3735d8) [0xaaabbace35d8]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x38b864) [0xaaabbacfb864]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x39161c) [0xaaabbad0161c]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x394f64) [0xaaabbad04f64]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x395f8c) [0xaaabbad05f8c]
+ --- vllm::Qwen3_5DenseModel::ForwardDevice(std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, vllm::v1::CommonAttentionMetadata const&, vllm::v1::GDNAttentionMetadata const&, std::vector<vllm::PagedKvCache, std::allocator<vllm::PagedKvCache> > const&, std::vector<vllm::GdnStateCache, std::allocator<vllm::GdnStateCache> > const&, vllm::Qwen3_5DenseWeights const&, vllm::HfConfig const&, vt::Queue&, std::vector<int, std::allocator<int> > const&)
+ --- /tmp/build-q8k/examples/vllm-bench(+0x3c71e8) [0xaaabbad371e8]
+ --- vllm::ModelRegistry::Forward(vllm::LoadedModel&, vllm::ModelForwardInput const&)
+ --- vllm::v1::GPUModelRunner::execute_model(vllm::v1::SchedulerOutput const&)
+ --- vllm::v1::Executor::execute_model(vllm::v1::SchedulerOutput const&)
+ --- vllm::v1::EngineCore::step()
+ --- vllm::v1::EngineCoreProc::process_engine_step()
+ --- vllm::v1::EngineCoreProc::run_busy_loop()
+ --- /tmp/build-q8k/examples/vllm-bench(+0xf1ffb0) [0xaaabbb88ffb0]
+ --- /usr/lib/gcc/aarch64-unknown-linux-gnu/16/libstdc++.so.6(+0xecabc) [0xfffe6cdecabc]
+ --- /usr/lib64/libc.so.6(+0x99070) [0xfffe6ca69070]
+ --- /usr/lib64/libc.so.6(+0x1282dc) [0xfffe6caf82dc]
+
+async-llm: output handler saw engine death: EngineCore encountered an issue. See stack trace (above) for the root cause. [TT_FATAL @ /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/impl/allocator/bank_manager.cpp:495: false
+info:
+Out of Memory: Not enough space to allocate 178257920 B DRAM buffer across 8 banks, where each bank needs to store 22282240 B, but bank size is 4272341376 B (allocated: 4264775936 B, free: 7565440 B, largest free block: 2097152 B)
+backtrace:
+ --- void tt::assert::detail::tt_throw<unsigned long, std::basic_string_view<char, std::char_traits<char> >, unsigned int, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&, std::basic_string_view<char, std::char_traits<char> > const&, unsigned int const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&>::t, unsigned long const&, std::basic_string_view<char, std::char_traits<char> > const&, unsigned int const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&)
+ --- tt::tt_metal::BankManager::allocate_buffer(unsigned long, unsigned long, bool, tt::tt_metal::CoreRangeSet const&, std::optional<unsigned int>, ttsl::StrongType<unsigned int, tt::tt_metal::AllocatorIDTag>, std::vector<std::pair<unsigned long, unsigned long>, std::allocator<std::pair<unsigned long, unsigned long> > > const&, std::optional<std::unordered_set<unsigned int, std::hash<unsigned int>, std::equal_to<unsigned int>, std::allocator<unsigned int> > > const&)
+ --- tt::tt_metal::AllocatorImpl::allocate_buffer(tt::tt_metal::Buffer*)
+ --- tt::tt_metal::BufferImpl::allocate_impl(tt::tt_metal::Buffer&)
+ --- tt::tt_metal::BufferImpl::create(tt::tt_metal::IDevice*, unsigned long, unsigned long, tt::tt_metal::BufferType, tt::tt_metal::BufferShardingArgs const&, std::optional<bool>, std::optional<ttsl::StrongType<unsigned char, tt::tt_metal::SubDeviceIdTag> >)
+ --- tt::tt_metal::distributed::MeshBuffer::create(std::variant<tt::tt_metal::distributed::ReplicatedBufferConfig, tt::tt_metal::distributed::ShardedBufferConfig> const&, tt::tt_metal::distributed::DeviceLocalBufferConfig const&, tt::tt_metal::distributed::MeshDevice*, std::optional<unsigned long>)
+ --- tt::tt_metal::tensor_impl::allocate_device_buffer(tt::tt_metal::distributed::MeshDevice*, tt::tt_metal::TensorSpec const&)
+ --- tt::tt_metal::allocate_mesh_tensor_on_device_with_topology(tt::tt_metal::distributed::MeshDevice&, tt::tt_metal::TensorSpec, tt::tt_metal::TensorTopology)
+ --- tt::tt_metal::distributed::MeshCommandQueue::enqueue_write_tensor(tt::tt_metal::HostTensor const&, tt::tt_metal::MemoryConfig const&)
+ --- tt::tt_metal::to_device(ttnn::Tensor const&, tt::tt_metal::distributed::MeshDevice*, ttsl::optional_reference<tt::tt_metal::MemoryConfig const>, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >)
+ --- ttnn::Tensor ttnn::Tensor::from_vector<int>(std::vector<int, std::allocator<int> >&&, tt::tt_metal::TensorSpec const&, tt::tt_metal::distributed::MeshDevice*, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >, int)
+ --- vt::tenstorrent::EnsureKeepQuantWords(vt::Tensor const&, vt::DType, long, long, tt::tt_metal::distributed::MeshDevice&)
+ --- vt::tenstorrent::MatmulBTQuantInt8DotKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- vt::tenstorrent::MatmulBTQuantKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- /tmp/build-q8k/examples/vllm-bench(+0x3735d8) [0xaaabbace35d8]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x38b864) [0xaaabbacfb864]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x39161c) [0xaaabbad0161c]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x394f64) [0xaaabbad04f64]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x395f8c) [0xaaabbad05f8c]
+ --- vllm::Qwen3_5DenseModel::ForwardDevice(std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, vllm::v1::CommonAttentionMetadata const&, vllm::v1::GDNAttentionMetadata const&, std::vector<vllm::PagedKvCache, std::allocator<vllm::PagedKvCache> > const&, std::vector<vllm::GdnStateCache, std::allocator<vllm::GdnStateCache> > const&, vllm::Qwen3_5DenseWeights const&, vllm::HfConfig const&, vt::Queue&, std::vector<int, std::allocator<int> > const&)
+ --- /tmp/build-q8k/examples/vllm-bench(+0x3c71e8) [0xaaabbad371e8]
+ --- vllm::ModelRegistry::Forward(vllm::LoadedModel&, vllm::ModelForwardInput const&)
+ --- vllm::v1::GPUModelRunner::execute_model(vllm::v1::SchedulerOutput const&)
+ --- vllm::v1::Executor::execute_model(vllm::v1::SchedulerOutput const&)
+ --- vllm::v1::EngineCore::step()
+ --- vllm::v1::EngineCoreProc::process_engine_step()
+ --- vllm::v1::EngineCoreProc::run_busy_loop()
+ --- /tmp/build-q8k/examples/vllm-bench(+0xf1ffb0) [0xaaabbb88ffb0]
+ --- /usr/lib/gcc/aarch64-unknown-linux-gnu/16/libstdc++.so.6(+0xecabc) [0xfffe6cdecabc]
+ --- /usr/lib64/libc.so.6(+0x99070) [0xfffe6ca69070]
+ --- /usr/lib64/libc.so.6(+0x1282dc) [0xfffe6caf82dc]
+]
+vllm-bench: failed: EngineCore encountered an issue. See stack trace (above) for the root cause. [TT_FATAL @ /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/impl/allocator/bank_manager.cpp:495: false
+info:
+Out of Memory: Not enough space to allocate 178257920 B DRAM buffer across 8 banks, where each bank needs to store 22282240 B, but bank size is 4272341376 B (allocated: 4264775936 B, free: 7565440 B, largest free block: 2097152 B)
+backtrace:
+ --- void tt::assert::detail::tt_throw<unsigned long, std::basic_string_view<char, std::char_traits<char> >, unsigned int, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long>(char const*, int, char const*, char const*, fmt::v11::fstring<unsigned long const&, std::basic_string_view<char, std::char_traits<char> > const&, unsigned int const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&>::t, unsigned long const&, std::basic_string_view<char, std::char_traits<char> > const&, unsigned int const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&, unsigned long const&)
+ --- tt::tt_metal::BankManager::allocate_buffer(unsigned long, unsigned long, bool, tt::tt_metal::CoreRangeSet const&, std::optional<unsigned int>, ttsl::StrongType<unsigned int, tt::tt_metal::AllocatorIDTag>, std::vector<std::pair<unsigned long, unsigned long>, std::allocator<std::pair<unsigned long, unsigned long> > > const&, std::optional<std::unordered_set<unsigned int, std::hash<unsigned int>, std::equal_to<unsigned int>, std::allocator<unsigned int> > > const&)
+ --- tt::tt_metal::AllocatorImpl::allocate_buffer(tt::tt_metal::Buffer*)
+ --- tt::tt_metal::BufferImpl::allocate_impl(tt::tt_metal::Buffer&)
+ --- tt::tt_metal::BufferImpl::create(tt::tt_metal::IDevice*, unsigned long, unsigned long, tt::tt_metal::BufferType, tt::tt_metal::BufferShardingArgs const&, std::optional<bool>, std::optional<ttsl::StrongType<unsigned char, tt::tt_metal::SubDeviceIdTag> >)
+ --- tt::tt_metal::distributed::MeshBuffer::create(std::variant<tt::tt_metal::distributed::ReplicatedBufferConfig, tt::tt_metal::distributed::ShardedBufferConfig> const&, tt::tt_metal::distributed::DeviceLocalBufferConfig const&, tt::tt_metal::distributed::MeshDevice*, std::optional<unsigned long>)
+ --- tt::tt_metal::tensor_impl::allocate_device_buffer(tt::tt_metal::distributed::MeshDevice*, tt::tt_metal::TensorSpec const&)
+ --- tt::tt_metal::allocate_mesh_tensor_on_device_with_topology(tt::tt_metal::distributed::MeshDevice&, tt::tt_metal::TensorSpec, tt::tt_metal::TensorTopology)
+ --- tt::tt_metal::distributed::MeshCommandQueue::enqueue_write_tensor(tt::tt_metal::HostTensor const&, tt::tt_metal::MemoryConfig const&)
+ --- tt::tt_metal::to_device(ttnn::Tensor const&, tt::tt_metal::distributed::MeshDevice*, ttsl::optional_reference<tt::tt_metal::MemoryConfig const>, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >)
+ --- ttnn::Tensor ttnn::Tensor::from_vector<int>(std::vector<int, std::allocator<int> >&&, tt::tt_metal::TensorSpec const&, tt::tt_metal::distributed::MeshDevice*, std::optional<ttsl::StrongType<unsigned char, ttnn::QueueIdTag> >, int)
+ --- vt::tenstorrent::EnsureKeepQuantWords(vt::Tensor const&, vt::DType, long, long, tt::tt_metal::distributed::MeshDevice&)
+ --- vt::tenstorrent::MatmulBTQuantInt8DotKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- vt::tenstorrent::MatmulBTQuantKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- /tmp/build-q8k/examples/vllm-bench(+0x3735d8) [0xaaabbace35d8]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x38b864) [0xaaabbacfb864]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x39161c) [0xaaabbad0161c]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x394f64) [0xaaabbad04f64]
+ --- /tmp/build-q8k/examples/vllm-bench(+0x395f8c) [0xaaabbad05f8c]
+ --- vllm::Qwen3_5DenseModel::ForwardDevice(std::vector<int, std::allocator<int> > const&, std::vector<int, std::allocator<int> > const&, vllm::v1::CommonAttentionMetadata const&, vllm::v1::GDNAttentionMetadata const&, std::vector<vllm::PagedKvCache, std::allocator<vllm::PagedKvCache> > const&, std::vector<vllm::GdnStateCache, std::allocator<vllm::GdnStateCache> > const&, vllm::Qwen3_5DenseWeights const&, vllm::HfConfig const&, vt::Queue&, std::vector<int, std::allocator<int> > const&)
+ --- /tmp/build-q8k/examples/vllm-bench(+0x3c71e8) [0xaaabbad371e8]
+ --- vllm::ModelRegistry::Forward(vllm::LoadedModel&, vllm::ModelForwardInput const&)
+ --- vllm::v1::GPUModelRunner::execute_model(vllm::v1::SchedulerOutput const&)
+ --- vllm::v1::Executor::execute_model(vllm::v1::SchedulerOutput const&)
+ --- vllm::v1::EngineCore::step()
+ --- vllm::v1::EngineCoreProc::process_engine_step()
+ --- vllm::v1::EngineCoreProc::run_busy_loop()
+ --- /tmp/build-q8k/examples/vllm-bench(+0xf1ffb0) [0xaaabbb88ffb0]
+ --- /usr/lib/gcc/aarch64-unknown-linux-gnu/16/libstdc++.so.6(+0xecabc) [0xfffe6cdecabc]
+ --- /usr/lib64/libc.so.6(+0x99070) [0xfffe6ca69070]
+ --- /usr/lib64/libc.so.6(+0x1282dc) [0xfffe6caf82dc]
+]

@@ -66,6 +66,14 @@ int KeepQuantWordsPerBlock(DType enc) {
     // first 136 bytes. Derived from the traits block size, not copied from
     // the wave comments (the spec's risk note).
     case DType::kIQ4_XS: return 48;
+    // TT-KEEPQUANT-Q8K-WEIGHTS: block_q8_K is 292 B per 256 elements (f32
+    // d + qs[256] + bsums[16], cpu_quant_blocks.h:129-134) — 73 words,
+    // ZERO-PADDED to the standing 64-B-multiple grid = 80 words (320 B).
+    // The pad rule above is exactly why: an unpadded 73-word row would
+    // reintroduce the leg33 page-size disagreement. The decode reads only
+    // the true 292 block bytes. Derived from the traits block size
+    // (vt::BlockBytes(kQ8_K) == 292), not copied from the spec.
+    case DType::kQ8_K: return 80;
     default: return 0;
   }
 }
@@ -81,6 +89,19 @@ void DropKeepQuantWordShadow(void* host) {
   if (host == nullptr) return;
   std::lock_guard<std::mutex> g(KeepQuantWordMutex());
   KeepQuantWordShadows().erase(host);
+}
+
+// TT-KEEPQUANT-Q8K-WEIGHTS staging probe: the resident word shadow read back
+// to the host. The staging test's byte-exact observable (see
+// tests/vt/test_tenstorrent_backend.cpp).
+bool KeepQuantWordShadowWordsForTest(const void* host,
+                                     std::vector<int32_t>* out) {
+  if (host == nullptr || out == nullptr) return false;
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  auto it = KeepQuantWordShadows().find(host);
+  if (it == KeepQuantWordShadows().end()) return false;
+  *out = it->second.words.to_vector<int32_t>();
+  return true;
 }
 
 // Stage the packed keep-quant stream as a resident i32 word tensor ONCE per
@@ -812,6 +833,48 @@ ttnn::Tensor DecodeKeepQuantWordsF32(const ttnn::Tensor& w, DType enc,
           ttnn::Shape({static_cast<uint32_t>(slice_rows),
                        static_cast<uint32_t>(nb) * 32u}));
     }
+    case DType::kQ8_K: {
+      // TT-KEEPQUANT-Q8K-WEIGHTS: the DEQUANT-COMPOSITE decode. Q8_K has no
+      // vec_dot anywhere in the tree (cpu_quant_dot.cpp's selector returns
+      // nullptr — it is the K-quants' ACTIVATION encoding), so its weights
+      // serve exactly what the CPU oracle serves: to_float = d * qs
+      // (cpu_quant_traits.cpp:85-95 carries the to_float-only row). The
+      // staged 80-word row: word 0 IS the f32 d's bits (block_q8_K leads
+      // with a FULL f32, unlike the f16 scales of every other K-quant);
+      // qs[256] occupies stream bytes 4..259 = words 1..64 exactly.
+      // bsums (bytes 260..291) never reach a decode — they cache the
+      // per-16-group sums the Q4_K/Q5_K VEC_DOT arms use to apply the block
+      // minimum in one pass, and the composite arm runs no vec_dot; the
+      // CPU to_float twin ignores them too (recorded choice: stage-carry
+      // only, no decode consumer). Zero-sign repair is the Q8_0 algebra:
+      // sign(d) is f32 bit 31, sign(q) the raw byte's bit 7.
+      ttnn::Tensor w0 = ttnn::slice(
+          w, ttsl::SmallVector<uint32_t>{0u, 0u},
+          ttsl::SmallVector<uint32_t>{B, 1u},
+          ttsl::SmallVector<uint32_t>{1u, 1u});
+      // Word 0 holds the f32 bit pattern whole: bitcast, never unpack.
+      ttnn::Tensor w0t = ttnn::to_layout(w0, ttnn::Layout::TILE);
+      ttnn::Tensor d = ttnn::to_layout(
+          ttnn::bitcast(w0t, ttnn::DataType::FLOAT32),
+          ttnn::Layout::ROW_MAJOR);  // {B,1}
+      ttnn::Tensor qb = KeepQuantByteRange(w, B, 4, 260, device);  // {B,256}
+      ttnn::Tensor qf = signed_byte_f32(qb);
+      ttnn::Tensor prod = ttnn::multiply(d, qf);  // {B,256}
+      ttnn::Tensor dsign = sign_bit_f32(w0, 31);  // {B,1}
+      ttnn::Tensor qsign = sign_bit_f32(qb, 7);   // {B,256}
+      ttnn::Tensor pred = ttnn::subtract(
+          ttnn::add(dsign, qsign),
+          ttnn::multiply(ttnn::multiply(dsign, qsign), 2.0f));
+      prod = repair(prod, ttnn::multiply(pred, zero_mask_f32(prod)),
+                    neg0_scalar());
+      // W4d W2 (#3042) reclaim discipline: the whole web is consumed.
+      TTReclaimPlanes(device, {&w0, &w0t, &d, &qb, &qf, &dsign, &qsign,
+                               &pred});
+      return ttnn::reshape(
+          prod,
+          ttnn::Shape({static_cast<uint32_t>(slice_rows),
+                       static_cast<uint32_t>(nb) * 256u}));
+    }
     default:
       // EnsureKeepQuantWords refuses anything else before this point.
       VT_CHECK(false, "tenstorrent keep-quant decode: unsupported encoding");
@@ -897,12 +960,13 @@ void MatmulBTQuantKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b
                enc == DType::kQ3_K || enc == DType::kIQ3_S ||
                enc == DType::kIQ4_XS || enc == DType::kIQ2_XS ||
                enc == DType::kQ2_K || enc == DType::kIQ1_S ||
-               enc == DType::kIQ1_M,
+               enc == DType::kIQ1_M || enc == DType::kQ8_K,
            std::string("tenstorrent kMatmulBTQuant: ") + enc_name +
                " has no keep-quant decode on TENSTORRENT; the registered set "
                "is kQ4_K/kQ5_K/kQ6_K/kQ8_0/kIQ3_XXS/kIQ2_XXS/kIQ2_S/kQ3_K/"
-               "kIQ3_S/kIQ4_XS/kIQ2_XS/kQ2_K/kIQ1_S/kIQ1_M "
-               "(BACKEND-TENSTORRENT-KEEPQUANT, QUANT-GGUF-IQ-TENSTORRENT)");
+               "kIQ3_S/kIQ4_XS/kIQ2_XS/kQ2_K/kIQ1_S/kIQ1_M/kQ8_K "
+               "(BACKEND-TENSTORRENT-KEEPQUANT, QUANT-GGUF-IQ-TENSTORRENT, "
+               "TT-KEEPQUANT-Q8K-WEIGHTS)");
   const int64_t elems = BlockElems(enc);
   VT_CHECK(b.shape[1] % elems == 0,
            std::string("tenstorrent kMatmulBTQuant: K must be a whole number "
@@ -1005,7 +1069,16 @@ void MatmulBTQuantKernel(Queue& q, Tensor& out, const Tensor& a, const Tensor& b
   const bool int8dot_optout = int8dot_env != nullptr &&
                               int8dot_env[0] != '\0' &&
                               std::strcmp(int8dot_env, "0") == 0;
-  if (!int8dot_optout) {
+  // TT-KEEPQUANT-Q8K-WEIGHTS: Q8_K weights NEVER take the int8-dot kernel —
+  // no Q8_K-weight vec_dot exists anywhere in the tree (the selector at
+  // cpu_quant_dot.cpp:1268-1273 returns nullptr by design: Q8_K is the
+  // K-quants' ACTIVATION encoding), so there is no quantized-domain dot to
+  // match. The DEQUANT-COMPOSITE arm below is both the CPU oracle and the
+  // device path; the fused INT8-dot kernel for Q8_K weights is a separate
+  // PERF row, gated on this composite's measured cost. Dispatch is
+  // unconditional — the VT_TT_KEEPQUANT_INT8DOT lever must not route a
+  // Q8_K weight into a kernel that cannot exist.
+  if (!int8dot_optout && enc != DType::kQ8_K) {
     MatmulBTQuantInt8DotKernel(q, out, a, b);
     return;
   }
@@ -1053,9 +1126,11 @@ void DropGroupedActShadow(void* host) {
 // structure (cpu_quant_gemm.cpp, the comparison oracle) with the decode
 // on-core. The whole tower is NEVER decoded; no twin is built.
 //
-// REGISTERED SET: exactly {Q4_K, Q5_K, Q6_K, Q8_0} on kTENSTORRENT (W4a
-// wave-2b widened the wave-2 pair: the 27B pin carries 67 Q6_K + 48 Q5_K
-// tensors, so the tower is not servable without them). The two K-quant
+// REGISTERED SET: {Q4_K, Q5_K, Q6_K, Q8_0} (W4a wave-2b widened the wave-2
+// pair: the 27B pin carries 67 Q6_K + 48 Q5_K tensors, so the tower is not
+// servable without them) plus kQ8_K (TT-KEEPQUANT-Q8K-WEIGHTS: the UD-Q8_K_XL
+// checkpoint's GEMM weights — the composite decode chain is encoding-generic,
+// the fused-decode fast arm stays Q4_K/Q6_K). The two K-quant
 // decodes are the W3 dense chains verbatim, run on the selected word slice —
 // Q6_K mirrors the ROCm grouped kernel's native dequant
 // (rocm_grouped_gemm.hip:1456), and Q5_K has NO ROCm grouped reference (the
@@ -1087,11 +1162,13 @@ void MatmulBTQuantGroupedKernel(Queue&, Tensor& out, const Tensor& act,
       std::string("k") + static_cast<char>(enc_lower[0] - 'a' + 'A') +
       enc_lower.substr(1);
   VT_CHECK(enc == DType::kQ4_K || enc == DType::kQ5_K ||
-               enc == DType::kQ6_K || enc == DType::kQ8_0,
+               enc == DType::kQ6_K || enc == DType::kQ8_0 ||
+               enc == DType::kQ8_K,
            std::string("tenstorrent kMatmulBTQuantGrouped: ") + enc_name +
                " has no GROUPED keep-quant decode on TENSTORRENT; the "
-               "registered set is kQ4_K/kQ5_K/kQ6_K/kQ8_0 (BACKEND-"
-               "TENSTORRENT-KEEPQUANT W4a)");
+               "registered set is kQ4_K/kQ5_K/kQ6_K/kQ8_0/kQ8_K (BACKEND-"
+               "TENSTORRENT-KEEPQUANT W4a; kQ8_K per TT-KEEPQUANT-"
+               "Q8K-WEIGHTS)");
   const int64_t elems = BlockElems(enc);
   VT_CHECK(weight.shape[1] % elems == 0,
            std::string("tenstorrent kMatmulBTQuantGrouped: K must be a whole "

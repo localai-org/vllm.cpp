@@ -1,0 +1,95 @@
+2026-11-13 14:14:38.452 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-13 14:14:38.452 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-13 14:14:38.452 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-13 14:14:38.452 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-13 14:14:38.456 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-13 14:14:38.456 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-13 14:14:38.485 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-13 14:14:38.485 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-13 14:14:38.485 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-13 14:14:38.485 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-13 14:14:38.486 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-13 14:14:38.544 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-13 14:14:38.588 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-13 14:14:38.588 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-13 14:14:38.588 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-13 14:14:38.588 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-13 14:14:38.588 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-13 14:14:39.385 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:12970:
+TEST CASE:  kTENSTORRENT Q8_K keep-quant staging: 80 padded words, byte-exact
+
+./tests/vt/test_tenstorrent_backend.cpp:13037: MESSAGE: Q8_K staging: 80 words/block, byte-exact incl. f32 d and zero pad
+
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/376797e407fa8d55/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/4315823865296814619/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/4315823865296814619/trisc1/trisck.1407079398722432001_99325.o /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/4315823865296814619/trisc1/trisck.1407079398722432001_99325.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/376797e407fa8d55/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/6352195288940155449/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/6352195288940155449/trisc1/trisck.1407079398722432001_99325.o /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/6352195288940155449/trisc1/trisck.1407079398722432001_99325.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin-durable/libexec/tt-metalium/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:13047:
+TEST CASE:  kTENSTORRENT Q8_K keep-quant composite matmul matches the CPU dequant oracle
+
+./tests/vt/test_tenstorrent_backend.cpp:13130: MESSAGE: Q8_K composite matmul: matches the CPU dequant oracle
+
+===============================================================================
+[doctest] test cases:   2 |   2 passed | 0 failed | 112 skipped
+[doctest] assertions: 337 | 337 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-13 14:15:38.717 | info     |    BuildKernels | JIT cache stats: 52/162 hits (32.1%) [52 cached, 39 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-13 14:15:38.717 | info     |    BuildKernels | JIT telemetry: 43 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-13 14:15:38.759 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-13 14:15:38.760 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-13 14:15:38.858 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-13 14:15:38.858 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-13 14:15:38.858 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
