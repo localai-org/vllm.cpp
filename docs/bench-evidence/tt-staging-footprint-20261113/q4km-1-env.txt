@@ -1,0 +1,8 @@
+date: 2026-11-13T21:54:57+01:00
+head: e866253698615734a2c33512a0e1484fa3de8527
+governor: performance
+load1: 2.06
+bench: /tmp/build-ttfp/examples/vllm-bench
+model: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf
+model sha256: 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169
+num-blocks: 64
