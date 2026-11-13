@@ -3,9 +3,23 @@
 - Owning row: `TT-KEEPQUANT-Q8K-WEIGHTS` (record ID `BACKEND-TENSTORRENT-Q8K-WEIGHTS`)
 - Trigger: the developer downloaded `unsloth/Qwen3.8-27B-GGUF` @ `ce331efc48d5722b4b8041f72793e530eae18d9b` (UD-Q8_K_XL, 31,457,991,680 B, LFS sha256 `af36ecb6b5db1407953345b746c14ac93f0657dda413910b4348683a2d990377`) and the arm must serve it; today the loader refuses (`kQ8_K` is activation-only in include/vt/dtype.h:41).
 
-## The block layout (why this arm is cheap)
+## The block layout (CORRECTED 2026-11-13 — the original spec conflated block_q8_0 with block_q8_K)
 
-`block_q8_K` (llama.cpp canonical): 1 f32 `d` scale + 32 int8 quants = **36 B per 32 elements**. The keepquant staging comment already records the Q8_0 precedent as `32 -> 9` words; Q8_K is also exactly **9 words** (36 B) with **zero padding** — the cleanest block type the staging path handles. Activation side: `kQ8_K` is already the K-quant `vec_dot_type`, so the INT8DOT kernel machinery exists; the new work is the WEIGHT-side arm (staging layout + dequant/vec_dot kernel path + loader acceptance).
+`block_q8_K` (src/vt/cpu/cpu_quant_blocks.h:129-134): 1 f32 `d` + 256 int8
+`qs` + 16 int16 `bsums` = **292 B per 256 elements** (static_assert 292,
+kQK_K = 256). Staging geometry: 292 B -> 73 words -> padded to the standing
+64-B-multiple grid = **80 words (320 B)** per super-block (the pad rule at
+tenstorrent_keepquant.cpp:62-68 exists to remove page-size disagreements;
+an unpadded 73-word row would reintroduce the leg33 disagreement). The
+Q8_K-weight vec_dot does NOT exist even on the CPU oracle
+(cpu_quant_dot.cpp:1268-1273 returns nullptr; the tree-standard reference
+for Q8_K weights is the **dequant-composite** fallback,
+cpu_quant_traits.cpp:85-95 carries the row for to_float only). Activation
+side: `kQ8_K` is already the K-quant `vec_dot_type`. Implementation shape
+therefore: W2 stages the 80-word rows and serves through the
+**dequant-composite arm** (tree-standard oracle AND tree-standard device
+path) in v1; a fused Q8_KxQ8_K INT8-dot kernel is a PERF row of its own
+(M5-rule adjudication), gated on the composite's measured cost.
 
 ## Waves
 
