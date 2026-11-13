@@ -1,0 +1,12 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   18187 20.3  0.0  34944 29312 ?        S    22:37   0:01 /usr/lib/python-exec/python3.13/python3 tests/scripts/test_dsv4v_w6_compare.py
+lu_zero  110439  0.9  0.0 18770112 226560 pts/7 Sl+  07:27   9:01 maki -c
+lu_zero  116071  0.9  0.7 20540800 2105856 pts/0 Sl+ Nov11  31:09 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero  108475  0.8  0.2 6219520 547200 pts/6  Sl+  07:19   7:22 claude --resume 2774bb5f-085e-481b-be2d-f0d379464dd9
+lu_zero  103727  0.7  0.1 6265280 461120 pts/1  Sl+  10:50   5:18 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero   82926  0.5  0.0 18685952 203968 pts/8 Sl+  07:44   4:44 maki
+lu_zero  108872  0.4  0.1 24337728 447232 ?     Ssl  Nov10  21:06 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service
+lu_zero  100182  0.4  1.3 28353408 3718272 pts/6 Sl+ 19:34   0:47 /usr/bin/rust-analyzer
+lu_zero    5985  0.2  0.0 11133888 228480 pts/3 Sl+  Nov12   5:57 opencode -c
+lu_zero   20794  0.2  0.1 11067264 289792 pts/10 Sl+ Nov11   8:01 opencode -c
+lu_zero   95757  0.1  0.0  11392  6400 ?        Ss   Oct26  41:07 tmux

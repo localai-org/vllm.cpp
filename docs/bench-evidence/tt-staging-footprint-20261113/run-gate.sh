@@ -30,7 +30,7 @@ log_env() {
   ps aux --sort=-%cpu | head -12 > "$EV/ps-top-$1.txt"
 }
 
-leg() {  # $1 = arm tag, $2 = rep
+leg() {  # $1 = arm tag, $2 = rep; extra engine env rides $LEG_ENV
   local name="$1-$2"
   echo "=== $name start $(date -Is) ==="
   exec 9>"${GPU_LOCK:-$HOME/gpu.lock}"; flock -x 9
@@ -38,7 +38,7 @@ leg() {  # $1 = arm tag, $2 = rep
   rm -f /dev/shm/TT_UMD_LOCK.* /dev/shm/tt_device_*_memory 2>/dev/null
   while [ "$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)" -ge 16 ]; do sleep 60; done
   log_env "$name"
-  taskset -c 32-63 "$BENCH" \
+  env $LEG_ENV taskset -c 32-63 "$BENCH" \
     --model "$MODEL" \
     --num-prompts 1 --input-len 32 --output-len 200 --concurrency 1 \
     --num-blocks "$BLOCKS" --max-num-batched-tokens 64 --seed 0 \
@@ -53,7 +53,7 @@ if [ "${1:-}" = "q4km" ]; then
   leg q4km 1
 else
   MODEL=/mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q6_K_XL.gguf
-  BLOCKS=${2:-16}
-  for r in 1 2 3; do leg q6kl "$r"; done
+  BLOCKS=${2:-8}
+  for r in 1 2 3; do leg "${LEG_TAG:-q6kl}" "$r"; done
 fi
 echo "ALL LEGS DONE $(date -Is)"
