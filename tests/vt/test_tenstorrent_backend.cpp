@@ -366,6 +366,115 @@ TEST_CASE("kTENSTORRENT kRelu matches a host F32 reference") {
   CHECK(max_abs_diff < 0.1f);
 }
 
+TEST_CASE("kTENSTORRENT kEmbeddingQuant decodes gathered rows to the bf16 "
+          "twin's exact bits (TT-EMBED-DUAL-RESIDENCY)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  // The registration IS the loader gate: DeviceQuantGatherSupported answers
+  // OpRegistered(kEmbeddingQuant, dev) (gguf_keep_quant.cpp:327-329), so this
+  // REQUIRE is what flips the tied table's residency from kExpandBf16 to
+  // kKeepQuant on this device. Red-before: at bd78cb172 this REQUIRE failed —
+  // kEmbeddingQuant had no kTENSTORRENT registration and the tied table paid
+  // a full bf16 device twin.
+  REQUIRE(vt::OpRegistered(vt::OpId::kEmbeddingQuant, DeviceType::kTENSTORRENT));
+
+  // Q8_0: the one block dtype with a ported CPU encoder (cpu_quant_act.cpp
+  // BlockFromFloat; the k-quant encoders are deliberately unported), so the
+  // fixture quantizes known values instead of hand-building blocks.
+  // Rows are DISTINGUISHABLE: row r element j carries r*100 + j, so a wrong
+  // row or a permuted column axis shows up as an identifiable value, not
+  // just a magnitude.
+  constexpr int64_t Vocab = 5, H = 256, T = 3;  // H = 8 Q8_0 blocks
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  vt::cpu::FromFloatFn from_float = vt::cpu::BlockFromFloat(vt::DType::kQ8_0);
+  vt::cpu::ToFloatFn to_float = vt::cpu::BlockToFloat(vt::DType::kQ8_0);
+  REQUIRE(from_float != nullptr);
+  REQUIRE(to_float != nullptr);
+  const size_t row_bytes = vt::RowSizeBytes(vt::DType::kQ8_0, H);
+  std::vector<uint8_t> packed(static_cast<size_t>(Vocab) * row_bytes);
+  std::vector<std::vector<float>> rows(static_cast<size_t>(Vocab));
+  for (int64_t r = 0; r < Vocab; ++r) {
+    rows[static_cast<size_t>(r)].resize(static_cast<size_t>(H));
+    for (int64_t j = 0; j < H; ++j)
+      rows[static_cast<size_t>(r)][static_cast<size_t>(j)] =
+          static_cast<float>(r * 100 + j);
+    from_float(rows[static_cast<size_t>(r)].data(),
+               packed.data() + static_cast<size_t>(r) * row_bytes, H);
+  }
+  const std::vector<int32_t> host_ids = {4, 0, 2};  // edges + middle
+
+  void* mem_table = backend.Alloc(packed.size());
+  void* mem_ids = backend.Alloc(host_ids.size() * sizeof(int32_t));
+  std::vector<float> host_out(static_cast<size_t>(T) * static_cast<size_t>(H),
+                              0.0f);
+  void* mem_out = backend.Alloc(host_out.size() * sizeof(float));
+  backend.Copy(q, mem_table, packed.data(), packed.size());
+  backend.Copy(q, mem_ids, host_ids.data(), host_ids.size() * sizeof(int32_t));
+
+  Tensor table =
+      Tensor::Contiguous(mem_table, vt::DType::kQ8_0,
+                         Device{DeviceType::kTENSTORRENT, 0}, {Vocab, H});
+  Tensor ids = Tensor::Contiguous(mem_ids, vt::DType::kI32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {T});
+  Tensor out = Tensor::Contiguous(mem_out, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {T, H});
+
+  auto embedding = reinterpret_cast<vt::EmbeddingFn>(
+      vt::GetOp(vt::OpId::kEmbeddingQuant, DeviceType::kTENSTORRENT));
+  // Leg 1 seeds the [T, H] row shadow; leg 2 with DIFFERENT ids into the SAME
+  // device ids buffer exercises the allocation-free refresh path (the
+  // per-replay-step warm shape). Each leg checks against its own oracle.
+  struct Leg {
+    std::vector<int32_t> ids;
+  };
+  const std::vector<Leg> legs = {{host_ids}, {{1, 3, 4}}};
+  float max_abs_diff = 0.0f;
+  float leg_diff = 0.0f;
+  std::vector<float> decoded(static_cast<size_t>(H));
+  for (size_t leg = 0; leg < legs.size(); ++leg) {
+    leg_diff = 0.0f;
+    const std::vector<int32_t>& cur = legs[leg].ids;
+    if (leg > 0) {
+      backend.Copy(q, mem_ids, cur.data(), cur.size() * sizeof(int32_t));
+    }
+    embedding(q, out, table, ids);
+    embedding(q, out, table, ids);
+    backend.Copy(q, host_out.data(), mem_out, host_out.size() * sizeof(float));
+    MESSAGE("leg", leg, " ids=", cur[0], ",", cur[1], ",", cur[2]);
+    for (int64_t i = 0; i < T; ++i) {
+      const int32_t id = cur[static_cast<size_t>(i)];
+      to_float(packed.data() + static_cast<size_t>(id) * row_bytes,
+               decoded.data(), H);
+      for (int64_t j = 0; j < H; ++j) {
+        const float ref = vt::BF16ToF32(
+            vt::F32ToBF16(decoded[static_cast<size_t>(j)]));
+        const float d = std::fabs(
+            host_out[static_cast<size_t>(i) * static_cast<size_t>(H) +
+                     static_cast<size_t>(j)] - ref);
+      if (d > leg_diff) leg_diff = d;
+      if (d > max_abs_diff) {
+        max_abs_diff = d;
+        MESSAGE("new worst i=", i, " j=", j, " d=", d,
+                " got=", host_out[static_cast<size_t>(i) * 256 + j],
+                " ref=", ref);
+      }
+      }
+    }
+    MESSAGE("leg", leg, " diff=", leg_diff, " max=", max_abs_diff,
+            " ho0=", host_out[0], " ho1=", host_out[1],
+            " dec0=", decoded[0], " id0=", cur[0]);
+  }
+  MESSAGE("worst_abs=", max_abs_diff);
+  CHECK(max_abs_diff == 0.0f);
+
+  backend.Free(mem_table);
+  backend.Free(mem_ids);
+  backend.Free(mem_out);
+}
 TEST_CASE("kTENSTORRENT kEmbedding matches a host F32 reference (row gather)") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");

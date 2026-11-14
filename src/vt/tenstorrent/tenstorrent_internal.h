@@ -698,6 +698,22 @@ struct EmbedTableShadow {
 std::mutex& EmbedTableMutex();
 std::map<uintptr_t, EmbedTableShadow>& EmbedTableShadows();
 
+// TT-EMBED-DUAL-RESIDENCY: a BLOCK-QUANT gather table (kEmbeddingQuant) keeps
+// NO full-table device twin. Each eager step (or replay refresh) decodes the
+// t gathered rows on host into the bf16 TWIN's exact bits and stages them as a
+// persistent [t, h] BFLOAT16 device shadow keyed on the table's host pointer —
+// the WarmDecodeIds pattern. The capture TU's EmbedDeviceIdsInto reads the map.
+struct QuantEmbedRowShadow {
+  std::optional<ttnn::Tensor> device;
+  uint32_t rows = 0, h = 0;
+};
+std::mutex& QuantEmbedMutex();
+std::map<uintptr_t, QuantEmbedRowShadow>& QuantEmbedRows();
+// Decode the n gathered ids' rows on host and refresh the persistent shadow
+// (from_vector on the MISS, allocation-free copy_to_device on the HIT).
+ttnn::Tensor RefreshQuantEmbedRows(const Tensor& table, const uint32_t* ids,
+                                   int64_t n, MeshDevice& device);
+
 // ---- moved declarations (definitions in tenstorrent_ops.cpp; shared with the
 // capture TU) ----
 std::atomic<int64_t>& LastTraceBytes();

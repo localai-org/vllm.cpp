@@ -319,6 +319,25 @@ void WarmDecodeIds(const int32_t* ids, int64_t n) {
   if (dbg_ids) std::fprintf(stderr, "[TT-STEP] WarmDecodeIds done\n");
 }
 
+// TT-EMBED-DUAL-RESIDENCY: the replay-step refresh for a block-quant gather
+// table. The captured embedding's INPUT rows depend on this step's ids, so —
+// exactly like WarmDecodeIds — the driver decodes the gathered rows on host
+// (the bf16 twin's exact bits) and H2D-copies them into the persistent
+// [n, h] shadow BEFORE the replay; the captured copy then moves them into the
+// hidden shadow in-region. No-op for a float table (the twin path warms it
+// once and it never changes).
+void WarmEmbedQuantRows(const Tensor& table, const int32_t* ids, int64_t n) {
+  if (!HostFreeDecodeEnabled()) return;
+  if (!IsBlockQuant(table.dtype) || ids == nullptr || n < 1) return;
+  MeshDevice& device = SharedMeshDevice();
+  std::vector<uint32_t> host(static_cast<size_t>(n));
+  for (int64_t i = 0; i < n; ++i) {
+    VT_CHECK(ids[i] >= 0, "tenstorrent WarmEmbedQuantRows: negative id");
+    host[static_cast<size_t>(i)] = static_cast<uint32_t>(ids[i]);
+  }
+  (void)RefreshQuantEmbedRows(table, host.data(), n, device);
+}
+
 void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
                         const void* table_host, int64_t vocab, int64_t hidden,
                         int64_t n) {
@@ -331,7 +350,23 @@ void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
     dev_ids = it->second.ids;
   }
   ttnn::Tensor dev_table;
+  bool quant_rows = false;
   {
+    // TT-EMBED-DUAL-RESIDENCY: a block-quant table has no full-table twin;
+    // its persistent [n, h] row shadow (refreshed per replay step by the
+    // driver's WarmEmbedQuantRows) IS the gathered embedding. The captured op
+    // is then just the copy below — same allocation discipline, no
+    // from_vector write in-region.
+    std::lock_guard<std::mutex> gq(QuantEmbedMutex());
+    auto itq = QuantEmbedRows().find(reinterpret_cast<uintptr_t>(table_host));
+    if (itq != QuantEmbedRows().end() && itq->second.device.has_value() &&
+        itq->second.rows == static_cast<uint32_t>(n) &&
+        itq->second.h == static_cast<uint32_t>(hidden)) {
+      dev_table = *itq->second.device;
+      quant_rows = true;
+    }
+  }
+  if (!quant_rows) {
     std::lock_guard<std::mutex> g(EmbedTableMutex());
     auto it = EmbedTableShadows().find(reinterpret_cast<uintptr_t>(table_host));
     VT_CHECK(it != EmbedTableShadows().end() && it->second.device.has_value() &&
@@ -341,8 +376,13 @@ void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
              "(run one eager embedding step before capture)");
     dev_table = *it->second.device;
   }
-  ttnn::Tensor dev_out = ttnn::embedding(dev_ids, dev_table, /*pad_token=*/std::nullopt,
-                                         /*layout=*/ttnn::Layout::TILE);
+  ttnn::Tensor dev_out;
+  if (quant_rows) {
+    dev_out = dev_table;
+  } else {
+    dev_out = ttnn::embedding(dev_ids, dev_table, /*pad_token=*/std::nullopt,
+                              /*layout=*/ttnn::Layout::TILE);
+  }
   if (dev_out.logical_shape().rank() != 2 ||
       dev_out.logical_shape()[0] != n || dev_out.logical_shape()[1] != hidden) {
     dev_out = ttnn::reshape(

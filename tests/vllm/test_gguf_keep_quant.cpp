@@ -1129,19 +1129,27 @@ TEST_CASE("the gather's DEVICE gate is the OP TABLE, not a hand-kept device list
           vt::OpRegistered(vt::OpId::kEmbeddingQuant, d));
   }
 
-  // The three that have no block-decoding gather in ANY build: each of their
-  // `kEmbedding` kernels asserts a float table by name (e.g. tenstorrent_ops.cpp
-  // "tenstorrent kEmbedding: float table, f32/bf16 out"), none registers
+  // The two that have no block-decoding gather in ANY build: each of their
+  // `kEmbedding` kernels asserts a float table by name, none registers
   // `kEmbeddingQuant`, and their arms are owed. A backend that registered the
   // quant id without writing the decoder would turn a clean load-time refusal
   // into a forward-time throw with the whole model resident — the #523 failure —
   // so this half stays an absolute assertion and not a registry echo.
   for (vt::DeviceType d :
-       {vt::DeviceType::kMETAL, vt::DeviceType::kVULKAN,
-        vt::DeviceType::kTENSTORRENT}) {
+       {vt::DeviceType::kMETAL, vt::DeviceType::kVULKAN}) {
     CAPTURE(vt::DeviceTypeName(d));
     CHECK_FALSE(vllm::DeviceQuantGatherSupported(d));
   }
+  // TT-EMBED-DUAL-RESIDENCY: kTENSTORRENT LEFT the no-gather set — its
+  // kEmbeddingQuant decodes the gathered rows on host and stages them as a
+  // persistent row shadow (no full-table twin). In a build without the TT
+  // backend the registrar is silent, so the gate stays closed there; the
+  // assertion is build-conditional, not deleted.
+#ifdef VLLM_CPP_TENSTORRENT
+  CHECK(vllm::DeviceQuantGatherSupported(vt::DeviceType::kTENSTORRENT));
+#else
+  CHECK_FALSE(vllm::DeviceQuantGatherSupported(vt::DeviceType::kTENSTORRENT));
+#endif
 #ifdef VLLM_CPP_HIP
   CHECK(vllm::DeviceQuantGatherSupported(vt::DeviceType::kROCM));
 #else
@@ -1336,7 +1344,8 @@ void AddF32T(GgufModelBuilder& b, const std::string& name,
 // for. All layers are full attention (interval 1), so no GDN tensors appear.
 // `tied` omits `output.weight`, which is how a tied-embedding GGUF says "the
 // head IS token_embd" (llama.cpp TENSOR_DUPLICATED) — the L5 sharing case.
-std::string BuildDenseQ8Gguf(const DenseDims& d, bool tied = false) {
+std::string BuildDenseQ8Gguf(const DenseDims& d, bool tied = false,
+                             bool quant_embd = false) {
   GgufModelBuilder b;
   b.AddKv(StrKv("general.architecture", "qwen35"));
   b.AddKv(U32Kv("qwen35.embedding_length", static_cast<uint32_t>(d.H)));
@@ -1352,7 +1361,13 @@ std::string BuildDenseQ8Gguf(const DenseDims& d, bool tied = false) {
   b.AddKv(U32Kv("qwen35.full_attention_interval", 1));
   b.AddKv(U32Kv("qwen35.context_length", 4096));
 
-  AddF32T(b, "token_embd.weight", {d.vocab, d.H}, 0.5F);
+  if (quant_embd) {
+    // TT-EMBED-DUAL-RESIDENCY: a QUANTIZED tied table (the qwen3.8-27B shape)
+    // needs the gather role to keep blocks on a device that decodes them.
+    AddQ8_0(b, "token_embd.weight", d.vocab, d.H, 5);
+  } else {
+    AddF32T(b, "token_embd.weight", {d.vocab, d.H}, 0.5F);
+  }
   AddF32T(b, "output_norm.weight", {d.H}, 1.5F);
   if (!tied) AddQ8_0(b, "output.weight", d.vocab, d.H, 11);
   for (int64_t il = 0; il < d.n_layer; ++il) {
@@ -2028,6 +2043,61 @@ TEST_CASE("tied lm_head SHARES the embedding expansion instead of copying it") {
   // being paid for.
   CHECK(ws.embed_tokens.bytes.data() == ws.lm_head.bytes.data());
   CHECK(wu.embed_tokens.bytes.data() != wu.lm_head.bytes.data());
+
+  // TT-EMBED-DUAL-RESIDENCY: a tied KEEP-QUANT pair shares on kTENSTORRENT.
+  // The original refusal named the head's OwnMatmulWeight repack, but
+  // QuantRepackForDevice answers that only on kCPU — on TT the head's words
+  // are the file's own GGML block order, and the TT gather reads the shared
+  // word shadow, so an unshared pair would stage a SECOND vocab-sized word
+  // image. CPU keeps the refusal (repack live); this arm is TT-build-only
+  // because embed_r itself needs OpRegistered(kEmbeddingQuant, kTENSTORRENT).
+#ifdef VLLM_CPP_TENSTORRENT
+  {
+    ::unsetenv("VT_CPU_REF");
+    ::unsetenv("VT_GGUF_KEEP_QUANT");
+    ::unsetenv("VT_GGUF_KEEP_F16");
+    ::unsetenv("VT_GGUF_SHARE_TIED_HEAD");
+    const DenseDims d2;
+    const TempFile f2(BuildDenseQ8Gguf(d2, /*tied=*/true, /*quant_embd=*/true));
+    const vllm::GgufFile g2 = vllm::GgufFile::Open(f2.path());
+    const vllm::HfConfig c2 = vllm::HfConfigFromGguf(g2);
+    vllm::GgufLoadPolicy tt = vllm::GgufLoadPolicy::FromEnv(vt::DeviceType::kTENSTORRENT);
+    REQUIRE(tt.keep_quant);
+    CHECK_FALSE(tt.quant_repack);  // the repack is a kCPU-only decision
+    tt.mmap_residency = true;
+    tt.share_tied_head = true;
+    vllm::GgufLoadPolicy unshared2 = tt;
+    unshared2.share_tied_head = false;
+    const vllm::Qwen3_5DenseWeights ws2 =
+        vllm::LoadQwen3_5DenseFromGguf(g2, c2, &tt);
+    const vllm::Qwen3_5DenseWeights wu2 =
+        vllm::LoadQwen3_5DenseFromGguf(g2, c2, &unshared2);
+    CHECK(vt::IsBlockQuant(ws2.embed_tokens.dtype));
+    CHECK(ws2.embed_tokens.bytes == ws2.lm_head.bytes);
+    CHECK(ws2.embed_tokens.bytes.data() == ws2.lm_head.bytes.data());
+    // With mmap residency BOTH unshared tensors borrow the SAME file bytes,
+    // so the pointer-inequality probe rides the copy arm (mmap off): there a
+    // share BORROWS one refcounted buffer and an unshare owns TWO copies.
+    vllm::GgufLoadPolicy unshared3 = tt;
+    unshared3.share_tied_head = false;
+    unshared3.mmap_residency = false;
+    vllm::GgufLoadPolicy shared3 = tt;
+    shared3.share_tied_head = true;
+    shared3.mmap_residency = false;
+    const vllm::Qwen3_5DenseWeights ws3 =
+        vllm::LoadQwen3_5DenseFromGguf(g2, c2, &shared3);
+    const vllm::Qwen3_5DenseWeights wu3 =
+        vllm::LoadQwen3_5DenseFromGguf(g2, c2, &unshared3);
+    CHECK(ws3.embed_tokens.bytes.data() == ws3.lm_head.bytes.data());
+    CHECK(wu3.embed_tokens.bytes.data() != wu3.lm_head.bytes.data());
+    // The head metadata matches what OwnMatmulWeight would have built:
+    // nk = true, [vocab, H], the block dtype.
+    CHECK(ws2.lm_head.nk);
+    CHECK(ws2.lm_head.dtype == wu2.lm_head.dtype);
+    CHECK(ws2.lm_head.shape[0] == wu2.lm_head.shape[0]);
+    CHECK(ws2.lm_head.shape[1] == wu2.lm_head.shape[1]);
+  }
+#endif
   CHECK(ws.embed_tokens.bytes.borrowed());
   CHECK(ws.lm_head.bytes.borrowed());
 

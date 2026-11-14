@@ -880,7 +880,20 @@ void LoadEmbedAndHead(const GgufFile& g, const GgufLoadPolicy& pol,
                          head_r == GgufResidency::kKeepF16;
   const bool bf16_share = embed_r == GgufResidency::kExpandBf16 &&
                           head_r == GgufResidency::kExpandBf16 && pol.expand_nk;
-  if (tied && pol.share_tied_head && (f16_share || bf16_share)) {
+  // TT-EMBED-DUAL-RESIDENCY: a tied KEEP-QUANT pair shares when the device
+  // cannot repack. The original refusal (:871-878) names the head's
+  // OwnMatmulWeight repack; QuantRepackForDevice (gguf_keep_quant.cpp:96-100)
+  // answers that only on kCPU, so on kTENSTORRENT the head's words are the
+  // file's own GGML block order — the SAME bytes the gather decodes. Sharing
+  // is REQUIRED there, not just cheaper: the TT gather reads the shared word
+  // shadow, and an unshared table would stage a SECOND ~vocab-sized word
+  // image beside the head's. CPU keeps the refusal (repack live).
+  const bool kq_share = embed_r == GgufResidency::kKeepQuant &&
+                        head_r == GgufResidency::kKeepQuant &&
+                        !pol.quant_repack &&
+                        pol.device == vt::DeviceType::kTENSTORRENT;
+  if (tied && pol.share_tied_head &&
+      (f16_share || bf16_share || kq_share)) {
     (void)NoNvfp4(pol).Route(ht,
                              GgufTensorRole::kMatmulWeight);  // head's 1 audit
     std::shared_ptr<const void> owner = embed->bytes.KeepAlive();
@@ -890,6 +903,11 @@ void LoadEmbedAndHead(const GgufFile& g, const GgufLoadPolicy& pol,
     h.rank = embed->rank;
     for (int i = 0; i < embed->rank; ++i) h.shape[i] = embed->shape[i];
     h.nk = true;  // [N = vocab, K = H], the file's own order
+    // The keep-quant borrow carries the same metadata OwnMatmulWeight would
+    // have built (nk = true, GGUF disk order IS the MatmulBT [N, K]
+    // orientation; pol.quant_repack is false on this device) — minus the
+    // second copy of the bytes. The gather keeps the EMBED tensor's own
+    // nk = false view of the same bytes.
     h.bytes = OwnedBytes::Borrow(embed->bytes.data(), embed->bytes.size(), owner);
     *head = std::move(h);
     return;
