@@ -213,6 +213,20 @@ bool KeepQuantWordShadowWordsForTest(const void* host,
 // TT-STAGING-FOOTPRINT: the ROW-PACKED shadow probe (one 64-B-multiple page
 // per weight row) — the dense int8-dot arm's residency for kQ8_0/kQ6_K.
 bool KeepQuantRowWordsPresentForTest(const void* host);
+// TT-STAGING-FOOTPRINT F1: geometry + content readbacks for the pad-rule
+// mutation class. The row-page size (ceil64(nb x block_bytes)) and the
+// legacy per-block word width (wpb, the 64-B-multiple block grid) are
+// load-bearing — the int8-dot kernel strides the staged words tensor by
+// 64-B accessor pages — so the focused cases must assert the exact staged
+// geometry AND that every pad word is zero. A ceil64->ceil32 rounding
+// mutation (or a wpb shrink) changes the geometry the hooks report and the
+// pads the readbacks return, so the case goes red instead of silently
+// serving a tighter grid.
+int64_t KeepQuantRowWordsRowsForTest(const void* host);
+int64_t KeepQuantRowWordsRowWordsForTest(const void* host);
+std::vector<int32_t> KeepQuantRowWordsReadBackForTest(const void* host);
+int64_t KeepQuantWordWpbForTest(const void* host);
+std::vector<int32_t> KeepQuantWordReadBackForTest(const void* host);
 bool DecodedWeightShadowPresentForTest(const void* host);
 bool EmbedTableShadowPresentForTest(const void* host);
 // W4d W0 (#3042): device-side allocation trace — interleaves
@@ -301,6 +315,15 @@ inline bool KeepQuantWordShadowWordsForTest(const void*,
   return false;
 }
 inline bool KeepQuantRowWordsPresentForTest(const void*) { return false; }
+inline int64_t KeepQuantRowWordsRowsForTest(const void*) { return 0; }
+inline int64_t KeepQuantRowWordsRowWordsForTest(const void*) { return 0; }
+inline std::vector<int32_t> KeepQuantRowWordsReadBackForTest(const void*) {
+  return {};
+}
+inline int64_t KeepQuantWordWpbForTest(const void*) { return 0; }
+inline std::vector<int32_t> KeepQuantWordReadBackForTest(const void*) {
+  return {};
+}
 inline bool DecodedWeightShadowPresentForTest(const void*) { return false; }
 inline bool EmbedTableShadowPresentForTest(const void*) { return false; }
 inline void AllocTraceSnapshot(MeshDevice&, const char*) {}

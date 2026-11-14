@@ -11260,6 +11260,305 @@ TEST_CASE("kTENSTORRENT dense keep-quant matmul serves ROW-PACKED rows (Q8_0/Q6_
   }
 }
 
+// TT-STAGING-FOOTPRINT F1 (review repair): the PAD RULE is load-bearing and
+// the multi-block case above never exercises the ceil64 != ceil32 divergence
+// class — its rows sit at nb=4, where ceil64(nb x bb) == ceil32 for Q8_0 and
+// only coincidentally differs for Q6_K without a staged-size assertion. A
+// ceil64 -> ceil32 mutation of KeepQuantRowBytes therefore compiled and this
+// file stayed green. The rows here hit the divergence class exactly
+// (kNb x bb mod 64 > 32) and assert, per row:
+//   1. the EXACT staged geometry: rows x row_words with row_words =
+//      ceil64(nb x bb) / 4 (the F1 mutation reports 344/… not 352),
+//   2. the full word content: nb blocks tight little-endian, then ZERO pad
+//      words to the 64-B page multiple,
+//   3. the kernel-consumed page stride: the envelope oracle only passes when
+//      the kernel walks the staged tensor at the ceil64 row stride — the
+//      CARG_BLK_BYTES page walk against a differently-strided shadow reads
+//      page r's bytes at wrong offsets and the dot outputs diverge.
+// The legacy-grid legs (Q4_K/Q5_K) pin the same mutation class on the old
+// arm: wpb = 48 words (192 B) per block, block bytes tight, pad words zero
+// — a wpb rounding mutation shows up in the readback geometry/pads.
+TEST_CASE("kTENSTORRENT dense keep-quant ROW-PACKED pad rule: ceil64 divergence rows stage exact geometry, zero pads, kernel page stride (Q8_0/Q6_K + legacy Q4_K/Q5_K pad-zero)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBTQuant, vt::DeviceType::kTENSTORRENT));
+
+  Backend& backend = vt::GetBackend(vt::DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  constexpr int64_t kN = 4;  // weight rows
+  std::mt19937 rng(20261114u);
+  auto rand_byte = [&rng]() { return static_cast<uint8_t>(rng() & 0xFF); };
+  auto put_f16 = [](uint8_t* blk, int64_t off, float v) {
+    const uint16_t bits = vt::F32ToF16(v);
+    std::memcpy(blk + off, &bits, sizeof(bits));
+  };
+  auto widen = [](uint16_t u) {
+    uint32_t bits = static_cast<uint32_t>(u) << 16;
+    float f;
+    std::memcpy(&f, &bits, 4);
+    return f;
+  };
+  auto le_word = [](const uint8_t* p) {
+    return static_cast<int32_t>(static_cast<uint32_t>(p[0]) |
+                                (static_cast<uint32_t>(p[1]) << 8) |
+                                (static_cast<uint32_t>(p[2]) << 16) |
+                                (static_cast<uint32_t>(p[3]) << 24));
+  };
+
+  // Row-packed legs: nb chosen so nb x bb mod 64 > 32 — the divergence
+  // class where ceil64 and ceil32 differ (F1's exact mutation gap).
+  const struct {
+    vt::DType enc;
+    int64_t nb;
+    int64_t page_words;  // ceil64(nb x bb) / 4 — asserted exactly
+  } row_legs[] = {
+      {vt::DType::kQ8_0, 40, 352},  // 40 x 34 = 1360 B -> 1408 (ceil32 1376)
+      {vt::DType::kQ6_K, 4, 224},   // 4 x 210 = 840 B -> 896 (ceil32 864)
+  };
+  for (const auto& leg : row_legs) {
+    const vt::DType enc = leg.enc;
+    const int64_t kNb = leg.nb;
+    const int64_t bb = vt::BlockBytes(enc);
+    const int64_t be = vt::BlockElems(enc);
+    const int64_t K = kNb * be;
+    // The divergence-class precondition: ceil64 != ceil32 exactly when
+    // 0 < (nb x bb) mod 64 <= 32 — the mutation must be visible HERE.
+    const int64_t raw = kNb * bb;
+    const int64_t rem = raw % 64;
+    REQUIRE(rem > 0);
+    REQUIRE(rem <= 32);
+    const int64_t row_bytes = (raw + 63) / 64 * 64;
+    const int64_t row_words = row_bytes / 4;
+    REQUIRE(row_bytes % 64 == 0);
+    REQUIRE(row_words == leg.page_words);
+    REQUIRE(row_words != (raw + 31) / 32 * 4);  // != ceil32 mutation
+
+    std::vector<uint8_t> packed(kN * kNb * bb);
+    for (int64_t b = 0; b < kN * kNb; ++b) {
+      uint8_t* blk = packed.data() + b * bb;
+      for (int64_t i = 0; i < bb; ++i) blk[i] = rand_byte();
+      const float d = (0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f) *
+                      ((rng() % 2) != 0 ? 1.0f : -1.0f);
+      if (enc == vt::DType::kQ6_K) {
+        put_f16(blk, 208, d);
+      } else {
+        put_f16(blk, 0, d);
+      }
+    }
+    std::vector<uint16_t> a_bf(K);
+    for (auto& v : a_bf)
+      v = vt::F32ToBF16((static_cast<float>(rng() % 401) - 200.0f) / 100.0f);
+
+    std::vector<float> w_f32(kN * K);
+    vt::cpu::BlockToFloat(enc)(packed.data(), w_f32.data(), kN * K);
+    std::vector<float> ref(kN), bound(kN);
+    for (int64_t n = 0; n < kN; ++n) {
+      float acc = 0.0f, mag = 0.0f;
+      for (int64_t k = 0; k < K; ++k) {
+        const float p = widen(a_bf[static_cast<size_t>(k)]) *
+                        widen(vt::F32ToBF16(w_f32[static_cast<size_t>(n) * K + k]));
+        acc += p;
+        mag += std::fabs(p);
+      }
+      ref[static_cast<size_t>(n)] = acc;
+      bound[static_cast<size_t>(n)] = 1.05f * std::ldexp(1.0f, -8) * (mag + std::fabs(acc));
+    }
+
+    void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+    void* mem_b = backend.Alloc(packed.size());
+    void* mem_o = backend.Alloc(kN * sizeof(float));
+    backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_b, packed.data(), packed.size());
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, K});
+    Tensor b_t = Tensor::Contiguous(mem_b, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, K});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kN});
+
+    vt::MatmulBT(q, o_t, a_t, b_t);
+    vt::MatmulBT(q, o_t, a_t, b_t);  // warm pair: eager stage, then hit
+
+    // (1) exact staged geometry.
+    REQUIRE_MESSAGE(
+        vt::tenstorrent::KeepQuantRowWordsPresentForTest(b_t.data),
+        "ROW-PACKED-WORDS (" << vt::Name(enc)
+                             << "): the divergence row staged no row shadow");
+    CHECK_MESSAGE(vt::tenstorrent::KeepQuantRowWordsRowsForTest(b_t.data) ==
+                      kN,
+                  "ROW-GEOM-ROWS (" << vt::Name(enc) << "): staged rows "
+                                    << vt::tenstorrent::KeepQuantRowWordsRowsForTest(
+                                           b_t.data)
+                                    << " != " << kN);
+    CHECK_MESSAGE(
+        vt::tenstorrent::KeepQuantRowWordsRowWordsForTest(b_t.data) ==
+            row_words,
+        "ROW-GEOM-WORDS (" << vt::Name(enc) << " nb=" << kNb
+                           << "): staged row_words "
+                           << vt::tenstorrent::KeepQuantRowWordsRowWordsForTest(
+                                  b_t.data)
+                           << " != ceil64(" << kNb << " x " << bb
+                           << ")/4 = " << row_words
+                           << " — the page rule is not ceil64");
+    // (2) full word content: tight blocks, ZERO pad words.
+    const std::vector<int32_t> words =
+        vt::tenstorrent::KeepQuantRowWordsReadBackForTest(b_t.data);
+    REQUIRE(words.size() == static_cast<size_t>(kN) *
+                                static_cast<size_t>(row_words));
+    std::vector<uint8_t> page(static_cast<size_t>(row_bytes), 0u);
+    int64_t pad_bad = 0, tight_bad = 0;
+    for (int64_t r = 0; r < kN; ++r) {
+      std::memcpy(page.data(), packed.data() + r * kNb * bb,
+                  static_cast<size_t>(kNb * bb));
+      for (int64_t wj = 0; wj < row_words; ++wj) {
+        const int32_t got = words[static_cast<size_t>(r * row_words + wj)];
+        const int32_t want = le_word(page.data() + wj * 4);
+        if (got != want) {
+          const bool is_pad = (wj * 4) >= kNb * bb;
+          if (is_pad)
+            ++pad_bad;
+          else
+            ++tight_bad;
+          CHECK_MESSAGE(got == want,
+                        "ROW-PAGE-WORDS (" << vt::Name(enc) << " row " << r
+                                           << " word " << wj
+                                           << (wj * 4 >= kNb * bb ? ", PAD"
+                                                                  : ", tight")
+                                           << "): got " << got << " want "
+                                           << want);
+        }
+      }
+    }
+    CHECK_MESSAGE(pad_bad == 0,
+                  "PAD-ZERO (" << vt::Name(enc) << " nb=" << kNb << "): "
+                               << pad_bad << " pad words non-zero — the "
+                               << "ceil64 page pad is corrupted");
+    CHECK_MESSAGE(tight_bad == 0,
+                  "TIGHT-BYTES (" << vt::Name(enc)
+                                  << "): " << tight_bad
+                                  << " tight-row words do not match the "
+                                     "packed blocks");
+
+    // (3) kernel-consumed page stride: envelope vs the tight-block oracle.
+    std::vector<float> out(kN, 0.0f);
+    backend.Copy(q, out.data(), mem_o, out.size() * sizeof(float));
+    backend.Free(mem_a);
+    backend.Free(mem_b);
+    backend.Free(mem_o);
+    for (int64_t n = 0; n < kN; ++n) {
+      const float diff = std::fabs(out[static_cast<size_t>(n)] -
+                                   ref[static_cast<size_t>(n)]);
+      CHECK(std::isfinite(out[static_cast<size_t>(n)]));
+      CHECK_MESSAGE(diff <= bound[static_cast<size_t>(n)],
+                    "KERNEL-PAGE-STRIDE (" << vt::Name(enc) << " nb=" << kNb
+                                           << ") out[" << n << "]=" << out[n]
+                                           << " ref=" << ref[n]
+                                           << " bound=" << bound[n]
+                                           << " — the kernel did not walk "
+                                              "the ceil64 page stride");
+    }
+    MESSAGE("pad-rule leg ", vt::Name(enc), " nb=", kNb, " row_words=",
+            row_words, ": geometry exact, pads zero, envelope ok");
+  }
+
+  // Legacy-grid legs: the same mutation class on the Q4_K/Q5_K arm —
+  // wpb = 48 words (192 B) per block, block bytes tight, pad words zero.
+  const struct {
+    vt::DType enc;
+    int64_t nb;
+  } legacy_legs[] = {{vt::DType::kQ4_K, 3}, {vt::DType::kQ5_K, 3}};
+  for (const auto& leg : legacy_legs) {
+    const vt::DType enc = leg.enc;
+    const int64_t kNb = leg.nb;
+    const int64_t bb = vt::BlockBytes(enc);
+    const int64_t be = vt::BlockElems(enc);
+    const int64_t K = kNb * be;
+    constexpr int64_t kWpb = 48;  // 192-B padded word grid per block
+    REQUIRE(bb <= kWpb * 4);
+    REQUIRE(kWpb * 4 % 64 == 0);
+
+    std::vector<uint8_t> packed(kN * kNb * bb);
+    for (int64_t b = 0; b < kN * kNb; ++b) {
+      uint8_t* blk = packed.data() + b * bb;
+      for (int64_t i = 0; i < bb; ++i) blk[i] = rand_byte();
+      put_f16(blk, 0, (0.05f + 0.35f * static_cast<float>(rng() % 64) / 64.0f) *
+                          ((rng() % 2) != 0 ? 1.0f : -1.0f));
+    }
+    std::vector<uint16_t> a_bf(K);
+    for (auto& v : a_bf)
+      v = vt::F32ToBF16((static_cast<float>(rng() % 401) - 200.0f) / 100.0f);
+
+    void* mem_a = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+    void* mem_b = backend.Alloc(packed.size());
+    void* mem_o = backend.Alloc(kN * sizeof(float));
+    backend.Copy(q, mem_a, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_b, packed.data(), packed.size());
+    Tensor a_t = Tensor::Contiguous(mem_a, vt::DType::kBF16,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, K});
+    Tensor b_t = Tensor::Contiguous(mem_b, enc,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {kN, K});
+    Tensor o_t = Tensor::Contiguous(mem_o, vt::DType::kF32,
+                                    Device{vt::DeviceType::kTENSTORRENT, 0}, {1, kN});
+
+    vt::MatmulBT(q, o_t, a_t, b_t);
+    vt::MatmulBT(q, o_t, a_t, b_t);
+
+    REQUIRE_MESSAGE(
+        vt::tenstorrent::KeepQuantWordShadowPresentForTest(b_t.data),
+        "LEGACY-WORDS (" << vt::Name(enc)
+                         << "): the legacy arm staged no per-block word grid");
+    CHECK_MESSAGE(vt::tenstorrent::KeepQuantWordWpbForTest(b_t.data) == kWpb,
+                  "LEGACY-GEOM-WPB (" << vt::Name(enc)
+                                      << "): wpb "
+                                      << vt::tenstorrent::KeepQuantWordWpbForTest(
+                                             b_t.data)
+                                      << " != " << kWpb);
+    const std::vector<int32_t> words =
+        vt::tenstorrent::KeepQuantWordReadBackForTest(b_t.data);
+    REQUIRE(words.size() == static_cast<size_t>(kN * kNb) *
+                                static_cast<size_t>(kWpb));
+    std::vector<uint8_t> blk_padded(static_cast<size_t>(kWpb * 4), 0u);
+    int64_t pad_bad = 0, tight_bad = 0;
+    for (int64_t b = 0; b < kN * kNb; ++b) {
+      std::memcpy(blk_padded.data(), packed.data() + b * bb,
+                  static_cast<size_t>(bb));
+      for (int64_t wj = 0; wj < kWpb; ++wj) {
+        const int32_t got = words[static_cast<size_t>(b * kWpb + wj)];
+        const int32_t want = le_word(blk_padded.data() + wj * 4);
+        if (got != want) {
+          if (wj * 4 >= bb)
+            ++pad_bad;
+          else
+            ++tight_bad;
+          CHECK_MESSAGE(got == want,
+                        "LEGACY-PAD-WORDS (" << vt::Name(enc) << " block " << b
+                                             << " word " << wj
+                                             << (wj * 4 >= bb ? ", PAD"
+                                                              : ", tight")
+                                             << "): got " << got << " want "
+                                             << want);
+        }
+      }
+    }
+    CHECK_MESSAGE(pad_bad == 0,
+                  "LEGACY-PAD-ZERO (" << vt::Name(enc) << "): " << pad_bad
+                                      << " pad words non-zero — the "
+                                      << "192-B block-grid pad is corrupted");
+    CHECK_MESSAGE(tight_bad == 0,
+                  "LEGACY-TIGHT-BYTES (" << vt::Name(enc) << "): " << tight_bad
+                                         << " tight words do not match the "
+                                            "packed blocks");
+    backend.Free(mem_a);
+    backend.Free(mem_b);
+    backend.Free(mem_o);
+    MESSAGE("legacy pad-zero leg ", vt::Name(enc), " wpb=", kWpb,
+            ": geometry exact, pads zero");
+  }
+}
+
 // W4a wave-3b-1 (#3030) survivor leg: the GATHER class keeps its twin. The
 // embedding table's bf16 device twin (EnsureEmbedTableDevice -> the
 // EmbedTableShadows map) is the residency the twin policy deliberately keeps;

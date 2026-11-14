@@ -2985,6 +2985,44 @@ bool KeepQuantRowWordsPresentForTest(const void* host) {
   std::lock_guard<std::mutex> g(KeepQuantWordMutex());
   return KeepQuantRowShadows().find(host) != KeepQuantRowShadows().end();
 }
+// TT-STAGING-FOOTPRINT F1: the row shadow's staged geometry and word
+// content, so the focused case can assert the ceil64 page rule and the
+// zero pads directly (see tenstorrent_device.h).
+int64_t KeepQuantRowWordsRowsForTest(const void* host) {
+  if (host == nullptr) return 0;
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  auto it = KeepQuantRowShadows().find(host);
+  return it == KeepQuantRowShadows().end() ? 0 : it->second.rows;
+}
+int64_t KeepQuantRowWordsRowWordsForTest(const void* host) {
+  if (host == nullptr) return 0;
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  auto it = KeepQuantRowShadows().find(host);
+  return it == KeepQuantRowShadows().end() ? 0 : it->second.row_words;
+}
+std::vector<int32_t> KeepQuantRowWordsReadBackForTest(const void* host) {
+  if (host == nullptr) return {};
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  auto it = KeepQuantRowShadows().find(host);
+  if (it == KeepQuantRowShadows().end()) return {};
+  return it->second.words.to_vector<int32_t>();
+}
+// The legacy per-block grid's word width and content — the same pad-rule
+// mutation class on the Q4_K/Q5_K arm (wpb words per block, block bytes
+// tight, 64-B-multiple zero pad).
+int64_t KeepQuantWordWpbForTest(const void* host) {
+  if (host == nullptr) return 0;
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  auto it = KeepQuantWordShadows().find(host);
+  return it == KeepQuantWordShadows().end() ? 0 : it->second.wpb;
+}
+std::vector<int32_t> KeepQuantWordReadBackForTest(const void* host) {
+  if (host == nullptr) return {};
+  std::lock_guard<std::mutex> g(KeepQuantWordMutex());
+  auto it = KeepQuantWordShadows().find(host);
+  if (it == KeepQuantWordShadows().end()) return {};
+  return it->second.words.to_vector<int32_t>();
+}
 bool DecodedWeightShadowPresentForTest(const void* host) {
   if (host == nullptr) return false;
   std::lock_guard<std::mutex> g(DecodedWeightMutex());

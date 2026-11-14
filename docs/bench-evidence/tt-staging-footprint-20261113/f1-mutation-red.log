@@ -1,0 +1,56 @@
+2026-11-14 03:24:29.704 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-14 03:24:29.705 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-14 03:24:29.705 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-14 03:24:29.705 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-14 03:24:54.498 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-14 03:24:54.498 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-14 03:24:54.527 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-14 03:24:54.527 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-14 03:24:54.527 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-14 03:24:54.527 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-14 03:24:54.528 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-14 03:24:54.613 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-14 03:24:54.658 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-14 03:24:54.658 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-14 03:24:54.658 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-14 03:24:54.658 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-14 03:24:54.658 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-14 03:24:55.465 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-14 03:24:55.466 | critical |          Always | TT_THROW: Compiler include directory './src/vt/tenstorrent/kernels' not found relative to current working directory '/tmp/build-ttfp'. (assert.hpp:104)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:11281:
+TEST CASE:  kTENSTORRENT dense keep-quant ROW-PACKED pad rule: ceil64 divergence rows stage exact geometry, zero pads, kernel page stride (Q8_0/Q6_K + legacy Q4_K/Q5_K pad-zero)
+
+./tests/vt/test_tenstorrent_backend.cpp:11281: ERROR: test case THREW exception: TT_THROW @ /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/impl/kernels/kernel.cpp:110: tt::exception
+info:
+Compiler include directory './src/vt/tenstorrent/kernels' not found relative to current working directory '/tmp/build-ttfp'.
+backtrace:
+ --- /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/_ttnncpp.so(+0x15be884) [0xfffc600ce884]
+ --- tt::tt_metal::Kernel::set_compiler_include_paths(std::vector<std::filesystem::__cxx11::path, std::allocator<std::filesystem::__cxx11::path> > const&)
+ --- /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/libtt_metal.so(+0xa8b610) [0xfffc5e05b610]
+ --- void std::_Construct<tt::tt_metal::DataMovementKernel, ttsl::StrongType<int, tt::tt_metal::ContextIdTag> const&, tt::tt_metal::KernelSource const&, tt::tt_metal::CoreRangeSet const&, tt::tt_metal::DataMovementConfig const&>(tt::tt_metal::DataMovementKernel*, ttsl::StrongType<int, tt::tt_metal::ContextIdTag> const&, tt::tt_metal::KernelSource const&, tt::tt_metal::CoreRangeSet const&, tt::tt_metal::DataMovementConfig const&)
+ --- tt::tt_metal::CreateDataMovementKernel(tt::tt_metal::Program&, tt::tt_metal::KernelSource const&, tt::tt_metal::CoreRangeSet const&, tt::tt_metal::DataMovementConfig const&)
+ --- tt::tt_metal::CreateKernelFromString(tt::tt_metal::Program&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::variant<tt::xy_pair, tt::tt_metal::CoreRange, tt::tt_metal::CoreRangeSet> const&, std::variant<tt::tt_metal::DataMovementConfig, tt::tt_metal::ComputeConfig> const&)
+ --- vt::tenstorrent::MatmulBTQuantInt8DotKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- vt::tenstorrent::MatmulBTQuantKernel(vt::Queue&, vt::Tensor&, vt::Tensor const&, vt::Tensor const&)
+ --- /tmp/build-ttfp/tests/test_tenstorrent_backend(+0x1536538) [0xaaab3f316538]
+ --- doctest::Context::run()
+ --- /tmp/build-ttfp/tests/test_tenstorrent_backend(main+0x3c) [0xaaab3dffbc1c]
+ --- /usr/lib64/libc.so.6(+0x22df4) [0xfffc5c282df4]
+ --- /usr/lib64/libc.so.6(__libc_start_main+0x98) [0xfffc5c282f38]
+ --- /tmp/build-ttfp/tests/test_tenstorrent_backend(_start+0x30) [0xaaab3dffc1b0]
+
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 113 skipped
+[doctest] assertions: 6 | 6 passed | 0 failed |
+[doctest] Status: FAILURE!
+2026-11-14 03:24:55.468 | info     |    BuildKernels | JIT cache stats: 8/8 hits (100.0%) [8 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-14 03:24:55.468 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-14 03:24:55.508 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-14 03:24:55.508 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-14 03:24:55.514 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-14 03:24:55.514 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-14 03:24:55.514 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
