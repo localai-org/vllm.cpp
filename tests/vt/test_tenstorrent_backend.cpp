@@ -11266,7 +11266,7 @@ TEST_CASE("kTENSTORRENT dense keep-quant matmul serves ROW-PACKED rows (Q8_0/Q6_
 // only coincidentally differs for Q6_K without a staged-size assertion. A
 // ceil64 -> ceil32 mutation of KeepQuantRowBytes therefore compiled and this
 // file stayed green. The rows here hit the divergence class exactly
-// (kNb x bb mod 64 > 32) and assert, per row:
+// (0 < (kNb x bb) mod 64 <= 32) and assert, per row:
 //   1. the EXACT staged geometry: rows x row_words with row_words =
 //      ceil64(nb x bb) / 4 (the F1 mutation reports 344/… not 352),
 //   2. the full word content: nb blocks tight little-endian, then ZERO pad
@@ -11308,7 +11308,7 @@ TEST_CASE("kTENSTORRENT dense keep-quant ROW-PACKED pad rule: ceil64 divergence 
                                 (static_cast<uint32_t>(p[3]) << 24));
   };
 
-  // Row-packed legs: nb chosen so nb x bb mod 64 > 32 — the divergence
+  // Row-packed legs: nb chosen so 0 < (nb x bb) mod 64 <= 32 — the divergence
   // class where ceil64 and ceil32 differ (F1's exact mutation gap).
   const struct {
     vt::DType enc;
