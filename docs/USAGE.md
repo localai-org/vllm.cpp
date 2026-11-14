@@ -1669,3 +1669,36 @@ ordinary reading. So read any single `rel(sumabs)` ratio as an order of
 magnitude, and confirm a real divergence with `head_dmax` or the sign-sensitive
 `rel_proj` column. Worked example and evidence:
 [`docs/bench-evidence/qwen4exp-layerfp-2999-20260923.md`](bench-evidence/qwen4exp-layerfp-2999-20260923.md).
+
+## The Qwen3.8 DFlash2 drafter: the exact weights
+
+The DFlash2 drafter for the Qwen3.8-27B target is a standalone component: the
+loader's draft path (`LoadDflashDraft`) reads it as a plain HF safetensors
+directory and borrows the target's embed/lm-head, so the drafter checkpoint
+carries no embedding of its own. W1 of
+`QWEN38-DFLASH2-STAGE-C` validated the pinned checkpoint against that loader
+contract (`scripts/convert-qwen38-dflash2-drafter.py` — the conversion is the
+identity; the script validates every tensor's key, dtype and shape and refuses
+by name what fails, writing `meta.json` with the enumeration). 81 tensors, all
+BF16, 3,848,817,896 B: `fc.weight` [5120, 25600] (taps 5/19/33/47/61),
+`hidden_norm`/`norm` [5120], 5 layers of q/k/v/o projections, per-head
+q_norm/k_norm [128], dynamic conv `base_kernel` (2,2,5120) +
+`kernel_projection` (1280,5120), MLP gate/up/down at intermediate 17408, and
+the candidate-selector codebooks (248320,256) + hidden_projection (256,5120).
+Full enumeration:
+[docs/bench-evidence/qwen38-dflash2-stage-c-w1-20261114/enumeration.json](bench-evidence/qwen38-dflash2-stage-c-w1-20261114/enumeration.json).
+
+| arm | repo @ revision | file | sha256 |
+|---|---|---|---|
+| drafter, BF16 | `incoai/Qwen3.8-27B-DFlash2` @ `dedf8df68adfb1afeaf7b7480c0a0243108177b4` | `model.safetensors`, 3,848,817,896 bytes | `67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c` |
+| drafter config | same revision | `config.json`, 1239 bytes | `873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980` |
+
+Provenance: this is the drafter-weights pin the dflash2-vision bundle's
+`PROVENANCE.json` names (`weights.drafter`; bundle
+`mando2222/qwen3.8-27b-dflash2-vision-p300x2-q4kv` @
+`28add9a1fbd0f259cba61f955023a65a10748064`), and the bundle's own drafter code
+(`extra_code/qwen38/dflash2.py:39`, `DEFAULT_WEIGHTS`) resolves the same
+repository. The drafter runs on the TARGET's weights, which are pinned by the
+served target arm. A missing or mis-shaped drafter tensor is refused by name at
+load time (`qwen3_dflash_weights.cpp` "tensor not found: <name>" /
+`refuse_unowned`).
