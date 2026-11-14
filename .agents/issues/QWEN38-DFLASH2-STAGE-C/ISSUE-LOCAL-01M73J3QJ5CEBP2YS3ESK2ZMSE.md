@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-10
-Updated: 2026-11-10
+Updated: 2026-11-14
 Closed: -
 
 ## Problem
@@ -16,4 +16,26 @@ Stage B's captured verify arm is speculative-ready but nothing drafts. The bundl
 
 ## Resolution
 
--
+- 2026-11-14 (W1, weights): the drafter tensors ARE buyable — the bundle's
+  `PROVENANCE.json` `weights.drafter` names `incoai/Qwen3.8-27B-DFlash2` @
+  `dedf8df68adfb1afeaf7b7480c0a0243108177b4`, the same repo the bundle's
+  drafter code resolves (`extra_code/qwen38/dflash2.py:39`). Downloaded
+  (developer go given 2026-11-13/14) to
+  `/mnt/models/qwen38-dflash2-drafter/`: `model.safetensors`
+  3,848,817,896 B, sha256 `67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`;
+  `config.json` 1,239 B sha256 `873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980`.
+  Enumeration: 81 tensors, all BF16 (fc [5120,25600]; hidden_norm/norm [5120];
+  5 layers of q/k/v/o + per-head qk-norm [128] + conv base_kernel (2,2,5120)
+  + kernel_projection (1280,5120) x2 + MLP 17408; selector codebooks
+  (248320,256) + hidden_projection (256,5120)). Format decision recorded: NO
+  re-encode — the existing `LoadDflashDraft` draft path consumes this HF
+  layout directly (contract `include/vllm/model_executor/models/qwen3_dflash.h:14-111`);
+  `scripts/convert-qwen38-dflash2-drafter.py` validates every tensor against
+  it, refuses by name, writes `meta.json`. Refuse-by-name at load time already
+  exists loader-side (`qwen3_dflash_weights.cpp` "tensor not found" /
+  `refuse_unowned`); no W1 loader change owed. Pins: `docs/USAGE.md`
+  ("The Qwen3.8 DFlash2 drafter: the exact weights"); evidence
+  `docs/bench-evidence/qwen38-dflash2-stage-c-w1-20261114/` (FLAT:
+  enumeration.json, validator.log, README.md). W2 (the forward,
+  component-validated) is next.
+
