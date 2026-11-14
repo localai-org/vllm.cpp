@@ -1,0 +1,12 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero  120667  2.1  0.1 6205376 487360 pts/6  Sl+  13:54   0:23 claude --resume 2774bb5f-085e-481b-be2d-f0d379464dd9
+lu_zero  116071  1.0  0.8 21083456 2202880 pts/0 Sl+ Nov11  44:01 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero   18447  0.8  0.1 20033024 276928 pts/7 Sl+  11:28   1:21 maki
+lu_zero  120198  0.5  0.1 6205248 350656 pts/1  Sl+  13:54   0:06 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero  108872  0.4  0.1 24337728 504832 ?     Ssl  Nov10  23:31 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service
+lu_zero  113492  0.1  0.0 11132352 263424 pts/3 Sl+  Nov13   1:32 opencode -c
+lu_zero   95757  0.1  0.0  11392  6400 ?        Ss   Oct26  41:38 tmux
+root        801  0.1  0.0      0     0 ?        S    Aug31 132:35 [kcompactd1]
+root     119978  0.1  0.0      0     0 ?        I    13:54   0:01 [kworker/u550:7-events_unbound]
+root        800  0.1  0.0      0     0 ?        S    Aug31 116:56 [kcompactd0]
+root        802  0.0  0.0      0     0 ?        S    Aug31 103:19 [kcompactd2]

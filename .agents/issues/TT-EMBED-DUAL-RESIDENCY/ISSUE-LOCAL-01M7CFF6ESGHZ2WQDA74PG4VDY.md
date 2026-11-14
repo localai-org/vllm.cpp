@@ -16,4 +16,22 @@ TT-STAGING-FOOTPRINT's W3 recorded the captured-arm serving gap (~80 MB trace-re
 
 ## Resolution
 
--
+- 2026-11-14, W1+W2 (commits 881752c9b, be416cc5a): census + elimination
+  landed on `row/TT-EMBED-DUAL-RESIDENCY` — `kEmbeddingQuant` registered on
+  kTENSTORRENT, tied keep-quant share arm on TT, the 2.44 GiB bf16 twin gone
+  (host and device). Focused tests green; eager-arm byte-identity `b36bc61a…`
+  preserved.
+- 2026-11-14, W3 attempt: **the unlock gate FAILED — STOP hit.** Captured
+  UD-Q6_K_XL KV 8 completes WITHOUT the ~80 MB trace-region OOM (allocator
+  ledger: 13,638,720 B/bank free before -> ~329 MB/bank at the tightest
+  snapshot, ~2.5 GB freed) and is deterministic 3/3 (`d54b29f9…`), but the
+  captured stream DIVERGES from the recorded eager stream `b36bc61a…` (embed
+  contribution collapses to the attractor). The W3 dtype-churn fix (slot-
+  current dtype+layout before every in-place copy; F32 row shadow) is
+  coherent and innocent: at W2 `be416cc5a` the Q4_K_M captured arm already
+  yields the identical wrong `a0033dd8…` vs the recorded `d49c53d2…`
+  (bisection scratch build, `bisect-q4km.log`). Regression owned by W2's
+  captured quant-row branch; eager arm correct at every head. Evidence:
+  `docs/bench-evidence/tt-embed-dual-residency-20261114/`. Owed: root-cause
+  the W2 captured divergence; W3(b)-(d) re-measure after it lands. State
+  stays OPEN.

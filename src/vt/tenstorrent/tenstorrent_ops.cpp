@@ -344,11 +344,12 @@ void EmbeddingKernel(Queue&, Tensor& out, const Tensor& table, const Tensor& ids
     ttnn::Tensor dev_rows = RefreshQuantEmbedRows(table, host_ids.data(), t, device);
     // The committed shadow MUST carry the OUT slot's storage width: the
     // download path (EnsureHostBytes) writes the SHADOW's dtype, and an f32
-    // out consumer reads f32 words. ttnn::embedding gives the float path an
-    // f32 output for free; the bf16 row shadow needs the explicit cast.
+    // out consumer reads f32 words. The row shadow is F32 (see
+    // RefreshQuantEmbedRows), so an f32 out commits as-is and a bf16 out
+    // gets the explicit downcast.
     dev_out = out.dtype == DType::kF32
-                  ? ttnn::typecast(dev_rows, ttnn::DataType::FLOAT32)
-                  : dev_rows;  // bf16 out: widths already agree
+                  ? dev_rows
+                  : ttnn::typecast(dev_rows, ttnn::DataType::BFLOAT16);
   } else {
     ttnn::Tensor dev_table = EnsureEmbedTableDevice(table, device);
     // TILE output → CommitDevice2D so the first residual/RMS/matmul reuses it.
@@ -374,6 +375,15 @@ void EmbeddingKernel(Queue&, Tensor& out, const Tensor& table, const Tensor& ids
     in_place = s != nullptr && s->device_current && s->device.has_value() &&
                s->dev_rows == t && s->dev_cols == h;
     if (in_place) {
+      // Pure copy only: convert the committed tensor to the slot shadow's
+      // current dtype/layout first (the shadow churns with whichever op
+      // committed last), never asking ttnn::copy to convert — its
+      // dtype-conversion path only supports TILE inputs.
+      const auto& dst = *s->device;
+      if (dev_out.dtype() != dst.dtype())
+        dev_out = ttnn::typecast(dev_out, dst.dtype());
+      if (dev_out.layout() != dst.layout())
+        dev_out = ttnn::to_layout(dev_out, dst.layout());
       ttnn::copy(dev_out, *s->device);
       s->host_current = false;
     }

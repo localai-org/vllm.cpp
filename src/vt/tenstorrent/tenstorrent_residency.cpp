@@ -47,7 +47,8 @@ std::map<uintptr_t, QuantEmbedRowShadow>& QuantEmbedRows() {
 }
 
 // Decode the n gathered rows on HOST into the bf16 twin's exact bits and
-// refresh the persistent [n, h] BFLOAT16 device shadow. The three-step decode
+// refresh the persistent [n, h] F32 device shadow (bf16-rounded values
+// upcast; see the spec note below). The three-step decode
 // is the exact pipeline the removed full-table twin rode: the CPU row decoder
 // (cpu_quant_dequant.cpp BlockToFloat, the CPU W6a gather's decoder) ->
 // vt::F32ToBF16 (round-to-nearest-even, the loader's OwnBf16 expansion,
@@ -81,9 +82,15 @@ ttnn::Tensor RefreshQuantEmbedRows(const Tensor& table, const uint32_t* ids,
     for (int64_t j = 0; j < h; ++j)
       dst[j] = BF16ToF32(F32ToBF16(row[static_cast<size_t>(j)]));
   }
+  // The shadow is staged F32: the values are already bf16-rounded (the twin's
+  // exact bits upcast), and an f32 shadow removes EVERY dtype conversion from
+  // both the eager commit and the captured copy — ttnn::copy's bf16->f32
+  // conversion path mis-serves a ROW_MAJOR source (the captured-vs-eager
+  // divergence), so neither path asks it to convert. The doubling of the
+  // shadow bytes is [t, h] — decode-batch sized, not vocab-sized.
   const auto spec = SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(n),
                                                 static_cast<uint32_t>(h)}),
-                           ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR);
+                           ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR);
   {
     std::lock_guard<std::mutex> g(QuantEmbedMutex());
     QuantEmbedRowShadow& s =

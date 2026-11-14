@@ -378,6 +378,25 @@ void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
   }
   ttnn::Tensor dev_out;
   if (quant_rows) {
+    // The row shadow is F32 ROW_MAJOR (see RefreshQuantEmbedRows). The
+    // recorded copy must
+    // be PURE (same dtype, same layout): ttnn::copy's dtype-conversion path
+    // only supports TILE inputs and mis-serves a ROW_MAJOR source (the
+    // captured-vs-eager divergence). The hidden slot's shadow dtype churns
+    // with whichever op committed last (f32 here, bf16 after a layer op), so
+    // convert the rows to the SLOT's current dtype and layout instead of
+    // asking the copy to convert.
+    {
+      std::lock_guard<std::mutex> g(SlotMutex());
+      BufferSlot* hs = FindSlot(out_host);
+      VT_CHECK(hs != nullptr && hs->device.has_value(),
+               "tenstorrent: EmbedDeviceIdsInto hidden shadow not resident");
+      const auto& dst = *hs->device;
+      if (dev_table.dtype() != dst.dtype())
+        dev_table = ttnn::typecast(dev_table, dst.dtype());
+      if (dev_table.layout() != dst.layout())
+        dev_table = ttnn::to_layout(dev_table, dst.layout());
+    }
     dev_out = dev_table;
   } else {
     dev_out = ttnn::embedding(dev_ids, dev_table, /*pad_token=*/std::nullopt,
