@@ -75,13 +75,11 @@ struct Win32LibraryShutdown {
 Win32LibraryShutdown g_win32_library_shutdown;
 #endif
 
+#if !defined(_WIN32)
 void* LookupSymbol(const char* name) {
-#if defined(_WIN32)
-  return reinterpret_cast<void*>(GetProcAddress(g_handle, name));
-#else
   return dlsym(g_handle, name);
-#endif
 }
+#endif
 
 bool ProbeWithOps(const VulkanLibraryOps& ops, bool close_success,
                   VulkanApi* api = nullptr, void** retained_handle = nullptr) {

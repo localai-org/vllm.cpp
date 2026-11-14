@@ -48,7 +48,7 @@ namespace {
 // header, so this works for any registered backend, not only CPU.
 class DeviceBuffer {
  public:
-  DeviceBuffer(vt::Backend& backend, size_t bytes) : backend_(backend), bytes_(bytes) {
+  DeviceBuffer(vt::Backend& backend, size_t bytes) : backend_(backend) {
     ptr_ = backend_.Alloc(bytes);
   }
   ~DeviceBuffer() { backend_.Free(ptr_); }
@@ -65,7 +65,6 @@ class DeviceBuffer {
 
  private:
   vt::Backend& backend_;
-  size_t bytes_;
   void* ptr_;
 };
 

@@ -35,8 +35,12 @@
 // of the file; the engine refuses rather than defaulting one, because
 // `layer_types`, `global_head_dim` and `attention_k_eq_v` resolve a DIFFERENT
 // tower out of a byte-identical tensor set.
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include <cstdint>
 #include <cstdio>
@@ -55,6 +59,13 @@ int RunFfmpeg(const std::vector<std::string>& args) {
   argv.reserve(args.size() + 1);
   for (const std::string& a : args) argv.push_back(const_cast<char*>(a.c_str()));
   argv.push_back(nullptr);
+#if defined(_WIN32)
+  // _P_WAIT returns the child's exit status, or -1 when the program cannot be
+  // started. MSVCRT quotes arguments that contain spaces but does not escape
+  // embedded double quotes.
+  const intptr_t status = _spawnvp(_P_WAIT, argv[0], argv.data());
+  return static_cast<int>(status);
+#else
   const pid_t pid = fork();
   if (pid < 0) {
     std::fprintf(stderr, "error: fork failed\n");
@@ -74,6 +85,7 @@ int RunFfmpeg(const std::vector<std::string>& args) {
     return -1;
   }
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
 }
 
 const char* Need(int argc, char** argv, int i, const char* flag) {

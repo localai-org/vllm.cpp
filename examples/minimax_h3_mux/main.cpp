@@ -23,8 +23,12 @@
 //   --audio   omitted => a silent clip
 //   --print-only  print the argv and exit WITHOUT spawning (lets the argv be
 //                 inspected, diffed or run by hand on a box with no ffmpeg).
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -46,6 +50,13 @@ int RunFfmpeg(const std::vector<std::string>& args) {
   }
   c_args.push_back(nullptr);
 
+#if defined(_WIN32)
+  // _P_WAIT returns the child's exit status, or -1 when the program cannot be
+  // started. MSVCRT quotes arguments that contain spaces but does not escape
+  // embedded double quotes.
+  const intptr_t status = _spawnvp(_P_WAIT, c_args[0], c_args.data());
+  return static_cast<int>(status);
+#else
   const pid_t pid = fork();
   if (pid < 0) {
     std::fprintf(stderr, "error: fork failed\n");
@@ -67,6 +78,7 @@ int RunFfmpeg(const std::vector<std::string>& args) {
     return -1;
   }
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
 }
 
 const char* Need(int argc, char** argv, int i, const char* flag) {

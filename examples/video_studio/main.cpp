@@ -27,10 +27,14 @@
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <sys/wait.h>
 #include <thread>
-#include <unistd.h>
 #include <vector>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #include <httplib/httplib.h>
 #include <nlohmann/json.hpp>
@@ -96,6 +100,12 @@ bool RunMux(char** argv, int argc, std::string* err) {
   std::string ff = g_ffmpeg;
   a[0] = ff.data();
   a.push_back(nullptr);
+  int code = -1;
+#if defined(_WIN32)
+  // The child inherits this process's stderr. The POSIX-only /dev/null redirect
+  // below has no MSVCRT spawn equivalent, so ffmpeg diagnostics reach the console.
+  code = static_cast<int>(_spawnvp(_P_WAIT, a[0], a.data()));
+#else
   const pid_t pid = fork();
   if (pid < 0) {
     *err = "fork failed";
@@ -108,9 +118,10 @@ bool RunMux(char** argv, int argc, std::string* err) {
   }
   int st = 0;
   waitpid(pid, &st, 0);
-  if (WIFEXITED(st) && WEXITSTATUS(st) == 0) return true;
-  *err = "ffmpeg exited " + std::to_string(WIFEXITED(st) ? WEXITSTATUS(st) : -1) +
-         " (is it installed? --ffmpeg PATH)";
+  code = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+#endif
+  if (code == 0) return true;
+  *err = "ffmpeg exited " + std::to_string(code) + " (is it installed? --ffmpeg PATH)";
   return false;
 }
 
