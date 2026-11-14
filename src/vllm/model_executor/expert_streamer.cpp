@@ -27,7 +27,6 @@ ExpertStreamer::ExpertStreamer(ExpertSlotCache& cache, ExpertSlotStore& store)
 ExpertStreamer::Result ExpertStreamer::EnsureFile(const ExpertKey& key, int fd,
                                                  size_t file_offset,
                                                  size_t bytes) {
-  Result out;
 #if defined(_WIN32)
   (void)fd;
   (void)file_offset;
@@ -35,6 +34,7 @@ ExpertStreamer::Result ExpertStreamer::EnsureFile(const ExpertKey& key, int fd,
   (void)key;
   throw std::invalid_argument("expert streamer: EnsureFile needs pread");
 #else
+  Result out;
   // Size first, for the same reason as the other two overloads: a slice that
   // cannot be stored must not evict a resident one on its way to being refused.
   if (bytes > store_.slot_bytes()) {

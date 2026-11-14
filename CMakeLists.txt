@@ -21,14 +21,18 @@ endif()
 # MSVC/UCRT runtime (/MT in Release, /MTd in Debug), so the installed server
 # does not depend on a developer-machine CRT deployment.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(WIN32)
+  # Windows headers otherwise replace qualified std::min/std::max calls with
+  # legacy macros. The project intentionally uses the portable ISO CRT entry
+  # points across platforms. These are platform contracts; /W4 /WX remains
+  # unchanged. WIN32 rather than MSVC: clang++ on Windows includes the same
+  # headers under the same contract, and CMake's MSVC variable is false for it.
+  add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()
 if(MSVC)
   # Keep PE debug directories reproducible and free of runner/build paths.
   add_link_options("/PDBALTPATH:%_PDB%")
-  # Windows headers otherwise replace qualified std::min/std::max calls with
-  # legacy macros. The project intentionally uses the portable ISO CRT entry
-  # points across platforms, and tokenizer tables require a UTF-8 execution
-  # character set. These are platform contracts; /W4 /WX remains unchanged.
-  add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
+  # Tokenizer tables require a UTF-8 execution character set (clang's default).
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 endif()
 
@@ -1618,6 +1622,11 @@ endif()
 # CPU backend on macOS as well as any future Metal backend.
 if(MSVC)
   target_link_options(vllm INTERFACE "/WHOLEARCHIVE:$<TARGET_FILE:vllm>")
+elseif(WIN32)
+  # clang++ on Windows is not MSVC, so the MSVC spelling must reach lld-link
+  # through the driver. Without it the C ABI objects are dropped and vllm.dll
+  # exports no vllm_* symbols.
+  target_link_options(vllm INTERFACE "LINKER:/WHOLEARCHIVE:$<TARGET_FILE:vllm>")
 elseif(APPLE)
   target_link_options(vllm INTERFACE "LINKER:-force_load,$<TARGET_FILE:vllm>")
 elseif(UNIX)
@@ -1806,10 +1815,10 @@ endif()
 #     OBJCXX, and the LANGUAGE property below is DIRECTORY-scoped, so setting it
 #     there would rewrite how the shipping build compiles it. Off that build,
 #     the file is in no other target and the property reaches nothing else.
-#   * NOT MSVC -- in MSVC `#import` means "import a type library", so cl.exe
-#     hard-errors on those two lines. The windows-2022 jobs must not inherit a
-#     red from a bit-rot guard.
-if(NOT VLLM_CPP_MLX AND NOT MSVC)
+#   * NOT WIN32 -- on a Windows toolchain (cl.exe or clang++) `#import` is
+#     rejected or means "import a type library", so both hard-error on those
+#     two lines. The windows-2022 jobs must not inherit a red from a bit-rot guard.
+if(NOT VLLM_CPP_MLX AND NOT WIN32)
   # CMake maps `.mm` to OBJCXX, which would need enable_language(OBJCXX) and an
   # ObjC++ compiler no Linux runner has. LANGUAGE CXX makes it emit `-x c++`.
   set_source_files_properties(src/vt/metal/metal_mlx_provider.mm
