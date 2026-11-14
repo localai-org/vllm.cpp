@@ -1062,7 +1062,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         MatmulWeight(d.q, probe_dev.t(), a.t(), tl.down);
         const std::vector<float> probe = DownloadBf16AsF32(d, probe_dev);
         double s = 0.0, sq = 0.0;
-        for (float v : probe) { s += v; sq += double(v) * v; }
+        for (float pv : probe) { s += pv; sq += double(pv) * pv; }
         std::fprintf(stderr,
                      "[FLINT-TT-STAGING] L%-3lld preprobe [%lld,%lld] "
                      "sum=%16.6f sq=%.6e\n",
@@ -1090,7 +1090,7 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
         MatmulWeight(d.q, ff2_dev.t(), a.t(), tl.down);
         const std::vector<float> ff2 = DownloadBf16AsF32(d, ff2_dev);
         double s = 0.0, sq = 0.0;
-        for (float v : ff2) { s += v; sq += double(v) * v; }
+        for (float pv : ff2) { s += pv; sq += double(pv) * pv; }
         std::fprintf(stderr,
                      "[FLINT-TT-STAGING] L%-3lld repprobe [%lld,%lld] "
                      "sum=%16.6f sq=%.6e\n",
@@ -1184,9 +1184,9 @@ std::vector<float> ForwardFlintTT(const std::vector<int32_t>& token_ids,
           // row that doesn't names the corrupted span.
           for (int64_t r = 0; r < t; ++r) {
             double sm = 0.0, sr = 0.0, diffmax = 0.0;
-            for (int64_t c = 0; c < h; ++c) {
-              const double mv = ff[static_cast<size_t>(r * h + c)];
-              const double rv = ff_re_host[static_cast<size_t>(r * h + c)];
+            for (int64_t col = 0; col < h; ++col) {
+              const double mv = ff[static_cast<size_t>(r * h + col)];
+              const double rv = ff_re_host[static_cast<size_t>(r * h + col)];
               sm += mv;
               sr += rv;
               diffmax = std::max(diffmax, std::abs(mv - rv));
