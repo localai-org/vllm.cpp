@@ -32,6 +32,7 @@
 // stage-1 table cannot rot behind an op-signature change.
 #include <algorithm>
 #include <chrono>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -39,6 +40,7 @@
 #include <string>
 #include <vector>
 
+#include "vllm/support/platform_compat.h"
 #include "vllm/model_executor/models/dense_attn_block.h"
 #include "vllm/model_executor/models/flint.h"
 #include "vllm/model_executor/models/flint_gguf_weights.h"
@@ -281,7 +283,7 @@ double RoutedBf16(Dev d, const Bf16Experts& b, const vllm::FlintParams& p,
 }  // namespace
 
 int main() {
-  setenv("VT_FLINT_KEEP_QUANT", "1", 1);
+  vllm::support::SetEnvVar("VT_FLINT_KEEP_QUANT", "1");
   const char* path = FLINT_GGUF_PATH;
   printf("loading %s (keep-quant, production loader)\n", path);
   long rss0 = RssKb();
@@ -300,7 +302,8 @@ int main() {
       break;
     }
   const vllm::FlintMoeWeights& mw = w.layers[static_cast<size_t>(moe_layer)].moe;
-  printf("tree: %ld -> %ld KiB RSS; first MoE layer %ld, H=%ld E=%ld topk=%ld I=%ld\n",
+  printf("tree: %ld -> %ld KiB RSS; first MoE layer %" PRId64 ", H=%" PRId64
+         " E=%" PRId64 " topk=%" PRId64 " I=%" PRId64 "\n",
          rss0, rss1, moe_layer, p.hidden_size, p.num_experts,
          p.num_experts_per_tok, p.moe_intermediate_size);
 
@@ -428,13 +431,15 @@ int main() {
       gemv_ms = tm.Ms();
     }
 
-    printf("\n== routed-expert phase, batch %ld (%d reps, median) ==\n", t, reps);
+    printf("\n== routed-expert phase, batch %" PRId64 " (%d reps, median) ==\n", t, reps);
     printf("(a) CIQ per-expert dispatch : %8.3f ms  (median of %zu)\n", Median(a_ms), a_ms.size());
     printf("(b) dequant bf16 per-expert : %8.3f ms  (median of %zu)\n", Median(b_ms), b_ms.size());
     printf("profile split of (a):\n");
-    printf("  activation quantize x%ld rows (per-call cost, x3 projections x%ld experts): %.3f ms\n",
+    printf("  activation quantize x%" PRId64 " rows (per-call cost, x3 projections x%" PRId64
+           " experts): %.3f ms\n",
            ne, p.num_experts_per_tok, q_ms);
-    printf("  scalar vec_dot, one gate tower (%ld rows): %.3f ms -> x3 towers x%ld experts = %.1f ms/token-layer\n",
+    printf("  scalar vec_dot, one gate tower (%" PRId64 " rows): %.3f ms -> x3 towers x%" PRId64
+           " experts = %.1f ms/token-layer\n",
            gate0.shape[0], vd_ms, p.num_experts_per_tok, vd_ms * 3 * p.num_experts_per_tok);
     printf("  weight memcpy floor, one gate tower: %.3f ms (%.1f MB)\n", mc_ms,
            static_cast<double>(gate0.shape[0]) * vt::RowSizeBytes(gate0.dtype, kg) / (1024.0 * 1024.0));
