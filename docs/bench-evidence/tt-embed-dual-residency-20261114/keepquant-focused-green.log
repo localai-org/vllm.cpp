@@ -1,0 +1,32 @@
+2026-11-14 14:24:37.018 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-14 14:24:37.018 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-14 14:24:37.018 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-14 14:24:37.018 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-14 14:24:37.021 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-14 14:24:37.021 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-14 14:24:37.057 | warning  |             UMD | Sysmem (0x40000000 bytes) using regular pages; pre-allocate hugepages for better DMA performance (e.g. 1 × 1GB or 512 × 2MB; on AArch64 also 2 × 512MB). (silicon_sysmem_manager.cpp:105)
+2026-11-14 14:24:37.058 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-14 14:24:37.058 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-14 14:24:37.058 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-14 14:24:37.058 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-14 14:24:37.059 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-14 14:24:38.059 | warning  |             UMD | Waiting for lock 'CHIP_IN_USE_0_PCIe' which is currently held by thread TID: 21755, PID: 21755 (robust_mutex.cpp:476)
+2026-11-14 14:31:56.533 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-14 14:31:56.597 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-14 14:31:56.597 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-14 14:31:56.597 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-14 14:31:56.598 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-14 14:31:56.598 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+===============================================================================
+[doctest] test cases:    63 |    63 passed | 0 failed | 0 skipped
+[doctest] assertions: 12205 | 12205 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-14 14:31:57.538 | info     |    BuildKernels | JIT cache stats: 8/8 hits (100.0%) [8 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-14 14:31:57.538 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-14 14:31:57.582 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-14 14:31:57.582 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-14 14:31:57.642 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-14 14:31:57.642 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-14 14:31:57.642 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
