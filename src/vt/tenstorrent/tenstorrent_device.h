@@ -467,6 +467,18 @@ void WarmDecodeIds(const int32_t* ids, int64_t n);
 inline void WarmDecodeIds(const int32_t*, int64_t) {}
 #endif
 
+// TT-EMBED-DUAL-RESIDENCY: the replay-step refresh for a BLOCK-QUANT gather
+// table (kEmbeddingQuant). The captured embedding reads the persistent [n, h]
+// bf16 row shadow this refreshes (decoded on host from the table's packed
+// bytes — the bf16 twin's exact bits). Must be called beside WarmDecodeIds on
+// every replay step; a float table no-ops (its twin warms once, never
+// changes).
+#ifdef VLLM_CPP_TENSTORRENT
+void WarmEmbedQuantRows(const Tensor& table, const int32_t* ids, int64_t n);
+#else
+inline void WarmEmbedQuantRows(const Tensor&, const int32_t*, int64_t) {}
+#endif
+
 // HOST-FREE-DECODE: capture-safe embedding over the persistent decode-ids
 // tensor (see WarmDecodeIds) into the hidden buffer whose host base is
 // `out_host` — the same device->device in-place refresh EmbeddingKernel

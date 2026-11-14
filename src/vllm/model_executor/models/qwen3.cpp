@@ -953,6 +953,15 @@ ForwardLogits Qwen3DenseDecodeGraph::Step(
     if (d.q.device.type == vt::DeviceType::kTENSTORRENT) {
       vt::tenstorrent::WarmDecodeIds(
           s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      // TT-EMBED-DUAL-RESIDENCY: a block-quant gather table has no full-table
+      // twin — its [n, h] row shadow rides the same per-step refresh.
+      {
+        Tensor dtabw = ResidentWeight(d, impl_->weights.embed_tokens,
+                                      {impl_->config.vocab_size,
+                                       impl_->config.hidden_size});
+        vt::tenstorrent::WarmEmbedQuantRows(
+            dtabw, s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      }
     } else {
       EmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
     }
@@ -1010,6 +1019,10 @@ ForwardLogits Qwen3DenseDecodeGraph::Step(
       Tensor dtab = ResidentWeight(d, impl_->weights.embed_tokens,
                                    {impl_->config.vocab_size,
                                     impl_->config.hidden_size});
+      // Seed the quant row shadow BEFORE the first capture if the eager steps
+      // have not (RefreshQuantEmbedRows refuses a cold staging in-region).
+      vt::tenstorrent::WarmEmbedQuantRows(
+          dtab, s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
       vt::tenstorrent::EmbedDeviceIdsInto(
           s.hidden->ptr(), S, impl_->config.hidden_size, dtab.data,
           impl_->config.vocab_size, impl_->config.hidden_size,

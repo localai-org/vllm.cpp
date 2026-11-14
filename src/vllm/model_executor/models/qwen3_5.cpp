@@ -12950,6 +12950,17 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       // un-gating exposed.
       vt::tenstorrent::WarmDecodeIds(
           s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      // TT-EMBED-DUAL-RESIDENCY: the captured embedding reads a persistent
+      // [n, h] ROW shadow for a block-quant table (no full-table twin), so it
+      // must ride the same per-step refresh — host decode of the gathered
+      // rows into the bf16 twin's exact bits, allocation-free H2D into the
+      // same buffer (WarmDecodeIds's pattern).
+      {
+        Tensor dtabw = Qwen3_5EmbeddingTable(
+            d.b, d.q, impl_->weights.embed_tokens, vocab, H);
+        vt::tenstorrent::WarmEmbedQuantRows(
+            dtabw, s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      }
     } else {
       DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
     }

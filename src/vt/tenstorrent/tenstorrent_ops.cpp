@@ -298,8 +298,9 @@ void EmbeddingKernel(Queue&, Tensor& out, const Tensor& table, const Tensor& ids
   TT_OP_TRACE("Embedding");
   VT_CHECK(table.rank == 2 && ids.rank == 1 && out.rank == 2,
            "tenstorrent kEmbedding: table rank-2, ids rank-1, out rank-2");
-  VT_CHECK(IsFloatDType(table.dtype) && (out.dtype == DType::kF32 || out.dtype == DType::kBF16),
-           "tenstorrent kEmbedding: float table, f32/bf16 out");
+  VT_CHECK((IsFloatDType(table.dtype) || IsBlockQuant(table.dtype)) &&
+               (out.dtype == DType::kF32 || out.dtype == DType::kBF16),
+           "tenstorrent kEmbedding: float or block-quant table, f32/bf16 out");
   VT_CHECK(ids.dtype == DType::kI32 || ids.dtype == DType::kI64,
            "tenstorrent kEmbedding: ids must be i32 or i64");
   VT_CHECK(table.IsContiguous() && ids.IsContiguous() && out.IsContiguous(),
@@ -332,10 +333,28 @@ void EmbeddingKernel(Queue&, Tensor& out, const Tensor& table, const Tensor& ids
   ttnn::Tensor dev_ids = ttnn::Tensor::from_vector<uint32_t>(
       host_ids, SpecOf(tt::tt_metal::Shape({t}), ttnn::DataType::UINT32, ttnn::Layout::ROW_MAJOR),
       &device);
-  ttnn::Tensor dev_table = EnsureEmbedTableDevice(table, device);
-  // TILE output → CommitDevice2D so the first residual/RMS/matmul reuses it.
-  ttnn::Tensor dev_out = ttnn::embedding(dev_ids, dev_table, /*pad_token=*/std::nullopt,
-                                         /*layout=*/ttnn::Layout::TILE);
+  ttnn::Tensor dev_out;
+  if (IsBlockQuant(table.dtype)) {
+    // TT-EMBED-DUAL-RESIDENCY: the block-quant gather keeps NO full-table
+    // device twin. The t gathered rows are decoded on HOST into the bf16
+    // twin's exact bits (RefreshQuantEmbedRows) and staged as a persistent
+    // [t, h] shadow — the tied table shares the lm_head's word residency
+    // instead of paying a second vocab matrix. Convert to TILE so the commit
+    // tail below sees the same shape/layout promise ttnn::embedding gave.
+    ttnn::Tensor dev_rows = RefreshQuantEmbedRows(table, host_ids.data(), t, device);
+    // The committed shadow MUST carry the OUT slot's storage width: the
+    // download path (EnsureHostBytes) writes the SHADOW's dtype, and an f32
+    // out consumer reads f32 words. ttnn::embedding gives the float path an
+    // f32 output for free; the bf16 row shadow needs the explicit cast.
+    dev_out = out.dtype == DType::kF32
+                  ? ttnn::typecast(dev_rows, ttnn::DataType::FLOAT32)
+                  : dev_rows;  // bf16 out: widths already agree
+  } else {
+    ttnn::Tensor dev_table = EnsureEmbedTableDevice(table, device);
+    // TILE output → CommitDevice2D so the first residual/RMS/matmul reuses it.
+    dev_out = ttnn::embedding(dev_ids, dev_table, /*pad_token=*/std::nullopt,
+                              /*layout=*/ttnn::Layout::TILE);
+  }
   // embedding may return [t, h] or a higher-rank view; normalize to [t, h].
   if (dev_out.logical_shape().rank() != 2 ||
       dev_out.logical_shape()[0] != t || dev_out.logical_shape()[1] != h) {
@@ -1928,6 +1947,14 @@ struct Registrar {
     RegisterOp(OpId::kRelu, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<ReluFn>(&ReluKernel)));
     RegisterOp(OpId::kEmbedding, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<EmbeddingFn>(&EmbeddingKernel)));
+    // TT-EMBED-DUAL-RESIDENCY: the SAME kernel serves the block-quant table
+    // (it branches on IsBlockQuant and decodes the gathered rows), so
+    // registering it under the quant id is what makes the TT block-gather
+    // capability VISIBLE to OpRegistered — which is how the GGUF residency
+    // policy stops expanding the tied table to a bf16 twin. Same shape as the
+    // CPU's registration (cpu_ops.cpp:4657-4663).
+    RegisterOp(OpId::kEmbeddingQuant, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<EmbeddingFn>(&EmbeddingKernel)));
     RegisterOp(OpId::kKeepQuantDecode, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<KeepQuantDecodeFn>(&KeepQuantDecodeKernel)));

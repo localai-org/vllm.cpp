@@ -21,11 +21,103 @@ bool ShadowDropTraceOn() {
 namespace {
 void DropEmbedTableShadow(void* host) {
   if (host == nullptr) return;
-  std::lock_guard<std::mutex> g(EmbedTableMutex());
-  EmbedTableShadows().erase(reinterpret_cast<uintptr_t>(host));
+  {
+    std::lock_guard<std::mutex> g(EmbedTableMutex());
+    EmbedTableShadows().erase(reinterpret_cast<uintptr_t>(host));
+  }
+  // TT-EMBED-DUAL-RESIDENCY: a freed block-quant table drops its row shadow
+  // too, so a recycled address can never alias a stale [t, h] stage (the
+  // DropKeepQuantWordShadow address-recycling lesson).
+  std::lock_guard<std::mutex> gq(QuantEmbedMutex());
+  QuantEmbedRows().erase(reinterpret_cast<uintptr_t>(host));
 }
 
 }  // namespace
+
+// ---- TT-EMBED-DUAL-RESIDENCY: the block-quant gather's row shadows --------
+
+std::mutex& QuantEmbedMutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::map<uintptr_t, QuantEmbedRowShadow>& QuantEmbedRows() {
+  static std::map<uintptr_t, QuantEmbedRowShadow> m;
+  return m;
+}
+
+// Decode the n gathered rows on HOST into the bf16 twin's exact bits and
+// refresh the persistent [n, h] BFLOAT16 device shadow. The three-step decode
+// is the exact pipeline the removed full-table twin rode: the CPU row decoder
+// (cpu_quant_dequant.cpp BlockToFloat, the CPU W6a gather's decoder) ->
+// vt::F32ToBF16 (round-to-nearest-even, the loader's OwnBf16 expansion,
+// gguf_dequant.cpp:228) -> vt::BF16ToF32 (a pure 16-bit left shift) ->
+// from_vector<float> against the BFLOAT16 spec (EnsureEmbedTableDevice's
+// upload). A value that already went through F32ToBF16 is bf16-representable,
+// so ttnn's own f32->bf16 cast on upload is the identity: the gathered rows
+// are bit-identical to the twin's.
+ttnn::Tensor RefreshQuantEmbedRows(const Tensor& table, const uint32_t* ids,
+                                   int64_t n, MeshDevice& device) {
+  VT_CHECK(IsBlockQuant(table.dtype),
+           "tenstorrent RefreshQuantEmbedRows: block-quant table required");
+  VT_CHECK(table.rank == 2 && table.IsContiguous(),
+           "tenstorrent RefreshQuantEmbedRows: rank-2 contiguous table");
+  const int64_t h = table.shape[1];
+  const int64_t vocab = table.shape[0];
+  const vt::cpu::ToFloatFn to_float = vt::cpu::BlockToFloat(table.dtype);
+  VT_CHECK(to_float != nullptr,
+           "tenstorrent RefreshQuantEmbedRows: no row decoder for block dtype " +
+               std::string(vt::Name(table.dtype)));
+  EnsureHost(table);
+  const size_t row_bytes = RowSizeBytes(table.dtype, h);
+  const uint8_t* base = table.Ptr<uint8_t>();
+  std::vector<float> host_rows(static_cast<size_t>(n) * static_cast<size_t>(h));
+  std::vector<float> row(static_cast<size_t>(h));
+  for (int64_t i = 0; i < n; ++i) {
+    VT_CHECK(ids[i] < static_cast<uint32_t>(vocab),
+             "tenstorrent RefreshQuantEmbedRows: id out of range");
+    to_float(base + static_cast<size_t>(ids[i]) * row_bytes, row.data(), h);
+    float* dst = host_rows.data() + static_cast<size_t>(i) * h;
+    for (int64_t j = 0; j < h; ++j)
+      dst[j] = BF16ToF32(F32ToBF16(row[static_cast<size_t>(j)]));
+  }
+  const auto spec = SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(n),
+                                                static_cast<uint32_t>(h)}),
+                           ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR);
+  {
+    std::lock_guard<std::mutex> g(QuantEmbedMutex());
+    QuantEmbedRowShadow& s =
+        QuantEmbedRows()[reinterpret_cast<uintptr_t>(table.data)];
+    if (s.device.has_value() && s.rows == static_cast<uint32_t>(n) &&
+        s.h == static_cast<uint32_t>(h)) {
+      // Allocation-free refresh: host staging tensor + H2D copy into the SAME
+      // device buffer (the WarmDecodeIds pattern).
+      ttnn::Tensor hst = ttnn::Tensor::from_vector<float>(host_rows, spec, nullptr);
+      ttnn::copy_to_device(hst, *s.device);
+      return *s.device;
+    }
+    // MISS = the one staging write this (table, n) shape ever pays. Same
+    // capture-time refusal as the word shadow: a captured graph pins
+    // capture-time bytes its replay cannot refresh (#2812), so the engine's
+    // pre-capture eager step (and the driver's per-step WarmEmbedQuantRows)
+    // refreshes this first.
+    if (tt_capture_active()) {
+      if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+        std::fprintf(stderr,
+                     "[TT-UP] RefreshQuantEmbedRows from_vector WRITE during "
+                     "capture\n");
+      VT_CHECK(false,
+               "tenstorrent RefreshQuantEmbedRows: cold row-shadow staging "
+               "inside capture — warm with one eager embedding step first");
+    }
+    AllocTraceSnapshot(device, "RefreshQuantEmbedRows/pre");
+    s.device = ttnn::Tensor::from_vector<float>(host_rows, spec, &device);
+    s.rows = static_cast<uint32_t>(n);
+    s.h = static_cast<uint32_t>(h);
+    AllocTraceSnapshot(device, "RefreshQuantEmbedRows/post");
+    return *s.device;
+  }
+}
 
 ttnn::Tensor EnsureEmbedTableDevice(const Tensor& table, MeshDevice& device) {
   VT_CHECK(table.rank == 2 && table.IsContiguous(), "EnsureEmbedTable: rank-2 contiguous");
