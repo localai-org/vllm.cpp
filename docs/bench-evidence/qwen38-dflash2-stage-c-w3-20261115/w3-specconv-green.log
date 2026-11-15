@@ -1,0 +1,75 @@
+2026-11-15 10:23:13.967 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-15 10:23:13.967 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-15 10:23:13.967 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-15 10:23:13.967 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-15 10:23:38.757 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-15 10:23:38.757 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-15 10:23:38.786 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-15 10:23:38.786 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-15 10:23:38.786 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-15 10:23:38.786 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-15 10:23:38.787 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-15 10:23:38.873 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-15 10:23:39.009 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-15 10:23:39.009 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-15 10:23:39.009 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-15 10:23:39.009 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-15 10:23:39.009 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-15 10:23:39.840 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:3938:
+TEST CASE:  kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (widened window, accepted-prefix offset, NULL + mixed seqlens + bf16 state)
+
+./tests/vt/test_tenstorrent_backend.cpp:4065: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=0: out max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4071: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=0: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4065: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=1: out max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4071: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=1: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4065: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=0: out max_abs=1.49012e-08 max_rel=1.74432e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4071: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=0: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4065: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=1: out max_abs=2.23517e-08 max_rel=2.66217e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4071: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=1: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4104: MESSAGE: kCausalConv1dSpecUpdate continuation step=0 nat=1: out max_abs=2.98023e-08 max_rel=2.07245e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4109: MESSAGE: kCausalConv1dSpecUpdate continuation step=0 nat=1: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4104: MESSAGE: kCausalConv1dSpecUpdate continuation step=1 nat=2: out max_abs=1.49012e-08 max_rel=2.08538e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4109: MESSAGE: kCausalConv1dSpecUpdate continuation step=1 nat=2: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4104: MESSAGE: kCausalConv1dSpecUpdate continuation step=2 nat=3: out max_abs=2.98023e-08 max_rel=1.90062e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4109: MESSAGE: kCausalConv1dSpecUpdate continuation step=2 nat=3: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4142: MESSAGE: kCausalConv1dSpecUpdate mixed-seqlen: out max_abs=2.98023e-08 max_rel=1.82683e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4147: MESSAGE: kCausalConv1dSpecUpdate mixed-seqlen: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4180: MESSAGE: kCausalConv1dSpecUpdate NULL-slot: out byte mismatches=0/576
+
+./tests/vt/test_tenstorrent_backend.cpp:4184: MESSAGE: kCausalConv1dSpecUpdate NULL-slot: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4224: MESSAGE: kCausalConv1dSpecUpdate bf16-state: out max_abs=1.49012e-08 max_rel=1.48972e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4229: MESSAGE: kCausalConv1dSpecUpdate bf16-state: conv_state max_abs=0 max_rel=0
+
+===============================================================================
+[doctest] test cases:  1 |  1 passed | 0 failed | 116 skipped
+[doctest] assertions: 39 | 39 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-15 10:23:40.203 | info     |    BuildKernels | JIT cache stats: 229/229 hits (100.0%) [229 cached, 327 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-15 10:23:40.203 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-15 10:23:40.286 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-15 10:23:40.286 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-15 10:23:40.374 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-15 10:23:40.374 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-15 10:23:40.374 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
