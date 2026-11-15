@@ -113,6 +113,59 @@ are a forward repair that makes 128/128 true, or a re-capture of
 for a distributional bar over a deterministic oracle. Neither is available to a
 host with no GPU and no snapshot, and neither is this row's work.
 
+## 2026-11-12 — the gap array's resolution cannot carry this argument
+
+Recorded from the committed artifacts alone: no GPU, no checkpoint, no rebuild.
+See ISSUE-LOCAL-01M7GNV6F01WRYT1RCDS766BG7.
+
+`neartie_gap_mnats.npy` is `int32` MILLINATS. `scripts/glm4-moe-lite-neartie-gap.py:92`
+floors every cell at zero (`max(0.0, arg_lp - lp(our_token))`) and `:93` rounds
+`gap * 1000`. A committed `0` therefore means "under half a millinat", which is
+not the same claim as "exactly tied". The section above reads the all-zero array
+as the stronger one, so it proves less than it says.
+
+Four measurements over the committed files, each one command and no model:
+
+- `greedy_ids == greedy_dist[:,:,0]` is true, and all five K channels are
+  byte-identical, so the K=5 self-determinism result stands unchanged.
+- `neartie_gap_mnats` holds exactly ONE distinct value, `0`, across all 128 cells.
+- No cell carries the `99_999_000` sentinel, so OUR token sat inside vLLM's
+  top-20 at every position, including all seven first divergences.
+- Prompt 7 is exact at 16/16. The others agree for 4 to 14 tokens before
+  diverging, at positions `[14, 6, 6, 4, 4, 4, 6]`.
+
+The last two are the finding. At a first divergence our prefix IS the oracle's,
+so vLLM's teacher-forced argmax there is `greedy_ids[i,j]` by construction and
+`gap` must be positive. Measured, `gap` is under half a millinat and the argmax
+it was measured against is OUR token. That is vLLM's greedy-decode path and its
+prefill `prompt_logprobs` path disagreeing with each other at sub-millinat
+resolution, not evidence about this forward.
+
+Two consequences, both of which change the order of the campaign:
+
+1. The STRICT bar was selected by five runs on ONE numeric path, so that
+   experiment cannot detect prefill-vs-decode disagreement and does not, by
+   itself, establish that the forward is what is wrong.
+2. A structural defect — wrong RoPE, wrong expert set, wrong norm epsilon —
+   diverges at the first token. Agreement for 4 to 14 tokens with one exact
+   prompt is the shape of accumulated bf16 noise.
+
+The next measurements are therefore not a kernel bisection:
+
+- **K1.** Re-capture with the gap stored in micro-nats or as raw float. The
+  half-millinat bucket is the only thing between "tied" and "0.0004 behind".
+- **K2.** Teacher-force vLLM twice on the same prompt and prefix: greedy decode
+  against prefill `prompt_logprobs`, and at `max_num_seqs` 1 and 4. If the argmax
+  flips, the exit is a ratified distributional bar over the sub-millinat band,
+  argued from that flip rather than from convenience.
+
+Only if K1 and K2 show real gaps above `kNearTieMnats` does the forward become
+the suspect. Then the two paths this port actually exercises are the `noaux_tc`
+router — `p.router_dtype_is_f32` (`glm4_moe_lite_registry.cpp:75`), top-4-of-64
+selection with `e_score_correction_bias` (`deepseek_v2.cpp:376`) — and the MLA
+`q_lora` branch (`q_a_layernorm`, `deepseek_v2.cpp:269`). This port carries no
+DSA indexer, so that is not a suspect.
+
 ## Owed
 
 - O1. T2 is RED as landed, and it must stay red until one of the two exits
@@ -131,3 +184,6 @@ host with no GPU and no snapshot, and neither is this row's work.
   no revision and no sha256 — which `CLAUDE.md` §"Say which weights, and from
   where" requires. Not repaired here because the values must be read off the
   artifact this host does not have.
+- O5. The resolution above and the two measurements it names (K1, K2) were
+  recorded on 2026-11-12 without a GPU. Both need the snapshot and a lease, so the
+  exit is still owned here and still needs the decision this row already names.
