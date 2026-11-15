@@ -109,3 +109,52 @@ W3 finish (2026-11-15, the drafter-ON OOM root cause + the gate disposition):
   draft proposes; the verify's GDN spec segment has no TT kernel. Evidence:
   docs/bench-evidence/qwen38-dflash2-stage-c-w3-20261115/ (w3f-off-*,
   w3f-diag-on-direct.*, w3f-on-probe.*, README.md).
+
+W4 kernel wave (2026-11-15, the fresh-implementer wave: the GDN spec kernel
++ the sampler it uncovered):
+
+- SHIPPED: `kGdnSpecDecode` on Tenstorrent (tenstorrent_gdn.cpp,
+  GdnSpecDecodeKernel) — the multi-row GDN decode step the verify's GDN
+  segment issues (op id 12, the refusal w3f-diag-on-direct named).
+  Composition: initial state from column num_accepted-1 (one exact
+  GatherRowsExact in the split shadow geometry — the one-hot matmul
+  alternative rounds tf32, measured 2.4e-4), T sequential
+  GdnDecodeStepComposed steps per request over contiguous row slices (the
+  pure-spec token order), per-timestep state snapshots accumulated device-side
+  and landed in ONE split-block ScatterRowsDevice (last-writer-wins = the
+  oracle's store order), the bf16-state storage rounding at the snapshot
+  boundary (the register chain stays f32 — the oracle's StoreF32 boundary),
+  NULL-init requests zero their out rows and store nothing (the oracle's
+  :114-115), the captured arm refuses by name (the acceptance metadata has no
+  persistent device refresh — the conv spec kernel's named gap; the spec
+  verify runs eager, VLLM_CPP_CUDAGRAPH=0). Focused gate RED: the test case
+  refuses by name with the kernel absent (w4-gdnspec-red.log). GREEN: 6 sweeps
+  vs the CPU f32 oracle — captured shape (Hk16/Hv32, Hk16/Hv48), rolling
+  continuation (3 steps, varying nat), mixed seqlens, NULL-init (+ the
+  explicit zeroed rows), bf16-state chain, and THE ROLLBACK IDENTITY
+  bit-exact: the spec snapshot at column j == the native kGdnDecode chain's
+  state after j+1 tokens, out 0/9216 and state 0/1179648 bit mismatches
+  (w4-gdnspec-green.log, 4/4 test cases EXIT 0).
+- SHIPPED: `kGreedyRejectionSample` on Tenstorrent
+  (ISSUE-LOCAL-01M7FTQR1HT8B61DVC00Y5AHZ8) — the by-name refusal that follows
+  (id 107): the loop now runs the draft propose, the (S, 9, spec) verify, the
+  GDN spec step and the sampler to completion (exit 0, the acceptance
+  telemetry live) for the FIRST time on this row.
+- FIXED: the bf16 GDN state-cache readback (ISSUE-LOCAL-01M7FSHPRTFND4Q75M5MNBAX3W)
+  — EnsureHostBytes' generic tail lost the width-adaptive bf16 arm to
+  f4725780b; the kGdnDecode bf16-state arm's final readback was failing on
+  the base. Restored + green.
+- GATES: (a)/(b) STOP at the token-identity gate — the emitted stream is
+  [220, 0, 0, ...] vs the recorded [220, 16, 23066, ...] (the spec's STOP
+  condition), and the probe evidence locates the degeneracy UPSTREAM of the
+  GDN spec kernels: the conv-spec x stream has NaN at the FIRST call and
+  collapses frozen at GDN layer 8+ every step, while the gathered state stays
+  real and the received activations are exactly zero
+  (ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H owns the bisect; the bfp8
+  weight-staging lever is the prime suspect and the no-bfp8 A/B is
+  capacity-blocked at KV 32). The acceptance multiple is UNMEASURABLE until
+  the divergence lands — a degenerate loop's TPOT (the probe's 9970 ms) is
+  not a number. (c) drafter-OFF byte-identity: this wave's rerun on both arms.
+  Evidence: docs/bench-evidence/qwen38-dflash2-stage-c-w3-20261115/
+  (w4-gdnspec-{red,green}.log, w4-on-probe.*, w4-diag-spec.*,
+  w4-nobfp8-probe.*, run-w4-gate.sh).

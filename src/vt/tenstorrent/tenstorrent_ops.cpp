@@ -2118,6 +2118,93 @@ void GreedyArgmaxKernel(Queue&, Tensor& token_ids, const Tensor& logits) {
   CommitHost(token_ids);
 }
 
+// ─── kGreedyRejectionSample on Tenstorrent (QWEN38-DFLASH2-STAGE-C W4) ───────
+// ISSUE-LOCAL-01M7FTQR1HT8B61DVC00Y5AHZ8: the verify's greedy sampler had no
+// TT kernel — the by-name refusal that follows the kGdnSpecDecode port in the
+// wired loop. Host-staged (the kGreedyArgmax precedent): PHASE 1 is the
+// per-row argmax over the verify's block logits — the same download the
+// direct-argmax draft arm already pays every verify step — and PHASE 2 is a
+// tiny integer accept walk. Ported 1:1 from the CPU reference
+// (cpu_sample.cpp GreedyRejectionSampleKernel — the _rejection_kernel
+// is_greedy branch, rejection_sampler_utils.py:564-585/:628 plus the greedy
+// short-circuits :846-849/:828-841): same strict-`>` lowest-index tie-break,
+// same walk, same PLACEHOLDER_TOKEN_ID pad — the TT arm is BIT-EXACT vs the
+// CPU oracle by construction (identical host arithmetic; no device float
+// path). The eager arm is the arm the spec verify runs (the captured
+// spec-verify refusal stands — the acceptance metadata has no persistent
+// device refresh on this backend); the captured sampler arm is that same
+// named owed item.
+void GreedyRejectionSampleKernel(Queue&, Tensor& sampled, Tensor& num_sampled,
+                                 Tensor& target_argmax, const Tensor& logits,
+                                 const Tensor& draft_sampled,
+                                 const Tensor& cu_num_logits) {
+  const int64_t vocab = logits.shape[1];
+  const int64_t num_logits = logits.shape[0];
+  const int64_t num_reqs = cu_num_logits.shape[0] - 1;
+  const int64_t width = sampled.shape[1];
+  EnsureHost(logits);
+  EnsureHost(draft_sampled);
+  EnsureHost(cu_num_logits);
+  const float* lp = logits.Ptr<float>();
+  const int32_t* dp = draft_sampled.Ptr<int32_t>();
+  const int32_t* cu = cu_num_logits.Ptr<int32_t>();
+  int32_t* sp = sampled.Ptr<int32_t>();
+  int32_t* ns = num_sampled.Ptr<int32_t>();
+  int32_t* ta = target_argmax.Ptr<int32_t>();
+
+  // argmax(logits[row]) with torch.argmax's lowest-index tie-break.
+  const auto row_argmax = [&](int64_t row) -> int32_t {
+    const float* r = lp + row * vocab;
+    int64_t best = 0;
+    float best_v = r[0];
+    for (int64_t j = 1; j < vocab; ++j) {
+      if (r[j] > best_v) {  // strict `>` => first occurrence of the max wins
+        best_v = r[j];
+        best = j;
+      }
+    }
+    return static_cast<int32_t>(best);
+  };
+
+  // PHASE 1, over every expanded row: upstream's _compute_global_target_argmax
+  // (rejection_sampler_utils.py:923-946).
+  for (int64_t row = 0; row < num_logits; ++row) ta[row] = row_argmax(row);
+
+  // PHASE 2: one sequential accept walk per request over the phase-1 argmaxes.
+  for (int64_t req = 0; req < num_reqs; ++req) {
+    const int64_t start = cu[req];
+    const int64_t end = cu[req + 1];
+    const int64_t num_draft_tokens = end - start - 1;
+    int32_t* row = sp + req * width;
+    for (int64_t j = 0; j < width; ++j) row[j] = -1;  // PLACEHOLDER_TOKEN_ID pad
+
+    bool accepted = true;
+    int64_t accepted_length = 0;
+    for (int64_t i = 0; i < num_draft_tokens; ++i) {
+      if (!accepted) break;  // upstream `elif accepted:` guard
+      const int32_t row_target = ta[start + i];
+      // NOTE the +1: draft token i is the INPUT id at the NEXT expanded row
+      // (rejection_sampler_utils.py:534). A -1 placeholder can never equal an
+      // argmax (>= 0), so it is rejected with no out-of-bounds read.
+      const int32_t draft = dp[start + i + 1];
+      accepted = (row_target == draft);
+      row[i] = accepted ? draft : row_target;
+      accepted_length += accepted ? 1 : 0;
+    }
+    // Bonus token: every draft accepted -> resample (greedy: argmax) at the
+    // bonus row. On a rejection the target argmax is already stored, so
+    // _resample_kernel returns early (:846-849).
+    if (accepted_length == num_draft_tokens) {
+      row[accepted_length] = ta[start + accepted_length];
+    }
+    // _insert_resampled_kernel:834 — num_sampled = accepted_length + 1.
+    ns[req] = static_cast<int32_t>(accepted_length) + 1;
+  }
+  CommitHost(sampled);
+  CommitHost(num_sampled);
+  CommitHost(target_argmax);
+}
+
 // ---- kSigmoidBiasTopK: the Kolibri-1 router ON DEVICE ------------------------
 // Composite of device ops mirroring SigmoidLogitAddRouting
 // (kolibri1_shared.h / kolibri1.py:126-142; the CPU kernel in cpu_ops.cpp is
@@ -2282,6 +2369,9 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<PagedAttentionFn>(&PagedAttentionKernel)));
     RegisterOp(OpId::kGreedyArgmax, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<GreedyArgmaxFn>(&GreedyArgmaxKernel)));
+    RegisterOp(OpId::kGreedyRejectionSample, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<GreedyRejectionSampleFn>(
+                   &GreedyRejectionSampleKernel)));
     RegisterOp(OpId::kFusedChain, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<FusedChainFn>(&FusedChainKernel)));
     RegisterOp(OpId::kL2Norm, DeviceType::kTENSTORRENT,
@@ -2299,6 +2389,9 @@ struct Registrar {
                    &CausalConv1dSpecUpdateKernel)));
     RegisterOp(OpId::kGdnDecode, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<GdnDecodeFn>(&GdnDecodeKernel)));
+    RegisterOp(OpId::kGdnSpecDecode, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<GdnSpecDecodeFn>(
+                  &GdnSpecDecodeKernel)));
     RegisterOp(OpId::kGdnStateGather, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<GdnStateGatherFn>(&GdnStateGatherKernel)));
     RegisterOp(OpId::kGdnStateScatter, DeviceType::kTENSTORRENT,

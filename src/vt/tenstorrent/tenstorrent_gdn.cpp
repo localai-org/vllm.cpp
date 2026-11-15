@@ -2898,6 +2898,28 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
     acc = ttnn::add(std::move(acc), ttnn::multiply(std::move(src_j), std::move(wj)));
   }
   ttnn::Tensor y = args.silu_activation ? ttnn::silu(acc) : acc;  // [T, R]
+  // VT_TT_GDN_SPEC_DEBUG (the GdnSpecDecode probe's twin): the conv spec
+  // step's x stream + MAC result checksums — distinguishes a zero x stream
+  // from a zero state window from a zero MAC.
+  if (const char* dbg = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+      dbg != nullptr && dbg[0] != '\0' && !tt_capture_active()) {
+    std::vector<float> yv = y.to_vector<float>();
+    double y_acc = 0.0;
+    for (float f : yv) y_acc += f > 0.0f ? f : -f;
+    std::vector<float> xv = xT.to_vector<float>();
+    double x_acc = 0.0;
+    for (float f : xv) x_acc += f > 0.0f ? f : -f;
+    std::vector<float> tv_ = T.to_vector<float>();
+    double t_acc = 0.0;
+    for (float f : tv_) t_acc += f > 0.0f ? f : -f;
+    std::fprintf(stderr,
+                 "[CONV-SPEC] T=%lld nreq=%lld conv_state=%p y_n=%zu "
+                 "y_asum=%.6g x_asum=%.6g T_asum=%.6g\n",
+                 static_cast<long long>(tokens),
+                 static_cast<long long>(num_reqs), conv_state.data, yv.size(),
+                 y_acc, x_acc, t_acc);
+    std::fflush(stderr);
+  }
   // ---- the out select ------------------------------------------------------
   if (!has_null) {
     // yT[r, t] = y[t, r]; the select reads row s_i*C + c per (c, t) — one
@@ -2992,6 +3014,292 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
     }
   }
   CommitConvTransposed(conv_state, std::move(new_shadow), uslots, uc, usl);
+}
+
+// kGdnSpecDecode (QWEN38-DFLASH2-STAGE-C W4; cpu_ops.cpp GdnSpecDecodeKernel,
+// the fused_sigmoid_gating.py IS_SPEC_DECODING + INPLACE_FINAL_STATE port).
+// The verify's GDN segment: every request carries its K+1-row spec block, the
+// initial state comes from column num_accepted-1 (the snapshot taken after the
+// last ACCEPTED token of the previous step), and the recurrence runs T
+// sequential composed steps — the SAME GdnDecodeStepComposed the single-row
+// kGdnDecode kernel runs — with each timestep's post-token state snapshotted
+// into its own slot column (the SSM rollback the stage-B commit-or-restore
+// composes with: a rejected verify tail restores the pre-step shadow this
+// kernel's commit replaced; the accepted tail keeps it).
+//
+// Device composition per request: the initial state row is ONE exact gather
+// from the cache shadow (GatherRowsExact — the one-hot matmul alternative
+// rounds its inputs to tf32, measured 2.4e-4, and the initial state's error
+// compounds through the delta-rule correction the wide-range arm pins); the
+// per-timestep q/k/v/g/beta are CONTIGUOUS row slices of the served streams
+// (request i's tokens are rows [cs_i, cs_i+1) in batch order — the pure-spec
+// contract), so the recurrence needs no per-timestep index build at all; the
+// per-timestep snapshots accumulate as device rows and land in ONE
+// split-block scatter at the end (ScatterRowsDevice, last-writer-wins — the
+// oracle's sequential store order).
+//
+// Metadata discipline (the conv spec kernel's, tenstorrent_gdn.cpp:2799): the
+// slot columns are step-stable (the engine's fixed per-request slot window)
+// but the INIT selection is acceptance-derived — num_accepted_tokens is the
+// one metadata whose content changes every verify step, so the eager arm
+// reads the host masters and the CAPTURED arm refuses by name: a capture-time
+// upload would replay one step's acceptance forever. The named gap is the
+// driver-side persistent-device refresh; until it lands the spec verify runs
+// on the eager arm (VLLM_CPP_CUDAGRAPH=0) — the arm the token-identity gate
+// needs.
+void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k,
+                         const Tensor& v, const Tensor& g, const Tensor& beta,
+                         Tensor& state, const Tensor& cu_seqlens,
+                         const Tensor& state_indices,
+                         const Tensor& num_accepted_tokens, const GdnArgs& args) {
+  TT_OP_TRACE("GdnSpecDecode");
+  GdnDecodeSteps().fetch_add(1, std::memory_order_relaxed);
+  const int64_t T = q_in.shape[0];
+  const int64_t hv = state.shape[1], dv = state.shape[2], dk = state.shape[3];
+  const int64_t hk = q_in.shape[1];
+  const int64_t slots = state.shape[0];
+  const int64_t num_reqs = state_indices.shape[0];
+  const int64_t num_cols = state_indices.shape[1];
+  if (T == 0) return;  // empty stream: no-op, cache as-is
+
+  VT_CHECK(!tt_capture_active(),
+           "tenstorrent gdn_spec_decode: the acceptance metadata has no "
+           "persistent device refresh on this backend — the captured arm "
+           "would replay one step's num_accepted forever. Named gap: the "
+           "driver's TT spec-metadata in-place device refresh (the "
+           "WarmRopeCosSin copy_to_device pattern); until it lands the spec "
+           "verify runs on the eager arm (VLLM_CPP_CUDAGRAPH=0).");
+  EnsureHost(cu_seqlens);
+  EnsureHost(num_accepted_tokens);
+  EnsureHost(state_indices);
+  const int32_t* csp = cu_seqlens.Ptr<int32_t>();
+  const int32_t* natp = num_accepted_tokens.Ptr<int32_t>();
+  const int32_t* sidx = state_indices.Ptr<int32_t>();
+  std::vector<int32_t> csv(csp, csp + num_reqs + 1);
+  VT_CHECK(csv[0] == 0 && csv[num_reqs] == T,
+           "tenstorrent gdn_spec_decode: bad cu_seqlens bounds");
+  std::vector<int64_t> lo(static_cast<size_t>(num_reqs)),
+      tlen(static_cast<size_t>(num_reqs));
+  std::vector<int32_t> init(static_cast<size_t>(num_reqs));
+  for (int64_t i = 0; i < num_reqs; ++i) {
+    lo[static_cast<size_t>(i)] = csv[static_cast<size_t>(i)];
+    tlen[static_cast<size_t>(i)] =
+        csv[static_cast<size_t>(i + 1)] - csv[static_cast<size_t>(i)];
+    VT_CHECK(tlen[static_cast<size_t>(i)] >= 0 &&
+                 tlen[static_cast<size_t>(i)] <= num_cols,
+             "tenstorrent gdn_spec_decode: query length exceeds the spec "
+             "slot count");
+    VT_CHECK(natp[static_cast<size_t>(i)] >= 1 &&
+                 natp[static_cast<size_t>(i)] <= num_cols,
+             "tenstorrent gdn_spec_decode: num_accepted_tokens out of range");
+    const int32_t s = sidx[static_cast<size_t>(i * num_cols +
+                                              (natp[static_cast<size_t>(i)] - 1))];
+    VT_CHECK(s < slots, "tenstorrent gdn_spec_decode: state index out of range");
+    init[static_cast<size_t>(i)] = s;
+  }
+
+  MeshDevice& device = SharedMeshDevice();
+  const uint32_t uhv = static_cast<uint32_t>(hv), udv = static_cast<uint32_t>(dv),
+                  udk = static_cast<uint32_t>(dk);
+  const int64_t row_elems = hv * dv * dk;
+  const uint32_t sf = static_cast<uint32_t>(SplitFactor(row_elems, /*esz=*/4));
+  const uint32_t blk = static_cast<uint32_t>(row_elems / sf);
+
+  // Device-pure staging (the decode kernel's ServeActF32 discipline: the
+  // projections commit their outputs device-side, so the activations are
+  // served from their current shadows; the eager arm keeps its host-staging
+  // fallback). q/k expand to Hv heads through the proven dim-0 gather — the
+  // head map is step-constant per geometry and content-keyed.
+  ttnn::Tensor q2d = ServeActF32(q_in, static_cast<uint32_t>(T * hk), udk, "q",
+                                 device);
+  ttnn::Tensor k2d =
+      ServeActF32(k, static_cast<uint32_t>(T * hk), udk, "k", device);
+  ttnn::Tensor v2d = ServeActF32(v, static_cast<uint32_t>(T * hv), udv, "v", device);
+  ttnn::Tensor g2d = ServeActF32(g, static_cast<uint32_t>(T * hv), 1, "g", device);
+  ttnn::Tensor b2d =
+      ServeActF32(beta, static_cast<uint32_t>(T * hv), 1, "beta", device);
+  ttnn::Tensor q_exp = q2d, k_exp = k2d;
+  if (hv != hk) {
+    ttnn::Tensor head_map =
+        CachedHeadMapIdx(static_cast<uint64_t>(T), static_cast<uint64_t>(hv),
+                         static_cast<uint64_t>(hk), static_cast<uint64_t>(dk),
+                         device);
+    q_exp = ttnn::gather(q2d, /*dim=*/0, head_map, /*sparse_grad=*/false,
+                         std::nullopt);
+    k_exp = ttnn::gather(k2d, /*dim=*/0, head_map, /*sparse_grad=*/false,
+                         std::nullopt);
+  }
+
+  // The split shadow ([slots*F, blk]) and the initial-state gather: one exact
+  // row gather per request (NULL rows gather zeros + the mask — the oracle's
+  // :114-115 skip). The acceptance-derived selection is why this is a
+  // per-call gather, not a content-keyed entry. The gather runs in the
+  // shadow's SPLIT geometry — each request's slot expands into its sf block
+  // rows (flat bytes identical either way), and the result views as
+  // [ns*Hv, Dv, Dk] (the decode kernel's one-hot matmul produces the same
+  // [B*sf, blk] -> [bh, dv, dk] reshape).
+  ttnn::Tensor cache2d = EnsureGdnCacheDevice(state, slots, row_elems, device);
+  std::vector<int32_t> init_blocks;
+  init_blocks.reserve(init.size() * static_cast<size_t>(sf));
+  for (int32_t ix : init)
+    for (uint32_t j = 0; j < sf; ++j)
+      init_blocks.push_back(ix < 0 ? -1
+                                   : ix * static_cast<int32_t>(sf) +
+                                         static_cast<int32_t>(j));
+  ttnn::Tensor S_all =
+      GatherRowsExact(cache2d, init_blocks, blk, device);
+  S_all = CaptureSafeReshape(
+      S_all, ttnn::Shape({static_cast<uint32_t>(init.size() * hv), udv, udk}));
+
+  // The recurrence: per request, T sequential composed steps over that
+  // request's [Hv, Dv, Dk] state block; per-timestep activations are
+  // contiguous row slices (request i's tokens are rows [cs_i, cs_i+1) in
+  // batch order, each token's Hv head rows contiguous after the expand).
+  std::vector<ttnn::Tensor> o_parts;    // per (request, timestep): [Hv, Dv, 1]
+  std::vector<ttnn::Tensor> snap_rows;  // per snapshot: [sf, blk]
+  std::vector<uint32_t> snap_bids;      // expanded split-block ids
+  for (int64_t i = 0; i < num_reqs; ++i) {
+    const int64_t Ti = tlen[static_cast<size_t>(i)];
+    if (Ti == 0) continue;  // T == 0 early-out (the oracle's :76-78)
+    if (init[static_cast<size_t>(i)] < 0) {
+      // NULL init: the oracle zeroes the request's out rows and skips the
+      // whole request — no snapshots even from live columns (:114-115).
+      o_parts.push_back(ttnn::zeros(
+          tt::tt_metal::Shape({static_cast<uint32_t>(Ti * hv), udv, 1u}),
+          ttnn::DataType::FLOAT32, ttnn::Layout::TILE, std::ref(device)));
+      continue;
+    }
+    ttnn::Tensor S = ttnn::slice(
+        S_all,
+        ttsl::SmallVector<uint32_t>{static_cast<uint32_t>(i * hv), 0u, 0u},
+        ttsl::SmallVector<uint32_t>{static_cast<uint32_t>((i + 1) * hv), udv,
+                                    udk},
+        ttsl::SmallVector<uint32_t>{1u, 1u, 1u});  // [Hv, Dv, Dk]
+    for (int64_t p = 0; p < Ti; ++p) {
+      const int64_t t = lo[static_cast<size_t>(i)] + p;
+      const uint32_t r0 = static_cast<uint32_t>(t * hv);
+      const uint32_t r1 = static_cast<uint32_t>((t + 1) * hv);
+      ttnn::Tensor qp = ttnn::slice(
+          q_exp, ttsl::SmallVector<uint32_t>{r0, 0u},
+          ttsl::SmallVector<uint32_t>{r1, udk}, ttsl::SmallVector<uint32_t>{1u, 1u});
+      ttnn::Tensor kp = ttnn::slice(
+          k_exp, ttsl::SmallVector<uint32_t>{r0, 0u},
+          ttsl::SmallVector<uint32_t>{r1, udk}, ttsl::SmallVector<uint32_t>{1u, 1u});
+      ttnn::Tensor vp = ttnn::slice(
+          v2d, ttsl::SmallVector<uint32_t>{r0, 0u},
+          ttsl::SmallVector<uint32_t>{r1, udv}, ttsl::SmallVector<uint32_t>{1u, 1u});
+      ttnn::Tensor gp = ttnn::slice(
+          g2d, ttsl::SmallVector<uint32_t>{r0, 0u},
+          ttsl::SmallVector<uint32_t>{r1, 1u}, ttsl::SmallVector<uint32_t>{1u, 1u});
+      ttnn::Tensor bp = ttnn::slice(
+          b2d, ttsl::SmallVector<uint32_t>{r0, 0u},
+          ttsl::SmallVector<uint32_t>{r1, 1u}, ttsl::SmallVector<uint32_t>{1u, 1u});
+      DecodeStepResult r = GdnDecodeStepComposed(S, qp, kp, vp, gp, bp, args.scale,
+                                                 uhv, udk, udv);
+      o_parts.push_back(std::move(r.o));
+      // Snapshot AFTER this timestep into its own slot column (the oracle's
+      // :156-166). A NULL column skips only its store.
+      S = std::move(r.state);
+      const int32_t slot =
+          sidx[static_cast<size_t>(i * num_cols + p)];
+      if (slot >= 0) {
+        snap_rows.push_back(
+            CaptureSafeReshape(S, ttnn::Shape({sf, blk})));
+        for (uint32_t j = 0; j < sf; ++j)
+          snap_bids.push_back(static_cast<uint32_t>(slot) * sf + j);
+      }
+    }
+  }
+
+  // The out: the (request, timestep) order IS token order (cs is the prefix
+  // sum) — one concat, then the logical-2D commit the decode kernel uses.
+  ttnn::Tensor o_all = o_parts.size() == 1 ? std::move(o_parts[0])
+                                           : ttnn::concat(o_parts, /*dim=*/0);
+  // VT_TT_GDN_SPEC_DEBUG: the spec step's metadata + result checksums, one
+  // line per call (eager only — a download is the read the trace refuses).
+  // The frozen-recurrence signature is the GDN-STATE-PROBE's: one IDENTICAL
+  // out checksum at every step means the recurrence never advanced.
+  if (const char* dbg = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+      dbg != nullptr && dbg[0] != '\0' && !tt_capture_active()) {
+    std::vector<float> ov = o_all.to_vector<float>();
+    double acc = 0.0;
+    uint64_t fnv = 1469598103934665603ULL;
+    for (float f : ov) {
+      uint32_t bits;
+      std::memcpy(&bits, &f, sizeof(bits));
+      fnv = (fnv ^ bits) * 1099511628211ULL;
+      acc += f > 0.0f ? f : -f;
+    }
+    // The gathered initial state + the q activation: distinguishes a zero
+    // STATE gather from zero ACTIVATIONS from a zero result.
+    std::vector<float> sv = S_all.to_vector<float>();
+    double s_acc = 0.0;
+    for (float f : sv) s_acc += f > 0.0f ? f : -f;
+    std::vector<float> qv = q_exp.to_vector<float>();
+    double q_acc = 0.0;
+    for (float f : qv) q_acc += f > 0.0f ? f : -f;
+    std::vector<float> vv = v2d.to_vector<float>();
+    double v_acc = 0.0;
+    for (float f : vv) v_acc += f > 0.0f ? f : -f;
+    std::fprintf(stderr,
+                 "[GDN-SPEC] T=%lld nreq=%lld nc=%lld nat0=%d init0=%d "
+                 "slots=%lld cache=%p out_n=%zu fnv=%016llx asum=%a "
+                 "s_asum=%.6g q_asum=%.6g v_asum=%.6g\n",
+                 static_cast<long long>(T), static_cast<long long>(num_reqs),
+                 static_cast<long long>(num_cols),
+                 num_reqs > 0 ? natp[0] : -1,
+                 num_reqs > 0 ? init[static_cast<size_t>(num_reqs - 1)] : -1,
+                 static_cast<long long>(slots), state.data, ov.size(),
+                 static_cast<unsigned long long>(fnv), acc, s_acc, q_acc, v_acc);
+    std::fflush(stderr);
+  }
+  CommitDeviceLogical2D(
+      out,
+      CaptureSafeReshape(o_all, ttnn::Shape({static_cast<uint32_t>(T), uhv, udv})),
+      static_cast<uint32_t>(T * hv), udv);
+
+  // ONE split-block scatter: every snapshot row lands in its slot in the
+  // oracle's store order (last-writer-wins on duplicates). No snapshots —
+  // all requests NULL/T=0 — leaves the cache untouched.
+  if (!snap_bids.empty()) {
+    ttnn::Tensor rows_all = snap_rows.size() == 1
+                                ? std::move(snap_rows[0])
+                                : ttnn::concat(snap_rows, /*dim=*/0);
+    // bf16 STORAGE semantics (the decode kernel's discipline): the state a
+    // step STORES rounds through bf16; the in-step register chain stays f32 —
+    // exactly the oracle's StoreF32 boundary.
+    if (state.dtype == DType::kBF16) {
+      rows_all = ttnn::typecast(ttnn::typecast(std::move(rows_all),
+                                               ttnn::DataType::BFLOAT16),
+                                ttnn::DataType::FLOAT32);
+    }
+    const uint32_t unb = static_cast<uint32_t>(snap_bids.size());
+    ttnn::Tensor bid_dev = UploadIdxU32(std::move(snap_bids), ttnn::Shape({unb}),
+                                        ttnn::Layout::ROW_MAJOR, device);
+    ttnn::Tensor next =
+        ScatterRowsDevice(cache2d, bid_dev, rows_all, slots, row_elems, sf);
+    // TT-GDN-REGION-REPLAY: commit INTO the persistent shadow (ttnn::copy —
+    // the capture-safe preallocated-destination write) so the next step's
+    // gather reads the advanced slots at the SAME address.
+    const auto same_spec = [](const ttnn::Tensor& a, const ttnn::Tensor& b) {
+      if (a.dtype() != b.dtype() || a.layout() != b.layout()) return false;
+      const auto sa = a.logical_shape(), sb = b.logical_shape();
+      if (sa.rank() != sb.rank()) return false;
+      for (uint32_t r = 0; r < sa.rank(); ++r)
+        if (sa[r] != sb[r]) return false;
+      return true;
+    };
+    if (same_spec(next, cache2d)) {
+      ttnn::copy(next, cache2d);
+      CommitDeviceLogical2D(state, std::move(cache2d),
+                            static_cast<uint32_t>(slots),
+                            static_cast<uint32_t>(row_elems));
+    } else {
+      CommitDeviceLogical2D(state, std::move(next),
+                            static_cast<uint32_t>(slots),
+                            static_cast<uint32_t>(row_elems));
+    }
+  }
 }
 
 

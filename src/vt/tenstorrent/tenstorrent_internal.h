@@ -746,6 +746,11 @@ void GdnPrefillKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k_i
 void GdnDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k,
                      const Tensor& v, const Tensor& g, const Tensor& beta,
                      Tensor& state, const Tensor* state_idx, const GdnArgs& args);
+void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& k,
+                         const Tensor& v, const Tensor& g, const Tensor& beta,
+                         Tensor& state, const Tensor& cu_seqlens,
+                         const Tensor& state_indices,
+                         const Tensor& num_accepted_tokens, const GdnArgs& args);
 void GdnStateGatherKernel(Queue&, Tensor& working, const Tensor& cache,
                           const Tensor& state_idx, const Tensor* has_initial_state);
 void GdnStateScatterKernel(Queue&, Tensor& cache, const Tensor& working,

@@ -1,0 +1,402 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf engine | num_prompts=1 input_len=32 output_len=24 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+vllm.cpp: the draft checkpoint at "/mnt/models/qwen38-dflash2-drafter" declares architecture "DFlash2DraftModel". Its grouped dynamic depthwise convolution, its CANDIDATE SELECTOR and its PATH WALK are all implemented and will run, so this draft DRAFTS -- from safetensors and from GGUF alike (row SPEC-DFLASH2 waves W1-W5, .agents/specs/dflash2-spec-decode.md, issue #1314). Two things are still owed and neither is silent: a GGUF drafter is DEQUANTIZED wholesale to bf16 at load, so a k-quant draft costs its bf16 residency rather than its file size, and no throughput number has been taken for this architecture -- a DFlash2 draft runs its block forward off the paged CUDA-graph fast path, because the candidate selector needs the hidden states of the same forward its logits came from. This port mirrors vllm-project/vllm#52816, which MERGED upstream on 2026-08-21 at head 3406ec1dae9916f920b90f0dbf90dcf54923d042, merge commit b389ac29465b33f9e9c534df221ea3c129e9793f. It does not advance the parity pin, and the port is not yet reconciled onto that merged head (issue #1561).
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 289527808 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+vllm.cpp: DFlash2 draft: grouped conv taps=2 group=16 block=9
+vllm.cpp: DFlash draft loaded from safetensors /mnt/models/qwen38-dflash2-drafter (k=8, taps=5, mask=248070, vocab=248320, shared head from the GGUF target file)
+vllm.cpp: the draft checkpoint at "/mnt/models/qwen38-dflash2-drafter" declares architecture "DFlash2DraftModel". Its grouped dynamic depthwise convolution, its CANDIDATE SELECTOR and its PATH WALK are all implemented and will run, so this draft DRAFTS -- from safetensors and from GGUF alike (row SPEC-DFLASH2 waves W1-W5, .agents/specs/dflash2-spec-decode.md, issue #1314). Two things are still owed and neither is silent: a GGUF drafter is DEQUANTIZED wholesale to bf16 at load, so a k-quant draft costs its bf16 residency rather than its file size, and no throughput number has been taken for this architecture -- a DFlash2 draft runs its block forward off the paged CUDA-graph fast path, because the candidate selector needs the hidden states of the same forward its logits came from. This port mirrors vllm-project/vllm#52816, which MERGED upstream on 2026-08-21 at head 3406ec1dae9916f920b90f0dbf90dcf54923d042, merge commit b389ac29465b33f9e9c534df221ea3c129e9793f. It does not advance the parity pin, and the port is not yet reconciled onto that merged head (issue #1561).
+vllm.cpp: DFlash draft embed SHARED with the target (one device copy, 2542796800 B saved)
+vllm.cpp: DFlash draft head SHARED with the target (one device copy, 1042944000 B saved)
+INFO auto-fit max_model_len: reduced from 262144 to 576 to fit the KV cache (64 blocks, one of them the null block, shared by 3 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: DFlash draft weights staged to device at load (5 layers)
+vllm.cpp: VT_DFLASH_DRAFT=1 — the DFlash2 draft proposes through the DIRECT-ARGMAX arm (bundle dflash2.py has_selector=false): full-vocab argmax per block row, candidate selector NOT resident (~254 MB freed). The verify stays lossless (greedy accept = the target's argmax); only acceptance can differ from the selector arm.
+vllm.cpp: draft speculative context is limited to 592 tokens (37 pages x 16, 11.5625 MiB per concurrent request across 5 draft layers, so 11.5625 MiB of device memory at max_num_seqs 1 — NOT counted by gpu_memory_utilization). max_model_len is 576 and the (1+k) draft block needs 9 more, so the whole advertised context is speculated.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+[TT-STEP-PHASE] step=1 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6597268082.6 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-1.0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab743ea140 y_n=829440 y_asum=-nan x_asum=nan T_asum=64862.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff803bc0040 out_n=55296 fnv=d3669989bf0be99e asum=0x1.dd507dc654c54p+6 s_asum=11984.7 q_asum=1115.47 v_asum=1537.21
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7460c740 y_n=829440 y_asum=2170.27 x_asum=73502.8 T_asum=6137.51
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff8020b0040 out_n=55296 fnv=23250715f64572d0 asum=0x1.1f419e69741d7p+0 s_asum=301.568 q_asum=1135.34 v_asum=41.7588
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab747fb780 y_n=829440 y_asum=2023.17 x_asum=63341.5 T_asum=6933.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff8005a0040 out_n=55296 fnv=ce7232c8c1b958da asum=0x1.409d1a3499936p+0 s_asum=394.118 q_asum=1355.47 v_asum=57.1256
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7520bf00 y_n=829440 y_asum=-nan x_asum=nan T_asum=8095.36
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7fa4f0040 out_n=55296 fnv=045a249fa7b59dd5 asum=0x1.c1dfafd48b288p-1 s_asum=356.086 q_asum=1250.59 v_asum=53.5041
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab753faf40 y_n=829440 y_asum=1860.54 x_asum=58518.5 T_asum=9059.29
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f89e0040 out_n=55296 fnv=7c7681c6eea617b9 asum=0x1.07712de5f1168p+0 s_asum=390.255 q_asum=1155.95 v_asum=62.822
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab755e9f80 y_n=829440 y_asum=2333.74 x_asum=64306.2 T_asum=10307.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f6ed0040 out_n=55296 fnv=90cd1bf0d5a888b0 asum=0x1.b7d665b090a7cp+0 s_asum=459.639 q_asum=1317.63 v_asum=74.3948
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab75fd9000 y_n=829440 y_asum=-nan x_asum=nan T_asum=12356
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f53c0040 out_n=55296 fnv=f928f96022241c92 asum=0x1.abce0d8a1badcp+0 s_asum=510.238 q_asum=1236 v_asum=81.5714
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab761c8040 y_n=829440 y_asum=1953.08 x_asum=60259.9 T_asum=11705.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f38b0040 out_n=55296 fnv=03f53e580d78f5be asum=0x1.46dc884ef2f57p+0 s_asum=604.686 q_asum=1182.71 v_asum=79.3099
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab763b7080 y_n=829440 y_asum=38.7424 x_asum=130.372 T_asum=12691.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f1da0040 out_n=55296 fnv=33ccc9f9196a362d asum=0x1.00053fa10a3acp+0 s_asum=569.553 q_asum=395.949 v_asum=8.84315
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76da6100 y_n=829440 y_asum=-nan x_asum=nan T_asum=14315.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f0290040 out_n=55296 fnv=1e078770a813d148 asum=0x1.597ab766ace48p-1 s_asum=648.755 q_asum=418.393 v_asum=7.30439
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76f95600 y_n=829440 y_asum=25.0573 x_asum=5.32792 T_asum=13549.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ee780040 out_n=55296 fnv=b21e9e74e37ca707 asum=0x1.7ecec7e021ap-1 s_asum=676.198 q_asum=414.6 v_asum=7.45403
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77184f40 y_n=829440 y_asum=43.8367 x_asum=5.32792 T_asum=14854.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ecc70040 out_n=55296 fnv=59426ef9b26b2355 asum=0x1.d4783918579bp-1 s_asum=716.319 q_asum=379.959 v_asum=12.6813
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77b74d00 y_n=829440 y_asum=-nan x_asum=nan T_asum=15654.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7eb160040 out_n=55296 fnv=5a1c08654b5cb4d4 asum=0x1.dc9508b21fdp-1 s_asum=695.189 q_asum=400.855 v_asum=10.0297
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77d64640 y_n=829440 y_asum=44.4728 x_asum=5.32792 T_asum=15957.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e9650040 out_n=55296 fnv=34cf1d5a2aee2d7d asum=0x1.62827c47b8bep-1 s_asum=732.638 q_asum=420.489 v_asum=12.1608
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77f53f80 y_n=829440 y_asum=47.4216 x_asum=5.32792 T_asum=17295
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e7b40040 out_n=55296 fnv=c2d2edabbc37b808 asum=0x1.e3f6004fd1398p-1 s_asum=921.751 q_asum=388.745 v_asum=11.7177
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78943d40 y_n=829440 y_asum=-nan x_asum=nan T_asum=24349.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e6030040 out_n=55296 fnv=be80fcc2ebc3536d asum=0x1.04f6ca999058p+1 s_asum=1698.17 q_asum=380.919 v_asum=20.5031
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78b33680 y_n=829440 y_asum=66.3097 x_asum=5.32792 T_asum=24446.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e4520040 out_n=55296 fnv=1abcafd553667826 asum=0x1.694fc5a5e1754p+0 s_asum=1517.96 q_asum=364.068 v_asum=17.8475
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78d22fc0 y_n=829440 y_asum=46.5112 x_asum=5.32792 T_asum=19717.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e2a10040 out_n=55296 fnv=ac1ad36555ca13f6 asum=0x1.a781a6321194p-1 s_asum=1030.57 q_asum=378.86 v_asum=10.93
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79712d80 y_n=829440 y_asum=-nan x_asum=nan T_asum=22429.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e0f00040 out_n=55296 fnv=4b4f3b23cf0a517a asum=0x1.ad6b905c5d68cp+0 s_asum=1302.33 q_asum=391.049 v_asum=13.2095
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab799026c0 y_n=829440 y_asum=49.8688 x_asum=5.32792 T_asum=23337.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7df3f0040 out_n=55296 fnv=3053fcbaf7e92bff asum=0x1.7a6b734187afdp+0 s_asum=1365.16 q_asum=382.927 v_asum=11.1959
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79af2000 y_n=829440 y_asum=70.2686 x_asum=5.32792 T_asum=22062.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7dd8e0040 out_n=55296 fnv=dbbb67599534ebfb asum=0x1.3d75f9f1c28cp+0 s_asum=1364.55 q_asum=394.84 v_asum=18.9545
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a4e1dc0 y_n=829440 y_asum=-nan x_asum=nan T_asum=22669.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7dbdd0040 out_n=55296 fnv=0e00aac7d650d6bf asum=0x1.a58dc9aa8ee3bp+0 s_asum=1278.62 q_asum=422.415 v_asum=7.99374
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a6d1780 y_n=829440 y_asum=27.0731 x_asum=5.32792 T_asum=22208.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7da2c0040 out_n=55296 fnv=fcdefffd8f3de511 asum=0x1.8244e4e6e09aep+0 s_asum=1371.94 q_asum=424.008 v_asum=7.3444
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a8c1100 y_n=829440 y_asum=67.0867 x_asum=5.32792 T_asum=23638.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d87b0040 out_n=55296 fnv=4378934cc1653c2a asum=0x1.d47ebc7c17568p+0 s_asum=1579.12 q_asum=381.687 v_asum=18.0704
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b2b0f40 y_n=829440 y_asum=-nan x_asum=nan T_asum=23149.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d6ca0040 out_n=55296 fnv=6559a5a628aba3c2 asum=0x1.d48aa82f4dcp+0 s_asum=1488.65 q_asum=404.342 v_asum=6.95075
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b4a0900 y_n=829440 y_asum=42.6169 x_asum=5.32792 T_asum=23423.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d5190040 out_n=55296 fnv=03ac8f117872ef1c asum=0x1.c0d192050e4ap+0 s_asum=1407.51 q_asum=405.168 v_asum=10.1747
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b6902c0 y_n=829440 y_asum=37.2763 x_asum=5.32792 T_asum=24533.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d3680040 out_n=55296 fnv=d4b41ea0f6e73e89 asum=0x1.cc605b788adfp+0 s_asum=1515 q_asum=356.647 v_asum=8.16548
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c0800c0 y_n=829440 y_asum=-nan x_asum=nan T_asum=30691.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d1b70040 out_n=55296 fnv=6857907e35492845 asum=0x1.55e0e64b2f18p+1 s_asum=2449.23 q_asum=364.474 v_asum=25.2006
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c26fa80 y_n=829440 y_asum=88.7633 x_asum=27.415 T_asum=30066.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d0060040 out_n=55296 fnv=d7e692fbd2e95b79 asum=0x1.e394a5635a685p+0 s_asum=1953.86 q_asum=327.236 v_asum=25.3839
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c45f400 y_n=829440 y_asum=58.5682 x_asum=27.415 T_asum=23431.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ce550040 out_n=55296 fnv=93925f997a7c7c3c asum=0x1.f1335ac52f16p-1 s_asum=1276.44 q_asum=371.917 v_asum=14.711
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ce4f240 y_n=829440 y_asum=-nan x_asum=nan T_asum=24367.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7cca40040 out_n=55296 fnv=a60480c4d9c7edbf asum=0x1.9b137004f3a77p+0 s_asum=1791.48 q_asum=387.983 v_asum=22.7882
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d03ec00 y_n=829440 y_asum=52.3173 x_asum=27.415 T_asum=24168.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7caf30040 out_n=55296 fnv=8fb535c5f0fe7507 asum=0x1.a188cd9d4dep+0 s_asum=1454.26 q_asum=381.036 v_asum=11.2286
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d22e5c0 y_n=829440 y_asum=63.8954 x_asum=27.415 T_asum=23097.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c9420040 out_n=55296 fnv=2f347f220465a05e asum=0x1.f6dc98dc8ae8p+0 s_asum=1394.39 q_asum=408.345 v_asum=17.0743
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dc1e9c0 y_n=829440 y_asum=-nan x_asum=nan T_asum=23796.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c7910040 out_n=55296 fnv=5639ae943586a4b5 asum=0x1.e687924dcd7dep+0 s_asum=1296.39 q_asum=416.467 v_asum=7.19626
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7de0e3c0 y_n=829440 y_asum=27.6458 x_asum=27.415 T_asum=22484.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c5e00040 out_n=55296 fnv=0ed84313930117e3 asum=0x1.d666ee3f2fp+0 s_asum=1270.3 q_asum=428.528 v_asum=7.76662
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dffdd40 y_n=829440 y_asum=66.2692 x_asum=27.415 T_asum=24022.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c42f0040 out_n=55296 fnv=07d88e5b07acb80e asum=0x1.a9759fadc6908p+0 s_asum=1351.79 q_asum=377.007 v_asum=17.5371
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7e9edb80 y_n=829440 y_asum=-nan x_asum=nan T_asum=25630.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c27e0040 out_n=55296 fnv=455b0fa2403f46fb asum=0x1.4ba64a276e28p+0 s_asum=1321.76 q_asum=375.25 v_asum=8.76192
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ebdd540 y_n=829440 y_asum=60.5443 x_asum=27.415 T_asum=25834.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c0cd0040 out_n=55296 fnv=3098d478dec49784 asum=0x1.85c138993b078p+0 s_asum=1362.42 q_asum=408.85 v_asum=15.5583
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7edccf00 y_n=829440 y_asum=44.6745 x_asum=27.415 T_asum=27687.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7bf1c0040 out_n=55296 fnv=8ac1c6f7ee26f2dd asum=0x1.3a8dd6dc4168p+1 s_asum=1574.64 q_asum=387.409 v_asum=11.0929
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f7bcd00 y_n=829440 y_asum=-nan x_asum=nan T_asum=39724
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7bd6b0040 out_n=55296 fnv=22bc308d1cfd3814 asum=0x1.14b1efd8c504p+2 s_asum=4367.48 q_asum=355.379 v_asum=37.3537
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f9ac700 y_n=829440 y_asum=124.401 x_asum=27.415 T_asum=38857.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7bbba0040 out_n=55296 fnv=34124d2f7b609c50 asum=0x1.cf392ca15443cp+1 s_asum=3999.43 q_asum=355.086 v_asum=34.1055
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7fb9c080 y_n=829440 y_asum=113.204 x_asum=27.415 T_asum=33389.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ba090040 out_n=55296 fnv=0bb1bbffa88b75f0 asum=0x1.518f1b3807ap+1 s_asum=2755.75 q_asum=368.323 v_asum=30.4676
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8058bec0 y_n=829440 y_asum=-nan x_asum=nan T_asum=41237.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b8580040 out_n=55296 fnv=37ecee83aa773acc asum=0x1.4b55d984788ep+2 s_asum=5390.06 q_asum=376.555 v_asum=46.6936
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8077b880 y_n=829440 y_asum=231.065 x_asum=27.415 T_asum=42372.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b6a70040 out_n=55296 fnv=b77ef8b57258459d asum=0x1.d97be80c8b0d8p+1 s_asum=4572.62 q_asum=383.652 v_asum=60.529
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8096b240 y_n=829440 y_asum=228.148 x_asum=27.415 T_asum=36968.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b4f60040 out_n=55296 fnv=003817030be856da asum=0x1.44b19765c4bfcp+1 s_asum=3979.2 q_asum=381.579 v_asum=53.7816
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8135b040 y_n=829440 y_asum=-nan x_asum=nan T_asum=52697.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b3450040 out_n=55296 fnv=299eab9cb2a1079f asum=0x1.4633eaa04e21dp+2 s_asum=5976.11 q_asum=358.6 v_asum=106.764
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8154aa40 y_n=829440 y_asum=228.818 x_asum=27.415 T_asum=37320.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b1940040 out_n=55296 fnv=66156274d533515a asum=0x1.256e0a25f92cp+1 s_asum=2866.89 q_asum=381.977 v_asum=63.7279
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8173a3c0 y_n=829440 y_asum=209.427 x_asum=27.415 T_asum=48575
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7afe30040 out_n=55296 fnv=e7ce6487e2641041 asum=0x1.7119493ac4bf1p+2 s_asum=4458.35 q_asum=414.899 v_asum=34.2274
+[TT-STEP-PHASE] step=2 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6597327091.5 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-6597268082.6
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab743ea140 y_n=829440 y_asum=-nan x_asum=nan T_asum=89142.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff803bc0040 out_n=55296 fnv=2f0a80a26c22c568 asum=0x1.c99c81af848b8p+6 s_asum=11550.9 q_asum=1179.47 v_asum=2192.03
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7460c740 y_n=829440 y_asum=1563.59 x_asum=53321.2 T_asum=8105.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff8020b0040 out_n=55296 fnv=7d5ee569f059a159 asum=0x1.570cd1626c869p+0 s_asum=238.983 q_asum=1245.73 v_asum=67.8142
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab747fb780 y_n=829440 y_asum=1728.02 x_asum=54126.1 T_asum=9061.26
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff8005a0040 out_n=55296 fnv=76a1becd2f23e739 asum=0x1.49660ffaabefdp+0 s_asum=355.903 q_asum=1406.33 v_asum=86.9022
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7520bf00 y_n=829440 y_asum=1591.35 x_asum=45822.4 T_asum=10141.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7fa4f0040 out_n=55296 fnv=09831434fe4bf502 asum=0x1.1c8616bcfebebp+0 s_asum=291.351 q_asum=1366.4 v_asum=90.71
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab753faf40 y_n=829440 y_asum=1659.43 x_asum=51394.1 T_asum=12186.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f89e0040 out_n=55296 fnv=2baa2b899d3dada3 asum=0x1.3a912111290a9p+0 s_asum=325.224 q_asum=1254.25 v_asum=100.312
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab755e9f80 y_n=829440 y_asum=1887.15 x_asum=52063.6 T_asum=13740
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f6ed0040 out_n=55296 fnv=46d4bcba5955c721 asum=0x1.f7a1210a7b6e2p+0 s_asum=426.991 q_asum=1325.52 v_asum=114.246
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab75fd9000 y_n=829440 y_asum=1959.18 x_asum=53593.2 T_asum=16793.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f53c0040 out_n=55296 fnv=784a8818f6e5c2ce asum=0x1.00a672a2d8545p+1 s_asum=440.118 q_asum=1280.25 v_asum=126.674
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab761c8040 y_n=829440 y_asum=1793.93 x_asum=52591.2 T_asum=15499.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f38b0040 out_n=55296 fnv=49c2e0d8673aff77 asum=0x1.8f95e7e99705p+0 s_asum=490.675 q_asum=1251.79 v_asum=128.267
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab763b7080 y_n=829440 y_asum=24.4373 x_asum=43.5438 T_asum=8464.33
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f1da0040 out_n=55296 fnv=053a6397665c2f0e asum=0x1.0944a9d6221b8p-1 s_asum=527.164 q_asum=198.169 v_asum=2.60192
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76da6100 y_n=829440 y_asum=25.3131 x_asum=296.078 T_asum=9494.26
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7f0290040 out_n=55296 fnv=1c6155aff8f9f0e0 asum=0x1.67ae266a2d14p-2 s_asum=587.915 q_asum=210.472 v_asum=2.8989
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76f95600 y_n=829440 y_asum=17.4558 x_asum=43.5438 T_asum=8890.98
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ee780040 out_n=55296 fnv=757b3c5637f9c31a asum=0x1.89cebff1864p-2 s_asum=629.815 q_asum=203.736 v_asum=2.80622
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77184f40 y_n=829440 y_asum=27.8441 x_asum=43.5117 T_asum=9275.76
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ecc70040 out_n=55296 fnv=30be696fe7bde184 asum=0x1.d4c7922a4a8ep-2 s_asum=667.091 q_asum=194.527 v_asum=3.58722
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77b74d00 y_n=829440 y_asum=28.2881 x_asum=379.429 T_asum=10443.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7eb160040 out_n=55296 fnv=ead1f04e1deac34f asum=0x1.ed99ddb4c75p-2 s_asum=620.903 q_asum=197.998 v_asum=3.74676
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77d64640 y_n=829440 y_asum=28.8472 x_asum=43.5117 T_asum=10597.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e9650040 out_n=55296 fnv=86265cf9079287a9 asum=0x1.6397550e8758p-2 s_asum=695.776 q_asum=212.051 v_asum=3.63469
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77f53f80 y_n=829440 y_asum=32.4899 x_asum=43.5117 T_asum=11207.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e7b40040 out_n=55296 fnv=519cafee81676802 asum=0x1.0c90ef664e058p-1 s_asum=877.274 q_asum=191.394 v_asum=4.57134
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78943d40 y_n=829440 y_asum=70.5634 x_asum=403.651 T_asum=16642.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e6030040 out_n=55296 fnv=8fdc7123ea303984 asum=0x1.15e51c803eap+0 s_asum=1630.2 q_asum=189.756 v_asum=8.42425
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78b33680 y_n=829440 y_asum=47.2315 x_asum=43.5117 T_asum=16363.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e4520040 out_n=55296 fnv=f3b8ad0f052205a9 asum=0x1.7207c48009c62p-1 s_asum=1340.8 q_asum=184.199 v_asum=7.96707
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78d22fc0 y_n=829440 y_asum=32.2446 x_asum=43.5117 T_asum=13252.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e2a10040 out_n=55296 fnv=740ca9ad390b11a2 asum=0x1.c0b8889b9898p-2 s_asum=919.386 q_asum=192.686 v_asum=4.5354
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79712d80 y_n=829440 y_asum=38.1814 x_asum=498.913 T_asum=14741.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7e0f00040 out_n=55296 fnv=50016f8f7264e795 asum=0x1.8fe667da3de2cp-1 s_asum=1102.33 q_asum=199.856 v_asum=3.68749
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab799026c0 y_n=829440 y_asum=33.9483 x_asum=43.5117 T_asum=15761.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7df3f0040 out_n=55296 fnv=bdef36bad7c9d036 asum=0x1.8208560ff9cbep-1 s_asum=1313.41 q_asum=198.507 v_asum=4.29143
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79af2000 y_n=829440 y_asum=43.5016 x_asum=43.5117 T_asum=15255.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7dd8e0040 out_n=55296 fnv=e1126c5f0e615609 asum=0x1.3083d63e5d08p-1 s_asum=1288.22 q_asum=194.56 v_asum=3.53562
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a4e1dc0 y_n=829440 y_asum=35.2233 x_asum=447.099 T_asum=15278.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7dbdd0040 out_n=55296 fnv=c5c6d6af396b272c asum=0x1.b0928fe1ce687p-1 s_asum=1225.29 q_asum=213.12 v_asum=3.18676
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a6d1780 y_n=829440 y_asum=18.9225 x_asum=43.5117 T_asum=14620.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7da2c0040 out_n=55296 fnv=ee5ed48c99afdc14 asum=0x1.8ddf8889001ccp-1 s_asum=1145.15 q_asum=222.962 v_asum=2.52931
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a8c1100 y_n=829440 y_asum=41.2654 x_asum=43.5117 T_asum=15258.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d87b0040 out_n=55296 fnv=4468346443b16cfd asum=0x1.c986538de1a5p-1 s_asum=1463.72 q_asum=193.596 v_asum=3.57312
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b2b0f40 y_n=829440 y_asum=27.9 x_asum=419.615 T_asum=14659.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d6ca0040 out_n=55296 fnv=8d7d366cafbcbc7b asum=0x1.db4bb6d957cp-1 s_asum=1447.5 q_asum=204.509 v_asum=2.79453
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b4a0900 y_n=829440 y_asum=25.8879 x_asum=43.5117 T_asum=14861.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d5190040 out_n=55296 fnv=a95bdf4adb129d65 asum=0x1.91cf88160001p-1 s_asum=1120.51 q_asum=201.99 v_asum=2.25914
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b6902c0 y_n=829440 y_asum=25.955 x_asum=43.5117 T_asum=15695.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d3680040 out_n=55296 fnv=07f61b355b3e91ca asum=0x1.b41490f4c67ep-1 s_asum=1445.47 q_asum=180.113 v_asum=2.89827
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c0800c0 y_n=829440 y_asum=84.4506 x_asum=521.17 T_asum=20220.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d1b70040 out_n=55296 fnv=7343b7bda43035d2 asum=0x1.4f2c3a9b9d9p+0 s_asum=2366.43 q_asum=181.722 v_asum=8.44499
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c26fa80 y_n=829440 y_asum=60.0211 x_asum=43.5117 T_asum=19196.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7d0060040 out_n=55296 fnv=4d9ef58d1e64614e asum=0x1.ce0f8b3642aeap-1 s_asum=1746.91 q_asum=164.956 v_asum=10.5888
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c45f400 y_n=829440 y_asum=38.3378 x_asum=43.5117 T_asum=15448.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ce550040 out_n=55296 fnv=9a95dd11f5698cac asum=0x1.06211cb1c0d6p-1 s_asum=1144.95 q_asum=196.065 v_asum=5.34505
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ce4f240 y_n=829440 y_asum=46.986 x_asum=404.56 T_asum=16327.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7cca40040 out_n=55296 fnv=68b873793d56f049 asum=0x1.8f8c6a53c2db8p-1 s_asum=1638.97 q_asum=197.626 v_asum=4.55451
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d03ec00 y_n=829440 y_asum=34.9925 x_asum=43.3553 T_asum=16315.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7caf30040 out_n=55296 fnv=1fd06577b884e979 asum=0x1.90b969efa44p-1 s_asum=1389.27 q_asum=195.014 v_asum=3.55151
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d22e5c0 y_n=829440 y_asum=38.0047 x_asum=43.3553 T_asum=15794.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c9420040 out_n=55296 fnv=958e814599351237 asum=0x1.bf2a5785dfe8p-1 s_asum=1309.7 q_asum=210.861 v_asum=2.53597
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dc1e9c0 y_n=829440 y_asum=35.4338 x_asum=473.276 T_asum=15850.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c7910040 out_n=55296 fnv=27379a43de8002a7 asum=0x1.ca3e37ac6b47cp-1 s_asum=1139.46 q_asum=210.688 v_asum=2.84877
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7de0e3c0 y_n=829440 y_asum=18.3686 x_asum=43.3553 T_asum=14917.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c5e00040 out_n=55296 fnv=20aa29d1bb3f60f0 asum=0x1.a4ee216bb58p-1 s_asum=1195.73 q_asum=218.799 v_asum=2.34854
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dffdd40 y_n=829440 y_asum=40.9532 x_asum=43.3553 T_asum=15598.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c42f0040 out_n=55296 fnv=837e68943ed9edc4 asum=0x1.9fa6171957e11p-1 s_asum=1227.86 q_asum=191.36 v_asum=3.22421
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7e9edb80 y_n=829440 y_asum=34.704 x_asum=580.683 T_asum=16427.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c27e0040 out_n=55296 fnv=a468fc6c1b7d1a0a asum=0x1.21876915a17p-1 s_asum=1072.63 q_asum=187.278 v_asum=3.45537
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ebdd540 y_n=829440 y_asum=35.731 x_asum=43.3553 T_asum=16519.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7c0cd0040 out_n=55296 fnv=82fec82d4c4eb66a asum=0x1.724d7b37c2ffp-1 s_asum=1286.99 q_asum=207.703 v_asum=3.12537
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7edccf00 y_n=829440 y_asum=27.8492 x_asum=43.3553 T_asum=17151.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7bf1c0040 out_n=55296 fnv=29bb3c91af0613e8 asum=0x1.30b96933b52p+0 s_asum=1509.59 q_asum=196.733 v_asum=3.1325
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f7bcd00 y_n=829440 y_asum=121.992 x_asum=613.575 T_asum=26068.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7bd6b0040 out_n=55296 fnv=d81f1d8555910c21 asum=0x1.0aab424a4be8p+1 s_asum=4246.86 q_asum=182.525 v_asum=12.8531
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f9ac700 y_n=829440 y_asum=82.4625 x_asum=43.3553 T_asum=23913
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7bbba0040 out_n=55296 fnv=0949fefa6ce4dfa2 asum=0x1.d138bd897aebap+0 s_asum=3630.11 q_asum=181.441 v_asum=13.3393
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7fb9c080 y_n=829440 y_asum=71.5781 x_asum=43.3553 T_asum=20886.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7ba090040 out_n=55296 fnv=4f616d5123482688 asum=0x1.422b3dc77f4p+0 s_asum=2555.91 q_asum=186.846 v_asum=9.84204
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8058bec0 y_n=829440 y_asum=149.891 x_asum=737.182 T_asum=25534.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b8580040 out_n=55296 fnv=98b6352c963d1ea9 asum=0x1.fe5be77a46e8p+0 s_asum=5039.15 q_asum=188.176 v_asum=18.0852
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8077b880 y_n=829440 y_asum=159.309 x_asum=43.3553 T_asum=26863
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b6a70040 out_n=55296 fnv=f384e9ad0329ce34 asum=0x1.deb228a44993p+0 s_asum=4367.63 q_asum=191.652 v_asum=21.9
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8096b240 y_n=829440 y_asum=156.974 x_asum=43.3553 T_asum=23878
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b4f60040 out_n=55296 fnv=3ebb208b14628dd5 asum=0x1.597e56bd61428p+0 s_asum=3745.6 q_asum=190.085 v_asum=18.3761
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8135b040 y_n=829440 y_asum=299.344 x_asum=1593.03 T_asum=32216.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b3450040 out_n=55296 fnv=8d8a87d6b22ad81a asum=0x1.3c90bbb6485fap+1 s_asum=5595.15 q_asum=178.756 v_asum=40.2589
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8154aa40 y_n=829440 y_asum=141.848 x_asum=43.3553 T_asum=22359.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7b1940040 out_n=55296 fnv=68afa728bb506963 asum=0x1.1ca14d4543b8p+0 s_asum=2668.82 q_asum=190.962 v_asum=19.7588
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8173a3c0 y_n=829440 y_asum=131.293 x_asum=43.3553 T_asum=29430.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7afe30040 out_n=55296 fnv=4cd58f30baad3454 asum=0x1.6ce20baecc5dap+1 s_asum=4217.18 q_asum=204.319 v_asum=11.3888
+[TT-STEP-PHASE] step=3 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6597385568.0 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-6597327091.5
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab743ea140 y_n=829440 y_asum=-nan x_asum=inf T_asum=97432.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff803bc0040 out_n=55296 fnv=41c439648f4dfefb asum=0x1.98b2b18b580bdp+6 s_asum=9605.52 q_asum=1176.42 v_asum=2124.88
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7460c740 y_n=829440 y_asum=1579.95 x_asum=53812.3 T_asum=9511.58
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff8020b0040 out_n=55296 fnv=5bfb9b216c25bf4e asum=0x1.73c14dec95548p+0 s_asum=172.438 q_asum=1260.42 v_asum=75.9162
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab747fb780 y_n=829440 y_asum=1745.59 x_asum=54591.6 T_asum=10631.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff8005a0040 out_n=55296 fnv=2f77f3a9143ab247 asum=0x1.3cfe65104423fp+0 s_asum=228.245 q_asum=1430.72 v_asum=105.281
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7520bf00 y_n=829440 y_asum=1623.58 x_asum=46512.4 T_asum=12006.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7fa4f0040 out_n=55296 fnv=b5aaf22cea83a6b5 asum=0x1.14fe776754a35p+0 s_asum=198.42 q_asum=1387.69 v_asum=101.086
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab753faf40 y_n=829440 y_asum=1658.44 x_asum=51303.8 T_asum=14310.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f89e0040 out_n=55296 fnv=d71bef18c592150f asum=0x1.546dbe454a829p+0 s_asum=232.461 q_asum=1254.71 v_asum=107.666
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab755e9f80 y_n=829440 y_asum=1891.79 x_asum=52023 T_asum=15587.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f6ed0040 out_n=55296 fnv=7ffceb26825d83a1 asum=0x1.b0cf79c149788p+0 s_asum=312.014 q_asum=1292.61 v_asum=132.816
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab75fd9000 y_n=829440 y_asum=1952.26 x_asum=53261.6 T_asum=18458.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f53c0040 out_n=55296 fnv=1b8ca85c4b0515d1 asum=0x1.d3ca3776fc587p+0 s_asum=362.059 q_asum=1263.59 v_asum=148.587
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab761c8040 y_n=829440 y_asum=1759.4 x_asum=51201 T_asum=17872.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f38b0040 out_n=55296 fnv=d622ed5e44da6aaa asum=0x1.6cb43275faf2cp+0 s_asum=337.132 q_asum=1275.73 v_asum=142.678
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab763b7080 y_n=829440 y_asum=0.188991 x_asum=43.3553 T_asum=6242.75
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f1da0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=404.545 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76da6100 y_n=829440 y_asum=0.506284 x_asum=43.3553 T_asum=6816.99
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f0290040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=457.399 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76f95600 y_n=829440 y_asum=0.401765 x_asum=43.3553 T_asum=6510.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ee780040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=432.71 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77184f40 y_n=829440 y_asum=0.378303 x_asum=43.3553 T_asum=6537.94
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ecc70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=509.397 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77b74d00 y_n=829440 y_asum=0.61711 x_asum=43.3553 T_asum=7291.82
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7eb160040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=407.566 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77d64640 y_n=829440 y_asum=0.339339 x_asum=43.3553 T_asum=7401.53
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e9650040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=533.558 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77f53f80 y_n=829440 y_asum=0.424439 x_asum=43.3553 T_asum=7600.61
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e7b40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=739.273 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78943d40 y_n=829440 y_asum=0.614371 x_asum=43.3553 T_asum=11993.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e6030040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1365.1 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78b33680 y_n=829440 y_asum=0.817049 x_asum=43.3553 T_asum=11386.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e4520040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1092.36 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78d22fc0 y_n=829440 y_asum=0.887053 x_asum=43.3553 T_asum=9421.46
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e2a10040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=554.16 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79712d80 y_n=829440 y_asum=0.410769 x_asum=43.3553 T_asum=10523.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e0f00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=717.092 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab799026c0 y_n=829440 y_asum=0.173764 x_asum=43.3553 T_asum=11349
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7df3f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1105.97 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79af2000 y_n=829440 y_asum=0.20048 x_asum=43.3553 T_asum=11096.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7dd8e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1000.24 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a4e1dc0 y_n=829440 y_asum=0.406564 x_asum=43.3553 T_asum=10971.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7dbdd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1017.99 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a6d1780 y_n=829440 y_asum=0.29682 x_asum=43.3553 T_asum=10562.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7da2c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=682.586 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a8c1100 y_n=829440 y_asum=0.611137 x_asum=43.3553 T_asum=10653.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d87b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1164.36 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b2b0f40 y_n=829440 y_asum=0.554951 x_asum=43.3553 T_asum=10434.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d6ca0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1245.28 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b4a0900 y_n=829440 y_asum=0.178653 x_asum=43.3553 T_asum=10482.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d5190040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=724.162 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b6902c0 y_n=829440 y_asum=0.479574 x_asum=43.3553 T_asum=10824.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d3680040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1228.99 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c0800c0 y_n=829440 y_asum=0.548086 x_asum=43.3553 T_asum=14378.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d1b70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2004.95 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c26fa80 y_n=829440 y_asum=0.874625 x_asum=43.3553 T_asum=13169.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d0060040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1442.92 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c45f400 y_n=829440 y_asum=0.703262 x_asum=43.3553 T_asum=10925.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ce550040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=772.197 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ce4f240 y_n=829440 y_asum=0.381439 x_asum=43.3553 T_asum=11967.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7cca40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1338.15 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d03ec00 y_n=829440 y_asum=0.177473 x_asum=42.2949 T_asum=11713.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7caf30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1155.4 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d22e5c0 y_n=829440 y_asum=0.187258 x_asum=42.2949 T_asum=11543.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c9420040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1010.97 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dc1e9c0 y_n=829440 y_asum=0.245632 x_asum=42.2949 T_asum=11301.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c7910040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=746.564 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7de0e3c0 y_n=829440 y_asum=0.375495 x_asum=42.2949 T_asum=10596.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c5e00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=849.243 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dffdd40 y_n=829440 y_asum=0.391215 x_asum=42.2949 T_asum=11022.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c42f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=940.336 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7e9edb80 y_n=829440 y_asum=0.580233 x_asum=42.2949 T_asum=11634.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c27e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=749.776 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ebdd540 y_n=829440 y_asum=0.306733 x_asum=42.2949 T_asum=11547.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c0cd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=983.464 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7edccf00 y_n=829440 y_asum=0.443267 x_asum=42.2949 T_asum=11911.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7bf1c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1259.35 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f7bcd00 y_n=829440 y_asum=0.995976 x_asum=42.2949 T_asum=19334.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7bd6b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3705.7 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f9ac700 y_n=829440 y_asum=1.09948 x_asum=42.2949 T_asum=16876.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7bbba0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2426.91 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7fb9c080 y_n=829440 y_asum=0.908931 x_asum=42.2949 T_asum=14805.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ba090040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1888.1 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8058bec0 y_n=829440 y_asum=1.87729 x_asum=42.2949 T_asum=18422.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b8580040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3712.46 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8077b880 y_n=829440 y_asum=2.25493 x_asum=42.2949 T_asum=19726.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b6a70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3464.23 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8096b240 y_n=829440 y_asum=1.57267 x_asum=42.2949 T_asum=17723.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b4f60040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2940.37 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8135b040 y_n=829440 y_asum=1.77521 x_asum=42.2949 T_asum=22311.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b3450040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3982.51 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8154aa40 y_n=829440 y_asum=1.19524 x_asum=42.2949 T_asum=15091.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b1940040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1913.41 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8173a3c0 y_n=829440 y_asum=1.35684 x_asum=42.2949 T_asum=20470.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7afe30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3564.19 q_asum=0 v_asum=0
+[TT-STEP-PHASE] step=4 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6597444022.3 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-6597385568.0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab743ea140 y_n=829440 y_asum=-nan x_asum=inf T_asum=96298.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff803bc0040 out_n=55296 fnv=4c2c0ce5938b76e6 asum=0x1.93afe2927c926p+6 s_asum=9533.67 q_asum=1176.42 v_asum=2124.88
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7460c740 y_n=829440 y_asum=1587.66 x_asum=53941.9 T_asum=10339.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff8020b0040 out_n=55296 fnv=05996c7a8a8eed11 asum=0x1.6f6c118330618p+0 s_asum=172.1 q_asum=1261.73 v_asum=80.0033
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab747fb780 y_n=829440 y_asum=1737.02 x_asum=54315.3 T_asum=11888.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff8005a0040 out_n=55296 fnv=5316eb69799855f0 asum=0x1.3bc05dfd6db91p+0 s_asum=214.621 q_asum=1430.55 v_asum=104.013
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7520bf00 y_n=829440 y_asum=1605.1 x_asum=45957.2 T_asum=12670.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7fa4f0040 out_n=55296 fnv=8190728faa13f493 asum=0x1.09c16048a76f3p+0 s_asum=193.782 q_asum=1389.76 v_asum=90.4082
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab753faf40 y_n=829440 y_asum=1634.3 x_asum=50655.5 T_asum=14924.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f89e0040 out_n=55296 fnv=a0c85aa2bd6806ac asum=0x1.469057d99b4dap+0 s_asum=228.05 q_asum=1253.03 v_asum=97.4111
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab755e9f80 y_n=829440 y_asum=1870.17 x_asum=51391.9 T_asum=17092.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f6ed0040 out_n=55296 fnv=d9e116ec8bd28e6f asum=0x1.addca068ec066p+0 s_asum=294.301 q_asum=1288.41 v_asum=125.744
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab75fd9000 y_n=829440 y_asum=1928.41 x_asum=52522.7 T_asum=20175
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f53c0040 out_n=55296 fnv=573840811bc4e873 asum=0x1.bdfe06b9738a8p+0 s_asum=363.178 q_asum=1261.28 v_asum=135.701
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab761c8040 y_n=829440 y_asum=1723.63 x_asum=50275.3 T_asum=18846.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f38b0040 out_n=55296 fnv=40c1106da90c7ae7 asum=0x1.604202d33ceecp+0 s_asum=316.083 q_asum=1260.99 v_asum=128.046
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab763b7080 y_n=829440 y_asum=0.18244 x_asum=42.3755 T_asum=6242.75
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f1da0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=357.565 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76da6100 y_n=829440 y_asum=0.499408 x_asum=42.2949 T_asum=6816.99
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7f0290040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=413.511 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab76f95600 y_n=829440 y_asum=0.394845 x_asum=42.2949 T_asum=6510.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ee780040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=353.314 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77184f40 y_n=829440 y_asum=0.372947 x_asum=42.2949 T_asum=6537.94
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ecc70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=424.705 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77b74d00 y_n=829440 y_asum=0.609221 x_asum=42.2949 T_asum=7291.82
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7eb160040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=356.938 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77d64640 y_n=829440 y_asum=0.32911 x_asum=42.2949 T_asum=7401.53
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e9650040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=453.877 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab77f53f80 y_n=829440 y_asum=0.417211 x_asum=42.2949 T_asum=7600.61
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e7b40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=663.247 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78943d40 y_n=829440 y_asum=0.596054 x_asum=42.2949 T_asum=11993.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e6030040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1247.52 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78b33680 y_n=829440 y_asum=0.794492 x_asum=42.2949 T_asum=11386.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e4520040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1041.41 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab78d22fc0 y_n=829440 y_asum=0.864033 x_asum=42.2949 T_asum=9421.46
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e2a10040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=422.209 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79712d80 y_n=829440 y_asum=0.399964 x_asum=42.2949 T_asum=10523.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7e0f00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=592.256 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab799026c0 y_n=829440 y_asum=0.163834 x_asum=42.2949 T_asum=11349
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7df3f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=980.627 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab79af2000 y_n=829440 y_asum=0.193105 x_asum=42.2949 T_asum=11096.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7dd8e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=882.018 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a4e1dc0 y_n=829440 y_asum=0.400263 x_asum=42.2949 T_asum=10971.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7dbdd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=933.29 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a6d1780 y_n=829440 y_asum=0.291317 x_asum=42.2949 T_asum=10562.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7da2c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=533.599 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7a8c1100 y_n=829440 y_asum=0.60664 x_asum=42.2949 T_asum=10653.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d87b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=996.418 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b2b0f40 y_n=829440 y_asum=0.547961 x_asum=42.2949 T_asum=10434.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d6ca0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1136.68 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b4a0900 y_n=829440 y_asum=0.168901 x_asum=42.2949 T_asum=10482.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d5190040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=597.43 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7b6902c0 y_n=829440 y_asum=0.472905 x_asum=42.2949 T_asum=10824.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d3680040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1105.03 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c0800c0 y_n=829440 y_asum=0.529236 x_asum=42.2949 T_asum=14378.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d1b70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1855.7 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c26fa80 y_n=829440 y_asum=0.85129 x_asum=42.2949 T_asum=13169.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7d0060040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1377.83 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7c45f400 y_n=829440 y_asum=0.67916 x_asum=42.2949 T_asum=10925.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ce550040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=629.309 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ce4f240 y_n=829440 y_asum=0.370486 x_asum=42.2949 T_asum=11967.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7cca40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1220.81 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d03ec00 y_n=829440 y_asum=0.171459 x_asum=41.5488 T_asum=11713.1
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7caf30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1015.08 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7d22e5c0 y_n=829440 y_asum=0.181792 x_asum=41.5488 T_asum=11543.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c9420040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=875.228 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dc1e9c0 y_n=829440 y_asum=0.240518 x_asum=41.5488 T_asum=11301.9
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c7910040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=663.308 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7de0e3c0 y_n=829440 y_asum=0.370889 x_asum=41.5488 T_asum=10596.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c5e00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=695.565 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7dffdd40 y_n=829440 y_asum=0.387412 x_asum=41.5488 T_asum=11022.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c42f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=799.936 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7e9edb80 y_n=829440 y_asum=0.574665 x_asum=41.5488 T_asum=11634.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c27e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=700.713 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7ebdd540 y_n=829440 y_asum=0.297886 x_asum=41.5488 T_asum=11547.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7c0cd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=841.625 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7edccf00 y_n=829440 y_asum=0.436286 x_asum=41.5488 T_asum=11911.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7bf1c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1134.91 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f7bcd00 y_n=829440 y_asum=0.971673 x_asum=41.5488 T_asum=19334.7
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7bd6b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3479.31 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7f9ac700 y_n=829440 y_asum=1.07406 x_asum=41.5488 T_asum=16876.4
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7bbba0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2008.16 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab7fb9c080 y_n=829440 y_asum=0.883974 x_asum=41.5488 T_asum=14805.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7ba090040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1607.4 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8058bec0 y_n=829440 y_asum=1.83746 x_asum=41.5488 T_asum=18422.3
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b8580040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3067.72 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8077b880 y_n=829440 y_asum=2.21736 x_asum=41.5488 T_asum=19726.6
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b6a70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3092.1 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8096b240 y_n=829440 y_asum=1.53583 x_asum=41.5488 T_asum=17723.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b4f60040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2656.41 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8135b040 y_n=829440 y_asum=1.74376 x_asum=41.5488 T_asum=22311.2
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b3450040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3200.36 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8154aa40 y_n=829440 y_asum=1.17155 x_asum=41.5488 T_asum=15091.8
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7b1940040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1643.02 q_asum=0 v_asum=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab8173a3c0 y_n=829440 y_asum=1.33335 x_asum=41.5488 T_asum=20470.5
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7afe30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3180.55 q_asum=0 v_asum=0

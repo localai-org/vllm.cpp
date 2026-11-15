@@ -1,0 +1,139 @@
+2026-11-15 15:49:26.806 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-15 15:49:26.806 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-15 15:49:26.806 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-15 15:49:26.806 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-15 15:49:51.577 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-15 15:49:51.577 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-15 15:49:51.606 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-15 15:49:51.607 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-15 15:49:51.607 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-15 15:49:51.607 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-15 15:49:51.607 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-15 15:49:51.693 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-15 15:49:51.825 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-15 15:49:51.825 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-15 15:49:51.825 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-15 15:49:51.825 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-15 15:49:51.825 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-15 15:49:52.656 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:4047:
+TEST CASE:  kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (widened window, accepted-prefix offset, NULL + mixed seqlens + bf16 state)
+
+./tests/vt/test_tenstorrent_backend.cpp:4174: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=0: out max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4180: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=0: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4174: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=1: out max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4180: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=0 bias=1: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4174: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=0: out max_abs=1.49012e-08 max_rel=1.74432e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4180: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=0: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4174: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=1: out max_abs=2.23517e-08 max_rel=2.66217e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4180: MESSAGE: kCausalConv1dSpecUpdate captured-shape silu=1 bias=1: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4213: MESSAGE: kCausalConv1dSpecUpdate continuation step=0 nat=1: out max_abs=2.98023e-08 max_rel=2.07245e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4218: MESSAGE: kCausalConv1dSpecUpdate continuation step=0 nat=1: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4213: MESSAGE: kCausalConv1dSpecUpdate continuation step=1 nat=2: out max_abs=1.49012e-08 max_rel=2.08538e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4218: MESSAGE: kCausalConv1dSpecUpdate continuation step=1 nat=2: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4213: MESSAGE: kCausalConv1dSpecUpdate continuation step=2 nat=3: out max_abs=2.98023e-08 max_rel=1.90062e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4218: MESSAGE: kCausalConv1dSpecUpdate continuation step=2 nat=3: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4251: MESSAGE: kCausalConv1dSpecUpdate mixed-seqlen: out max_abs=2.98023e-08 max_rel=1.82683e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4256: MESSAGE: kCausalConv1dSpecUpdate mixed-seqlen: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4289: MESSAGE: kCausalConv1dSpecUpdate NULL-slot: out byte mismatches=0/576
+
+./tests/vt/test_tenstorrent_backend.cpp:4293: MESSAGE: kCausalConv1dSpecUpdate NULL-slot: conv_state max_abs=0 max_rel=0
+
+./tests/vt/test_tenstorrent_backend.cpp:4333: MESSAGE: kCausalConv1dSpecUpdate bf16-state: out max_abs=1.49012e-08 max_rel=1.48972e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:4338: MESSAGE: kCausalConv1dSpecUpdate bf16-state: conv_state max_abs=0 max_rel=0
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:4345:
+TEST CASE:  kTENSTORRENT kGdnDecode matches the CPU f32 oracle (rank-1 step, both state_idx forms, NULL slot)
+
+./tests/vt/test_tenstorrent_backend.cpp:4456: MESSAGE: kGdnDecode B=1 Hk=2 Hv=8: out max_abs=2.79397e-09 max_rel=1.07319e-06 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4456: MESSAGE: kGdnDecode B=1 Hk=2 Hv=2: out max_abs=2.79397e-09 max_rel=7.48661e-07 state max_abs=7.45058e-09 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4456: MESSAGE: kGdnDecode B=3 Hk=2 Hv=8: out max_abs=2.79397e-09 max_rel=1.70824e-06 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4456: MESSAGE: kGdnDecode B=3 Hk=2 Hv=2: out max_abs=2.09548e-09 max_rel=7.73201e-07 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4545: MESSAGE: kGdnDecode wide-range state: state rel_rms=3.21276e-08 out rel_rms=2.15802e-07 max_rel(|ref|<0.1)=0.0366045 state tol=0.002 abs_floor=1e-05 state max_abs=1.52588e-05 max_rel=0.000905375
+
+./tests/vt/test_tenstorrent_backend.cpp:4573: MESSAGE: kGdnDecode indexed: out max_abs=4.55789e-06 cache max_abs=3.67537e-05 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4588: MESSAGE: kGdnDecode indexed NULL: out max_abs=4.16115e-06 cache max_abs=3.81283e-05
+
+./tests/vt/test_tenstorrent_backend.cpp:4624: MESSAGE: kGdnDecode wide-state (row 262144) + NULL: out max_abs=3.51202e-06 cache max_abs=3.65041e-05 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4696: MESSAGE: kGdnDecode traffic: steps=3 h2d=1048576 d2h=0 (state bytes=1048576)
+
+./tests/vt/test_tenstorrent_backend.cpp:4799: MESSAGE: kGdnDecode bf16-state step=0: out max_abs=0 (0 = storage semantics honored)
+
+./tests/vt/test_tenstorrent_backend.cpp:4799: MESSAGE: kGdnDecode bf16-state step=1: out max_abs=0 (0 = storage semantics honored)
+
+./tests/vt/test_tenstorrent_backend.cpp:4799: MESSAGE: kGdnDecode bf16-state step=2: out max_abs=0 (0 = storage semantics honored)
+
+./tests/vt/test_tenstorrent_backend.cpp:4810: MESSAGE: kGdnDecode bf16-state: cache bit mismatches=0/98304
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:4824:
+TEST CASE:  kTENSTORRENT kGdnSpecDecode matches the CPU f32 oracle (accepted-prefix init slot, per-timestep snapshots, NULL + mixed seqlens + bf16 state)
+
+./tests/vt/test_tenstorrent_backend.cpp:4974: MESSAGE: kGdnSpecDecode captured-shape Hk=16 Hv=32: out max_abs=6.51926e-09 state max_abs=2.98023e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:4974: MESSAGE: kGdnSpecDecode captured-shape Hk=16 Hv=48: out max_abs=5.58794e-09 state max_abs=2.98023e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:5014: MESSAGE: kGdnSpecDecode continuation step=0 nat=1: out max_abs=6.51926e-09 state max_abs=1.49012e-08
+
+./tests/vt/test_tenstorrent_backend.cpp:5014: MESSAGE: kGdnSpecDecode continuation step=1 nat=2: out max_abs=9.31323e-09 state max_abs=2.98023e-08
+
+./tests/vt/test_tenstorrent_backend.cpp:5014: MESSAGE: kGdnSpecDecode continuation step=2 nat=3: out max_abs=6.51926e-09 state max_abs=3.72529e-08
+
+./tests/vt/test_tenstorrent_backend.cpp:5051: MESSAGE: kGdnSpecDecode mixed-seqlen: out max_abs=7.45058e-09 state max_abs=2.23517e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:5089: MESSAGE: kGdnSpecDecode NULL-init: out max_abs=4.65661e-09 state max_abs=1.49012e-08 tol=0.02
+
+./tests/vt/test_tenstorrent_backend.cpp:5138: MESSAGE: kGdnSpecDecode bf16-state step=0 nat=1: out max_abs=9.31323e-09 state max_abs=1.19209e-07
+
+./tests/vt/test_tenstorrent_backend.cpp:5138: MESSAGE: kGdnSpecDecode bf16-state step=1 nat=2: out max_abs=6.51926e-09 state max_abs=6.10352e-05
+
+./tests/vt/test_tenstorrent_backend.cpp:5248: MESSAGE: kGdnSpecDecode rollback identity: out bit mismatches=0/9216 state bit mismatches=0/1179648
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:5263:
+TEST CASE:  kTENSTORRENT kGreedyRejectionSample is BIT-EXACT vs the CPU oracle (accept, reject, bonus)
+
+./tests/vt/test_tenstorrent_backend.cpp:5344: MESSAGE: kGreedyRejectionSample full-accept: bit-exact=true num_sampled=9
+
+./tests/vt/test_tenstorrent_backend.cpp:5364: MESSAGE: kGreedyRejectionSample reject-at-2: bit-exact=true num_sampled=3 sampled[2]=14
+
+./tests/vt/test_tenstorrent_backend.cpp:5387: MESSAGE: kGreedyRejectionSample two-requests: bit-exact=true num_sampled=3/4
+
+===============================================================================
+[doctest] test cases:    4 |    4 passed | 0 failed | 116 skipped
+[doctest] assertions: 5252 | 5252 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-15 15:49:54.602 | info     |    BuildKernels | JIT cache stats: 454/454 hits (100.0%) [454 cached, 863 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-15 15:49:54.602 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-15 15:49:54.689 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-15 15:49:54.689 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-15 15:49:54.694 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-15 15:49:54.694 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-15 15:49:54.694 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
