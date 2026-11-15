@@ -1,6 +1,6 @@
-date: 2026-11-15T10:25:42+01:00
-head: 745f5edde9dd0cdc27ed6e94b7cd3c183de98aee
+date: 2026-11-15T10:47:00+01:00
+head: aded1d441ba9885e79cbae7fe83ee654b1b5e071
 governor: performance
-load1: 1.60
+load1: 1.11
 bench: /tmp/build-stagec-w3/examples/vllm-bench
 model sha256: 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169

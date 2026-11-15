@@ -25,7 +25,8 @@ namespace {
 // keep their exact signatures and semantics, so every one of the ~70 op wrappers
 // below is UNCHANGED: the seam is inserted at `GetOp` and picked up by all of
 // them at once with zero call-site edits.
-bool IsFloat(DType d) { return d == DType::kF32 || d == DType::kF16 || d == DType::kBF16; }
+// `IsFloat` lives in dtype.h/dtype.cpp now; the anonymous-namespace duplicate
+// that used to sit here collided with it (ops.cpp:153 resolved ambiguously).
 bool IsOutFloat(DType d) { return d == DType::kF32 || d == DType::kBF16; }
 // Retained model values are scoped to ordinary weights, never activations.
 void ValidateWeightValues(const Tensor& weight, const Tensor& other,
