@@ -2116,8 +2116,23 @@ bool BindDflashDraftSharedEmbed(DflashDraft& draft, const LoadedModel& target) {
   // are different bytes at different widths, and aliasing them would make the
   // draft gather f16 rows through a bf16 view -- silently wrong tokens, which no
   // memory gate would ever see.
-  bool same = own.dtype == shared->dtype && own.rank == shared->rank;
-  for (int i = 0; same && i < own.rank; ++i) same = own.shape[i] == shared->shape[i];
+  //
+  // QWEN38-DFLASH2-STAGE-C W3: a BLOCK-QUANT target table now shares too.
+  // TT-EMBED-DUAL-RESIDENCY made the target's own table the PACKED owner (no
+  // bf16 twin), which made dtype equality decline the share on every k-quant
+  // GGUF target and re-open a 2.44 GB bf16 draft table beside the packed one.
+  // The draft's four embed lookups run `vt::Embedding`, whose TT kernel decodes
+  // a block-quant table's gathered rows on the fly into the bf16 twin's EXACT
+  // bits (RefreshQuantEmbedRows) -- the same bytes the draft's own dequantized
+  // table held -- so the aliasing hazard the f16 case names does not exist
+  // here: the values are identical, only the storage is packed. A scalar
+  // mismatch (f16 vs bf16) still refuses.
+  bool shape_same = own.rank == shared->rank;
+  for (int i = 0; shape_same && i < own.rank; ++i)
+    shape_same = own.shape[i] == shared->shape[i];
+  bool same = shape_same && (own.dtype == shared->dtype ||
+                             (vt::IsBlockQuant(shared->dtype) &&
+                              vt::IsFloat(own.dtype)));
   if (!same) {
     const auto describe = [](const OwnedTensor& w) {
       std::string s(vt::Name(w.dtype));

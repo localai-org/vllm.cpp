@@ -58,3 +58,54 @@ W2 resolution (2026-11-14, the drafter forward on TT):
   proof (sign-flipped fc row -> PCC 0.9648 < 0.98) still detects a wrong
   drafter. Evidence: docs/bench-evidence/qwen38-dflash2-stage-c-w2-20261114/
   (FLAT: README.md, gate-final.log). W3 (the loop) is next.
+
+W3 finish (2026-11-15, the drafter-ON OOM root cause + the gate disposition):
+
+- ROOT CAUSE (the Q4_K_M KV-64 drafter-ON crash): CAPACITY, not staging and
+  not missing weights. The drafter loads from its pinned safetensors artifact
+  (`/mnt/models/qwen38-dflash2-drafter`, log line "DFlash draft loaded from
+  safetensors ... shared head from the GGUF target file"); the "SKIPPING the
+  MTP drafter head" line is the TARGET's blk.64 nextn tensors (loud, and the
+  pinned llama.cpp oracle ignores the same tensors). The exact error is a TT
+  DRAM OOM — 178257920 B (the draft's ffn_down [5120,17408] bf16) inside
+  EnsureMatmulWeightDevice under the draft trunk's first forward, board at
+  99.5% per bank. Measured ledger (VT_TT_STEP_PHASES): the Q4_K_M target at
+  KV 64 leaves 5366 MiB free, stable from step 3; the drafter's bf16 trunk
+  stages ~3.3 GiB at the first propose plus ~2 GiB of zeros primes and
+  scratch retention; the fifth layer's ffn_down lands 6.9 MiB short.
+- THE TWO PRIOR LEGS EACH HAD ONLY ONE SHARE ACTIVE: pre-embed base — embed
+  shared via the bf16 twin, head bind silently skipped (shared_lm_head null);
+  post-embed base — head shared, embed share DECLINED by the dtype-equality
+  guard (the draft's bf16 table vs the target's packed q4_K). Both died the
+  same way at the same allocation.
+- FIX: (1) the W3 share-gate block-quant arm completed and audited
+  (BindDflashDraftSharedEmbed accepts a block-quant target table beside a
+  float draft table — the TT kEmbedding kernel decodes the packed rows on the
+  fly; IsFloat moved to dtype.h/dtype.cpp, the ops.cpp duplicate removed,
+  exactly one `if (!same)` guard); both banners fire together (embed
+  2542796800 B + head 1042944000 B). (2) VT_TT_WEIGHT_RESIDENCY=bfp8 on every
+  drafter-ON leg — the draft's trunk stages as BFP8_B (~1.55 GiB) and the
+  wall CLOSES; scope verified: the target's packed keep-quant weights refuse
+  bfp8 by name and fall back, the GDN layers never route through
+  EnsureMatmulWeightDevice, so the target's numerics are bit-identical and
+  the lossless verify keeps the emitted tokens the target's greedy stream.
+  (3) VT_DFLASH_DRAFT=1 restored on the drafter-ON legs (the untracked gate
+  script had dropped it; the probes were silently running the SELECTOR arm
+  and died at the selector's f32 sample-row gather — kIndexSelect refuses f32
+  rows — instead of the direct arm).
+- VERIFIED PAST THE WALL: direct arm + bfp8 + both shares — the draft's full
+  trunk stages, the first propose completes, the verify runs, and the loop
+  dies at the NEXT named blocker: `no kernel for op GdnSpecDecode (id 12) on
+  device tenstorrent` — the port gap this issue already owed (the conv spec
+  op landed; the GDN spec op follows GdnDecodeStepComposed: initial state
+  from column num_accepted-1, T sequential composed steps, per-timestep slot
+  snapshots).
+- GATES: (b) Q4_K_M drafter-OFF, knob defaults — token-ids sha256
+  d49c53d23ac5bc4180096b30ebe3fb6990ba6f6eff7d6098760685f9035019ff
+  BYTE-IDENTICAL to the recorded stream 3/3 legs, TPOT 6626.97 / 6627.91 /
+  6626.89 ms vs the recorded 6607 (0.30%, the same band the G4 reproduction
+  recorded). (a)/(c) BLOCKED at the
+  verify by the kGdnSpecDecode port gap — the memory wall is closed and the
+  draft proposes; the verify's GDN spec segment has no TT kernel. Evidence:
+  docs/bench-evidence/qwen38-dflash2-stage-c-w3-20261115/ (w3f-off-*,
+  w3f-diag-on-direct.*, w3f-on-probe.*, README.md).

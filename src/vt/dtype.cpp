@@ -216,6 +216,10 @@ const BlockGeometry& RequireBlockGeometry(DType dtype) {
 
 bool IsBlockQuant(DType dtype) { return FindBlockGeometry(dtype) != nullptr; }
 
+bool IsFloat(DType dtype) {
+  return dtype == DType::kF32 || dtype == DType::kBF16 || dtype == DType::kF16;
+}
+
 int64_t BlockElems(DType dtype) { return RequireBlockGeometry(dtype).block_elems; }
 
 int64_t BlockBytes(DType dtype) { return RequireBlockGeometry(dtype).block_bytes; }

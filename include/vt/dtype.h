@@ -221,6 +221,12 @@ inline size_t SizeOf(DType dtype) {
 // True for the ggml block-quantized encodings above.
 bool IsBlockQuant(DType dtype);
 
+// True for the elementwise float dtypes (f32, bf16, f16) — the complement of
+// the block-quant set for a weight table. Mirrors the kEmbedding kernel's own
+// table acceptance (float or block-quant) so call sites gate a share with the
+// same predicate the kernel validates against.
+bool IsFloat(DType dtype);
+
 // Block geometry for a block-quantized dtype (throws for elementwise dtypes).
 // `BlockElems` = ggml's blck_size, `BlockBytes` = ggml's type_size.
 int64_t BlockElems(DType dtype);

@@ -1,0 +1,1611 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf engine | num_prompts=1 input_len=32 output_len=24 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+vllm.cpp: the draft checkpoint at "/mnt/models/qwen38-dflash2-drafter" declares architecture "DFlash2DraftModel". Its grouped dynamic depthwise convolution, its CANDIDATE SELECTOR and its PATH WALK are all implemented and will run, so this draft DRAFTS -- from safetensors and from GGUF alike (row SPEC-DFLASH2 waves W1-W5, .agents/specs/dflash2-spec-decode.md, issue #1314). Two things are still owed and neither is silent: a GGUF drafter is DEQUANTIZED wholesale to bf16 at load, so a k-quant draft costs its bf16 residency rather than its file size, and no throughput number has been taken for this architecture -- a DFlash2 draft runs its block forward off the paged CUDA-graph fast path, because the candidate selector needs the hidden states of the same forward its logits came from. This port mirrors vllm-project/vllm#52816, which MERGED upstream on 2026-08-21 at head 3406ec1dae9916f920b90f0dbf90dcf54923d042, merge commit b389ac29465b33f9e9c534df221ea3c129e9793f. It does not advance the parity pin, and the port is not yet reconciled onto that merged head (issue #1561).
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 289527808 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+vllm.cpp: DFlash2 draft: grouped conv taps=2 group=16 block=9
+vllm.cpp: DFlash draft loaded from safetensors /mnt/models/qwen38-dflash2-drafter (k=8, taps=5, mask=248070, vocab=248320, shared head from the GGUF target file)
+vllm.cpp: the draft checkpoint at "/mnt/models/qwen38-dflash2-drafter" declares architecture "DFlash2DraftModel". Its grouped dynamic depthwise convolution, its CANDIDATE SELECTOR and its PATH WALK are all implemented and will run, so this draft DRAFTS -- from safetensors and from GGUF alike (row SPEC-DFLASH2 waves W1-W5, .agents/specs/dflash2-spec-decode.md, issue #1314). Two things are still owed and neither is silent: a GGUF drafter is DEQUANTIZED wholesale to bf16 at load, so a k-quant draft costs its bf16 residency rather than its file size, and no throughput number has been taken for this architecture -- a DFlash2 draft runs its block forward off the paged CUDA-graph fast path, because the candidate selector needs the hidden states of the same forward its logits came from. This port mirrors vllm-project/vllm#52816, which MERGED upstream on 2026-08-21 at head 3406ec1dae9916f920b90f0dbf90dcf54923d042, merge commit b389ac29465b33f9e9c534df221ea3c129e9793f. It does not advance the parity pin, and the port is not yet reconciled onto that merged head (issue #1561).
+vllm.cpp: DFlash draft embed SHARED with the target (one device copy, 2542796800 B saved)
+vllm.cpp: DFlash draft head SHARED with the target (one device copy, 1042944000 B saved)
+INFO auto-fit max_model_len: reduced from 262144 to 576 to fit the KV cache (64 blocks, one of them the null block, shared by 3 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: DFlash draft weights staged to device at load (5 layers)
+vllm.cpp: VT_DFLASH_DRAFT=1 — the DFlash2 draft proposes through the DIRECT-ARGMAX arm (bundle dflash2.py has_selector=false): full-vocab argmax per block row, candidate selector NOT resident (~254 MB freed). The verify stays lossless (greedy accept = the target's argmax); only acceptance can differ from the selector arm.
+vllm.cpp: draft speculative context is limited to 592 tokens (37 pages x 16, 11.5625 MiB per concurrent request across 5 draft layers, so 11.5625 MiB of device memory at max_num_seqs 1 — NOT counted by gpu_memory_utilization). max_model_len is 576 and the (1+k) draft block needs 9 more, so the whole advertised context is speculated.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+[TT-EXACT-SERVE] ptr=0xfff46828c140 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff468300840 [32,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff468300840 [32,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff468300840 [32,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff4687562c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff4687562c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff4687562c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff4687ce380 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff4687ce380 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff4687ce380 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff46885a400 [32,10240] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff468918480 [1536,128] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff468918480 [1536,128] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff468918480 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=0 type=gdn host_ms=2464.495 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff469a50f00 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff469a50f00 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff469a50f00 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff469ac8f40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff469ac8f40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff469ac8f40 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff4689784c0 [1536,128] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=1 type=gdn host_ms=2920.779 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff469bc54c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff469bc54c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff469bc54c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff469c3d500 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff469c3d500 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff469c3d500 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=2 type=gdn host_ms=2922.921 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=3 type=fa host_ms=3952.380 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3addf09c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3addf09c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3addf09c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3ade68a00 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3ade68a00 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3ade68a00 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=4 type=gdn host_ms=2925.385 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3adee0a40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3adee0a40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3adee0a40 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3adf58a80 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3adf58a80 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3adf58a80 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=5 type=gdn host_ms=2924.325 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=890.714 read=327680
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3adfd0ac0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3adfd0ac0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3adfd0ac0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3ae048b00 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3ae048b00 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3ae048b00 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=6 type=gdn host_ms=2072.967 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=7 type=fa host_ms=3902.167 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3af999c40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3af999c40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3af999c40 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3afa11c80 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3afa11c80 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3afa11c80 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=8 type=gdn host_ms=2937.580 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3afaccb40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3afaccb40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3afaccb40 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3afb44b80 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3afb44b80 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3afb44b80 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=9 type=gdn host_ms=3027.911 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3afbd9240 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3afbd9240 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3afbd9240 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff3afc51280 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff3afc51280 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff3afc51280 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=10 type=gdn host_ms=3024.238 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=11 type=fa host_ms=3920.945 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2b9470100 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2b9470100 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2b9470100 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2b94e8140 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2b94e8140 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2b94e8140 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=12 type=gdn host_ms=3025.237 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2b9560180 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2b9560180 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2b9560180 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2b95d81c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2b95d81c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2b95d81c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=13 type=gdn host_ms=3018.990 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2b9676c40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2b9676c40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2b9676c40 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2b96eec80 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2b96eec80 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2b96eec80 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=14 type=gdn host_ms=2935.799 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=15 type=fa host_ms=4012.931 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2650e0080 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2650e0080 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2650e0080 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2651580c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2651580c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2651580c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=16 type=gdn host_ms=3022.426 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2651d0100 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2651d0100 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2651d0100 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff265248140 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff265248140 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff265248140 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=17 type=gdn host_ms=2936.876 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff2652d3600 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff2652d3600 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff2652d3600 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff26534b640 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff26534b640 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff26534b640 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=18 type=gdn host_ms=3026.504 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=19 type=fa host_ms=4005.017 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=890.838 read=327680
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff267d7d1c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff267d7d1c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff267d7d1c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff267df5200 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff267df5200 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff267df5200 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=20 type=gdn host_ms=2091.876 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff267e75280 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff267e75280 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff267e75280 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff267eed2c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff267eed2c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff267eed2c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=21 type=gdn host_ms=3026.789 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1fc000040 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1fc000040 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1fc000040 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1fc078080 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1fc078080 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1fc078080 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=22 type=gdn host_ms=3019.600 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=23 type=fa host_ms=3920.719 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1ff9f0200 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1ff9f0200 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1ff9f0200 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1ffa68240 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1ffa68240 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1ffa68240 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=24 type=gdn host_ms=3032.179 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1ffae0280 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1ffae0280 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1ffae0280 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1ffb582c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1ffb582c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1ffb582c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=25 type=gdn host_ms=3026.192 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1ffbfb500 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1ffbfb500 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1ffbfb500 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1ffc73540 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1ffc73540 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1ffc73540 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=26 type=gdn host_ms=2935.740 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=27 type=fa host_ms=4012.514 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff16947d940 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff16947d940 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff16947d940 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1694f5980 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1694f5980 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1694f5980 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=28 type=gdn host_ms=3017.516 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1695711c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1695711c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1695711c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1695e9200 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1695e9200 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1695e9200 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=29 type=gdn host_ms=2929.992 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff169698ec0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff169698ec0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff169698ec0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff169710f00 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff169710f00 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff169710f00 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=30 type=gdn host_ms=3029.144 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=31 type=fa host_ms=3996.496 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff16bd297c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff16bd297c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff16bd297c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff16bda1800 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff16bda1800 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff16bda1800 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=32 type=gdn host_ms=2951.300 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff16be1d2c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff16be1d2c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff16be1d2c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff16be95300 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff16be95300 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff16be95300 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=33 type=gdn host_ms=3040.426 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=982.443 read=327680
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff16bf46740 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff16bf46740 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff16bf46740 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff104000040 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff104000040 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff104000040 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=34 type=gdn host_ms=2101.850 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=35 type=fa host_ms=3918.295 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff107986980 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff107986980 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff107986980 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff1079fe9c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff1079fe9c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff1079fe9c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=36 type=gdn host_ms=3037.961 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff107a7a380 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff107a7a380 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff107a7a380 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff107af23c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff107af23c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff107af23c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=37 type=gdn host_ms=3040.004 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff107ba1c00 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff107ba1c00 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff107ba1c00 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff107c19c40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff107c19c40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff107c19c40 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=38 type=gdn host_ms=2949.673 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=39 type=fa host_ms=4011.768 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff071430100 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff071430100 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff071430100 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff0714a8140 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff0714a8140 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff0714a8140 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=40 type=gdn host_ms=3034.457 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff071520180 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff071520180 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff071520180 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff0715981c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff0715981c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff0715981c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=41 type=gdn host_ms=2948.423 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff07163e6c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff07163e6c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff07163e6c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff0716b6700 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff0716b6700 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff0716b6700 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=42 type=gdn host_ms=3036.174 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=43 type=fa host_ms=3993.984 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff073cced40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff073cced40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff073cced40 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff073d46d80 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff073d46d80 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff073d46d80 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=44 type=gdn host_ms=2950.733 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff073dc2780 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff073dc2780 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff073dc2780 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff073e3a7c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff073e3a7c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff073e3a7c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=45 type=gdn host_ms=3042.668 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff073eeb440 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff073eeb440 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff073eeb440 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff073f63480 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff073f63480 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff073f63480 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=46 type=gdn host_ms=3035.470 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=47 type=fa host_ms=3916.964 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=982.308 read=327680
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeff792bb40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeff792bb40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeff792bb40 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeff79a3b80 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeff79a3b80 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeff79a3b80 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=48 type=gdn host_ms=2106.086 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeff7a1f840 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeff7a1f840 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeff7a1f840 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeff7a97880 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeff7a97880 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeff7a97880 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=49 type=gdn host_ms=3037.077 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeff7b47440 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeff7b47440 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeff7b47440 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeff7bbf480 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeff7bbf480 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeff7bbf480 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=50 type=gdn host_ms=2951.443 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=51 type=fa host_ms=4009.669 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef793f00c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef793f00c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef793f00c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef79468100 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef79468100 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef79468100 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=52 type=gdn host_ms=3031.996 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef794e0140 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef794e0140 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef794e0140 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef79558180 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef79558180 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef79558180 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=53 type=gdn host_ms=2943.265 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef795e4d00 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef795e4d00 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef795e4d00 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef7965cd40 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef7965cd40 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef7965cd40 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=54 type=gdn host_ms=3038.064 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=55 type=fa host_ms=3995.873 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef25180100 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef25180100 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef25180100 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef251f8140 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef251f8140 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef251f8140 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=56 type=gdn host_ms=2948.328 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef25270180 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef25270180 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef25270180 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef252e81c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef252e81c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef252e81c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=57 type=gdn host_ms=2937.229 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef25394480 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef25394480 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef25394480 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef2540c4c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef2540c4c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef2540c4c0 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=58 type=gdn host_ms=2938.452 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=59 type=fa host_ms=3903.992 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef27e3dfc0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef27e3dfc0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef27e3dfc0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef27eb6000 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef27eb6000 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef27eb6000 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=60 type=gdn host_ms=2938.494 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffef27f31bc0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffef27f31bc0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffef27f31bc0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeecd0e0080 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeecd0e0080 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeecd0e0080 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=61 type=gdn host_ms=2937.531 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=890.503 read=327680
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeecd1580c0 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeecd1580c0 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeecd1580c0 [48,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffeecd1d0100 [48,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffeecd1d0100 [48,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffeecd1d0100 [48,5120] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff46885a400 [32,10240] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff46885a400 [32,10240] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff46885a400 [32,10240] slot installed
+[TT-STAGE-UPLOAD] ptr=0xfff4689784c0 [1536,128] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xfff4689784c0 [1536,128] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xfff4689784c0 [1536,128] slot installed
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=62 type=gdn host_ms=2098.958 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff468918480 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff46954f280 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4696a6440 [32,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468d5b000 [32,17408] bf16 shadow serve
+[TT-STEP-PHASE] layer=63 type=fa host_ms=3903.223 dev_ms=-1.000
+[TT-EXACT-SERVE] ptr=0xfff46869b000 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=889.749 read=327680
+[TT-STAGE-UPLOAD] ptr=0xfff4680042c0 [32,25600] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff4680042c0 [32,25600] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff4680042c0 [32,25600] slot installed
+[TT-EXACT-SERVE] ptr=0xfff468194300 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff3aca71740 [256,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4688fa440 [256,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [256,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2c95f800 [256,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4681e65c0 [32,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2c995f80 [256,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff3aca81780 [32,1024] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [32,1024] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2c94f7c0 [32,1024] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2c96f840 [32,1024] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2c9a5fc0 [32,1024] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4688fa440 [9,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xfff4689f8540 [9,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xfff4689f8540 [9,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xfff4689f8540 [9,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a41580 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a41580 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a41580 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,6144] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [288,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d31ebc0 [72,128] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffee2cc044c0 [9,4096] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffee2cc044c0 [9,4096] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffee2cc044c0 [9,4096] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a41580 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a4b780 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a4b780 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a4b780 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf4ae40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468577140 [9,34816] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [9,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a4b780 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d0b3600 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a5b280 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a5b280 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a5b280 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,6144] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [288,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d31ebc0 [72,128] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffee2cf4ae40 [9,4096] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffee2cf4ae40 [9,4096] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffee2cf4ae40 [9,4096] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a5b280 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a65480 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a65480 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a65480 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468577140 [9,34816] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [9,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a65480 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d0cff80 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a74f80 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a74f80 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a74f80 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,6144] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [288,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d31ebc0 [72,128] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffee2cf4ae40 [9,4096] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xffee2cf4ae40 [9,4096] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xffee2cf4ae40 [9,4096] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a74f80 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a7f180 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a7f180 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a7f180 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468577140 [9,34816] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [9,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a7f180 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d124340 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a8ec80 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a8ec80 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a8ec80 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,6144] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [288,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d31ebc0 [72,128] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffee2cf4ae40 [9,4096] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xffee2cf4ae40 [9,4096] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xffee2cf4ae40 [9,4096] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a8ec80 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84a98e80 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84a98e80 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84a98e80 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468577140 [9,34816] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [9,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84a98e80 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d13b380 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84aa8b00 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84aa8b00 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84aa8b00 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cbe8c40 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,6144] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf1c6c0 [288,128] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d31ebc0 [72,128] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffee2cf4ae40 [9,4096] bf16 bulk upload
+[TT-UP-PERSIST] ptr=0xffee2cf4ae40 [9,4096] in-place CQ write
+[TT-STAGE-INSTALL] ptr=0xffee2cf4ae40 [9,4096] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2cb95f00 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84aa8b00 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cc044c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xaaab84ab2d40 [4,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xaaab84ab2d40 [4,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xaaab84ab2d40 [4,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689d8500 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468577140 [9,34816] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff468300840 [9,17408] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2cf45200 [9,1280] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xaaab84ab2d40 [4,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2ce97fc0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d1523c0 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4689f8540 [9,5120] bf16 shadow serve
+[TT-STEP-PHASE] sync kind=host-read wait_ms=3055.490 read=9437184
+[TT-STEP-PHASE] step=1 kind=eager-mtap B=9 S=9 boundary=0 warm_calls=0 dram_free_mib=7486 dispatches=0 segments=0 wall_ms=1.9 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-1.0
+[TT-EXACT-SERVE] ptr=0xffee2d13b380 [9,5120] bf16 shadow serve
+[TT-STAGE-UPLOAD] ptr=0xffee2d124340 [9,5120] bf16 bulk upload
+[TT-UP-ALLOC] ptr=0xffee2d124340 [9,5120] from_span alloc arm
+[TT-STAGE-INSTALL] ptr=0xffee2d124340 [9,5120] slot installed
+[TT-EXACT-SERVE] ptr=0xffee2d0cff80 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d0cff80 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d0cff80 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4687562c0 [48,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xffee2d0cff80 [9,5120] bf16 shadow serve
+[TT-EXACT-SERVE] ptr=0xfff4687ce380 [48,5120] bf16 shadow serve
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin/ -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/855df4da08cf7755/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/7134242580718603743/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/7134242580718603743/trisc1/trisck.15278457539239486400_89781.o /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/7134242580718603743/trisc1/trisck.15278457539239486400_89781.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin/ -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/855df4da08cf7755/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/17967716502737202493/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/17967716502737202493/trisc1/trisck.15278457539239486400_89781.o /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/17967716502737202493/trisc1/trisck.15278457539239486400_89781.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin/ -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/855df4da08cf7755/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/16420063014010874271/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/16420063014010874271/trisc1/trisck.15278457539239486400_89781.o /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/16420063014010874271/trisc1/trisck.15278457539239486400_89781.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin/ -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/855df4da08cf7755/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/9295146891817457442/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/9295146891817457442/trisc1/trisck.15278457539239486400_89781.o /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/9295146891817457442/trisc1/trisck.15278457539239486400_89781.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin/ -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/855df4da08cf7755/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/6666357687823429324/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/6666357687823429324/trisc1/trisck.15278457539239486400_89781.o /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/6666357687823429324/trisc1/trisck.15278457539239486400_89781.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+Building trisc1, compile step:
+/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/compiler/bin/riscv-tt-elf-g++ -O3 -std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval -ftt-no-dyninit -flto=1 -flto-partition=one -ffast-math -fno-finite-math-only -fsigned-zeros -fno-associative-math -fno-exceptions -fno-rtti -fno-use-cxa-atexit -g -MMD -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=multistatement-macros -Wno-error=parentheses -Wno-error=unused-but-set-variable -Wno-unused-variable -Wno-unused-function --param=min-pagesize=0 -mcpu=tt-bh-tensix -Winvalid-pch -Wno-error=invalid-pch -I. -I.. -I/home/lu_zero/Sources/tt/tt-metal-pin/ -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tools/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hostdevcommon/api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/api/ -I/home/lu_zero/Sources/tt/tt-metal-pin/runtime/sfpi/include -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_io -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/blackhole_defines -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/internal/tt-1xx/blackhole/noc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/common/inc -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/tt-llk/tt_llk_blackhole/llk_lib/hal -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu -I/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx -I/home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute -include /home/lu_zero/.cache/tt-metal-cache/pch/855df4da08cf7755/pch.h -DIS_NOT_POW2_NUM_L1_BANKS=1 -DLOG_BASE_2_OF_NUM_DRAM_BANKS=3 -DNUM_DRAM_BANKS=8 -DNUM_L1_BANKS=110 -DPCIE_NOC_X=19 -DPCIE_NOC_Y=24 -DTENSIX_FIRMWARE -DLOCAL_MEM_EN=0 -DPROCESSOR_INDEX=3 -DUCK_CHLKC_MATH -DCOMPILE_FOR_TRISC=1 -DPROGRAMMABLE_CORE_TYPE=0 -DARCH_BLACKHOLE -DDISPATCH_MESSAGE_ADDR=4290184248 -DKERNEL_BUILD -DFULL_KERNEL_NAME="eltwise_typecast/1611353366980482238/" -include named_ct_arg_map_generated.h -c -o /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/1611353366980482238/trisc1/trisck.15278457539239486400_89781.o /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc -MF /home/lu_zero/.cache/tt-metal-cache/17089598622106942383/kernels/eltwise_typecast/1611353366980482238/trisc1/trisck.15278457539239486400_89781.d
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:11,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.hpp:60,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/api/convenience.hpp:35,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/operations/copy/typecast/device/kernels/compute/eltwise_typecast.cpp:8,
+                 from ../chlkc_math.cpp:6,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/common/chlkc_list.h:16,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/firmware/src/tt-1xx/trisck.cc:14:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h: In function 'void ckernel::copy_dest_values(uint32_t, uint32_t)':
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/llk_math_eltwise_binary_sfpu_macros.h:55:43: warning: 'void ckernel::sfpu::copy_dest_value(uint, uint, uint) [with bool APPROXIMATION_MODE = false; int ITERATIONS = 8; uint = long unsigned int]' is deprecated: Use copy_dest_value<DataFormat, APPROXIMATION_MODE, ITERATIONS> instead [-Wdeprecated-declarations]
+   55 |      _llk_math_eltwise_binary_sfpu_params_(                                                               \
+      |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |          ::ckernel::sfpu::FN<_SFPU_BIN_EXPAND TEMPLATES>, DST_IN0, DST_IN1, DST_OUT, VECTOR_MODE, ##__VA_ARGS__))
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/compute_kernel_api.h:67:19: note: in definition of macro 'MATH'
+   67 | #define MATH(...) __VA_ARGS__
+      |                   ^~~~~~~~~~~
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:65:11: note: in expansion of macro 'SFPU_BINARY_CALL'
+   65 |     MATH((SFPU_BINARY_CALL(
+      |           ^~~~~~~~~~~~~~~~
+In file included from /home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/inc/api/compute/copy_dest_values.h:9,
+                 from /home/lu_zero/Sources/tt/tt-metal-pin/ttnn/cpp/ttnn/kernel_lib/eltwise/unary/misc.inl:18:
+/home/lu_zero/Sources/tt/tt-metal-pin/tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_copy_dest_values.h:39:6: note: declared here
+   39 | void copy_dest_value(const uint dst_index_in, const uint dst_index_out, const uint /* unused */) {
+      |      ^~~~~~~~~~~~~~~
+[TT-EXACT-SERVE] ptr=0xfff468300840 [9,10240] bf16 shadow serve
+engine-fatal: EngineCore busy loop threw: vt: no kernel for op GdnSpecDecode (id 12) on device tenstorrent (type 6), and the portable CPU reference tier is NOT eligible: this backend does not report its device memory host-addressable, so a host kernel may not dereference what it allocated (unified memory is false, which is a DIFFERENT property). Build a native kernel for this op or run it on the CPU device at ./src/vt/op_provider.cpp:653
+async-llm: output handler saw engine death: EngineCore encountered an issue. See stack trace (above) for the root cause. [vt: no kernel for op GdnSpecDecode (id 12) on device tenstorrent (type 6), and the portable CPU reference tier is NOT eligible: this backend does not report its device memory host-addressable, so a host kernel may not dereference what it allocated (unified memory is false, which is a DIFFERENT property). Build a native kernel for this op or run it on the CPU device at ./src/vt/op_provider.cpp:653]
+vllm-bench: failed: EngineCore encountered an issue. See stack trace (above) for the root cause. [vt: no kernel for op GdnSpecDecode (id 12) on device tenstorrent (type 6), and the portable CPU reference tier is NOT eligible: this backend does not report its device memory host-addressable, so a host kernel may not dereference what it allocated (unified memory is false, which is a DIFFERENT property). Build a native kernel for this op or run it on the CPU device at ./src/vt/op_provider.cpp:653]

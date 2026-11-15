@@ -57,7 +57,7 @@ direct arm (-254 MB selector codebooks), every KV size fails:
   KV 16 eager ALSO OOMs (w3-off16.log): KV 16 is over the line with no drafter
   at all.
 - KV 32/48/64: OOM at the same stagings, 20-60 MB short, fragmentation-bound
-  (largest free block < the request), w3-nb32/nb48/da16/da64/pre32.log.
+  (largest free block < the request), w3-nb32/nb48/da16/da64/w3-pre32.log.
 
 The spec's own baseline (stage B, `## Our baseline`) is Q4_K_M KV 64 — on that
 target the drafter loads and the engine reaches the spec steps.
@@ -144,3 +144,88 @@ kernel is ported. State on this base (pre-embed-fix, 745f5edde + W3):
    T sequential composed steps, per-timestep slot snapshots).
 3. The driver-side TT spec-metadata in-place device refresh (the
    WarmRopeCosSin pattern) for the captured spec verify arm.
+
+## W3 finish (2026-11-15, the OOM root cause + the gate disposition)
+
+The Q4_K_M KV-64 drafter-ON crash (`w3-q4km-on.log`, `probe-1.log`) is
+ROOT-CAUSED, and it is neither of the two hypotheses the leg named.
+
+**Root cause: capacity, not staging.** The exact error is a TT DRAM
+allocator OOM — `Not enough space to allocate 178257920 B` (the draft's
+`ffn_down` [5120, 17408] bf16) inside `EnsureMatmulWeightDevice` under the
+draft trunk's first forward — with the board at 4250752960/4272341376 B
+per bank (99.5%). The ledger, measured with `VT_TT_STEP_PHASES=1`
+(`w3f-diag-off-env.txt` legs): the Q4_K_M target at KV 64 sits at
+**5366 MiB free**, stable from decode step 3 (the GDN layers'
+bf16-expanded projections alone are 10.4 GiB staged: `[10240,5120] x48`,
+`[6144,5120] x48`, `[5120,6144] x48` — the kTransformedWeight bf16
+expansion the loader documents). The drafter's bf16 trunk stages ~3.3 GiB
+of DRAM at the first propose (`VT_STAGING_TRACE`: `gate_up [34816,5120]
+x5`, `down [5120,17408] x5`) plus ~2 GiB of zeros primes and scratch
+retention — the fifth layer's `ffn_down` lands 6.9 MiB short.
+
+**The two prior legs each had only ONE of the two shares active**, which
+is why both died the same way:
+- `w3-q4km-on.log` (06:16, pre-embed base): embed shared via the bf16 twin
+  (2542796800 B saved), the head bind silently skipped
+  (`shared_lm_head` null → no banner) → the draft's own bf16 head resident.
+- `probe-1.log` (10:51, post-embed base): head shared (1042944000 B
+  saved), the embed share DECLINED by the dtype-equality guard ("the
+  draft read bf16 [248320, 5120] and the target holds q4_K") → the
+  draft's own 2.44 GiB bf16 table resident.
+
+**The fix (this wave):**
+1. The W3 share-gate block-quant arm (`BindDflashDraftSharedEmbed`,
+   model_loader.cpp — the uncommitted edit, audited and completed): a
+   block-quant target table now shares with the draft's float table — the
+   draft's four embed lookups decode the packed rows on the fly
+   (RefreshQuantEmbedRows), so the aliasing hazard the f16 case names does
+   not exist. Both banners now fire together
+   (`w3f-on-probe.stderr.log`: embed 2542796800 B + head 1042944000 B).
+   `IsFloat` moved to dtype.h/dtype.cpp (the ops.cpp anonymous-namespace
+   duplicate collided with it); exactly one `if (!same)` guard remains.
+2. `VT_TT_WEIGHT_RESIDENCY=bfp8` on every DRAFTER-ON leg (the row's
+   recorded memory lever, now measured): the draft's trunk stages as
+   BFP8_B (~1.55 GiB, the bf16 staging dropped) and the wall CLOSES.
+   Scope verified: `EnsureBfp8WeightDevice` refuses non-bf16 (the
+   target's packed keep-quant weights) by name and falls back to the
+   normal staging; the GDN layers stage via `EnsureDevice2D` directly and
+   never route through `EnsureMatmulWeightDevice` — so the TARGET's
+   numerics are bit-identical and the lossless verify keeps the emitted
+   tokens the target's greedy stream; only acceptance/TPOT can move.
+3. `VT_DFLASH_DRAFT=1` RESTORED on every drafter-ON leg — the untracked
+   `run-w3-finish-gate.sh` had dropped it (the committed `run-gate.sh`
+   has it), so the probe legs silently ran the SELECTOR arm and died at
+   the selector's f32 sample-row gather (`speculator.cpp:217` →
+   `kIndexSelect: only bf16 rows are supported`) instead of the direct
+   arm's path. The direct arm downloads the block logits and argmaxes on
+   host; the selector never runs.
+
+**Verified past the wall** (`w3f-diag-on-direct.log`: direct arm + bfp8 +
+both shares): the draft's full trunk stages, the first propose completes,
+the verify runs — and the loop dies at the NEXT named blocker, exactly
+the one this README's continuation already owed:
+
+```
+vt: no kernel for op GdnSpecDecode (id 12) on device tenstorrent (type 6)
+```
+
+**Gates this run:**
+- (b) Q4_K_M drafter-OFF, knob defaults: `w3f-off-{1,2,3}` — token-ids
+  sha256 `d49c53d23ac5bc4180096b30ebe3fb6990ba6f6eff7d6098760685f9035019ff`
+  = BYTE-IDENTICAL to the recorded stream, 3/3 legs; TPOT
+  6626.97 / 6627.91 / 6626.89 ms vs the recorded 6607 (0.30%, the same
+  band the G4 reproduction recorded: 6624 vs 6607).
+- (a) Q4_K_M KV-64 drafter-ON: BLOCKED at the verify by the
+  `kGdnSpecDecode` TT port gap (the refusal above, captured in
+  `w3f-diag-on-direct.log`). The memory wall is closed and the draft
+  proposes; the verify's GDN spec segment has no TT kernel. The port
+  follows `GdnDecodeStepComposed` (the W2-validated exactness-scrubbed
+  step): initial state from column `num_accepted-1`, T sequential
+  composed steps, per-timestep slot snapshots, one split-block scatter.
+  It is the next wave's first item and needs the fresh-implementer /
+  fresh-reviewer cycle per the row discipline.
+- (c) UD-Q6_K_XL KV-8 drafter-ON: blocked by the same gap (the rebase
+  onto lo-main is ALREADY in this branch's base — `13542b40a` is an
+  ancestor of HEAD and the fork's main equals it; the embed fix
+  `47847ad9c` landed before the branch's W1).
