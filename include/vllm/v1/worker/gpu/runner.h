@@ -1366,7 +1366,23 @@ class GPUModelRunner final : public ModelRunnerBase {
   const vllm::HfConfig* dflash_config_ = nullptr;
   int dflash_k_ = 0;
   std::vector<int32_t> dflash_tap_layer_ids_;
+  // QWEN38-DFLASH2-STAGE-C W3 (VT_DFLASH_DRAFT): the DFlash lane proposes
+  // through the bundle's direct-argmax arm instead of the candidate selector +
+  // path walk. Set ONLY by set_dflash_draft (the dflash lane); set_dspark_draft
+  // resets it, so the shared block body keeps the DSpark lane on its own
+  // sampler regardless of the knob. Default false — byte-identical to the
+  // pre-W3 selector lane.
+  bool dflash_direct_arm_ = false;
   bool use_dflash() const { return dflash_weights_ != nullptr; }
+  // QWEN38-DFLASH2-STAGE-C W3: stage the draft's own bf16 weights to the device
+  // AT WIRING time on a weight-staging platform (the `PrepareBf16Resident`
+  // pattern, qwen3_5.cpp W4d W6): a lazy first-propose stage at a 27B footprint
+  // allocated against a fragmented, ~99-percent-full bank set and OOM'd, where
+  // the same bytes land fine straight after the weights load. `ResidentWeight`
+  // caches the upload on the OwnedTensor, so the propose's later calls hit.
+  // The shared embed/head are deliberately NOT staged here: the loader rebinds
+  // the draft onto the TARGET's resident owners.
+  void PreStageDflashWeights(const vllm::Qwen3DFlashWeights& weights);
   // ── SPEC-DSPARK W5 ──────────────────────────────────────────────────────────
   // The separately-loaded DSpark draft (borrow owned by LoadedEngine; null unless
   // method=="dspark"). When set, dflash_weights_ points at `&dspark_weights_->
