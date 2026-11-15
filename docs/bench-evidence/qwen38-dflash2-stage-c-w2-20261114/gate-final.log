@@ -1,0 +1,163 @@
+2026-11-15 04:31:10.299 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-15 04:31:10.299 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-15 04:31:10.299 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-15 04:31:10.299 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-15 04:31:10.302 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-15 04:31:10.302 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-15 04:31:10.332 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-15 04:31:10.332 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-15 04:31:10.332 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-15 04:31:10.332 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-15 04:31:10.333 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-15 04:31:10.365 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[GATE] ref begin
+[GATE] ref end
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-15 04:31:50.450 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-15 04:31:50.451 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-15 04:31:50.451 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-15 04:31:50.451 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-15 04:31:50.451 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-15 04:31:51.250 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:807:
+TEST CASE:  qwen38 dflash2 drafter TT: the 8-row block forward over tap context matches the bundle reference (PCC band)
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:856: MESSAGE: stage fc: PCC 0.999999, rel_rms 0.00168875, max|ours| 390, max|ref| 389.246, outliers 1, first at 55680 (row 10 col 4480) ours 0.0043335 ref 0.000293394
+
+2026-11-15 04:31:59.172 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:31:59.213 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:31:59.232 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:31:59.251 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:31:59.271 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:917: MESSAGE: stage ctxV l0: PCC 0.999997, rel_rms 0.00245909 | deviceV vs refK-raw PCC 0.00488018
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:919: MESSAGE: ctxV ours[0..2] -5.28125 13.4375 5.75 | ref -5.26992 13.409 5.72012
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:953: MESSAGE: stage ctxK l0 vs normed+rope: PCC 0.999995, rel_rms 0.00324758 | vs raw: PCC 0.826567 | vs normed-norope: PCC 0.877979 | vs heads-outer: PCC 0.0185336
+
+2026-11-15 04:32:03.509 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:32:03.511 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:32:03.512 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:32:03.514 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:32:03.516 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:32:10.760 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 0 (1): PCC 0.996071, rel_rms 0.0886409
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 1 (1): PCC 0.991694, rel_rms 0.130608
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 2 (1): PCC 0.994488, rel_rms 0.10566
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 3 (1): PCC 0.99754, rel_rms 0.0718851
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 4 (1): PCC 0.99803, rel_rms 0.0666603
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 5 (1): PCC 0.99719, rel_rms 0.0757995
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 6 (1): PCC 0.99744, rel_rms 0.0742856
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:969: MESSAGE: row 7 (1): PCC 0.997643, rel_rms 0.0687601
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:975: MESSAGE: ALL rows: PCC 0.995645, rel_rms 0.093469 (floor 0.98, the bundle's band, model.py:1132)
+
+===============================================================================
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:993:
+TEST CASE:  qwen38 dflash2 drafter TT: DFlashGroupedConv matches CPU within the tie-rounding envelope
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1056: MESSAGE: conv parity: 35582 bit-diffs of 87040, big(>5%) 2195, max rel diff 31250 | per-row 0:1711 1:2134 2:2171 3:2160 4:2170 5:2066 6:2271 7:2227 8:1595 9:2215 10:2244 11:2169 12:2205 13:2096 14:2264 15:2341 16:1543 
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1081: MESSAGE: worst i=35105 row 6 col 4385 pos 6 cpu 0 tt 0.03125 | x 1.90625 xPrev -1.59375 d0 1.0625 d1 1.28906 b0 1.65625 b1 1.95312 | k0-away 2.71875 cpu-k0 2.71875
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=8 row 0 col 8 cpu 5.09375 tt 5.125 x 1.92188 d 1.28125 b 1.38281
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=9 row 0 col 9 cpu -1.58594 tt -1.58594 x -0.769531 d 1.28125 b 0.78125
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=10 row 0 col 10 cpu 0.150391 tt 0.150391 x 0.150391 d 1.28125 b -0.279297
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=11 row 0 col 11 cpu -0.808594 tt -0.808594 x -0.949219 d 1.28125 b -0.429688
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=12 row 0 col 12 cpu 0 tt 0 x 0 d 1.28125 b -0.0400391
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=13 row 0 col 13 cpu -3.9375 tt -3.95312 x -1.65625 d 1.28125 b 1.10156
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=14 row 0 col 14 cpu -1.6875 tt -1.6875 x -1.71875 d 1.28125 b -0.300781
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1092: MESSAGE: i=15 row 0 col 15 cpu -0.707031 tt -0.707031 x -0.320312 d 1.28125 b 0.921875
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1109: MESSAGE: conv parity envelope: rel_rms 0.00382381, maxabs 0.0625, xmax 2, bound 0.1
+
+===============================================================================
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1124:
+TEST CASE:  qwen38 dflash2 drafter TT: paged attention at the draft block shape matches the CPU kernel
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1192: MESSAGE: paged-attn parity: rel_rms 1.70431e-07, max|d| 5.96046e-07, first 0 (cpu 0.21052 tt 0.21052)
+
+===============================================================================
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:1217:
+TEST CASE:  qwen38 dflash2 drafter: the CPU arm of the chain matches the bundle reference
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2583: MESSAGE: DECISIVE: real chain per_layer[0] vs fp64(mine): PCC 0.562838, rel_rms 0.896367
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2587: MESSAGE: mcv_b first8: -274.000000 126.500000 -286.000000 1376.000000 -472.000000 816.000000 -466.000000 -34.250000  | cpp first3 536 402 -170
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2606: MESSAGE: REFLAYER down2 first8: -91.983276 108.499229 -628.016113 1497.519775 -524.263062 615.010925 -460.714111 -83.268188 | PCC(down2, mcv_b) 0.999988 | PCC(per_layer, mcv_b) 0.562838 | PCC(per_layer, down2) 0.562593
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2614: MESSAGE: down2 max at 13869 value 1.91136e+06 | mcv_b max at 13869 value 1.90874e+06
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2643: MESSAGE: down first8: 544.000000 392.000000 -165.000000 4.625000 318.000000 668.000000 544.000000 560.000000 | cpp first3 536 402 -170 | down max -516096
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2651: MESSAGE: down max at 3629 (row 0 col 3629) value -516096
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2654: MESSAGE: layer 0 down (ctx 16): PCC 0.999922, rel_rms 0.0125848
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2662: MESSAGE: layer0 down max|ref| 516096 max|cpp| 520192 cpp[0..5] 536 402 -170 | ref 544 392 -165
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2654: MESSAGE: layer 1 down (ctx 16): PCC 0.999489, rel_rms 0.0319741
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2654: MESSAGE: layer 2 down (ctx 16): PCC 0.999631, rel_rms 0.0526131
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2654: MESSAGE: layer 3 down (ctx 16): PCC 0.994419, rel_rms 0.107273
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2654: MESSAGE: layer 4 down (ctx 16): PCC 0.987589, rel_rms 0.196873
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 0: PCC 0.996591, rel_rms 0.0827792
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 1: PCC 0.991187, rel_rms 0.136884
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 2: PCC 0.996125, rel_rms 0.0892966
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 3: PCC 0.998354, rel_rms 0.0574257
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 4: PCC 0.998536, rel_rms 0.0542861
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 5: PCC 0.997416, rel_rms 0.0791948
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 6: PCC 0.997194, rel_rms 0.0796298
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2671: MESSAGE: row 7: PCC 0.998502, rel_rms 0.0580375
+
+2026-11-15 04:33:57.790 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:33:57.812 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:33:57.831 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:33:57.853 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:33:57.875 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+2026-11-15 04:34:05.191 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2677:
+TEST CASE:  qwen38 dflash2 drafter TT: the PCC gate is RED on a corrupted fc row
+
+./tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:2704: MESSAGE: corrupted-fc ALL rows: PCC 0.964777, rel_rms 0.269148
+
+===============================================================================
+[doctest] test cases:   5 |   5 passed | 0 failed | 0 skipped
+[doctest] assertions: 451 | 451 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-15 04:34:34.387 | info     |    BuildKernels | JIT cache stats: 181/217 hits (83.4%) [181 cached, 165 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-15 04:34:34.387 | info     |    BuildKernels | JIT telemetry: 43 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-15 04:34:34.432 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-15 04:34:34.432 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-15 04:34:34.507 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-15 04:34:34.507 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-15 04:34:34.507 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
+EXIT 0

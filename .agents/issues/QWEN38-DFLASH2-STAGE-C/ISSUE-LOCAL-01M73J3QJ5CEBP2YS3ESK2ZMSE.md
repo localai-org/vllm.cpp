@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-10
-Updated: 2026-11-14
+Updated: 2026-11-15
 Closed: -
 
 ## Problem
@@ -16,26 +16,45 @@ Stage B's captured verify arm is speculative-ready but nothing drafts. The bundl
 
 ## Resolution
 
-- 2026-11-14 (W1, weights): the drafter tensors ARE buyable — the bundle's
-  `PROVENANCE.json` `weights.drafter` names `incoai/Qwen3.8-27B-DFlash2` @
-  `dedf8df68adfb1afeaf7b7480c0a0243108177b4`, the same repo the bundle's
-  drafter code resolves (`extra_code/qwen38/dflash2.py:39`). Downloaded
-  (developer go given 2026-11-13/14) to
-  `/mnt/models/qwen38-dflash2-drafter/`: `model.safetensors`
-  3,848,817,896 B, sha256 `67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`;
-  `config.json` 1,239 B sha256 `873e3556509b0da06e29654ba00d4944888d4b5e8a33afde25f7eb27d321e980`.
-  Enumeration: 81 tensors, all BF16 (fc [5120,25600]; hidden_norm/norm [5120];
-  5 layers of q/k/v/o + per-head qk-norm [128] + conv base_kernel (2,2,5120)
-  + kernel_projection (1280,5120) x2 + MLP 17408; selector codebooks
-  (248320,256) + hidden_projection (256,5120)). Format decision recorded: NO
-  re-encode — the existing `LoadDflashDraft` draft path consumes this HF
-  layout directly (contract `include/vllm/model_executor/models/qwen3_dflash.h:14-111`);
-  `scripts/convert-qwen38-dflash2-drafter.py` validates every tensor against
-  it, refuses by name, writes `meta.json`. Refuse-by-name at load time already
-  exists loader-side (`qwen3_dflash_weights.cpp` "tensor not found" /
-  `refuse_unowned`); no W1 loader change owed. Pins: `docs/USAGE.md`
-  ("The Qwen3.8 DFlash2 drafter: the exact weights"); evidence
-  `docs/bench-evidence/qwen38-dflash2-stage-c-w1-20261114/` (FLAT:
-  enumeration.json, validator.log, README.md). W2 (the forward,
-  component-validated) is next.
+W2 resolution (2026-11-14, the drafter forward on TT):
 
+- SHIPPED: `kDFlashGroupedConv` on TT (src/vt/tenstorrent/tenstorrent_ops.cpp)
+  — the DFlash2 draft's grouped dynamic conv had no TT kernel (the drafter
+  forward could not run on the P150 at all) — plus the `kIndexCopy` TT
+  registration the context-KV append needs. Both are compositions of the
+  shared TT primitives; the conv preserves the CPU kernel's
+  one-round-per-step structure.
+- THE LEVER: `kMatmulBT` on TT passed `F32AccKernelConfig()` only for f32
+  outputs; bf16 outputs (every drafter GEMM) ran the ttnn default config
+  (LoFi + bf16 partials, the W3 noise map's 2.3e-2 rel_rms per GEMM), while
+  the bundle's own CKC is HiFi4 + fp32_dest_acc_en (dflash2.py). Now the
+  exactness arm for BOTH output dtypes — parity with the bundle, not tuning.
+  Effect on the fc combine: 74 sign-flip-class outliers -> 1.
+- THE REFERENCE BUG (the gate's whole gap): the test harness's
+  `RefLayerForward` allocated its attention output `o2d` as [B, kH=5120]
+  (H-padded) but the o_proj matmul reads it contiguous at [B, kNH*kHD=4096]
+  — rows 1..7 of EVERY reference layer corrupted (row 0 matched, rows 1+
+  collapsed; the exact signature the gate reported). Fixed to [B, kNH*kHD].
+  The ten-stage op-by-op replay (context-free AND with-context, every stage
+  PCC >= 0.9995 vs independent fp64) is what moved the suspicion onto the
+  reference; the real chain was never the divergence.
+- ALSO FIXED in the harness on the way: per-head RoPE, the o_proj K/N
+  geometry, the pre_residual_down out-param, bf16 rounding of the conv
+  coefficients (the op rounds bf16(b)+bf16(d), not b+d), CombineAuxFeatures'
+  PRE-norm contract, a ckv.k OOB read, and a null-CPU-queue crash
+  misattributed to "CPU MatmulBT raw-NK segfaults".
+- SUBSTRATE (recorded honestly): the pinned tt-metal's f32->bf16 rounding at
+  exact half-ulp ties is NEITHER RNE nor consistent-direction (tie 170.5 ulp
+  rounds up, tie 207.5 ulp rounds down), so the conv's k = bf16(b + d) can
+  land one k-ulp away and flip a cancellation tap. BIT IDENTITY IS
+  UNATTAINABLE; the conv gate is the documented operand-magnitude envelope
+  (rel_rms 0.0038, maxabs 0.0625 <= 0.1 bound).
+- GATE GREEN: `tests/vllm/models/test_qwen38_dflash2_drafter_tt` 451/451
+  assertions, EXIT 0, on the pinned drafter weights on the P150: TT 8-row
+  block forward vs the corrected bundle reference — per-row PCC
+  0.9917..0.9980 (floor 0.98, the bundle's own band, model.py:1132),
+  ALL-rows 0.9956 / rel_rms 0.0935; conv envelope PASS; paged attention
+  rel_rms 1.7e-07; the CPU arm (device-free) per-layer 0.9876..0.9999; RED
+  proof (sign-flipped fc row -> PCC 0.9648 < 0.98) still detects a wrong
+  drafter. Evidence: docs/bench-evidence/qwen38-dflash2-stage-c-w2-20261114/
+  (FLAT: README.md, gate-final.log). W3 (the loop) is next.
