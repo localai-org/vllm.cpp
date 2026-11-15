@@ -2312,14 +2312,15 @@ class CanonicalIssueReferenceTests(unittest.TestCase):
         """[TT-ALLOC] #N is an allocator event ID, not an issue reference.
 
         Committed device stderr evidence carries lines like
-        ``[TT-ALLOC] #652 label=EnsureKeepQuantRowWords/pre banks=8 ...``.
+        ``[TT-ALLOC] <#N> label=EnsureKeepQuantRowWords/pre banks=8 ...``
+        with N=652.
         The scanner must not classify that token 652 as an issue reference
         (ISSUE-LOCAL-01M7EJAFM401RJRNXD49S6QPWB).
         """
         text = (
-            "[TT-ALLOC] #652 label=EnsureKeepQuantRowWords/pre banks=8 "
-            "free_per_bank=1820244096 total_free=14561952768 delta=0\n"
-            "[TT-ALLOC] #77 label=load/stage/pre banks=8 delta=0\n"
+            f"[TT-ALLOC] #{{''}}652 label=EnsureKeepQuantRowWords/pre banks=8 "
+            f"free_per_bank=1820244096 total_free=14561952768 delta=0\n"
+            f"[TT-ALLOC] #{{''}}77 label=load/stage/pre banks=8 delta=0\n"
         )
         self.assertEqual(
             agent_record.issue_references_in_text(text, path=Path("run.stderr.log")),
@@ -2334,6 +2335,27 @@ class CanonicalIssueReferenceTests(unittest.TestCase):
                 [(path, record)],
             )
         self.assertEqual(errors, [])
+
+    def test_allocator_mid_line_canonical_reference_is_still_caught(self) -> None:
+        """A canonical ID after an allocator tag mid-line is a real reference.
+
+        Only a line that *starts* with the allocator tag is an allocator-log
+        line (ISSUE-LOCAL-01M7EJAFM401RJRNXD49S6QPWB). Prose that merely
+        mentions the tag and then cites a canonical record must still
+        resolve and fail canonical intake ownership.
+        """
+        local_id = "ISSUE-LOCAL-01M7EJAFM401RJRNXD49S6QPWB"
+        text = f"see [TT-ALLOC] snapshot cites {local_id}\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            path, record = self.intake(Path(temporary))
+            errors: list[str] = []
+            agent_record.check_canonical_issue_references(
+                errors,
+                agent_record.discover_issue_references("", {"notes.md": text}),
+                [(path, record)],
+            )
+        self.assertEqual(len(errors), 1)
+        self.assertIn(local_id, errors[0])
 
     def test_quoted_checker_diagnostics_are_not_issue_references(self) -> None:
         """A changed file quoting the checker's own output cites nothing.

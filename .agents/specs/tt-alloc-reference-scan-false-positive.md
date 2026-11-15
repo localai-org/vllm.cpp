@@ -37,21 +37,22 @@ token classification inside `issue_references_in_text`:
   there are the checker describing itself, not the author claiming a
   reference.
 
-Line-scoped, not file-scoped: a real reference elsewhere in an evidence log
-is still detected. A real reference sharing a line with an allocator tag is
-not detected; accepted, because allocator lines are machine-generated.
+- Line-scoped, not file-scoped: a real reference elsewhere in an evidence
+  log is still detected. Only a line that *starts* with the allocator tag
+  (leading whitespace allowed) counts as an allocator-log line, so a
+  canonical reference later on a tagged prose line is still detected.
 
 ## Tests (tests/scripts/test_agent_record.py)
 
 Red on the unfixed checker, green after:
 
-- a changed file containing `[TT-ALLOC] #652 label=...` yields no reference
+- a changed file containing `[TT-ALLOC] 652 label=...` (the tag-then-number
+  form the log lines carry) yields no reference
   and passes `check_canonical_issue_references` against an intake record for 652.
 - a changed file quoting an `ERROR: issue reference` diagnostic line (token
   plus `_intake` record ID) yields no reference.
 - a changed file containing a prose bare-token reference still resolves to the
   intake record and still fails canonical ownership (property survives).
-  record and still fails canonical ownership (property survives).
 
 ## Evidence
 
@@ -60,6 +61,9 @@ Red on the unfixed checker, green after:
   unfixed checker).
 - Green after: the branch runs `check-agent-record.py` clean with the
   evidence logs intact.
+- Note: `reference-scan-false-positive-red-before.log` is a de-indented
+  transcription of the source capture `preflight-staged-repair.log`, whose
+  lines carry eight leading spaces; it is not a byte capture.
 
 ## Stop conditions
 
