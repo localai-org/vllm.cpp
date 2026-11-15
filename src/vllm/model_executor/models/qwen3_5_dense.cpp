@@ -76,6 +76,13 @@ class Qwen3_5DenseLoadedModel final : public LoadedModel {
   const OwnedTensor* shared_embed_tokens() const override {
     return weights_->embed_tokens.Empty() ? nullptr : &weights_->embed_tokens;
   }
+  // QWEN38-DFLASH2-STAGE-C W3: lend the head too, exactly like the table above
+  // (#1946 pattern). The GGUF target's head is the PACKED keep-quant owner the
+  // target's own logits GEMM reads; the draft's block logits run it through the
+  // same `MatmulBT` block-quant dispatch, so one device copy serves both.
+  const OwnedTensor* shared_lm_head() const override {
+    return weights_->lm_head.Empty() ? nullptr : &weights_->lm_head;
+  }
   void AttachMtpDraftWeights(Qwen3_5MTPWeights weights) override {
     mtp_draft_weights_ = std::move(weights);
   }

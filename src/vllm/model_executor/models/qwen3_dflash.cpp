@@ -123,7 +123,7 @@ DBuf DflashLogitsF32D(Dev d, const Tensor& x, const Qwen3DFlashWeights& weights,
   // packed branch above made the packed case reach `ResidentWeight` with an
   // empty `lm_head` and SEGFAULT, which is a red the suite cannot explain. A
   // named refusal is the same red with the reason attached.
-  VT_CHECK(!weights.lm_head.Empty(),
+  VT_CHECK(!weights.LmHead().Empty(),
            "dflash: the draft's SHARED lm_head is empty in ALL THREE owners. The "
            "draft runs the TARGET's head, so the loader fills exactly one of "
            "`lm_head` (raw-NK bf16), `lm_head_fp4` (packed NVFP4) and "
@@ -131,7 +131,17 @@ DBuf DflashLogitsF32D(Dev d, const Tensor& x, const Qwen3DFlashWeights& weights,
            "(qwen3_dflash.h), issues #1628 "
            "(https://github.com/mudler/vllm.cpp/issues/1628) and #2495 "
            "(https://github.com/mudler/vllm.cpp/issues/2495).");
-  Tensor lm = ResidentWeight(d, weights.lm_head, {vocab, hidden_size});
+  // QWEN38-DFLASH2-STAGE-C W3: a GGUF head now arrives PACKED (kept quantized,
+  // the #1628 admitted state) and takes the same block-quant MatmulBT dispatch
+  // the target's own logits GEMM takes (DenseLogitsF32D's keep-quant arm,
+  // qwen3_5.cpp). f32 out, like every other arm of this function.
+  if (vt::IsBlockQuant(weights.LmHead().dtype)) {
+    Tensor lm = ResidentWeight(d, weights.LmHead());
+    DBuf logits(d, DType::kF32, {x.shape[0], vocab});
+    vt::MatmulBT(d.q, logits.t(), x, lm);
+    return logits;
+  }
+  Tensor lm = ResidentWeight(d, weights.LmHead(), {vocab, hidden_size});
   DBuf logits(d, DType::kF32, {x.shape[0], vocab});
   vt::MatmulBT(d.q, logits.t(), x, lm);
   return logits;
