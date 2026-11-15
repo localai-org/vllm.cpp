@@ -27,6 +27,8 @@
 
 #include "vllm/model_executor/models/qwen3_5_internal.h"
 #include "vllm/model_executor/models/qwen3_5_mtp.h"  // SPEC-MTP I5d-pre: Qwen3_5MTPModel complete type for the owned draft member
+#include "vllm/model_executor/models/dense_attn_block.h"  // ResidentWeight (W3 draft pre-staging)
+#include "vllm/model_executor/models/dense_device_glue.h"  // Dev
 #include "vllm/model_executor/models/qwen3_dflash_internal.h"  // W13 (#2112) the draft-lane route counters the readout reports
 #include "vllm/platforms/interface.h"  // GetPlatform(device.type) per-tensor memory-model seam
 #include "vllm/v1/attention/backend.h"  // AttentionBackend / get_kv_cache_shape (M3)
@@ -112,6 +114,35 @@ static bool AsyncRunnerEnvDefault() {
 static bool QueueSupportsAsyncInputCombine(const vt::Queue& queue) {
   const vt::Backend* backend = vt::TryGetBackend(queue.device.type);
   return backend != nullptr && backend->SupportsAsyncSampledTokenReadback();
+}
+
+// QWEN38-DFLASH2-STAGE-C W3 (VT_DFLASH_DRAFT): the DIRECT-ARGMAX draft arm.
+//
+// Default OFF: every DFlash2-classified draft proposes through the candidate
+// selector + path walk exactly as SPEC-DFLASH2 W4-W9 landed it, byte-identical.
+//
+// When set to 1, a DFlash2-classified draft proposes through the bundle's
+// DFlash-v1 branch instead (extra_code/qwen38/dflash2.py::draft, the
+// `has_selector == false` else-arm: full-vocab argmax per block row). The
+// verify is lossless either way — the accept rule is the target's argmax — so
+// the emitted tokens are the target's and only ACCEPTANCE can move; this arm
+// exists because the selector is strictly worse for this row's gate:
+//   * it needs the TARGET lm_head's exact top-16, which a GGUF target serves
+//     through `LoadGgufSharedEmbedAndHeadBf16`'s dequantized bf16 head — the
+//     silent-acceptance-loss state D12 (`RefuseQuantizedDflash2LmHead`) names —
+//     and the row's gate target IS a k-quant GGUF (UD-Q6_K_XL); and
+//   * the two codebooks are ~254 MB of device residency
+//     (`## Risks/decisions` D5 of the dflash2 spec) that the direct arm never
+//     allocates, which is the difference between serving and OOM on a P150
+//     whose DRAM the repacked 27B k-quant target has already claimed.
+// The block forward itself is UNCHANGED — selection happens post-logits — so
+// the W2-validated drafter forward is the producer on both arms.
+static bool DflashDraftDirectArm() {
+  static const bool on = [] {
+    const char* e = std::getenv("VT_DFLASH_DRAFT");
+    return e != nullptr && e[0] == '1' && e[1] == '\0';
+  }();
+  return on;
 }
 
 // GDN step-geometry diagnostic (default OFF). When VT_GDN_DIAG_STEP_LOG=1, each
@@ -4524,7 +4555,7 @@ void GPUModelRunner::propose_drafts_dflash(
   propose_drafts_block(
       num_rejected_in, *dflash_weights_, *dflash_config_,
       /*num_query_per_req=*/1 + k,
-      [k, draft_vocab, weights = dflash_weights_](
+      [this, k, draft_vocab, weights = dflash_weights_](
           const std::vector<float>& block_logits, int P,
           const std::vector<int32_t>& anchors) {
         (void)anchors;  // DFlash's anchor is a bonus token, never a prediction.
@@ -4536,7 +4567,14 @@ void GPUModelRunner::propose_drafts_dflash(
         // when the DFlash2 branch produced nothing, and a DFlash2 block that
         // reaches the per-slot argmax proposes worse tokens with NO visible
         // symptom -- the verify is lossless, so only acceptance falls.
-        vllm::v1::RefuseDflash1ArgmaxOnDflash2Block(*weights);
+        // QWEN38-DFLASH2-STAGE-C W3: VT_DFLASH_DRAFT=1 selects the bundle's
+        // direct-argmax arm (dflash2.py `has_selector == false`); the refusal
+        // above exists to keep a selector-grade block from silently DEGRADING
+        // to argmax, which under this knob is the operator's explicit choice,
+        // recorded in the load banner and gated on acceptance, not tokens.
+        if (!dflash_direct_arm_) {
+          vllm::v1::RefuseDflash1ArgmaxOnDflash2Block(*weights);
+        }
         return SampleDflashBlockDrafts(block_logits, P, k, draft_vocab);
       });
 }
@@ -4628,11 +4666,71 @@ void GPUModelRunner::propose_drafts_ngram(
 // draft into the runner. Resolves the D1 multi-tap capture indices
 // (target_layer_ids) from the draft config once and sizes the per-request
 // combined-feature context accumulation.
+void GPUModelRunner::PreStageDflashWeights(
+    const vllm::Qwen3DFlashWeights& weights) {
+  // Stage on every DEVICE backend (the `PrepareBf16Resident` contract: a
+  // device-resident weight-staging queue), never on CPU where ResidentWeight
+  // aliases host bytes.
+  if (vllm::platforms::GetPlatform(queue_.device.type).is_cpu()) {
+    return;
+  }
+  dense_attn::Dev d{vt::GetBackend(queue_.device.type), queue_};
+  const auto stage = [&d](const vllm::OwnedTensor& t) {
+    if (!t.Empty()) (void)vllm::dense_attn::ResidentWeight(d, t);
+  };
+  stage(weights.fc);
+  stage(weights.hidden_norm);
+  stage(weights.final_norm);
+  for (const vllm::Qwen3DFlashLayerWeights& layer : weights.layers) {
+    stage(layer.input_layernorm);
+    stage(layer.post_attention_layernorm);
+    stage(layer.qkv_proj);
+    stage(layer.o_proj);
+    stage(layer.q_norm);
+    stage(layer.k_norm);
+    stage(layer.gate_up_proj);
+    stage(layer.down_proj);
+    stage(layer.attention_conv.base_kernel);
+    stage(layer.attention_conv.kernel_projection);
+    stage(layer.mlp_conv.base_kernel);
+    stage(layer.mlp_conv.kernel_projection);
+  }
+  d.b.Synchronize(d.q);
+  std::cerr << "vllm.cpp: DFlash draft weights staged to device at load ("
+            << weights.layers.size() << " layers)\n";
+}
+
 void GPUModelRunner::set_dflash_draft(const vllm::Qwen3DFlashWeights* weights,
                                       const vllm::HfConfig* config, int k) {
   dflash_weights_ = weights;
   dflash_config_ = config;
   dflash_k_ = k;
+  // QWEN38-DFLASH2-STAGE-C W3 (VT_DFLASH_DRAFT): resolve the draft arm once at
+  // wiring, and say so. With the knob set AND a DFlash2-classified checkpoint,
+  // propose routes through the bundle's direct-argmax branch (dflash2.py
+  // `has_selector == false`); the selector codebooks (~254 MB device) are never
+  // made resident, the block forward runs the DFlash1 contract, and the DFlash1
+  // refusal is bypassed as the operator's explicit choice. Default OFF.
+  dflash_direct_arm_ =
+      DflashDraftDirectArm() && weights != nullptr && weights->IsDflash2();
+  // QWEN38-DFLASH2-STAGE-C W3: stage the draft's OWN bf16 weights at WIRING
+  // time, not lazily at the first propose. The target model has
+  // `PrepareBf16Resident` for exactly this reason (qwen3_5.cpp, W4d W6): a
+  // lazy first-use stage at a 27B footprint asked its allocation against a
+  // fragmented, ~99-percent-full bank set and died, where the same bytes land
+  // fine immediately after the weights load, while the banks are still
+  // sequential. `ResidentWeight` caches the upload on the OwnedTensor
+  // (`d_dev`), so the propose's later calls hit. The shared embed/head are NOT
+  // staged here: the rebinds give the draft the TARGET's resident owners.
+  if (weights != nullptr) PreStageDflashWeights(*weights);
+  if (dflash_direct_arm_) {
+    std::cerr << "vllm.cpp: VT_DFLASH_DRAFT=1 — the DFlash2 draft proposes through "
+                 "the DIRECT-ARGMAX arm (bundle dflash2.py "
+                 "has_selector=false): full-vocab argmax per block row, "
+                 "candidate selector NOT resident (~254 MB freed). The verify "
+                 "stays lossless (greedy accept = the target's argmax); only "
+                 "acceptance can differ from the selector arm.\n";
+  }
   dflash_tap_layer_ids_.clear();
   if (config != nullptr && config->raw.is_object() &&
       config->raw.contains("dflash_config") &&
@@ -4705,6 +4803,10 @@ void GPUModelRunner::set_dspark_draft(const vllm::Qwen3DSparkWeights* weights,
   dspark_weights_ = weights;
   dspark_sample_from_anchor_ = sample_from_anchor;
   set_dflash_draft(weights == nullptr ? nullptr : &weights->backbone, config, k);
+  // The DSpark lane keeps its own sampler regardless of VT_DFLASH_DRAFT: the
+  // knob resolves the DFlash lane's arm only (set_dflash_draft resolved it
+  // against the inherited backbone above).
+  dflash_direct_arm_ = false;
 }
 
 // SPEC-DFLASH D5: the DFlash branch of propose_drafts. Ported from
@@ -5149,7 +5251,12 @@ void GPUModelRunner::propose_drafts_block(
     // `final_out` host contract disqualified that branch and cost every DFlash2
     // step the graph lane plus a full-logits download. A DFlash1 draft passes
     // nullptr and this call is byte-for-byte what it was.
-    const bool dflash2 = backbone.IsDflash2();
+    // QWEN38-DFLASH2-STAGE-C W3: under VT_DFLASH_DRAFT=1 the selection is the
+    // bundle's direct-argmax arm (see DflashDraftDirectArm above), so the block
+    // forward runs the DFlash1 contract — no final-hidden capture, no selector
+    // device residency — and the `sample` callback below produces the tokens.
+    const bool dflash2 =
+        backbone.IsDflash2() && !dflash_direct_arm_;
     // SPEC-DFLASH2 W9 (#1849): the level-2 device-segment split. Each
     // Synchronize drains the queue at a phase seam so the wall clock between
     // seams IS that phase's device work; on the CPU backend the sync is a

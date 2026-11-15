@@ -829,3 +829,39 @@ TEST_CASE("A2-2 repair: a device result that was never copied drains ONE queue")
 //     test_block_verification_matches_standard (:372) — block verification.
 //   * tests/v1/worker/test_gpu_rejection_sampler_i64.py:109 (>2^31 logits-buffer
 //     indexing) — needs the block-verification buffer layout.
+
+// QWEN38-DFLASH2-STAGE-C W3: the loop's accept rule is the bundle's greedy
+// cascade at the DFlash2 block shape (k = 8, the drafter's [anchor, MASK x 7]
+// row count). Two cases pin the two commit contracts the loop relies on:
+//   * full accept: the longest accepted prefix is the whole 8-row draft and the
+//     commit is draft[0..7] + the verify bonus (dflash2_serving.py
+//     `_accept_greedy` / `com = [pending] + drafts[:m] + row_ids[mi_u]`);
+//   * reject at depth 3: the commit is the 3-token accepted prefix + the first
+//     differing VERIFY token, and num_rejected = 5 — the GDN rollback length
+//     the stage-B commit-or-restore restores on the next step.
+TEST_CASE("rejection_sampler: dflash2 k=8 cascade — full accept commits draft plus bonus") {
+  const RejectionSamplerOutput out =
+      Run({{1, 2, 3, 4, 5, 6, 7, 8}},
+          {{1, 2, 3, 4, 5, 6, 7, 8, 9}},
+          /*k=*/8);
+  REQUIRE(out.sampled_token_ids.size() == 1);
+  CHECK(out.sampled_token_ids[0] ==
+        std::vector<int32_t>{1, 2, 3, 4, 5, 6, 7, 8, 9});
+  CHECK(out.num_sampled[0] == 9);  // 8 accepted drafts + the bonus
+  CHECK(out.num_rejected[0] == 0);
+}
+
+TEST_CASE("rejection_sampler: dflash2 k=8 cascade — reject at depth 3 commits prefix plus target argmax") {
+  // Drafts 1 2 3 match; draft 4 does not (target argmax there is 9).
+  // Nothing past the first differing position may be accepted, even though
+  // drafts 5..8 coincidentally match the target rows after 9.
+  const RejectionSamplerOutput out =
+      Run({{1, 2, 3, 4, 5, 6, 7, 8}},
+          {{1, 2, 3, 9, 5, 6, 7, 8, 6}},
+          /*k=*/8);
+  CHECK(out.sampled_token_ids[0] == std::vector<int32_t>{1, 2, 3, 9});
+  CHECK(out.num_sampled[0] == 4);   // 3 accepted drafts + the replacement
+  CHECK(out.num_rejected[0] == 5);  // the GDN rollback length
+  CHECK(Padded(out, 9)[0] ==
+        std::vector<int32_t>{1, 2, 3, 9, -1, -1, -1, -1, -1});
+}
