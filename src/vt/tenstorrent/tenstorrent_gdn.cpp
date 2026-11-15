@@ -2462,6 +2462,538 @@ void CausalConv1dUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor
   CommitConvTransposed(conv_state, std::move(rolled), uslots, uc, usl);
 }
 
+// ---- kCausalConv1dSpecUpdate (QWEN38-DFLASH2-STAGE-C W3) --------------------
+//
+// The SPECULATIVE conv window update (SPEC-MTP I4; cpu_ops.cpp
+// CausalConv1dSpecUpdateKernel at :1863, ported from vllm causal_conv1d.py
+// @ e24d1b24 IS_SPEC_DECODING + IS_VARLEN). The kCausalConv1dUpdate above is
+// the decode step: read-old-then-roll at window offset 0, one token per
+// request. The spec verify advances the WIDENED conv row (state_len =
+// (K-1) + (max_query_len-1) taps) by the ACCEPTED prefix: per request i,
+// with off = num_accepted_tokens[i]-1, the window stream is
+//   S = old_state[off .. off+K-2] ++ x[lo .. hi-1]
+// out[t] = silu(bias + sum_j w[j]*S[t+j]) over the request's tokens, and the
+// committed row is new_state = old_state[off+1 .. off+keep] ++ x[lo..hi-1]
+// (keep = state_len - seqlen; the one-tap left shift IS the conv rollback).
+//
+// PROVENANCE (never a mirror source; oracle registry `vllm-tt-plugin`,
+// gateable = no): the bundle's gdn/tp.py `spec_conv_sel` rebuilds each user's
+// conv window for the next verify by SELECTING rows out of
+// cat([E_prev, qkv_new]) at the accepted index — the same
+// select-by-accepted-prefix semantics, implemented here against our
+// persistent transposed shadow instead of a per-verify one-hot matmul.
+//
+// Composition = CausalConv1dUpdateKernel's proven primitives, dim-0 only
+// (the W2 micro-probe doctrine). The shadow T0 is [sl+1, R] time-major
+// (row j, col s*C+c = state[s][c][j]). The stream the MAC reads is one
+// concat of the per-request state-window rows and the x token rows; the MAC
+// is exact tap-major multiply + sequential adds in the oracle's accumulation
+// order (bias, taps 0..K-1); the commit is one gather out of
+// SRC = [T0 | zeros | xT] plus the exact 0/1 blend that leaves
+// non-participating slots byte-identical.
+//
+// The gather indices split by CONTENT STABILITY, which is what makes the op
+// capture-safe AND acceptance-varying-safe at once:
+//   * everything derived from the state slots and cu_seqlens (the owner map,
+//     the x scatter ids, the out column select, the roll's x-part rows and
+//     its keep mask) is STABLE across a sequence's steps — host-built once
+//     per content, cached, and refused on change during capture exactly like
+//     GdnConvIdxEntry;
+//   * everything derived from num_accepted_tokens (the window read offset
+//     and the roll's state-part rows) CHANGES EVERY VERIFY STEP — those two
+//     indices are derived ON DEVICE from the persistent num_accepted_tokens
+//     buffer (integer-exact f32 arithmetic: every value is < 2^24, so the
+//     f32 mul/add is exact and the f32->u32 typecast is the identity on
+//     integral values). A host-built index would bake one step's acceptance
+//     into the captured graph and silently corrupt every later replay.
+struct ConvSpecIdxEntry {
+  std::vector<int32_t> idx;  // content identity: slot per request
+  std::vector<int32_t> cs;   // content identity: cu_seqlens
+  bool warmed = false;
+  // slot/cu_seqlens-derived (stable per capture):
+  ttnn::Tensor owner_idx;   // [R, 1] u32 TILE — column -> owning request (0
+                            // when no live request owns it)
+  ttnn::Tensor x_scatter;   // [T] u32 RM — indexed_fill bid: token t -> its
+                            // slot's block of row t
+  ttnn::Tensor zeros_ts;    // [T*slots, C] f32 RM — the x-scatter base
+  ttnn::Tensor mac_idx;     // [K*T, R] u32 TILE — tap-major stream rows
+                            // (tap j's slice is rows [j*T, (j+1)*T))
+  ttnn::Tensor osel_idx;    // [C, T] u32 TILE — the out column select on the
+                            // transposed y (row ids s_i*C + c)
+  ttnn::Tensor roll_x;      // [sl, R] f32 TILE — the roll's x-part SRC rows
+  ttnn::Tensor roll_m;      // [sl, R] f32 TILE — 1 where the roll reads a
+                            // state row (j < keep), 0 on the x part
+  ttnn::Tensor mv, mk;      // [1, R] f32 TILE — the non-owned-slot restore /
+                            // keep masks for the state commit
+  ttnn::Tensor zeros_blk;   // [sl-width+1, R] f32 TILE — SRC's out-of-range
+                            // zeros (the oracle's `src < state_len` guard)
+};
+std::mutex& ConvSpecIdxMutex() {
+  static std::mutex* m = new std::mutex();  // never destroyed (#1486)
+  return *m;
+}
+std::map<std::array<uint64_t, 5>, ConvSpecIdxEntry>& ConvSpecIdxMap() {
+  static std::map<std::array<uint64_t, 5>, ConvSpecIdxEntry>* c =
+      new std::map<std::array<uint64_t, 5>, ConvSpecIdxEntry>();  // #1486
+  return *c;
+}
+
+void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& w,
+                                  const Tensor* bias, Tensor& conv_state,
+                                  const Tensor& conv_state_indices,
+                                  const Tensor& num_accepted_tokens,
+                                  const Tensor& cu_seqlens,
+                                  const CausalConv1dArgs& args) {
+  TT_OP_TRACE("CausalConv1dSpecUpdate");
+  GdnDecodeSteps().fetch_add(1, std::memory_order_relaxed);
+  const int64_t tokens = x.shape[0], c_dim = x.shape[1], k = w.shape[1];
+  const int64_t width = k - 1;
+  const int64_t state_len = conv_state.shape[2];
+  const int64_t slots = conv_state.shape[0];
+  const int64_t num_reqs = cu_seqlens.shape[0] - 1;
+  const int64_t x_rs = x.stride[0];
+  if (tokens == 0) return;  // empty stream: no-op, cache as-is
+  MeshDevice& device = SharedMeshDevice();
+  const uint32_t R = static_cast<uint32_t>(slots * c_dim);
+  const uint32_t uc = static_cast<uint32_t>(c_dim);
+  const uint32_t usl = static_cast<uint32_t>(state_len);
+  const uint32_t uslots = static_cast<uint32_t>(slots);
+  const uint32_t utok = static_cast<uint32_t>(tokens);
+
+  // Metadata: the slot ids and cu_seqlens are stable across a sequence's
+  // steps (the decode discipline), so the host masters are read for the
+  // content check and the eager builds. NULL rows never capture (the decode
+  // discipline); the eager arm handles them by skipping the request
+  // entirely (the oracle's :114-115 continue) — its out rows keep their
+  // previous bytes and its slot is not owned by the roll.
+  std::vector<int32_t> idxv =
+      ReadIdxHost(conv_state_indices, slots, "causal_conv1d_spec_update", true);
+  EnsureHost(cu_seqlens);
+  const int32_t* csp = cu_seqlens.Ptr<int32_t>();
+  std::vector<int32_t> csv(csp, csp + num_reqs + 1);
+  bool has_null = false;
+  for (int32_t s : idxv)
+    if (s < 0) has_null = true;
+  VT_CHECK(!has_null || !tt_capture_active(),
+           "tenstorrent causal_conv1d_spec_update: NULL state rows during "
+           "trace capture — the captured arm is the pure-spec indexed path");
+
+  // Per-request geometry from cu_seqlens (host, stable content).
+  int64_t total = 0;
+  std::vector<int64_t> lo(static_cast<size_t>(num_reqs)), keep(static_cast<size_t>(num_reqs));
+  for (int64_t i = 0; i < num_reqs; ++i) {
+    lo[static_cast<size_t>(i)] = csv[static_cast<size_t>(i)];
+    const int64_t seqlen = csv[static_cast<size_t>(i + 1)] - csv[static_cast<size_t>(i)];
+    keep[static_cast<size_t>(i)] = state_len - seqlen;  // may exceed width
+    total += seqlen;
+  }
+  VT_CHECK(total == tokens,
+           "tenstorrent causal_conv1d_spec_update: cu_seqlens does not cover "
+           "the x stream");
+
+  // ---- the content-keyed stable index set --------------------------------
+  const std::array<uint64_t, 5> key{
+      static_cast<uint64_t>(slots), static_cast<uint64_t>(c_dim),
+      static_cast<uint64_t>(state_len), static_cast<uint64_t>(tokens),
+      static_cast<uint64_t>(num_reqs)};
+  ConvSpecIdxEntry e;
+  {
+    std::lock_guard<std::mutex> g(ConvSpecIdxMutex());
+    auto it = ConvSpecIdxMap().find(key);
+    if (it != ConvSpecIdxMap().end() && it->second.warmed && it->second.idx == idxv &&
+        it->second.cs == csv) {
+      e = it->second;  // copy the handles under the lock
+    } else {
+      VT_CHECK(!tt_capture_active(),
+               "tenstorrent causal_conv1d_spec_update: slot/seqlen metadata "
+               "changed during trace capture — the recapture cadence owns a "
+               "metadata change (reset the graph, then re-warm on the eager "
+               "boundary step)");
+      ConvSpecIdxEntry n;
+      n.warmed = true;
+      // owner map: column (s*C+c) -> the request that names slot s (0 when
+      // none does — request 0's off is read there, a finite garbage value
+      // the roll blend and the out select never propagate).
+      std::vector<uint32_t> owner(static_cast<size_t>(R), 0u);
+      for (int64_t i = 0; i < num_reqs; ++i) {
+        const int32_t s = idxv[static_cast<size_t>(i)];
+        if (s < 0) continue;
+        for (int64_t c = 0; c < c_dim; ++c)
+          owner[static_cast<size_t>(s * c_dim + c)] = static_cast<uint32_t>(i);
+      }
+      n.owner_idx = UploadIdxU32(
+          std::move(owner), ttnn::Shape({R, 1}), ttnn::Layout::TILE, device);
+      // x scatter: token t's row lands at block (t*slots + slot_t) of the
+      // [T*slots, C] base — flat (t*slots + s)*C + c == t*R + s*C + c, so
+      // the [T*slots, C] result views as the [T, R] slot-ordered x.
+      std::vector<uint32_t> xbid(static_cast<size_t>(tokens));
+      for (int64_t t = 0; t < tokens; ++t) {
+        int64_t req = num_reqs - 1;
+        for (int64_t i = 0; i < num_reqs; ++i) {
+          if (t >= csv[static_cast<size_t>(i)] && t < csv[static_cast<size_t>(i + 1)]) {
+            req = i;
+            break;
+          }
+        }
+        const int32_t s = idxv[static_cast<size_t>(req)];
+        xbid[static_cast<size_t>(t)] = static_cast<uint32_t>(t * slots + (s < 0 ? 0 : s));
+      }
+      n.x_scatter = UploadIdxU32(std::move(xbid), ttnn::Shape({utok}),
+                                 ttnn::Layout::ROW_MAJOR, device);
+      n.zeros_ts = ttnn::zeros(tt::tt_metal::Shape({utok * uslots, uc}),
+                               ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR,
+                               std::ref(device));
+      // MAC stream rows: token t (request i, position p = t - lo_i), tap j:
+      //   p + j < width ? p + j (the state window part)
+      //     : width + (lo_i + p + j - width) = t + j (the x part)
+      // — the per-request offsets are baked into the stream's state rows, so
+      // the tap row is uniform across the columns and the oracle's
+      // win[t+j] addressing falls out exactly. The gather index is the FULL
+      // [K*T, R] broadcast form (ConvGatherIdx's shape rule: the index's
+      // last dim spans the input's), stored TAP-major so tap j's slice is
+      // the contiguous rows [j*T, (j+1)*T).
+      std::vector<uint32_t> mac(static_cast<size_t>(k * tokens) * R, 0u);
+      for (int64_t t = 0; t < tokens; ++t) {
+        int64_t req = num_reqs - 1;
+        for (int64_t i = 0; i < num_reqs; ++i) {
+          if (t >= csv[static_cast<size_t>(i)] && t < csv[static_cast<size_t>(i + 1)]) {
+            req = i;
+            break;
+          }
+        }
+        const int64_t p = t - lo[static_cast<size_t>(req)];
+        for (int64_t j = 0; j < k; ++j) {
+          const int64_t m = p + j;
+          const uint32_t row = static_cast<uint32_t>(
+              m < width ? m : width + (t + j - width));
+          for (int64_t c = 0; c < R; ++c)
+            mac[static_cast<size_t>(j * tokens + t) * R + c] = row;
+        }
+      }
+      n.mac_idx = UploadIdxU32(
+          std::move(mac),
+          ttnn::Shape({static_cast<uint32_t>(k * utok), R}), ttnn::Layout::TILE,
+          device);
+      // out column select on the transposed y: osel[c, t] = slot_i*C + c.
+      std::vector<uint32_t> osel(static_cast<size_t>(c_dim * tokens));
+      for (int64_t t = 0; t < tokens; ++t) {
+        int64_t req = num_reqs - 1;
+        for (int64_t i = 0; i < num_reqs; ++i) {
+          if (t >= csv[static_cast<size_t>(i)] && t < csv[static_cast<size_t>(i + 1)]) {
+            req = i;
+            break;
+          }
+        }
+        const int32_t s = idxv[static_cast<size_t>(req)];
+        for (int64_t c = 0; c < c_dim; ++c)
+          osel[static_cast<size_t>(c * tokens + t)] =
+              static_cast<uint32_t>((s < 0 ? 0 : s) * c_dim + c);
+      }
+      n.osel_idx = UploadIdxU32(
+          std::move(osel), ttnn::Shape({uc, utok}), ttnn::Layout::TILE, device);
+      // The roll's x-part rows and keep mask (cs/stable-derived; the mux is
+      // exact 0/1 arithmetic, never a `where`): roll_x[j][col] = SRC row of
+      // the x part when j >= keep_i (else 0 — masked out), roll_m[j][col] =
+      // 1 when j < keep_i (read the state part).
+      const uint32_t x_base = 2 * usl - static_cast<uint32_t>(width) + 2;
+      std::vector<float> rx(static_cast<size_t>(state_len) * R, 0.0f);
+      std::vector<float> rm(static_cast<size_t>(state_len) * R, 0.0f);
+      for (int64_t i = 0; i < num_reqs; ++i) {
+        const int32_t s = idxv[static_cast<size_t>(i)];
+        if (s < 0) continue;
+        for (int64_t c = 0; c < c_dim; ++c) {
+          const size_t base = static_cast<size_t>(s * c_dim + c);
+          for (int64_t j = 0; j < state_len; ++j) {
+            rm[base + static_cast<size_t>(j) * R] = j < keep[static_cast<size_t>(i)] ? 1.0f : 0.0f;
+            if (j >= keep[static_cast<size_t>(i)]) {
+              rx[base + static_cast<size_t>(j) * R] = static_cast<float>(
+                  x_base + lo[static_cast<size_t>(i)] + (j - keep[static_cast<size_t>(i)]));
+            }
+          }
+        }
+      }
+      n.roll_x = UploadTensor(std::move(rx), ttnn::Shape({usl, R}),
+                              ttnn::DataType::FLOAT32, ttnn::Layout::TILE,
+                              device);
+      n.roll_m = UploadTensor(std::move(rm), ttnn::Shape({usl, R}),
+                              ttnn::DataType::FLOAT32, ttnn::Layout::TILE,
+                              device);
+      // the non-owned-slot restore/keep masks (the decode kernel's mv/mk)
+      std::vector<float> mv(static_cast<size_t>(R), 0.0f), mk(static_cast<size_t>(R), 1.0f);
+      for (int32_t s : idxv) {
+        if (s < 0) continue;
+        for (int64_t c = 0; c < c_dim; ++c) {
+          mv[static_cast<size_t>(s * c_dim + c)] = 1.0f;
+          mk[static_cast<size_t>(s * c_dim + c)] = 0.0f;
+        }
+      }
+      n.mv = UploadTensor(std::move(mv), ttnn::Shape({1, R}),
+                          ttnn::DataType::FLOAT32, ttnn::Layout::TILE, device);
+      n.mk = UploadTensor(std::move(mk), ttnn::Shape({1, R}),
+                          ttnn::DataType::FLOAT32, ttnn::Layout::TILE, device);
+      // SRC's out-of-range zeros: the oracle's `src < state_len ? srow[src] :
+      // 0` guard — the roll's state part can read past the row when a short
+      // request's keep exceeds the window; those reads land in this block.
+      const uint32_t zrows = usl - static_cast<uint32_t>(width) + 1;
+      n.zeros_blk = ttnn::zeros(tt::tt_metal::Shape({zrows, R}),
+                                ttnn::DataType::FLOAT32, ttnn::Layout::TILE,
+                                std::ref(device));
+      n.idx = idxv;
+      n.cs = csv;
+      ConvSpecIdxMap()[key] = std::move(n);
+      e = ConvSpecIdxMap()[key];
+    }
+  }
+  // ---- the transposed shadow ----------------------------------------------
+  ttnn::Tensor T0 = EnsureConvStateTransposed(conv_state, uslots, uc, usl, device);
+  ttnn::Tensor T = T0;
+  // ---- x into slot-ordered rows [T, R] ------------------------------------
+  ttnn::Tensor xT;
+  {
+    ttnn::Tensor x_raw;
+    if (ServeDeviceShadowRaw(x, utok, uc, x_raw)) {
+      ttnn::Tensor x_f32 = x_raw.dtype() == ttnn::DataType::FLOAT32
+                               ? x_raw
+                               : ttnn::typecast(x_raw, ttnn::DataType::FLOAT32);
+      auto to_rm = [](ttnn::Tensor t) {
+        return t.layout() == ttnn::Layout::ROW_MAJOR
+                   ? t
+                   : ttnn::to_layout(t, ttnn::Layout::ROW_MAJOR);
+      };
+      ttnn::Tensor filled = ttnn::indexed_fill(
+          e.x_scatter,
+          ttnn::experimental::view(e.zeros_ts,
+                                   ttnn::Shape({utok * uslots, 1, 1, uc})),
+          ttnn::experimental::view(to_rm(x_f32),
+                                   ttnn::Shape({utok, 1, 1, uc})),
+          std::nullopt, /*dim=*/0);
+      xT = ttnn::to_layout(
+          ttnn::experimental::view(std::move(filled),
+                                   ttnn::Shape({utok, R})),
+          ttnn::Layout::TILE);
+    } else {
+      VT_CHECK(!tt_capture_active(),
+               "tenstorrent causal_conv1d_spec_update: x arrived without a "
+               "current device shadow during trace capture — the captured "
+               "arm reads device-resident activations only");
+      EnsureHost(x);
+      std::vector<float> xr(static_cast<size_t>(tokens) * R, 0.0f);
+      for (int64_t t = 0; t < tokens; ++t) {
+        int64_t req = num_reqs - 1;
+        for (int64_t i = 0; i < num_reqs; ++i) {
+          if (t >= csv[static_cast<size_t>(i)] && t < csv[static_cast<size_t>(i + 1)]) {
+            req = i;
+            break;
+          }
+        }
+        const int32_t s = idxv[static_cast<size_t>(req)];
+        if (s < 0) continue;  // NULL request: no x lands anywhere
+        for (int64_t c = 0; c < c_dim; ++c)
+          xr[static_cast<size_t>(t * R + s * c_dim + c)] =
+              LoadElemF32(x, t * x_rs + c);
+      }
+      xT = UploadTensor(std::move(xr), ttnn::Shape({utok, R}),
+                        ttnn::DataType::FLOAT32, ttnn::Layout::TILE, device);
+    }
+  }
+  // ---- the acceptance-derived indices (device side) ------------------------
+  // off_col[c] = num_accepted[owner(c)] - 1. All values are small integers,
+  // so the f32 arithmetic is exact and the f32->u32 typecast back is the
+  // identity on integral values.
+  //
+  // num_accepted_tokens is the ONE metadata whose content changes every
+  // verify step (the previous step's acceptance). Its host master is fresh
+  // (the driver's StageSpecStepInputs memcpy), so the eager arm reads it and
+  // re-uploads the tiny [nreq, 1] tile per call. A CAPTURED call refuses
+  // here, by name: tt-metal records no writes in-region ("Writes are not
+  // supported during trace capture"), and a capture-time upload would replay
+  // one step's acceptance forever — silently advancing every later verify by
+  // a stale prefix. The named gap is the driver-side persistent-device
+  // refresh (the WarmRopeCosSin copy_to_device pattern) this op is shaped to
+  // consume the moment it lands.
+  VT_CHECK(!tt_capture_active(),
+           "tenstorrent causal_conv1d_spec_update: the acceptance metadata "
+           "has no persistent device refresh on this backend — the captured "
+           "arm would replay one step's num_accepted forever. Named gap: the "
+           "driver's TT spec-metadata in-place device refresh (the "
+           "WarmRopeCosSin copy_to_device pattern); until it lands the spec "
+           "verify runs on the eager arm (VLLM_CPP_CUDAGRAPH=0).");
+  EnsureHost(num_accepted_tokens);
+  const int32_t* np = num_accepted_tokens.Ptr<int32_t>();
+  std::vector<float> nat_host(static_cast<size_t>(num_reqs));
+  for (int64_t i = 0; i < num_reqs; ++i)
+    nat_host[static_cast<size_t>(i)] = static_cast<float>(np[i]);
+  ttnn::Tensor nat_f32 = UploadTensor(
+      std::move(nat_host), ttnn::Shape({static_cast<uint32_t>(num_reqs), 1}),
+      ttnn::DataType::FLOAT32, ttnn::Layout::TILE, device);
+  ttnn::Tensor off_col =
+      ttnn::gather(nat_f32, /*dim=*/0, e.owner_idx, /*sparse_grad=*/false, std::nullopt);
+  off_col = ttnn::subtract(std::move(off_col), 1.0f);  // [R, 1] f32
+  // state-window gather index: row j reads shadow row off_c + j — the
+  // gather's per-column semantics carries the column, so the index VALUE is
+  // the ROW number alone (flat row*R+col addressing would read rows the
+  // shadow does not have). Built as width blocks [R, 1] -> [1, R],
+  // concatenated j-major.
+  ttnn::Tensor stat_idx;
+  {
+    std::vector<ttnn::Tensor> rows;
+    rows.reserve(static_cast<size_t>(width));
+    for (int64_t j = 0; j < width; ++j) {
+      ttnn::Tensor rj = ttnn::add(off_col, static_cast<float>(j));    // [R, 1]
+      rows.push_back(ttnn::transpose(std::move(rj), 0, 1));           // [1, R]
+    }
+    stat_idx = ttnn::typecast(ttnn::concat(std::move(rows), /*dim=*/0),
+                              ttnn::DataType::UINT32);  // [width, R]
+  }
+  ttnn::Tensor statG =
+      ttnn::gather(T, /*dim=*/0, stat_idx, /*sparse_grad=*/false, std::nullopt);
+  // ---- the stream + the MAC ----------------------------------------------
+  // xT stays alive: the state commit's SRC concat reads it again below (the
+  // handles are refcounted — pass it by value here).
+  ttnn::Tensor S = ttnn::concat(std::vector<ttnn::Tensor>{std::move(statG), xT},
+                                /*dim=*/0);  // [width + T, R]
+  const uint32_t utaps = static_cast<uint32_t>(k);
+  ttnn::Tensor Wt = CachedTile(
+      w.data, utaps, R, 0,
+      [&w, utaps, R, uslots, uc, k] {
+        EnsureHost(w);
+        std::vector<float> wh(static_cast<size_t>(utaps) * R);
+        for (uint32_t j = 0; j < utaps; ++j)
+          for (uint32_t s = 0; s < uslots; ++s)
+            for (uint32_t c = 0; c < uc; ++c)
+              wh[static_cast<size_t>(j) * R + s * uc + c] =
+                  LoadElemF32(w, static_cast<int64_t>(c) * k + j);
+        return wh;
+      },
+      ttnn::Shape({utaps, R}), device);
+  ttnn::Tensor acc = bias != nullptr
+                         ? CachedTile(
+                               bias->data, R, 0, 0,
+                               [bias, R, uslots, uc] {
+                                 EnsureHost(*bias);
+                                 std::vector<float> bh(static_cast<size_t>(R));
+                                 for (uint32_t s = 0; s < uslots; ++s)
+                                   for (uint32_t c = 0; c < uc; ++c)
+                                     bh[static_cast<size_t>(s) * uc + c] =
+                                         LoadElemF32(*bias, c);
+                                 return bh;
+                               },
+                               ttnn::Shape({1, R}), device)
+                         : CachedAccBase(R, device);
+  // Exact accumulation in the oracle's order: bias first, then taps 0..K-1
+  // (one exact multiply + one add per tap — the decode kernel's discipline).
+  for (int64_t j = 0; j < k; ++j) {
+    ttnn::Tensor mac_j = ttnn::slice(
+        e.mac_idx, ttsl::SmallVector<uint32_t>{static_cast<uint32_t>(j * tokens), 0u},
+        ttsl::SmallVector<uint32_t>{static_cast<uint32_t>((j + 1) * tokens),
+                                    static_cast<uint32_t>(R)},
+        ttsl::SmallVector<uint32_t>{1u, 1u});  // [T, R] u32
+    ttnn::Tensor src_j =
+        ttnn::gather(S, /*dim=*/0, mac_j, /*sparse_grad=*/false, std::nullopt);
+    ttnn::Tensor wj = ttnn::slice(
+        Wt, ttsl::SmallVector<uint32_t>{static_cast<uint32_t>(j), 0u},
+        ttsl::SmallVector<uint32_t>{static_cast<uint32_t>(j + 1),
+                                    static_cast<uint32_t>(R)},
+        ttsl::SmallVector<uint32_t>{1u, 1u});  // [1, R]
+    acc = ttnn::add(std::move(acc), ttnn::multiply(std::move(src_j), std::move(wj)));
+  }
+  ttnn::Tensor y = args.silu_activation ? ttnn::silu(acc) : acc;  // [T, R]
+  // ---- the out select ------------------------------------------------------
+  if (!has_null) {
+    // yT[r, t] = y[t, r]; the select reads row s_i*C + c per (c, t) — one
+    // exact dim-0 gather with the cached per-column index, then the
+    // transpose back to the out's [T, C] order.
+    ttnn::Tensor yT = ttnn::transpose(y, 0, 1);  // [R, T]
+    ttnn::Tensor sel = ttnn::gather(yT, /*dim=*/0, e.osel_idx,
+                                    /*sparse_grad=*/false, std::nullopt);
+    ttnn::Tensor o = ttnn::transpose(sel, 0, 1);  // [T, C]
+    CommitDeviceLogical2D(out, std::move(o), utok, uc);
+  } else {
+    // Eager-only (NULL rows never capture): the oracle leaves a NULL
+    // request's out rows untouched, so the select runs on the host against
+    // the out buffer's current bytes.
+    EnsureHost(out);
+    std::vector<float> yv = y.to_vector<float>();
+    for (int64_t t = 0; t < tokens; ++t) {
+      int64_t req = num_reqs - 1;
+      for (int64_t i = 0; i < num_reqs; ++i) {
+        if (t >= csv[static_cast<size_t>(i)] && t < csv[static_cast<size_t>(i + 1)]) {
+          req = i;
+          break;
+        }
+      }
+      const int32_t s = idxv[static_cast<size_t>(req)];
+      if (s < 0) continue;  // NULL request: out keeps its previous bytes
+      for (int64_t c = 0; c < c_dim; ++c)
+        StoreElemF32(out, t * c_dim + c,
+                     yv[static_cast<size_t>(t * R + s * c_dim + c)]);
+    }
+    CommitHost(out);
+  }
+  // ---- the state commit ----------------------------------------------------
+  // SRC = [T0 | zeros | xT]: the zeros block absorbs the out-of-range state
+  // reads (the oracle's `src < state_len` guard), the x part follows it.
+  ttnn::Tensor SRC = ttnn::concat(
+      std::vector<ttnn::Tensor>{T, e.zeros_blk, xT}, /*dim=*/0);
+  // The roll's state-part rows (device-derived from num_accepted — the
+  // value that changes every verify step): row j reads SRC row off_c + j + 1
+  // (a row number; SRC = [T0 | zeros | xT], so a read past the shadow's taps
+  // lands in the zeros block — the oracle's `src < state_len ? srow[src] :
+  // 0` guard, no clamp op needed).
+  ttnn::Tensor roll_state;
+  {
+    std::vector<ttnn::Tensor> rows;
+    rows.reserve(static_cast<size_t>(state_len));
+    for (int64_t j = 0; j < state_len; ++j) {
+      ttnn::Tensor rj = ttnn::add(off_col, static_cast<float>(j + 1));  // [R, 1]
+      rows.push_back(ttnn::transpose(std::move(rj), 0, 1));  // [1, R]
+    }
+    roll_state = ttnn::concat(std::move(rows), /*dim=*/0);  // [sl, R] f32
+  }
+  // The exact 0/1 mux: (state - x) * m + x — m = 1 reads the state part,
+  // m = 0 the x part; integral-valued f32 makes every product and sum exact.
+  ttnn::Tensor roll_f = ttnn::add(
+      ttnn::multiply(ttnn::subtract(std::move(roll_state), e.roll_x), e.roll_m),
+      e.roll_x);
+  ttnn::Tensor rolled = ttnn::gather(
+      SRC, /*dim=*/0, ttnn::typecast(std::move(roll_f), ttnn::DataType::UINT32),
+      /*sparse_grad=*/false, std::nullopt);  // [sl, R]
+  // The non-participating slots keep their bytes (the exact 0/1 blend back
+  // to the pre-step shadow's state rows).
+  ttnn::Tensor T_state = ttnn::slice(
+      T, ttsl::SmallVector<uint32_t>{0u, 0u},
+      ttsl::SmallVector<uint32_t>{usl, static_cast<uint32_t>(R)},
+      ttsl::SmallVector<uint32_t>{1u, 1u});  // [sl, R]
+  rolled = ttnn::add(ttnn::multiply(std::move(rolled), e.mv),
+                     ttnn::multiply(std::move(T_state), e.mk));
+  // bf16 STORAGE semantics (SupportsCompressedConvState, cuda_backend.cu:119):
+  // every value that enters the cache rounds through bf16 at the store
+  // boundary (the decode kernel's discipline, tenstorrent_gdn.cpp:2437).
+  if (conv_state.dtype == DType::kBF16) {
+    rolled = ttnn::typecast(ttnn::typecast(std::move(rolled), ttnn::DataType::BFLOAT16),
+                            ttnn::DataType::FLOAT32);
+  }
+  // Rebuild the [sl+1, R] shadow: the committed rows + a fresh scratch row
+  // (never read before the next step overwrites it).
+  ttnn::Tensor new_shadow = ttnn::concat(
+      std::vector<ttnn::Tensor>{std::move(rolled), CachedAccBase(R, device)},
+      /*dim=*/0);
+  // TT-GDN-REGION-REPLAY: commit INTO the persistent shadow (ttnn::copy —
+  // the capture-safe preallocated-destination write) so the trace's next
+  // slice reads the advanced window at the SAME address.
+  if (new_shadow.dtype() == T0.dtype() && new_shadow.layout() == T0.layout()) {
+    const auto sr = new_shadow.logical_shape(), s0 = T0.logical_shape();
+    bool same = sr.rank() == s0.rank();
+    for (uint32_t r = 0; same && r < sr.rank(); ++r) same = sr[r] == s0[r];
+    if (same) {
+      ttnn::copy(new_shadow, T0);
+      CommitConvTransposed(conv_state, std::move(T0), uslots, uc, usl);
+      return;
+    }
+  }
+  CommitConvTransposed(conv_state, std::move(new_shadow), uslots, uc, usl);
+}
+
 
 
 }  // namespace vt::tenstorrent

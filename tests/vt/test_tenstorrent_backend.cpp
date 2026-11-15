@@ -4030,6 +4030,321 @@ TEST_CASE("kTENSTORRENT kCausalConv1dUpdate matches the CPU f32 oracle (read-old
   }
 }
 
+// ==== QWEN38-DFLASH2-STAGE-C W3: the SPECULATIVE conv window update vs the
+// CPU f32 oracle. Same doctrine as the decode block above: identical inputs,
+// both arms run the public vt:: op on their own backend. Before the kernel
+// landed, Resolve refused BY NAME on the TT arm — that refusal is this
+// block's red state (and the e2e loop's: w3-bfp32.log).
+//
+// The spec step differs from the decode step in the two things the oracle
+// names: the window is read at offset num_accepted-1 (per request), and the
+// committed row is old[off+1..off+keep] ++ x — the one-tap left shift that
+// IS the conv rollback. Sweeps: the captured shape (one request, seqlen ==
+// max_query_len), a rolling continuation (the next step's window must read
+// the committed row), mixed seqlens (a short request's keep exceeds the
+// window — the out-of-range guard), a NULL slot (out keeps its previous
+// bytes, the slot is untouched), and the bf16-state storage arm (emulated
+// oracle: the CPU arm refuses bf16 — the CPU backend does not answer
+// SupportsCompressedConvState — so the reference rounds the state through
+// bf16 per step, the same emulation the decode test's bf16 arm runs).
+TEST_CASE("kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (widened window, accepted-prefix offset, NULL + mixed seqlens + bf16 state)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& cpu = *vt::TryGetBackend(DeviceType::kCPU);
+  constexpr int64_t C = 64, K = 4;  // conv dim / kernel width (Qwen GDN: K=4)
+
+  // One spec step on a given starting conv_state (host bytes in `st`).
+  // `seqlens` gives each request's token count (sum == rows of x); `nat` and
+  // `idx` are per request. Returns out; `st` is updated.
+  auto step = [&](Backend& b, DeviceType dt, int64_t state_len, bool silu,
+                  bool bf16_state, std::vector<float>& st,
+                  const std::vector<float>& x, const std::vector<float>& w,
+                  const std::vector<float>& bias, const std::vector<int32_t>& idx,
+                  const std::vector<int32_t>& nat, const std::vector<int32_t>& cs,
+                  std::vector<float>& out) {
+    const int64_t T = cs.back();
+    const int64_t nreq = static_cast<int64_t>(idx.size());
+    void* mx = b.Alloc(x.size() * sizeof(float));
+    void* mw = b.Alloc(w.size() * sizeof(float));
+    void* mb = bias.empty() ? nullptr : b.Alloc(bias.size() * sizeof(float));
+    void* ms = b.Alloc(st.size() * (bf16_state ? sizeof(uint16_t) : sizeof(float)));
+    void* mo = b.Alloc(out.size() * sizeof(float));
+    void* mi = b.Alloc(idx.size() * sizeof(int32_t));
+    void* mn = b.Alloc(nat.size() * sizeof(int32_t));
+    void* mq = b.Alloc(cs.size() * sizeof(int32_t));
+    Queue q = b.CreateQueue();
+    b.Copy(q, mx, x.data(), x.size() * sizeof(float));
+    b.Copy(q, mw, w.data(), w.size() * sizeof(float));
+    if (mb != nullptr) b.Copy(q, mb, bias.data(), bias.size() * sizeof(float));
+    if (bf16_state) {
+      // The state tensor is bf16: round the host f32 through bf16 (RNE), the
+      // storage the oracle's f32 reference is checked against.
+      std::vector<uint16_t> st_bits(st.size());
+      for (size_t i = 0; i < st.size(); ++i)
+        st_bits[i] = vt::F32ToBF16(st[i]);
+      b.Copy(q, ms, st_bits.data(), st_bits.size() * sizeof(uint16_t));
+    } else {
+      b.Copy(q, ms, st.data(), st.size() * sizeof(float));
+    }
+    b.Copy(q, mo, out.data(), out.size() * sizeof(float));
+    b.Copy(q, mi, idx.data(), idx.size() * sizeof(int32_t));
+    b.Copy(q, mn, nat.data(), nat.size() * sizeof(int32_t));
+    b.Copy(q, mq, cs.data(), cs.size() * sizeof(int32_t));
+    // x is fed as a PADDED-row view (the merged qkvz slice the contract
+    // admits): outer stride C+8, garbage in the pad.
+    const int64_t x_row = C, pad = 8;
+    std::vector<float> xp(static_cast<size_t>(T * (x_row + pad)), 0.0f);
+    for (int64_t i = 0; i < T; ++i)
+      for (int64_t c = 0; c < C; ++c)
+        xp[static_cast<size_t>(i * (x_row + pad) + c)] = x[static_cast<size_t>(i * C + c)];
+    void* mxp = b.Alloc(xp.size() * sizeof(float));
+    b.Copy(q, mxp, xp.data(), xp.size() * sizeof(float));
+    Tensor tx{};
+    tx.data = mxp;
+    tx.dtype = vt::DType::kF32;
+    tx.device = Device{dt, 0};
+    tx.rank = 2;
+    tx.shape[0] = T;
+    tx.shape[1] = C;
+    tx.stride[0] = x_row + pad;
+    tx.stride[1] = 1;
+    Tensor tw = Tensor::Contiguous(mw, vt::DType::kF32, Device{dt, 0}, {C, K});
+    Tensor tb{};
+    if (mb != nullptr) tb = Tensor::Contiguous(mb, vt::DType::kF32, Device{dt, 0}, {C});
+    const int64_t slots = st.size() / static_cast<size_t>(C * state_len);
+    Tensor ts = Tensor::Contiguous(ms, bf16_state ? vt::DType::kBF16 : vt::DType::kF32,
+                                   Device{dt, 0}, {slots, C, state_len});
+    Tensor ti = Tensor::Contiguous(mi, vt::DType::kI32, Device{dt, 0}, {nreq});
+    Tensor tn = Tensor::Contiguous(mn, vt::DType::kI32, Device{dt, 0}, {nreq});
+    Tensor tq = Tensor::Contiguous(mq, vt::DType::kI32, Device{dt, 0},
+                                   {static_cast<int64_t>(cs.size())});
+    Tensor to = Tensor::Contiguous(mo, vt::DType::kF32, Device{dt, 0}, {T, C});
+    vt::CausalConv1dArgs args;
+    args.silu_activation = silu;
+    vt::CausalConv1dSpecUpdate(q, to, tx, tw, mb != nullptr ? &tb : nullptr, ts, ti,
+                               tn, tq, args);
+    b.Copy(q, out.data(), mo, out.size() * sizeof(float));
+    if (bf16_state) {
+      // Storage truth: download the bf16 cache and widen back — the next
+      // step's window reads the STORED bits (the bf16-state arm's contract).
+      std::vector<uint16_t> got_bits(st.size(), 0);
+      b.Copy(q, got_bits.data(), ms, got_bits.size() * sizeof(uint16_t));
+      for (size_t i = 0; i < st.size(); ++i) st[i] = vt::BF16ToF32(got_bits[i]);
+    } else {
+      b.Copy(q, st.data(), ms, st.size() * sizeof(float));
+    }
+    b.Free(mx);
+    b.Free(mw);
+    if (mb != nullptr) b.Free(mb);
+    b.Free(ms);
+    b.Free(mo);
+    b.Free(mi);
+    b.Free(mn);
+    b.Free(mq);
+    b.Free(mxp);
+  };
+
+  // --- Sweep A: the captured shape — one request, seqlen == max_query_len
+  // (state_len = (K-1)+(mql-1)), fresh state, silu x bias on/off.
+  {
+    const int64_t mql = 9, state_len = (K - 1) + (mql - 1), T = mql, slots = 4;
+    for (int silu : {0, 1}) {
+      for (int has_bias : {0, 1}) {
+        uint32_t s = 63000u + static_cast<uint32_t>(silu * 17 + has_bias);
+        std::vector<float> w(static_cast<size_t>(C * K)), bias;
+        std::vector<float> st(static_cast<size_t>(slots * C * state_len)),
+            x(static_cast<size_t>(T * C));
+        for (float& v : w) v = 0.4f * GdnLcg(s);
+        for (float& v : st) v = GdnLcg(s);
+        for (float& v : x) v = 2.0f * GdnLcg(s);
+        if (has_bias) {
+          bias.resize(static_cast<size_t>(C));
+          for (float& v : bias) v = 0.1f * GdnLcg(s);
+        }
+        const std::vector<int32_t> idx{2};  // slot 2 of 4: a non-zero offset
+        const std::vector<int32_t> nat{mql};
+        const std::vector<int32_t> cs{0, static_cast<int32_t>(T)};
+        std::vector<float> st_cpu = st, st_tt = st;
+        std::vector<float> out_cpu(static_cast<size_t>(T * C), 0.0f),
+            out_tt(static_cast<size_t>(T * C), 0.0f);
+        step(cpu, DeviceType::kCPU, state_len, silu != 0, false, st_cpu, x, w, bias,
+             idx, nat, cs, out_cpu);
+        step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+             state_len, silu != 0, false, st_tt, x, w, bias, idx, nat, cs, out_tt);
+        GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 1e-4f, 1e-5f);
+        MESSAGE("kCausalConv1dSpecUpdate captured-shape silu=", silu,
+                " bias=", has_bias, ": out max_abs=", d.max_abs,
+                " max_rel=", d.max_rel);
+        CHECK(std::isfinite(d.max_abs));
+        CHECK(d.within);
+        GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 1e-4f, 1e-5f);
+        MESSAGE("kCausalConv1dSpecUpdate captured-shape silu=", silu,
+                " bias=", has_bias, ": conv_state max_abs=", ds.max_abs,
+                " max_rel=", ds.max_rel);
+        CHECK(std::isfinite(ds.max_abs));
+        CHECK(ds.within);
+      }
+    }
+  }
+
+  // --- Sweep B: rolling continuation — three spec steps; each step's window
+  // must read the row the previous step committed (the rollback identity).
+  {
+    const int64_t mql = 9, state_len = (K - 1) + (mql - 1), T = mql, slots = 2;
+    uint32_t s = 63100u;
+    std::vector<float> w(static_cast<size_t>(C * K)), bias(static_cast<size_t>(C));
+    for (float& v : w) v = 0.4f * GdnLcg(s);
+    for (float& v : bias) v = 0.1f * GdnLcg(s);
+    std::vector<float> st(static_cast<size_t>(slots * C * state_len));
+    for (float& v : st) v = GdnLcg(s);
+    const std::vector<int32_t> idx{1};
+    const std::vector<int32_t> cs{0, static_cast<int32_t>(T)};
+    for (int step_i = 0; step_i < 3; ++step_i) {
+      std::vector<float> x(static_cast<size_t>(T * C));
+      for (float& v : x) v = 2.0f * GdnLcg(s);
+      const std::vector<int32_t> nat{static_cast<int32_t>(1 + (step_i % mql))};  // acceptance varies
+      std::vector<float> st_cpu = st, st_tt = st;
+      std::vector<float> out_cpu(static_cast<size_t>(T * C), 0.0f),
+          out_tt(static_cast<size_t>(T * C), 0.0f);
+      step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu, x, w, bias, idx,
+           nat, cs, out_cpu);
+      step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+           state_len, true, false, st_tt, x, w, bias, idx, nat, cs, out_tt);
+      GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 1e-4f, 1e-5f);
+      MESSAGE("kCausalConv1dSpecUpdate continuation step=", step_i,
+              " nat=", nat[0], ": out max_abs=", d.max_abs, " max_rel=", d.max_rel);
+      CHECK(std::isfinite(d.max_abs));
+      CHECK(d.within);
+      GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 1e-4f, 1e-5f);
+      MESSAGE("kCausalConv1dSpecUpdate continuation step=", step_i,
+              " nat=", nat[0], ": conv_state max_abs=", ds.max_abs,
+              " max_rel=", ds.max_rel);
+      CHECK(std::isfinite(ds.max_abs));
+      CHECK(ds.within);
+      st = st_tt;
+    }
+  }
+
+  // --- Sweep C: two requests with MIXED seqlens (one short: keep exceeds
+  // the window, the out-of-range guard engages) and distinct slots.
+  {
+    const int64_t mql = 9, state_len = (K - 1) + (mql - 1), slots = 4;
+    const int64_t T = 9;  // seqlens 9 + 0? no: 6 + 3
+    uint32_t s = 63200u;
+    std::vector<float> w(static_cast<size_t>(C * K)), bias(static_cast<size_t>(C));
+    for (float& v : w) v = 0.4f * GdnLcg(s);
+    for (float& v : bias) v = 0.1f * GdnLcg(s);
+    std::vector<float> st(static_cast<size_t>(slots * C * state_len));
+    for (float& v : st) v = GdnLcg(s);
+    std::vector<float> x(static_cast<size_t>(T * C));
+    for (float& v : x) v = 2.0f * GdnLcg(s);
+    const std::vector<int32_t> idx{1, 3};
+    const std::vector<int32_t> nat{4, 9};
+    const std::vector<int32_t> cs{0, 6, 9};  // request 0: 6 tokens, request 1: 3
+    std::vector<float> st_cpu = st, st_tt = st;
+    std::vector<float> out_cpu(static_cast<size_t>(T * C), 0.0f),
+        out_tt(static_cast<size_t>(T * C), 0.0f);
+    step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu, x, w, bias, idx, nat,
+         cs, out_cpu);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+         state_len, true, false, st_tt, x, w, bias, idx, nat, cs, out_tt);
+    GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 1e-4f, 1e-5f);
+    MESSAGE("kCausalConv1dSpecUpdate mixed-seqlen: out max_abs=", d.max_abs,
+            " max_rel=", d.max_rel);
+    CHECK(std::isfinite(d.max_abs));
+    CHECK(d.within);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 1e-4f, 1e-5f);
+    MESSAGE("kCausalConv1dSpecUpdate mixed-seqlen: conv_state max_abs=", ds.max_abs,
+            " max_rel=", ds.max_rel);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+  }
+
+  // --- Sweep D: a NULL slot (idx<0) — out keeps its previous bytes, the slot
+  // is untouched. Eager-only shape (NULL rows never capture).
+  {
+    const int64_t mql = 9, state_len = (K - 1) + (mql - 1), T = mql, slots = 3;
+    uint32_t s = 63300u;
+    std::vector<float> w(static_cast<size_t>(C * K));
+    for (float& v : w) v = 0.4f * GdnLcg(s);
+    std::vector<float> st(static_cast<size_t>(slots * C * state_len));
+    for (float& v : st) v = GdnLcg(s);
+    std::vector<float> x(static_cast<size_t>(T * C));
+    for (float& v : x) v = 2.0f * GdnLcg(s);
+    const std::vector<int32_t> idx{-1};
+    const std::vector<int32_t> nat{mql};
+    const std::vector<int32_t> cs{0, static_cast<int32_t>(T)};
+    // Seed BOTH out buffers with a known pattern: the NULL request's rows
+    // must come back byte-identical.
+    std::vector<float> prev(static_cast<size_t>(T * C));
+    for (float& v : prev) v = 3.0f * GdnLcg(s);
+    std::vector<float> st_cpu = st, st_tt = st;
+    std::vector<float> out_cpu = prev, out_tt = prev;
+    step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu, x, w, {}, idx, nat,
+         cs, out_cpu);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+         state_len, true, false, st_tt, x, w, {}, idx, nat, cs, out_tt);
+    size_t out_mism = 0;
+    for (size_t i = 0; i < prev.size(); ++i)
+      if (out_tt[i] != prev[i] || out_cpu[i] != prev[i]) ++out_mism;
+    MESSAGE("kCausalConv1dSpecUpdate NULL-slot: out byte mismatches=", out_mism,
+            "/", prev.size());
+    CHECK(out_mism == 0);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 1e-4f, 1e-5f);
+    MESSAGE("kCausalConv1dSpecUpdate NULL-slot: conv_state max_abs=", ds.max_abs,
+            " max_rel=", ds.max_rel);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+  }
+
+  // --- Sweep E: bf16 conv_state (the production mamba_cache_dtype) — the
+  // storage-round arm. The reference is the EMULATED oracle: the CPU op on an
+  // f32 copy with the state rounded through bf16 per step (the CPU backend
+  // does not answer SupportsCompressedConvState, so it refuses bf16 state).
+  {
+    const int64_t mql = 9, state_len = (K - 1) + (mql - 1), T = mql, slots = 2;
+    uint32_t s = 63400u;
+    std::vector<float> w(static_cast<size_t>(C * K));
+    for (float& v : w) v = 0.4f * GdnLcg(s);
+    std::vector<float> st(static_cast<size_t>(slots * C * state_len));
+    for (float& v : st) v = GdnLcg(s);
+    const std::vector<int32_t> idx{1};
+    const std::vector<int32_t> cs{0, static_cast<int32_t>(T)};
+    const std::vector<int32_t> nat{mql};
+    std::vector<float> x(static_cast<size_t>(T * C));
+    for (float& v : x) v = 2.0f * GdnLcg(s);
+    std::vector<float> st_cpu = st, st_tt = st;
+    // The storage truth on BOTH sides: the cache is bf16, so the state the
+    // step READS is the bf16-rounded values (widened back), not the host
+    // f32 the test generated. The commit then rounds again (the TT arm at
+    // its shadow commit; the emulation below).
+    for (float& v : st_cpu) v = vt::BF16ToF32(vt::F32ToBF16(v));
+    for (float& v : st_tt) v = vt::BF16ToF32(vt::F32ToBF16(v));
+    std::vector<float> out_cpu(static_cast<size_t>(T * C), 0.0f),
+        out_tt(static_cast<size_t>(T * C), 0.0f);
+    // The emulated oracle: the CPU step on the bf16-rounded state, then
+    // round the committed state through bf16 again (the storage boundary
+    // the TT arm honors at its commit).
+    step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu, x, w, {}, idx, nat,
+         cs, out_cpu);
+    for (float& v : st_cpu) v = vt::BF16ToF32(vt::F32ToBF16(v));
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+         state_len, true, true, st_tt, x, w, {}, idx, nat, cs, out_tt);
+    GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 1e-4f, 1e-5f);
+    MESSAGE("kCausalConv1dSpecUpdate bf16-state: out max_abs=", d.max_abs,
+            " max_rel=", d.max_rel);
+    CHECK(std::isfinite(d.max_abs));
+    CHECK(d.within);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 1e-4f, 1e-5f);
+    MESSAGE("kCausalConv1dSpecUpdate bf16-state: conv_state max_abs=", ds.max_abs,
+            " max_rel=", ds.max_rel);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+  }
+}
+
 TEST_CASE("kTENSTORRENT kGdnDecode matches the CPU f32 oracle (rank-1 step, both state_idx forms, NULL slot)") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");

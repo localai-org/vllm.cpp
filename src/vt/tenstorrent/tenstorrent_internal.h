@@ -764,6 +764,12 @@ void CausalConv1dUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor
                               const Tensor* bias, Tensor& conv_state,
                               const Tensor* conv_state_indices,
                               const CausalConv1dArgs& args);
+void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& w,
+                                  const Tensor* bias, Tensor& conv_state,
+                                  const Tensor& conv_state_indices,
+                                  const Tensor& num_accepted_tokens,
+                                  const Tensor& cu_seqlens,
+                                  const CausalConv1dArgs& args);
 ttnn::Tensor EnsureEmbedTableDevice(const Tensor& table, MeshDevice& device);
 ttnn::Tensor EnsureAffine1D(const Tensor& t, uint32_t d, MeshDevice& device);
 bool ServeDeviceShadowRaw(const Tensor& t, uint32_t rows, uint32_t cols,
