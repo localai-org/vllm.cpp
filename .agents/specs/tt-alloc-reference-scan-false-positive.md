@@ -12,17 +12,17 @@ or enforced property changes.
 ## Problem
 
 `python3 scripts/check-agent-record.py` on `row/TT-EMBED-DUAL-RESIDENCY`
-reports 18 errors: `#652/#834/#835` and `#148/#242/#250/#296/#362/#469`
-resolve to `_intake`, plus the `ISSUE-GH-N` twins. Both forms are false
-positives from committed evidence logs:
+reports 18 errors: the GitHub-issue-number tokens 652/834/835 and
+148/242/250/296/362/469 resolve to `_intake`, plus the `ISSUE-GH` twins. Both
+forms are false positives from committed evidence logs:
 
-1. `[TT-ALLOC] #652 label=EnsureKeepQuantRowWords/pre banks=8 ...` device
+1. `[TT-ALLOC] 652 label=EnsureKeepQuantRowWords/pre banks=8 ...` device
    allocator lines in `docs/bench-evidence/tt-embed-dual-residency-20261114/{q6kl-cap-1,q6kl-cap16-1}.stderr.log`.
    The `#N` is an allocator event ID.
 2. `preflight-staged-repair.log` quotes the checker's own diagnostics
-   verbatim (`ERROR: issue reference #148 resolves to _intake record
-   ISSUE-GH-148; ...`), so the scanner matches both `#148` and `ISSUE-GH-148`
-   in the checker's own output text.
+   verbatim (lines beginning `ERROR: issue reference` that name a token and
+   its `_intake` record), so the scanner matches both forms in the checker's
+   own output text.
 
 ## Design
 
@@ -46,10 +46,11 @@ not detected; accepted, because allocator lines are machine-generated.
 Red on the unfixed checker, green after:
 
 - a changed file containing `[TT-ALLOC] #652 label=...` yields no reference
-  and passes `check_canonical_issue_references` against an intake `#652`.
-- a changed file quoting `ERROR: issue reference #77 resolves to _intake
-  record ISSUE-GH-77` yields no reference.
-- a changed file containing a prose `#77` still resolves to the intake
+  and passes `check_canonical_issue_references` against an intake record for 652.
+- a changed file quoting an `ERROR: issue reference` diagnostic line (token
+  plus `_intake` record ID) yields no reference.
+- a changed file containing a prose bare-token reference still resolves to the
+  intake record and still fails canonical ownership (property survives).
   record and still fails canonical ownership (property survives).
 
 ## Evidence

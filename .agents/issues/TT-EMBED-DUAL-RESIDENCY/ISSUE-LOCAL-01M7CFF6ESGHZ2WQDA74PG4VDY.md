@@ -66,3 +66,11 @@ TT-STAGING-FOOTPRINT's W3 recorded the captured-arm serving gap (~80 MB trace-re
   (tightest `total_free=2,634,189,824 B`, ~2.5 GB/bank-set freed, no OOM);
   `test_gguf_keep_quant` 63/63 cases, 12205/12205 assertions. Row stays
   OPEN for the fresh-review cycle.
+
+2026-11-15: the 18 `check-agent-record` errors seen on this branch (the
+nine bare-token GitHub numbers plus their ISSUE-GH twins resolving to
+`_intake`) were a checker false positive, not row debt: allocator event
+IDs in the committed `[TT-ALLOC]` stderr evidence and the checker's own
+diagnostics quoted verbatim in preflight-staged-repair.log. Fixed in-flow
+under ISSUE-LOCAL-01M7EJAFM401RJRNXD49S6QPWB; the checker is green on
+this branch with the evidence logs intact.

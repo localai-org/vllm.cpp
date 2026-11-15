@@ -1,0 +1,43 @@
+NOTE: bare issue-number tokens on non-diagnostic lines are masked here (652, 77) so this evidence log is itself scannable; the red-before failure text is otherwise verbatim unittest output.
+FF.
+======================================================================
+FAIL: test_allocator_log_lines_are_not_issue_references (tests.scripts.test_agent_record.CanonicalIssueReferenceTests.test_allocator_log_lines_are_not_issue_references)
+[TT-ALLOC] #N is an allocator event ID, not an issue reference.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/tt-embed/tests/scripts/test_agent_record.py", line 2324, in test_allocator_log_lines_are_not_issue_references
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        agent_record.issue_references_in_text(text, path=Path("run.stderr.log")),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        set(),
+        ^^^^^^
+    )
+    ^
+AssertionError: Items in the first set but not the second:
+'77'
+'652'
+
+======================================================================
+FAIL: test_quoted_checker_diagnostics_are_not_issue_references (tests.scripts.test_agent_record.CanonicalIssueReferenceTests.test_quoted_checker_diagnostics_are_not_issue_references)
+A changed file quoting the checker's own output cites nothing.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/tt-embed/tests/scripts/test_agent_record.py", line 2349, in test_quoted_checker_diagnostics_are_not_issue_references
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        agent_record.issue_references_in_text(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        set(),
+        ^^^^^^
+    )
+    ^
+AssertionError: Items in the first set but not the second:
+'77'
+'ISSUE-GH record ID (masked)'
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+FAILED (failures=2)
