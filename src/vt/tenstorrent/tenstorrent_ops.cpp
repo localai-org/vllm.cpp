@@ -157,11 +157,18 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   const std::optional<ttnn::DataType> out_dt =
       out.dtype == DType::kF32 ? std::optional(ttnn::DataType::FLOAT32)
                                : std::nullopt;
+  // The exactness arm for BOTH output dtypes. The bf16-out arm previously ran
+  // the ttnn default config (LoFi fidelity, bf16 partial accumulation — the
+  // W3 noise map's 2.3e-2 rel_rms per GEMM), which the drafter's 5-layer
+  // forward amplifies: QWEN38-DFLASH2-STAGE-C W2 measured the 8-row block
+  // forward at row PCC 0.72-0.97 against the bundle reference on this arm,
+  // and at the bundle's own band on the exactness arm — the bundle's own
+  // compute kernel config IS HiFi4 + fp32_dest_acc_en (dflash2.py CKC), so
+  // this is parity, not tuning.
   ttnn::Tensor dev_c = ttnn::operations::matmul::matmul(
       dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/true,
       /*memory_config=*/std::nullopt, out_dt, /*program_config=*/std::nullopt,
-      /*activation=*/std::nullopt,
-      out_dt ? F32AccKernelConfig() : std::nullopt);
+      /*activation=*/std::nullopt, F32AccKernelConfig());
   CommitDevice2D(out, std::move(dev_c));
 }
 
@@ -1112,6 +1119,216 @@ void CastF32Kernel(Queue&, Tensor& out, const Tensor& in) {
 // gained external linkage and tenstorrent_internal.h declarations, and a
 // declaration left inside this anonymous namespace would name a distinct,
 // never-defined internal entity that shadows them.)
+// kDFlashGroupedConv: the DFlash2 draft's GROUPED DYNAMIC CONV on Tenstorrent
+// (QWEN38-DFLASH2-STAGE-C W2). The op was CUDA/CPU-only until this row — the
+// drafter forward could not run on the P150 at all ("no kernel for op
+// DFlashGroupedConv ... on device tenstorrent"), which is exactly the missing
+// piece W2 owns. The math is the CPU kernel's (cpu_ops.cpp
+// DFlashGroupedConvKernel) and the upstream `_grouped_conv` it ports:
+//
+//   out[i,c] = sum_{t<=pos(i)} round(k(i,side,t,g) * x[i-t,c]),
+//   k = round(base[side,t,c] + coefficients[i,side,t,g]),
+//   pos(i) = i mod block_size (the power-of-two `&` arm included),
+//   g = c / group_size  (the group expansion: one coefficient per group of
+//       `group_size` columns),
+// with a round to the shared model dtype after each step.
+//
+// The TT composition keeps that rounding STRUCTURE by staying in the SHARED
+// dtype throughout: ttnn::add / ttnn::multiply on bf16 (or f32) tensors round
+// each elementwise step to the tensors' dtype, which IS the CPU kernel's
+// `round()` up to TIES: the pinned substrate's f32->bf16 conversion does not
+// round half to even (measured on the P150, the W2 parity case — the exact tie
+// 170.5 ulp rounds up, another exact tie 207.5 ulp rounds down), so k =
+// bf16(b + d) can land one k-ulp away from the CPU kernel wherever b + d is an
+// exact tie, and a k≈0 cancellation can flip a tap term. The op's gate is
+// therefore the operand-magnitude envelope in
+// tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp, not bit equality.
+// The group expansion runs as a one-hot matmul, whose one-product
+// rows are exact in either dtype; the t>0 shifted taps ride a concat zero row,
+// and the t<=pos gate is a per-row 0/1 mask multiply whose zero adds are exact.
+// No native TT-NN kernel is written: the op is a composition of the same
+// primitives every other TT op here uses (slice/matmul/add/multiply/concat).
+void DFlashGroupedConvKernel(Queue&, Tensor& out, const Tensor& x,
+                             const Tensor& coefficients, const Tensor& base,
+                             const DFlashGroupedConvArgs& args) {
+  TT_OP_TRACE("DFlashGroupedConv");
+  const bool trace = std::getenv("VT_DFLASH_CONV_TRACE") != nullptr;
+  VT_CHECK(x.rank == 2 && out.rank == 2,
+           "tenstorrent kDFlashGroupedConv: x/out must be rank-2 [T,H]");
+  VT_CHECK(x.IsContiguous() && out.IsContiguous(),
+           "tenstorrent kDFlashGroupedConv: contiguous required");
+  VT_CHECK(IsFloatDType(x.dtype) && out.dtype == x.dtype,
+           "tenstorrent kDFlashGroupedConv: the shared float dtype is required");
+  const int64_t T = x.shape[0];
+  const int64_t h = args.num_groups * args.group_size;
+  const int64_t taps = args.taps;
+  const int64_t sides = coefficients.shape[1];
+  const int64_t side = args.side;
+  VT_CHECK(x.shape[1] == h && out.shape[0] == T && out.shape[1] == h,
+           "tenstorrent kDFlashGroupedConv: shape mismatch");
+  VT_CHECK(T >= 1 && taps >= 1 && side >= 0 && side < sides,
+           "tenstorrent kDFlashGroupedConv: degenerate geometry");
+
+  MeshDevice& device = SharedMeshDevice();
+  // Rank-2 VIEWS over the same device-resident slots: EnsureDevice2D keys on
+  // the host data pointer, and these views preserve the base pointer and the
+  // numel, so the tracked serve paths resolve unchanged.
+  Tensor c2 = coefficients.View({T, sides * taps * args.num_groups});
+  Tensor b2 = base.View({sides * taps, h});
+  ttnn::Tensor dev_c = EnsureDevice2D(c2, device);
+  if (trace) std::fprintf(stderr, "[CONV] c ok\n");
+  ttnn::Tensor dev_b = EnsureDevice2D(b2, device);
+  if (trace) std::fprintf(stderr, "[CONV] b ok\n");
+  ttnn::Tensor dev_x = EnsureDevice2D(x, device);
+  const ttnn::DataType dt = (x.dtype == DType::kF32) ? ttnn::DataType::FLOAT32
+                                                     : ttnn::DataType::BFLOAT16;
+  const uint32_t tu = static_cast<uint32_t>(T);
+  const uint32_t hu = static_cast<uint32_t>(h);
+  const uint32_t gu = static_cast<uint32_t>(args.num_groups);
+
+  // The group-expansion matrix [groups, H]: row g carries 1.0 on columns
+  // [g*group_size, (g+1)*group_size) — the bundle's `_expansion` — so the
+  // matmul below replicates each group coefficient across its columns.
+  std::vector<float> expansion_host(static_cast<size_t>(args.num_groups) * h, 0.0f);
+  for (int64_t g = 0; g < args.num_groups; ++g)
+    for (int64_t j = 0; j < args.group_size; ++j)
+      expansion_host[static_cast<size_t>(g * h + g * args.group_size + j)] = 1.0f;
+  const ttnn::Tensor expansion = ttnn::Tensor::from_vector<float>(
+      expansion_host,
+      SpecOf(tt::tt_metal::Shape({gu, hu}), ttnn::DataType::FLOAT32,
+             ttnn::Layout::TILE),
+      &device);
+  const ttnn::Tensor expansion_dt = (dt == ttnn::DataType::FLOAT32)
+                                        ? expansion
+                                        : ttnn::typecast(expansion, dt);
+  if (trace) std::fprintf(stderr, "[CONV] E ok\n");
+
+  // The t>0 tap input: x shifted one row down, with a zero row at index 0
+  // (the row's mask multiplies it out when pos < t anyway).
+  ttnn::Tensor shifted;
+  if (taps > 1 && T > 1) {
+    if (trace) std::fprintf(stderr, "[CONV] shift begin\n");
+    // ROW_MAJOR for the slice+concat: the TILE concat of a tile-padded 1-row
+    // fragment with a (T-1)-row fragment crashed at this pin. The tensor goes
+    // back to TILE before the multiply below.
+    const ttnn::Tensor x_rm = ttnn::to_layout(dev_x, ttnn::Layout::ROW_MAJOR);
+    const ttnn::Tensor zero_row =
+        ttnn::zeros(tt::tt_metal::Shape({1u, hu}), dt,
+                    ttnn::Layout::ROW_MAJOR, std::ref(device));
+    if (trace) std::fprintf(stderr, "[CONV] zero ok\n");
+    const ttnn::Tensor x_head =
+        ttnn::slice(x_rm, ttsl::SmallVector<uint32_t>{0u, 0u},
+                    ttsl::SmallVector<uint32_t>{tu - 1u, hu},
+                    ttsl::SmallVector<uint32_t>{1u, 1u});
+    if (trace) std::fprintf(stderr, "[CONV] x_head ok\n");
+    shifted = ttnn::to_layout(
+        ttnn::concat(std::vector<ttnn::Tensor>{zero_row, x_head}, 0),
+        ttnn::Layout::TILE);
+    if (trace) std::fprintf(stderr, "[CONV] shifted ok\n");
+  }
+
+  ttnn::Tensor acc;
+  for (int64_t t = 0; t < taps; ++t) {
+    // d[T, groups] = coefficients[:, side, t, :]; expand to [T, H].
+    const uint32_t coff =
+        static_cast<uint32_t>((side * taps + t) * args.num_groups);
+    ttnn::Tensor d =
+        ttnn::slice(dev_c, ttsl::SmallVector<uint32_t>{0u, coff},
+                    ttsl::SmallVector<uint32_t>{tu, coff + gu},
+                    ttsl::SmallVector<uint32_t>{1u, 1u});
+    if (trace) std::fprintf(stderr, "[CONV] d sliced t=%lld\n", (long long)t);
+    ttnn::Tensor k = ttnn::operations::matmul::matmul(d, expansion_dt);
+    if (trace) std::fprintf(stderr, "[CONV] matmul ok t=%lld\n", (long long)t);
+    // + the base row: [1,H] broadcast add; the dtype round here IS the CPU
+    // kernel's round(b + d).
+    const uint32_t brow = static_cast<uint32_t>(side * taps + t);
+    const ttnn::Tensor base_row =
+        ttnn::slice(dev_b, ttsl::SmallVector<uint32_t>{brow, 0u},
+                    ttsl::SmallVector<uint32_t>{brow + 1u, hu},
+                    ttsl::SmallVector<uint32_t>{1u, 1u});
+    k = ttnn::add(k, base_row);
+    if (trace) std::fprintf(stderr, "[CONV] add ok t=%lld\n", (long long)t);
+    // term = round(k * x_t)
+    ttnn::Tensor term = ttnn::multiply(k, (t == 0) ? dev_x : shifted);
+    if (trace) std::fprintf(stderr, "[CONV] mul ok t=%lld\n", (long long)t);
+    if (t > 0) {
+      // The t <= pos(i) gate: pos(i) = i mod block_size (the CPU kernel's
+      // power-of-two `&` arm included). A 0/1 per-row mask; the masked-out
+      // term is exact 0, so the add below is the CPU kernel's acc unchanged.
+      std::vector<float> mask_host(static_cast<size_t>(T), 0.0f);
+      const int64_t block = args.block_size;
+      const bool pot = (block & (block - 1)) == 0;
+      for (int64_t i = 0; i < T; ++i) {
+        const int64_t pos = pot ? (i & (block - 1)) : (i % block);
+        mask_host[static_cast<size_t>(i)] = (pos >= t) ? 1.0f : 0.0f;
+      }
+      const ttnn::Tensor mask = ttnn::Tensor::from_vector<float>(
+          mask_host,
+          SpecOf(tt::tt_metal::Shape({tu, 1u}), ttnn::DataType::FLOAT32,
+                 ttnn::Layout::TILE),
+          &device);
+      term = ttnn::multiply(term, (dt == ttnn::DataType::FLOAT32)
+                                      ? mask
+                                      : ttnn::typecast(mask, dt));
+      if (trace) std::fprintf(stderr, "[CONV] mask ok t=%lld\n", (long long)t);
+    }
+    acc = (t == 0) ? std::move(term) : ttnn::add(acc, term);
+  }
+  CommitDevice2D(out, std::move(acc));
+}
+
+// kIndexCopy: row scatter out[idx[i]] = in[i] on Tenstorrent (QWEN38-DFLASH2-
+// STAGE-C W2). The DFlash2 drafter's combined [context; block] K/V assembly
+// (qwen3_dflash.cpp:988-994) scatters device-resident rows into a fresh combined
+// buffer per layer per step, and the TT backend had no kernel for the op — the
+// same gap that hid the drafter forward from the P150.
+//
+// The composition is a ONE-HOT matmul: M[out_rows, in_rows] with M[idx[i], i] =
+// 1 (else 0), then out = M @ in. Every output row is one one-hot product, so
+// the result is the source row EXACTLY — but only in bf16, where the matmul's
+// tf32 truncation cannot touch bf16-valued operands; an f32 in would lose low
+// mantissa bits to tf32, so the op REFUSES f32 by name rather than silently
+// corrupting a copy. The index is read on the host (the DBuf-built index
+// tensors keep a host master); the out side commits through its tracked slot
+// so the base buffer the caller holds a view of becomes device-current.
+void IndexCopyKernel(Queue&, Tensor& out, const Tensor& in, const Tensor& idx) {
+  TT_OP_TRACE("IndexCopy");
+  VT_CHECK(in.dtype == DType::kBF16,
+           "tenstorrent kIndexCopy: only bf16 rows are supported (the one-hot "
+           "matmul is exact there; an f32 in would lose mantissa bits to tf32)");
+  const int64_t rows = idx.shape[0];
+  if (rows == 0) return;
+  const int64_t out_rows = out.shape[0];
+  int64_t inner = 1;
+  for (int r = 1; r < out.rank; ++r) inner *= out.shape[r];
+  int64_t inner_in = 1;
+  for (int r = 1; r < in.rank; ++r) inner_in *= in.shape[r];
+  VT_CHECK(inner == inner_in, "tenstorrent kIndexCopy: inner extent mismatch");
+
+  EnsureHost(idx);
+  const int32_t* ix = idx.Ptr<int32_t>();
+  std::vector<float> onehot_host(static_cast<size_t>(out_rows) * rows, 0.0f);
+  for (int64_t i = 0; i < rows; ++i) {
+    VT_CHECK(ix[i] >= 0 && ix[i] < out_rows,
+             "tenstorrent kIndexCopy: idx out of range");
+    onehot_host[static_cast<size_t>(ix[i]) * rows + i] = 1.0f;
+  }
+
+  MeshDevice& device = SharedMeshDevice();
+  Tensor out2 = out.View({out_rows, inner});
+  Tensor in2 = in.View({rows, inner});
+  ttnn::Tensor dev_in = EnsureDevice2D(in2, device);
+  const ttnn::Tensor onehot = ttnn::Tensor::from_vector<float>(
+      onehot_host,
+      SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(out_rows),
+                                   static_cast<uint32_t>(rows)}),
+             ttnn::DataType::FLOAT32, ttnn::Layout::TILE),
+      &device);
+  const ttnn::Tensor onehot_bf = ttnn::typecast(onehot, ttnn::DataType::BFLOAT16);
+  ttnn::Tensor dev_out = ttnn::operations::matmul::matmul(onehot_bf, dev_in);
+  CommitDevice2D(out2, std::move(dev_out));
+}
+
 void SigmoidGateBf16Kernel(Queue&, Tensor& out, const Tensor& attn,
                            const Tensor& gate) {
   TT_OP_TRACE("SigmoidGateBf16");
@@ -1992,6 +2209,11 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<CastBf16Fn>(&CastBf16Kernel)));
     RegisterOp(OpId::kCastF32, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<CastF32Fn>(&CastF32Kernel)));
+    RegisterOp(OpId::kIndexCopy, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<IndexCopyFn>(&IndexCopyKernel)));
+    RegisterOp(OpId::kDFlashGroupedConv, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<DFlashGroupedConvFn>(
+                   &DFlashGroupedConvKernel)));
     RegisterOp(OpId::kRopeNeox, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<RopeFn>(&RopeNeoxKernel)));
     RegisterOp(OpId::kRopeCosSinCache, DeviceType::kTENSTORRENT,

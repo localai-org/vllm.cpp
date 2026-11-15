@@ -998,6 +998,12 @@ target_include_directories(test_qwen3_dflash2_draft PRIVATE ${CMAKE_SOURCE_DIR}/
 # and a token gate therefore cannot see a quantized tensor that never decoded.
 vllm_cpp_add_test(test_qwen3_dflash2_gguf vllm/models/test_qwen3_dflash2_gguf.cpp)
 target_include_directories(test_qwen3_dflash2_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# QWEN38-DFLASH2-STAGE-C W2: the DFlash2 DRAFTER's per-iteration forward, on the
+# pinned Qwen3.8-27B-DFlash2 checkpoint, on the Tenstorrent P150, gated PCC vs
+# the bundle's reference math (the bundle's own band; see the file header for
+# the band's provenance and the corrupted-fc RED case).
+vllm_cpp_add_test(test_qwen38_dflash2_drafter_tt vllm/models/test_qwen38_dflash2_drafter_tt.cpp)
+target_include_directories(test_qwen38_dflash2_drafter_tt PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # SPEC-DSPARK W2: the DSpark Markov transition head + draft->target vocab map.
 vllm_cpp_add_test(test_qwen3_dspark_markov vllm/models/test_qwen3_dspark_markov.cpp)
 target_include_directories(test_qwen3_dspark_markov PRIVATE ${CMAKE_SOURCE_DIR}/src)
