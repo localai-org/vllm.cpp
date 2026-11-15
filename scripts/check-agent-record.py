@@ -2059,6 +2059,14 @@ ISSUE_ROW = re.compile(
 RETIRED_INDEX = AGENTS / "issue-index.md"
 
 
+# A device allocator-log line tags its `#N` with a bracketed -ALLOC label;
+# the number there is an allocator event ID, not an issue reference.
+ALLOCATOR_LOG_LINE_RE = re.compile(r"\[[A-Z][A-Z0-9-]*-ALLOC\]")
+
+# A quoted checker diagnostic line describes a reference it already
+# resolved; its tokens are the checker's own output, not the author's.
+CHECKER_DIAGNOSTIC_LINE_RE = re.compile(r"^\s*(?:ERROR|WARNING): issue reference\b")
+
 ISSUE_REFERENCE_RE = re.compile(
     r"(?<![A-Z0-9_-])ISSUE-GH-[1-9][0-9]*(?![A-Z0-9_-])"
     r"|(?<![A-Z0-9_-])ISSUE-LOCAL-[0-7][0-9A-HJKMNP-TV-Z]{25}(?![A-Z0-9_-])"
@@ -2113,11 +2121,19 @@ def issue_references_in_text(
             )
 
     references: set[str] = set()
-    for match in ISSUE_REFERENCE_RE.finditer(searchable):
-        reference = match.group(0)
-        if reference.startswith("issues/"):
-            reference = f"#{reference.removeprefix('issues/')}"
-        references.add(reference)
+    for line in searchable.split("\n"):
+        # Allocator event IDs and quoted checker diagnostics are not issue
+        # references. Skip the whole line: machine-generated and
+        # self-describing text carries no claim of canonical ownership.
+        if ALLOCATOR_LOG_LINE_RE.search(line) or CHECKER_DIAGNOSTIC_LINE_RE.search(
+            line
+        ):
+            continue
+        for match in ISSUE_REFERENCE_RE.finditer(line):
+            reference = match.group(0)
+            if reference.startswith("issues/"):
+                reference = f"#{reference.removeprefix('issues/')}"
+            references.add(reference)
     return references
 
 

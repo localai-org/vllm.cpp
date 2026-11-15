@@ -2308,6 +2308,71 @@ class CanonicalIssueReferenceTests(unittest.TestCase):
         )
 
 
+    def test_allocator_log_lines_are_not_issue_references(self) -> None:
+        """[TT-ALLOC] #N is an allocator event ID, not an issue reference.
+
+        Committed device stderr evidence carries lines like
+        ``[TT-ALLOC] #652 label=EnsureKeepQuantRowWords/pre banks=8 ...``.
+        The scanner must not classify that token 652 as an issue reference
+        (ISSUE-LOCAL-01M7EJAFM401RJRNXD49S6QPWB).
+        """
+        text = (
+            "[TT-ALLOC] #652 label=EnsureKeepQuantRowWords/pre banks=8 "
+            "free_per_bank=1820244096 total_free=14561952768 delta=0\n"
+            "[TT-ALLOC] #77 label=load/stage/pre banks=8 delta=0\n"
+        )
+        self.assertEqual(
+            agent_record.issue_references_in_text(text, path=Path("run.stderr.log")),
+            set(),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path, record = self.intake(Path(temporary))
+            errors: list[str] = []
+            agent_record.check_canonical_issue_references(
+                errors,
+                agent_record.discover_issue_references("", {"run.stderr.log": text}),
+                [(path, record)],
+            )
+        self.assertEqual(errors, [])
+
+    def test_quoted_checker_diagnostics_are_not_issue_references(self) -> None:
+        """A changed file quoting the checker's own output cites nothing.
+
+        Evidence logs capture past checker runs; the token and record-ID
+        pair on an ``ERROR: issue reference ...`` line describe tokens the
+        checker already resolved, and are not the author's references.
+        """
+        text = (
+            "ERROR: issue reference #77 resolves to _intake record "
+            f"ISSUE-GH-{''}77; triage it to a canonical row or exactly owned _owed\n"
+        )
+        self.assertEqual(
+            agent_record.issue_references_in_text(
+                text, path=Path("preflight-staged-repair.log")
+            ),
+            set(),
+        )
+
+    def test_a_prose_hash_reference_still_resolves_and_fails_on_intake(self) -> None:
+        """The narrow guards do not hide a real ``#N`` reference.
+
+        A changed file that cites a bare-token reference in prose must still resolve to the
+        canonical record and still fail canonical intake ownership.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            path, record = self.intake(Path(temporary))
+            errors: list[str] = []
+            agent_record.check_canonical_issue_references(
+                errors,
+                agent_record.discover_issue_references(
+                    "", {"notes.md": f"The deferred sweep tracks #{''}77 here."}
+                ),
+                [(path, record)],
+            )
+        self.assertEqual(len(errors), 1)
+        self.assertIn(f"#{''}77", errors[0])
+        self.assertIn("_intake", errors[0])
+
     def test_git_discovery_reads_commit_bodies_and_changed_file_contents(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
