@@ -2169,6 +2169,55 @@ bool BindDflashDraftSharedEmbed(DflashDraft& draft, const LoadedModel& target) {
   return true;
 }
 
+// QWEN38-DFLASH2-STAGE-C W3: the HEAD twin of the embed rebind above. The
+// GGUF draft arm keeps the target head PACKED now (LoadGgufSharedEmbedAndHeadBf16),
+// so the dtype/shape guard below passes on every GGUF target whose head the
+// target itself reads from `lm_head`, and the draft's block-logits GEMM runs
+// the target's OWN resident owner through one `d_dev` — instead of uploading a
+// second bf16 dequantization of the head (2.44 GB at 248320x5120) beside it.
+// A safetensors target head rebinds only when the draft's bf16 owner and the
+// target's bf16 owner are the same tensor shape and dtype; NVFP4/EXL3 heads
+// keep their own draft owners (`lm_head_fp4` / `lm_head_exl3`) and never reach
+// this rebind, because the guard reads `weights.lm_head` only.
+bool BindDflashDraftSharedHead(DflashDraft& draft, const LoadedModel& target) {
+  if (draft.dspark != nullptr) return false;
+  const OwnedTensor* shared = target.shared_lm_head();
+  if (shared == nullptr) return false;
+  const OwnedTensor& own = draft.weights.lm_head;
+  if (own.Empty() || shared == &own) return false;
+  bool same = own.dtype == shared->dtype && own.rank == shared->rank;
+  for (int i = 0; same && i < own.rank; ++i) same = own.shape[i] == shared->shape[i];
+  if (!same) {
+    const auto describe = [](const OwnedTensor& w) {
+      std::string s(vt::Name(w.dtype));
+      s += " [";
+      for (int i = 0; i < w.rank; ++i) {
+        if (i != 0) s += ", ";
+        s += std::to_string(w.shape[i]);
+      }
+      return s + "]";
+    };
+    std::cerr << "vllm.cpp: DFlash draft head NOT shared with the target: the "
+                 "draft read "
+              << describe(own) << " and the target holds " << describe(*shared)
+              << ". Both heads stay resident; tokens are unaffected.\n";
+    return false;
+  }
+  const size_t saved = vt::RowSizeBytes(own.dtype, own.Numel());
+  draft.weights.shared_lm_head = shared;
+  // `lm_head` itself goes empty (the #1946 discipline: a populated owner leaves
+  // a second `d_dev` reachable, and the empty tensor makes any stale reader
+  // refuse at its first `ResidentWeight` instead of duplicating the head).
+  draft.weights.lm_head = OwnedTensor{};
+  // The draft no longer computes on a DEQUANTIZED head — it computes on the
+  // target's own packed owner — so D12's trigger state is gone.
+  draft.weights.lm_head_dequantized = false;
+  std::cerr << "vllm.cpp: DFlash draft head SHARED with the target (one device "
+               "copy, "
+            << saved << " B saved)\n";
+  return true;
+}
+
 // #1946: the member-initialiser wrapper for BindDflashDraftSharedEmbed, so the
 // rebind happens WHILE the engine is being built rather than in a body that a
 // later member could forward before. Null model or null draft passes through
@@ -2184,6 +2233,7 @@ static std::unique_ptr<DflashDraft> BindSharedEmbed(
     std::unique_ptr<DflashDraft> draft, const LoadedModel* target) {
   if (draft != nullptr && target != nullptr) {
     (void)BindDflashDraftSharedEmbed(*draft, *target);
+    (void)BindDflashDraftSharedHead(*draft, *target);
   }
   return draft;
 }

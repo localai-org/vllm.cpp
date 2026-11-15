@@ -250,6 +250,16 @@ struct Qwen3DFlashWeights {
   const OwnedTensor& EmbedTable() const {
     return shared_embed_tokens != nullptr ? *shared_embed_tokens : embed_tokens;
   }
+  // QWEN38-DFLASH2-STAGE-C W3: the head twin of the embed rebind above. The
+  // target's own lm_head owner, borrowed, once `BindDflashDraftSharedHead` has
+  // rebound it. Null on a draft that was never rebound: the draft then runs its
+  // own `lm_head`, exactly as every pre-W3 path did.
+  const OwnedTensor* shared_lm_head = nullptr;
+  // The table the draft's block-logits GEMM actually reads. The ONE accessor,
+  // so a rebind cannot reach a second copy through a stale field.
+  const OwnedTensor& LmHead() const {
+    return shared_lm_head != nullptr ? *shared_lm_head : lm_head;
+  }
   OwnedTensor fc;            // bf16 raw-NK [H, H*num_taps], nk (combine_hidden_states)
   // MODEL-DFLASH2-EXL3 (#2495 item 7): the aux-combine trellis, and the ONE
   // field that says whether this draft is an EXL3 draft at all. Empty on every

@@ -1099,12 +1099,34 @@ void LoadGgufSharedEmbedAndHeadBf16(const GgufFile& g, OwnedTensor* embed,
   const GgufTensorInfo& ht = g.Get(head_name);
   VT_CHECK(ht.shape.size() == 2,
            "gguf shared head: " + head_name + " must be 2-D");
+  // QWEN38-DFLASH2-STAGE-C W3: a BLOCK-QUANT head is now kept PACKED, in the
+  // exact owner the target's own logits GEMM reads (MatmulBT's keep-quant
+  // dispatch; the block-quant arm in DflashLogitsF32D). It used to be
+  // dequantized to a bf16 [vocab, H] copy here, which the draft then uploaded a
+  // SECOND time beside the target's own packed head + row words — ~2.44 GB of
+  // duplicate device residency that OOM'd the 27B k-quant arms on one P150.
+  // Keeping the head packed also moves the draft into #1628's ADMITTED state:
+  // the selector's top-16 (when it runs) now comes off the target's own
+  // quantized-head GEMM, i.e. the target's exact logits. A scalar ggml type
+  // (f16/f32/bf16, one element per block) still dequantizes to bf16 below.
+  if (GgmlTraits(ht.ggml_type).block_elems != 1) {
+    vt::DType qdt = vt::DType::kF32;
+    VT_CHECK(KeepQuantDType(ht.ggml_type, &qdt),
+             "gguf shared head: " + head_name + " is block-quantized in an "
+                 "encoding the keep-quant set does not carry");
+    *head = OwnGgufQuantBlocks(ht, ht.shape[0], ht.shape[1], /*row_offset=*/0,
+                               /*mmap_src=*/nullptr, /*repack=*/false,
+                               /*cuda_align=*/false, /*prefault=*/false);
+    head->nk = true;
+    if (head_was_quantized != nullptr) *head_was_quantized = false;
+    return;
+  }
   *head = OwnBf16(g, head_name, ht.shape);  // [N = vocab, K = H]
   head->nk = true;
   // A scalar ggml type packs ONE element per "block"; anything else is
   // block-quantized and `OwnBf16` above dequantized it. SPEC-DFLASH2 W3 (#1314).
   if (head_was_quantized != nullptr)
-    *head_was_quantized = GgmlTraits(ht.ggml_type).block_elems != 1;
+    *head_was_quantized = false;
 }
 
 // --- weights -------------------------------------------------------------

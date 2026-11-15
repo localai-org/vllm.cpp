@@ -107,6 +107,12 @@ struct DflashDraft {
 // that every draft loader funnels into.
 bool BindDflashDraftSharedEmbed(DflashDraft& draft, const LoadedModel& target);
 
+// QWEN38-DFLASH2-STAGE-C W3: the head twin of the rebind above. Shares the
+// target's own lm_head owner with the draft (one device copy); returns true
+// when it rebound. Same ONE constructor call site, same export-for-the-gate
+// reason as the embed lever.
+bool BindDflashDraftSharedHead(DflashDraft& draft, const LoadedModel& target);
+
 // vLLM CacheConfig.gpu_memory_utilization's own default (vllm/config/cache.py:68
 // @ 555967922). Named because EngineParams carries the knob as an optional, so
 // "the caller chose nothing" and "the caller chose 0.92" are different states

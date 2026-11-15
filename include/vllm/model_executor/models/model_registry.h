@@ -271,6 +271,15 @@ class LoadedModel {
   // any draft rebound onto them.
   virtual const OwnedTensor* shared_embed_tokens() const { return nullptr; }
 
+  // The target's own lm_head owner (the SAME tensor the target's logits GEMM
+  // reads). QWEN38-DFLASH2-STAGE-C W3: the DFlash draft's block logits run the
+  // target head, and before this accessor the GGUF arm handed the draft a
+  // DEQUANTIZED bf16 copy — a second full head of device residency on a board
+  // whose DRAM the repacked 27B target has already claimed. Mirrors
+  // `shared_embed_tokens` and the #1946 rebind. Default: null (no rebind), so
+  // every model that does not opt in keeps today's behavior byte-identical.
+  virtual const OwnedTensor* shared_lm_head() const { return nullptr; }
+
   // Retain the checkpoint's loaded `mtp.*` draft weights (the 15/19 BF16 tensors
   // LoadQwen3_5MTP produced) inside the concrete model so the draft can be built
   // on demand with a stable lifetime. Default: unsupported (throws), because a
