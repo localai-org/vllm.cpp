@@ -12954,12 +12954,21 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       // [n, h] ROW shadow for a block-quant table (no full-table twin), so it
       // must ride the same per-step refresh — host decode of the gathered
       // rows into the bf16 twin's exact bits, allocation-free H2D into the
-      // same buffer (WarmDecodeIds's pattern).
+      // same buffer (WarmDecodeIds's pattern). The refresh alone is NOT
+      // enough: a recorded copy FROM the shadow replays capture-time bytes
+      // (the poison probe — the whole shadow zeroed per step, the captured
+      // stream unchanged), so the quant arm commits the embedding OUTSIDE
+      // the region, here, before the replay. A float table keeps the
+      // in-region embedding (its recorded ttnn::embedding reads the
+      // refreshed ids replay-live and its twin never changes).
       {
         Tensor dtabw = Qwen3_5EmbeddingTable(
             d.b, d.q, impl_->weights.embed_tokens, vocab, H);
-        vt::tenstorrent::WarmEmbedQuantRows(
-            dtabw, s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+        const int64_t n = static_cast<int64_t>(s.token_ids.size());
+        vt::tenstorrent::WarmEmbedQuantRows(dtabw, s.token_ids.data(), n);
+        if (vt::tenstorrent::EmbedQuantRowArm(dtabw.data, n, H))
+          vt::tenstorrent::EmbedDeviceIdsInto(s.hidden->ptr(), S, H,
+                                              dtabw.data, vocab, H, n);
       }
     } else {
       DenseEmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
@@ -13105,6 +13114,16 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
       // embedding reads (qwen3.cpp:998-1000).
       vt::tenstorrent::WarmDecodeIds(
           s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      // TT-EMBED-DUAL-RESIDENCY: refresh the quant row shadow for THIS step's
+      // ids before the R4 mirror commits the embed outside the scope — the
+      // eager cold step refreshed with ITS ids, and a capture of stale rows
+      // would pin them into every replay (qwen3.cpp:1022-1025).
+      {
+        Tensor dtab = Qwen3_5EmbeddingTable(
+            d.b, d.q, impl_->weights.embed_tokens, vocab, H);
+        vt::tenstorrent::WarmEmbedQuantRows(
+            dtab, s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+      }
       // R4 dummy-run mirror (#1105, qwen3.cpp:1001-1016): the embedding and
       // the hidden-shadow copy run INSIDE the capture below, and both programs
       // are cold at first capture — tt-metal refuses to load new binaries
@@ -13177,12 +13196,17 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         // (the qwen3.cpp:1041-1051 lane; the #3321 W3 in-region discipline).
         // Replay steps refresh the ids outside (WarmDecodeIds) and re-run
         // this embedding inside the trace, so no replay step performs an
-        // eager device alloc while the trace is live.
+        // eager device alloc while the trace is live. The QUANT row arm is
+        // the exception: its recorded copy would replay capture-time bytes,
+        // so the R4 mirror above already committed the embed OUTSIDE the
+        // scope and the replay steps commit beside WarmEmbedQuantRows.
         Tensor dtab = Qwen3_5EmbeddingTable(
             d.b, d.q, impl_->weights.embed_tokens, vocab, H);
-        vt::tenstorrent::EmbedDeviceIdsInto(
-            s.hidden->ptr(), S, H, dtab.data, vocab, H,
-            static_cast<int64_t>(s.token_ids.size()));
+        if (!vt::tenstorrent::EmbedQuantRowArm(
+                dtab.data, static_cast<int64_t>(s.token_ids.size()), H))
+          vt::tenstorrent::EmbedDeviceIdsInto(
+              s.hidden->ptr(), S, H, dtab.data, vocab, H,
+              static_cast<int64_t>(s.token_ids.size()));
       }
       lg = DenseForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta,
                               s.gdn_meta, attn_kv, gdn_state, impl_->weights,

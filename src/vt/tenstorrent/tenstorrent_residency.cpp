@@ -4,6 +4,7 @@
 #include "vt/tenstorrent/tenstorrent_internal.h"
 
 #include <cstdlib>
+#include <cstring>
 
 #include "vllm/config/tt_weight_residency.h"
 
@@ -47,7 +48,7 @@ std::map<uintptr_t, QuantEmbedRowShadow>& QuantEmbedRows() {
 }
 
 // Decode the n gathered rows on HOST into the bf16 twin's exact bits and
-// refresh the persistent [n, h] F32 device shadow (bf16-rounded values
+// refresh the persistent [n, h] BF16 device shadow (bf16-rounded values,
 // upcast; see the spec note below). The three-step decode
 // is the exact pipeline the removed full-table twin rode: the CPU row decoder
 // (cpu_quant_dequant.cpp BlockToFloat, the CPU W6a gather's decoder) ->
@@ -82,15 +83,21 @@ ttnn::Tensor RefreshQuantEmbedRows(const Tensor& table, const uint32_t* ids,
     for (int64_t j = 0; j < h; ++j)
       dst[j] = BF16ToF32(F32ToBF16(row[static_cast<size_t>(j)]));
   }
-  // The shadow is staged F32: the values are already bf16-rounded (the twin's
-  // exact bits upcast), and an f32 shadow removes EVERY dtype conversion from
-  // both the eager commit and the captured copy — ttnn::copy's bf16->f32
-  // conversion path mis-serves a ROW_MAJOR source (the captured-vs-eager
-  // divergence), so neither path asks it to convert. The doubling of the
-  // shadow bytes is [t, h] — decode-batch sized, not vocab-sized.
+  // The shadow is staged BF16 ROW_MAJOR: the host decode already produced the
+  // bf16 twin's exact bits (bf16-rounded values), and from_vector's f32->bf16
+  // upload cast is the identity on them (EnsureEmbedTableDevice's argument).
+  // Staging the SLOT dtype removes EVERY conversion op from the captured
+  // region: the recorded copy is PURE (bf16 ROW_MAJOR -> bf16 slot), because
+  // the in-region typecast/to_layout of a ROW_MAJOR f32 source bakes
+  // capture-time bytes the per-step refresh never reaches (the W3 captured
+  // divergence — the refresh wrote fresh rows into the same address the trace
+  // pinned, and the replay still read the capture-time conversion snapshot).
+  // The eager path that needs f32 rows typecasts AFTER the refresh, outside
+  // any trace. The doubling of the shadow bytes is [t, h] — decode-batch
+  // sized, not vocab-sized.
   const auto spec = SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(n),
                                                 static_cast<uint32_t>(h)}),
-                           ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR);
+                           ttnn::DataType::BFLOAT16, ttnn::Layout::ROW_MAJOR);
   {
     std::lock_guard<std::mutex> g(QuantEmbedMutex());
     QuantEmbedRowShadow& s =
@@ -100,7 +107,32 @@ ttnn::Tensor RefreshQuantEmbedRows(const Tensor& table, const uint32_t* ids,
       // Allocation-free refresh: host staging tensor + H2D copy into the SAME
       // device buffer (the WarmDecodeIds pattern).
       ttnn::Tensor hst = ttnn::Tensor::from_vector<float>(host_rows, spec, nullptr);
+      // VT_TT_EMB_POISON: stall bisection only — zero the first row before the
+      // H2D copy. A captured replay that still emits the unperturbed stream
+      // does not read this buffer at replay; a changed stream proves the read.
+      if (std::getenv("VT_TT_EMB_POISON") != nullptr) {
+        for (size_t j = 0; j < host_rows.size(); ++j) host_rows[j] = 0.f;
+        std::fprintf(stderr, "[TT-EMB-DBG] poison applied n=%lld\n", (long long)n);
+      }
       ttnn::copy_to_device(hst, *s.device);
+      if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr) {
+        auto hsh = [](const float* p, size_t k) {
+          uint32_t h = 2166136261u;
+          for (size_t i = 0; i < k; ++i) {
+            uint32_t b;
+            std::memcpy(&b, p + i, 4);
+            h = (h ^ b) * 16777619u;
+          }
+          return h;
+        };
+        const size_t k = std::min<size_t>(host_rows.size(), 1024);
+        std::fprintf(stderr,
+                     "[TT-EMB-DBG] RefreshQuantEmbedRows HIT n=%lld addr=%u "
+                     "hash=%08x v0=%a\n",
+                     (long long)n,
+                     static_cast<uint32_t>(s.device->mesh_buffer().address()),
+                     hsh(host_rows.data(), k), host_rows.empty() ? 0.f : host_rows[0]);
+      }
       return *s.device;
     }
     // MISS = the one staging write this (table, n) shape ever pays. Same
@@ -121,6 +153,13 @@ ttnn::Tensor RefreshQuantEmbedRows(const Tensor& table, const uint32_t* ids,
     s.device = ttnn::Tensor::from_vector<float>(host_rows, spec, &device);
     s.rows = static_cast<uint32_t>(n);
     s.h = static_cast<uint32_t>(h);
+    if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+      std::fprintf(stderr,
+                   "[TT-EMB-DBG] RefreshQuantEmbedRows MISS(STAGE) n=%lld "
+                   "addr=%u capture=%d\n",
+                   (long long)n,
+                   static_cast<uint32_t>(s.device->mesh_buffer().address()),
+                   tt_capture_active() ? 1 : 0);
     AllocTraceSnapshot(device, "RefreshQuantEmbedRows/post");
     return *s.device;
   }

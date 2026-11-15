@@ -1,75 +1,95 @@
-# TT-EMBED-DUAL-RESIDENCY — W3: the OOM cleared, the captured arm diverges (STOP)
+# TT-EMBED-DUAL-RESIDENCY — W3 STOP lifted: the frozen recorded copy, root-caused and repaired
 
 Evidence for row `TT-EMBED-DUAL-RESIDENCY` (issue
 `ISSUE-LOCAL-01M7CFF6ESGHZ2WQDA74PG4VDY`). Implementation heads: W1
-`881752c9b`, W2 `be416cc5a`, W3 fix uncommitted at capture time and then
-committed with this evidence. Build: `/tmp/build-embed` (same recipe as
-`tt-staging-footprint-20261113/README.md`). Recipe per leg: mutex
+`881752c9b`, W2 `be416cc5a`, W3 `95ff6d146`, repair on top (see
+`git log --grep TT-EMBED-DUAL-RESIDENCY`). Build: `/tmp/build-embed` (same
+recipe as `tt-staging-footprint-20261113/README.md`). Recipe per leg: mutex
 `${GPU_LOCK:-$HOME/gpu.lock}`, luwen reset + 15 s + `/dev/shm` cleanup,
 idle gate load<16, `taskset -c 32-63` runs / `64-127` builds, governor/
 env/ps-top logged (`*-env.txt`, `ps-top-*.txt`), bench run FROM THE REPO
-ROOT (kernel-JIT resolves `./src/vt/tenstorrent/kernels` from cwd — the
-first three legs, `q6kl-cap-*.log` of 13:44-13:49, failed on exactly
-that and were rerun).
+ROOT. Gate script: `run-unlock-gate.sh` (the 13:44-13:49 `q6kl-cap-*` cwd
+failures in the W3 STOP record remain residue).
 
-## W3 gate result: FAILED — captured-vs-eager divergence, STOP
+## Root cause: a recorded `ttnn::copy` FROM the row shadow replays capture-time bytes
 
-UD-Q6_K_XL (`701d8fa9…`), KV 8, captured arm, defaults, 3 reps:
+The bisection in the W3 STOP record stands: the captured quant-row branch
+introduced in W2 `be416cc5a` broke BOTH artifacts identically (`a0033dd8…`),
+and the W3 dtype fix neither caused nor repaired it. The trace work
+instrumented the embed site (`VT_TT_TRACE_DEBUG`, `[TT-EMB-DBG]` lines) and
+settled the recorded hypotheses:
 
-- `q6kl-cap-{1,2,3}`: exit 0, NO OOM (the ~80 MB trace region now
-  allocates), token ids 3/3 identical, sha256 `d54b29f9…` —
-  **deterministic but WRONG**: stream `220,16,16,220,16,…` (the embed
-  contribution collapsed to the attractor), vs the recorded eager stream
-  `b36bc61a…` = `220,16,23066,220,16,…`.
-- Eager arm with the same W3 tree: `q6kl-eager-1`, sha256 `b36bc61a…` —
-  BYTE-IDENTICAL to the recorded TT-STAGING-FOOTPRINT eager stream, Mean
-  TPOT 5340.30 ms (recorded 5340.63).
+1. **The refresh is correct and reaches the pinned address.** Per replay
+   step `WarmEmbedQuantRows` decodes this step's rows on host (per-step
+   `[TT-EMB-DBG] RefreshQuantEmbedRows HIT` hash CHANGES with the step id)
+   and H2D-copies into the SAME buffer address the capture baked
+   (`shadow_addr=240586496` at the dummy run, at capture, and at every
+   refresh). The eager arm — which decodes through the same
+   `RefreshQuantEmbedRows` — is byte-identical at every head, so the host
+   decode itself is exact.
+2. **The read side is frozen.** Poison probe (`VT_TT_EMB_POISON`, mechanics
+   test only — the `VT_TT_NO_IDS_WARM` precedent): zeroing the ENTIRE row
+   shadow after the refresh, before every replay, left the captured stream
+   bit-for-bit unchanged (`220,16,16,220,16,…`, the attractor). A replayed
+   read of that buffer would have seen zeros.
+3. **Refinement of H1.** It is not the W3 `typecast`/`to_layout` ops alone:
+   the pure same-dtype copy variant (bf16-staged shadow, no conversion op in
+   the region at all) diverges IDENTICALLY. The capture pins the STAGED
+   buffer's CONTENT, not just its address, for the high-level `ttnn::copy`
+   (the #2812 pin-bytes class). The recorded ops that ARE replay-live in
+   this trace are the custom kernels' reads (`WarmRacIdx`/`WarmPaMeta`) and
+   `ttnn::embedding`'s recorded ids read (`WarmDecodeIds`) — which is why
+   the W1-era captured arm passed and the quant row branch (a copy) did not.
 
-## The W3 fix is coherent and not the cause — the regression is W2's
+Bisection artifacts kept: `bisect-q4km*`, `q4km-cap-1-token-ids.json`
+(W3-era divergence), `q6kl-cap-pure-1`, `q6kl-cap-sync-1`.
 
-The uncommitted W3 work converts the committed tensor to the hidden
-slot's CURRENT dtype+layout before every in-place copy (eager
-`EmbeddingKernel` and captured `EmbedDeviceIdsInto`), because the
-slot's shadow dtype churns between ops (f32 after the embed commit, bf16
-after a layer op) and `ttnn::copy`'s dtype-conversion path only supports
-TILE inputs; the row shadow itself is now staged F32 (bf16-rounded
-values upcast — the twin's exact bits, zero conversions anywhere).
+## Fix (stage-B contract: the representation change lands OUTSIDE the region)
 
-Bisection: Q4_K_M at `--num-blocks 64` (the TT-STAGING-FOOTPRINT gate-2
-recipe, recorded captured stream `d49c53d2…`):
+- NEW `vt::tenstorrent::EmbedQuantRowArm(table_host, n, h)`
+  (`tenstorrent_capture.cpp`, declared in `tenstorrent_device.h`): the same
+  map match `EmbedDeviceIdsInto`'s quant arm uses, exposed to the drivers.
+- Drivers `qwen3.cpp` (replay + capture) and `qwen3_5.cpp` (replay +
+  capture): when the embed is the quant row arm, the in-region
+  `EmbedDeviceIdsInto` is SKIPPED (the trace records no embed) and the
+  commit runs OUTSIDE the region per replay step, right beside
+  `WarmEmbedQuantRows` — allocation-free (the shadow and the hidden slot
+  are persistent; the copy program is warmed by the R4 dummy run at
+  capture). A float table keeps the in-region recorded `ttnn::embedding`
+  (its ids read is replay-live; its twin never changes — that path passed
+  before W2 and is untouched).
+- `EmbedDeviceIdsInto`'s quant arm now REFUSES a hidden slot whose storage
+  does not match the shadow's dtype+layout, by name: any in-region
+  conversion replays frozen capture-time bytes (the W3 lesson, made loud).
+- The row shadow is staged BF16 (the twin's exact bits; `from_vector`'s
+  f32->bf16 upload cast is the identity on bf16-rounded values), so the
+  eager f32-out arm typecasts after the refresh, outside any trace.
+- qwen3_5.cpp's capture step gained the missing pre-mirror
+  `WarmEmbedQuantRows` (qwen3.cpp:1022-1025 already had it): without it the
+  capture would pin the previous eager step's rows.
+- Instrumentation kept as bisection knobs: `VT_TT_TRACE_DEBUG`
+  (`[TT-EMB-DBG]` prints), `VT_TT_EMB_POISON` (mechanics test only).
 
-| head | captured sha256 | result |
-|---|---|---|
-| W3 tree | `a0033dd8…` | diverges (`q4km-cap-1-token-ids.json`) |
-| W2 `be416cc5a` (scratch build `/tmp/build-bisect`, `bisect-q4km.log`) | `a0033dd8…` | diverges identically |
-| pre-change `de3493a3742` | `d49c53d2…` | recorded pass |
+## Gate results (all on the repaired tree, 3 reps each, 200 tokens, seed 0)
 
-So the captured quant-row branch introduced in W2 `be416cc5a` breaks the
-captured arm on BOTH artifacts; the W3 dtype fix neither caused nor
-repairs it. The eager arm is correct at every head. The captured path
-reads the F32 row shadow in-region and still produces wrong rows —
-next hypotheses: the in-region `typecast`/`to_layout` ops recorded at
-capture time replay against buffers the per-step H2D refresh does not
-update (the refresh writes the ROW_MAJOR f32 shadow; the recorded
-converted copy is a different buffer), or the refresh ordering vs replay
-launch. `q6kl-cap-pure-1`, `q6kl-cap-sync-1` token files and the
-13:44 failed-cwd logs are kept as bisection residue.
+| Gate | Result |
+|---|---|
+| Q4_K_M captured, 64 blocks ×3 | `d49c53d2…` 3/3 — byte-identical to the recorded pass |
+| Q4_K_M eager, 64 blocks | `d49c53d2…` — unchanged |
+| UD-Q6_K_XL captured, KV 8 ×3 | `b36bc61a…` 3/3 — byte-identical to the recorded eager stream |
+| UD-Q6_K_XL eager, KV 8 | `b36bc61a…` — unchanged |
+| TPOT captured vs eager (UD-Q6_K_XL, KV 8) — W3(b), now on the CORRECT stream | captured 5329.15 / 5319.70 / 5318.76 ms vs eager 5341.31 ms — capture costs nothing measurable |
+| Largest fitting KV pool — W3(c) | KV 16 fits (no OOM), deterministic 2/2, sha `5b34331d…` (`q6kl-cap16-*`) |
+| DRAM ledger — W3(d) | `VT_TT_ALLOC_TRACE`, `q6kl-cap-1.stderr.log`: 1743 snapshots, tightest `total_free=2,634,189,824 B` (~329 MB/bank × 8 banks) — the ~2.5 GB freed twin stays freed; the ~80 MB trace region allocates |
+| Focused | `test_gguf_keep_quant` 63/63 cases, 12205/12205 assertions (`/tmp/kq2.log`) |
 
-## What PASSED (the twin elimination is real)
-
-- DRAM ledger (`VT_TT_ALLOC_TRACE=1`, `q6kl-cap-1.stderr.log`):
-  before (TT-STAGING-FOOTPRINT oom8) — 13,638,720 B/bank free at
-  `end_trace_capture`, 80,134,144 B trace region OOM. After — run
-  completes, tightest snapshot `total_free=2,633,993,216 B`
-  (~329 MB/bank). Freed ≈ 2.5 GB/bank-equivalent — the 2.44 GiB twin.
-- Focused: `test_gguf_keep_quant` 12205/12205 (`/tmp/kq.log`), green
-  with the W3 tree; eager-arm byte-identity `b36bc61a…` reproduced.
-- TPOT captured 5337.25 / 5317.94 / 5318.44 ms vs eager 5340.30 ms —
-  capture costs nothing measurable (measured on the WRONG stream, so
-  recorded as indicative only, not a gate result).
+Q4_K_M per-leg wall time in `*-env.txt`; per-leg environment, governor,
+load and ps-top snapshots beside every leg.
 
 ## Owed (row stays OPEN)
 
-- Root-cause the W2 captured quant-row divergence (STOP hit; W3(b)-(d)
-  — KV16 re-measure, Q8_K_XL viability — not run past the STOP).
-- Fresh implementer + reviewer cycle on the repair.
+- Fresh reviewer cycle on the repair (mutation of the guarantee: gate the
+  out-of-region commit off and the captured stream must re-diverge; delete
+  the driver call site and the focused gate must catch it).
+- `docs/USAGE.md` weights-and-checkpoint line for the row's gate artifacts,
+  at row DONE.
