@@ -229,3 +229,140 @@ vt: no kernel for op GdnSpecDecode (id 12) on device tenstorrent (type 6)
   onto lo-main is ALREADY in this branch's base — `13542b40a` is an
   ancestor of HEAD and the fork's main equals it; the embed fix
   `47847ad9c` landed before the branch's W1).
+
+## W4 kernel wave (2026-11-15, the fresh-implementer wave: kGdnSpecDecode + the sampler it uncovered)
+
+Head at measurement: the W4 commits on `row/QWEN38-DFLASH2-STAGE-C`
+(c6f4042c7 + the GDN spec kernel + the sampler port + the EnsureHostBytes
+repair). Issues: the row issue's W4 entry,
+`ISSUE-LOCAL-01M7FTQR1HT8B61DVC00Y5AHZ8` (the sampler port gap),
+`ISSUE-LOCAL-01M7FSHPRTFND4Q75M5MNBAX3W` (the bf16 state readback, closed),
+`ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H` (the divergence bisect, open).
+
+### Shipped
+
+1. **`kGdnSpecDecode` on Tenstorrent** (`tenstorrent_gdn.cpp`,
+   `GdnSpecDecodeKernel`) — op id 12, the refusal `w3f-diag-on-direct.stderr.log`
+   named. The multi-row GDN decode step the verify's GDN segment issues.
+   Composition, per `GdnDecodeStepComposed` (the W2-validated exactness-scrubbed
+   step the single-row `kGdnDecode` runs):
+   - initial state from column `num_accepted-1` of the request's slot row —
+     ONE exact `GatherRowsExact` in the SPLIT shadow geometry (each slot
+     expands into its `sf` block rows; the one-hot matmul alternative rounds
+     its inputs to tf32, measured 2.4e-4, and the initial state's error
+     compounds through the delta-rule correction the wide-range arm pins);
+   - T sequential composed steps per request; the per-timestep q/k/v/g/beta
+     are CONTIGUOUS row slices of the served streams (request i's tokens are
+     rows `[cs_i, cs_i+1)` in batch order — the pure-spec contract), so the
+     recurrence needs no per-timestep index build;
+   - per-timestep state snapshots accumulated as device rows and landed in
+     ONE split-block `ScatterRowsDevice` (last-writer-wins = the oracle's
+     sequential store order); a NULL snapshot column skips only its store;
+   - bf16 STORAGE semantics at the snapshot boundary (the register chain
+     stays f32 — the oracle's `StoreF32` boundary);
+   - NULL-init requests zero their out rows and store NOTHING (the oracle's
+     :114-115 — no snapshots even from live columns);
+   - the captured arm refuses BY NAME (the acceptance metadata has no
+     persistent device refresh — the conv spec kernel's named gap); the spec
+     verify runs eager (`VLLM_CPP_CUDAGRAPH=0`).
+   - Commit-or-restore composition: the kernel commits through the SAME
+     `CommitDeviceLogical2D` slot mechanism `kGdnDecode` uses, so the stage-B
+     `StageGdnStateShadow`/`RestoreGdnStateShadow` clones cover its advance —
+     a rejected verify tail restores the pre-step shadow this kernel's commit
+     replaced. The rollback identity is pinned BIT-EXACT (below).
+2. **`kGreedyRejectionSample` on Tenstorrent**
+   (`ISSUE-LOCAL-01M7FTQR1HT8B61DVC00Y5AHZ8`) — the by-name refusal that
+   follows (id 107): the loop got past the GDN spec step and died at the
+   sampler. Host-staged (the `kGreedyArgmax` precedent), ported 1:1 from the
+   CPU reference — bit-exact vs the CPU oracle by construction.
+3. **The bf16 GDN state-cache readback repaired**
+   (`ISSUE-LOCAL-01M7FSHPRTFND4Q75M5MNBAX3W`, closed) — `EnsureHostBytes`'
+   generic tail lost the width-adaptive bf16 arm to f4725780b; the
+   kGdnDecode bf16-state arm's final readback was failing on the BASE
+   (pre-existing; no wave changes in its path).
+
+### Focused gate (the P150, mutex + reset per leg)
+
+- RED before (`w4-gdnspec-red.log`): the test case refuses by name —
+  `no kernel for op GdnSpecDecode (id 12) on device tenstorrent` — the same
+  refusal the engine's verify hit (`w3f-diag-on-direct.stderr.log:1609`).
+- GREEN after (`w4-gdnspec-green.log`, 4/4 test cases EXIT 0):
+  - captured shape (ns=1, T=9, nat=3, slots at a non-zero offset):
+    Hk16/Hv32 out max_abs 6.5e-9 state 3.0e-8; Hk16/Hv48 out 5.6e-9 state
+    3.0e-8 (tol 0.02 — the composed-step envelope);
+  - rolling continuation, 3 spec steps with VARYING acceptance (nat 1/2/3),
+    each step's init reading the previous step's committed snapshot column:
+    out <= 9.3e-9, state <= 3.7e-8;
+  - mixed seqlens (ragged cu_seqlens, disjoint slot rows): out 7.5e-9, state
+    2.2e-8;
+  - NULL-init: out 4.7e-9, state 1.5e-8, the NULL request's out rows
+    explicitly ZERO, its live snapshot columns NOT stored;
+  - bf16-state chain (2 steps, the emulated oracle: the CPU step on the
+    bf16-rounded state + the storage rounding at the commit): out 9.3e-9,
+    state 1.2e-7 / 6.1e-5 (the bf16 storage band);
+  - **THE ROLLBACK IDENTITY, bit-exact** — the spec kernel's snapshot at
+    column j == the native `kGdnDecode` chain's state after j+1 tokens (same
+    device, same composed step, zero tolerance): out 0/9216, state
+    0/1179648 bit mismatches. This is the property the stage-B
+    commit-or-restore rides: a rejected verify tail rolls the state back to
+    a slot a later step can resume from.
+  - the sampler: full-accept / reject-at-depth-2 / two-requests, all three
+    BIT-EXACT vs the CPU oracle.
+- The kGdnDecode + kCausalConv1dSpecUpdate cases rerun in the same log:
+  green (the EnsureHostBytes repair un-breaks the kGdnDecode bf16-state arm:
+  cache bit mismatches 0/98304).
+
+### Device gates
+
+- **(a) Q4_K_M KV-64 drafter-ON: STOP at the token-identity gate.** The loop
+  RUNS END-TO-END for the first time on this row (`w4-on-probe`: exit 0, 24
+  tokens, the acceptance telemetry live — 24/32 proposed accepted) and the
+  emitted stream is `[220, 0, 0, ...]` vs the recorded greedy stream
+  `[220, 16, 23066, ...]` (d49c53d2…). THE SPEC'S STOP CONDITION. The probe
+  evidence locates the degeneracy UPSTREAM of the GDN spec kernels
+  (`w4-diag-spec.stderr.log`, `VT_TT_GDN_SPEC_DEBUG`):
+  - the conv-spec kernel's x stream — the spec tokens' qkvz projection — has
+    NaN at the FIRST call (step 0, GDN layer 0: `x_asum=nan`) and collapses
+    to a frozen ~43.3553 sum at GDN layer 8+ in EVERY step (steps 0-3),
+    while the state-window reads stay real (T_asum ~6-15k);
+  - the GDN spec kernel's gathered state is real (s_asum 0.6-9.5k) and its
+    received activations are EXACTLY zero (q_asum=0, v_asum=0) for the
+    collapsed layers — the zero outs are a downstream consequence;
+  - the acceptance telemetry plus the all-zero ids fit BOTH argmaxes
+    degenerating to token 0 (the NaN-argmax signature: NaN comparisons false
+    -> best stays 0) — the verify's block logits AND the draft's block
+    logits are NaN-poisoned;
+  - the GDN spec kernel and the sampler are exonerated: their focused gates
+    are bit-exact, the metadata (nat0/init0/slots) is sane every call, and
+    the first NaN precedes any GdnSpecDecode call.
+  `ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H` owns the bisect (the embed of the
+  draft's proposals -> the qkvz projection GEMM -> the conv-spec x; the bfp8
+  weight-staging lever is the prime suspect). The no-bfp8 A/B is
+  capacity-blocked on this base: the draft's bf16 trunk OOMs at the same
+  178257920 B ffn_down allocation even at KV 32 (`w4-nobfp8-probe.*`).
+  **The acceptance multiple is UNMEASURABLE until the divergence lands** —
+  a degenerate loop's TPOT (the probe's 9970 ms at 24 tokens) is not a
+  number, and recording it as the multiple would be dishonest.
+- **(b) UD-Q6_K_XL KV-8 drafter-ON: BLOCKED by the same divergence** (the
+  same verify path; running it would measure the same degenerate loop).
+- **(c) drafter-OFF byte-identity, both arms: PASS, 6/6 legs** — the knob
+  default unchanged by this wave's changes:
+  - Q4_K_M KV-64 captured, 3 reps: token-ids sha256
+    `d49c53d23ac5bc4180096b30ebe3fb6990ba6f6eff7d6098760685f9035019ff` =
+    BYTE-IDENTICAL to the recorded stream 3/3 (`w4-off-{1,2,3}`); TPOT
+    6628.03 / 6626.55 / 6627.64 ms vs the recorded 6607 (0.32%, the same
+    band the W3 rerun recorded: 6626.89-6627.91).
+  - UD-Q6_K_XL KV-8 captured, 3 reps: token-ids sha256
+    `b36bc61a59828c1ddf05fbabf62ca0a491c652d50f7ec06bee86d4b17ad18bcc` =
+    BYTE-IDENTICAL to the recorded stream 3/3 (`w4-q6kl-off-{1,2,3}`, 64
+    tokens — the 8-block pool caps max_model_len at 96); TPOT 5325.37 /
+    5326.25 / 5325.98 ms vs the recorded eager 5341.31 / the embed row's
+    captured band 5318.76-5329.15.
+
+### Recipe
+
+`run-w4-gate.sh` (this dir): the committed run-w3-finish-gate.sh's discipline
+(file mutex, luwen reset + 15 s + /dev/shm cleanup per leg, idle gate,
+taskset 32-63 bench / 64-127 builds, run FROM THE REPO ROOT, INT8DOT=1) with
+`VT_DFLASH_DRAFT=1` restored on the drafter-ON legs and
+`VLLM_CPP_CUDAGRAPH=0 VT_TT_WEIGHT_RESIDENCY=bfp8` per the W3 disposition.

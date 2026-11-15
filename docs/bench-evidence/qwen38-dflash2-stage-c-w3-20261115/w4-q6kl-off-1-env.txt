@@ -1,0 +1,11 @@
+date: 2026-11-15T18:04:42+01:00
+head: c6f4042c75f169b3177c246e297e58321606fc86
+governor: performance
+load1: 2.60
+bench: /tmp/build-stagec-w3/examples/vllm-bench
+model: /mnt/models/unsloth-qwen3.8-27B-gguf-v2/Qwen3.8-27B-UD-Q6_K_XL.gguf
+model sha256: 701d8fa9ed214ab21bfc130cd2a7df19ca89bbef7713e2dfb19f3c63696aa917
+num-blocks: 8
+extra-env: 
+output-len: 200
+spec: 0

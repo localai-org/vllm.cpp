@@ -1,0 +1,12 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero  116071  1.1  0.8 21284416 2217344 pts/0 Sl+ Nov11  67:55 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero  120667  0.8  0.1 6217856 524544 pts/6  Sl+  Nov14  13:42 claude --resume 2774bb5f-085e-481b-be2d-f0d379464dd9
+lu_zero  110995  0.4  0.2 21567424 536064 ?     Ssl  Nov14   4:15 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service
+lu_zero  120198  0.3  0.1 6213568 343552 pts/1  Sl+  Nov14   4:53 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+lu_zero   77161  0.2  0.0 11123968 265152 pts/9 Sl+  11:20   0:34 opencode -c
+lu_zero   95757  0.1  0.0  11392  6400 ?        Ss   Oct26  42:32 tmux
+root        801  0.1  0.0      0     0 ?        S    Aug31 137:14 [kcompactd1]
+root        800  0.1  0.0      0     0 ?        S    Aug31 118:21 [kcompactd0]
+root        802  0.0  0.0      0     0 ?        S    Aug31 103:56 [kcompactd2]
+root      28358  0.0  0.0      0     0 ?        I    15:49   0:00 [kworker/u577:5-btrfs-endio-meta]
+lu_zero   34127  0.0  0.0  10240  4480 ?        Ss   15:50   0:00 bash docs/bench-evidence/qwen38-dflash2-stage-c-w3-20261115/run-w4-gate.sh probe-on

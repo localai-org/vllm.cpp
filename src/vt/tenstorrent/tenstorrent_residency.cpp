@@ -1584,17 +1584,25 @@ void EnsureHostBytes(void* host) {
     // shifts WHICH requests borrow). The shadow's dtype is authoritative: an
     // f32 shadow writes f32, a bf16 shadow writes bf16, whatever the capacity.
     // The conv-transposed arm above keeps its own layout contract.
-    if (dev.dtype() == ttnn::DataType::FLOAT32) {
-      VT_CHECK(bytes >= n * sizeof(float),
-               "tenstorrent: EnsureHostBytes host buffer too small for the "
-               "f32 shadow");
+    //
+    // ISSUE-LOCAL-01M7FSHPRTFND4Q75M5MNBAX3W: the f32-shadow branch must still
+    // fall back to the bf16-rounded write when the slot's registered capacity
+    // is bf16-sized — the GDN ssm cache shadow is ALWAYS f32
+    // (EnsureGdnCacheDevice) while a production bf16 mamba_ssm cache
+    // registers n*2 bytes, and tenstorrent_gdn.cpp:410 documents the
+    // f32->bf16 rounding on the way out as existing. The #1922 rule survives:
+    // the f32 write still requires n*4, so a sub-f32 buffer never receives
+    // f32 bytes — it receives the stored bf16 truth (the shadow's f32 values
+    // ARE the bf16-rounded cache widened; rounding them back is exact).
+    if (dev.dtype() == ttnn::DataType::FLOAT32 &&
+        bytes >= n * sizeof(float)) {
       std::memcpy(base, result.data(), n * sizeof(float));
-    } else {
-      VT_CHECK(bytes >= n * sizeof(uint16_t),
-               "tenstorrent: EnsureHostBytes host buffer too small for the "
-               "shadow dtype");
+    } else if (bytes >= n * sizeof(uint16_t)) {
       auto* dst = static_cast<uint16_t*>(base);
       for (size_t i = 0; i < n; ++i) dst[i] = F32ToBF16(result[i]);
+    } else {
+      VT_CHECK(false, "tenstorrent: EnsureHostBytes host buffer too small for "
+                      "the shadow");
     }
     s->host_current = true;
   }

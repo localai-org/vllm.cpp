@@ -4816,6 +4816,585 @@ TEST_CASE("kTENSTORRENT kGdnDecode matches the CPU f32 oracle (rank-1 step, both
   }
 }
 
+// QWEN38-DFLASH2-STAGE-C W4: the speculative GDN step (kGdnSpecDecode) — the
+// multi-row arm the verify's GDN segment issues. The oracle is the CPU f32
+// GdnSpecDecode (cpu_ops.cpp GdnSpecDecodeKernel, the fused_sigmoid_gating
+// IS_SPEC_DECODING port); the device arm composes the SAME per-timestep step
+// the kGdnDecode kernel runs (GdnDecodeStepComposed), so the rollback
+// identity — spec snapshot at column j == the native kGdnDecode chain after
+// j+1 tokens — is BIT-EXACT on this device (same op sequence, same inputs),
+// and the oracle-facing arms take the composed-step envelope.
+TEST_CASE("kTENSTORRENT kGdnSpecDecode matches the CPU f32 oracle (accepted-prefix init slot, per-timestep snapshots, NULL + mixed seqlens + bf16 state)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& cpu = *vt::TryGetBackend(DeviceType::kCPU);
+  constexpr int64_t Dk = 128, Dv = 128;
+
+  // One spec step: ns requests; per-request token counts from `cs` (sum ==
+  // rows of q); `idx2d` is the flat [ns*ncols] slot rows; `nat` the previous
+  // step's acceptance per request. Updates st/out.
+  auto step = [&](Backend& b, DeviceType dt, int64_t Hk, int64_t Hv,
+                  const std::vector<float>& q, const std::vector<float>& k,
+                  const std::vector<float>& v, const std::vector<float>& g,
+                  const std::vector<float>& beta, std::vector<float>& st,
+                  int64_t slots, const std::vector<int32_t>& cs,
+                  const std::vector<int32_t>& idx2d, int64_t ncols,
+                  const std::vector<int32_t>& nat, std::vector<float>& out,
+                  bool bf16_state = false) {
+    const int64_t T = cs.back();
+    const int64_t ns = static_cast<int64_t>(nat.size());
+    const size_t st_n = static_cast<size_t>(slots * Hv * Dv * Dk);
+    void* mq = b.Alloc(q.size() * sizeof(float));
+    void* mk = b.Alloc(k.size() * sizeof(float));
+    void* mv = b.Alloc(v.size() * sizeof(float));
+    void* mg = b.Alloc(g.size() * sizeof(float));
+    void* mb = b.Alloc(beta.size() * sizeof(float));
+    void* ms = b.Alloc(st_n * (bf16_state ? sizeof(uint16_t) : sizeof(float)));
+    void* mo = b.Alloc(out.size() * sizeof(float));
+    void* mi = b.Alloc(idx2d.size() * sizeof(int32_t));
+    void* mn = b.Alloc(nat.size() * sizeof(int32_t));
+    void* mc = b.Alloc(cs.size() * sizeof(int32_t));
+    Queue qq = b.CreateQueue();
+    b.Copy(qq, mq, q.data(), q.size() * sizeof(float));
+    b.Copy(qq, mk, k.data(), k.size() * sizeof(float));
+    b.Copy(qq, mv, v.data(), v.size() * sizeof(float));
+    b.Copy(qq, mg, g.data(), g.size() * sizeof(float));
+    b.Copy(qq, mb, beta.data(), beta.size() * sizeof(float));
+    if (bf16_state) {
+      // The state tensor is bf16: round the host f32 through bf16 (RNE), the
+      // storage the oracle's f32 reference is checked against.
+      std::vector<uint16_t> st_bits(st_n);
+      for (size_t i = 0; i < st_n; ++i) st_bits[i] = vt::F32ToBF16(st[i]);
+      b.Copy(qq, ms, st_bits.data(), st_n * sizeof(uint16_t));
+    } else {
+      b.Copy(qq, ms, st.data(), st_n * sizeof(float));
+    }
+    b.Copy(qq, mo, out.data(), out.size() * sizeof(float));
+    b.Copy(qq, mi, idx2d.data(), idx2d.size() * sizeof(int32_t));
+    b.Copy(qq, mn, nat.data(), nat.size() * sizeof(int32_t));
+    b.Copy(qq, mc, cs.data(), cs.size() * sizeof(int32_t));
+    Tensor tq = Tensor::Contiguous(mq, vt::DType::kF32, Device{dt, 0}, {T, Hk, Dk});
+    Tensor tk = Tensor::Contiguous(mk, vt::DType::kF32, Device{dt, 0}, {T, Hk, Dk});
+    Tensor tv = Tensor::Contiguous(mv, vt::DType::kF32, Device{dt, 0}, {T, Hv, Dv});
+    Tensor tg = Tensor::Contiguous(mg, vt::DType::kF32, Device{dt, 0}, {T, Hv});
+    Tensor tb = Tensor::Contiguous(mb, vt::DType::kF32, Device{dt, 0}, {T, Hv});
+    Tensor ts = Tensor::Contiguous(ms, bf16_state ? vt::DType::kBF16 : vt::DType::kF32,
+                                   Device{dt, 0}, {slots, Hv, Dv, Dk});
+    Tensor tidx = Tensor::Contiguous(mi, vt::DType::kI32, Device{dt, 0}, {ns, ncols});
+    Tensor tnat = Tensor::Contiguous(mn, vt::DType::kI32, Device{dt, 0}, {ns});
+    Tensor tcs = Tensor::Contiguous(mc, vt::DType::kI32, Device{dt, 0},
+                                    {static_cast<int64_t>(cs.size())});
+    Tensor to = Tensor::Contiguous(mo, vt::DType::kF32, Device{dt, 0}, {T, Hv, Dv});
+    vt::GdnArgs args;
+    args.scale = 1.0f / std::sqrt(static_cast<float>(Dk));
+    vt::GdnSpecDecode(qq, to, tq, tk, tv, tg, tb, ts, tcs, tidx, tnat, args);
+    b.Copy(qq, out.data(), mo, out.size() * sizeof(float));
+    if (bf16_state) {
+      // Storage truth: download the bf16 cache and widen back — the next
+      // step's init slot reads the STORED bits (the bf16-state contract).
+      std::vector<uint16_t> got_bits(st_n, 0);
+      b.Copy(qq, got_bits.data(), ms, st_n * sizeof(uint16_t));
+      for (size_t i = 0; i < st_n; ++i) st[i] = vt::BF16ToF32(got_bits[i]);
+    } else {
+      b.Copy(qq, st.data(), ms, st_n * sizeof(float));
+    }
+    b.Free(mq);
+    b.Free(mk);
+    b.Free(mv);
+    b.Free(mg);
+    b.Free(mb);
+    b.Free(ms);
+    b.Free(mo);
+    b.Free(mi);
+    b.Free(mn);
+    b.Free(mc);
+  };
+
+  // Inputs on-manifold: l2-normalized q/k, log-decay g <= 0, beta in (0,1) —
+  // the same distribution the kGdnDecode oracle arm generates.
+  auto gen = [&](uint32_t seed, int64_t T, int64_t Hk, int64_t Hv,
+                 std::vector<float>& q, std::vector<float>& k, std::vector<float>& v,
+                 std::vector<float>& g, std::vector<float>& beta) {
+    uint32_t s = seed;
+    q.assign(static_cast<size_t>(T * Hk * Dk), 0.0f);
+    k.assign(static_cast<size_t>(T * Hk * Dk), 0.0f);
+    v.assign(static_cast<size_t>(T * Hv * Dv), 0.0f);
+    g.assign(static_cast<size_t>(T * Hv), 0.0f);
+    beta.assign(static_cast<size_t>(T * Hv), 0.0f);
+    for (float& x : q) x = GdnLcg(s);
+    for (float& x : k) x = GdnLcg(s);
+    for (float& x : v) x = GdnLcg(s);
+    for (float& x : g) x = -0.24f * GdnLcg(s) - 0.05f;  // negative log-decay
+    for (float& x : beta) x = 0.05f + 0.9f * (GdnLcg(s) + 0.5f);
+    for (int64_t r = 0; r < T * Hk; ++r) {
+      float ss = 0.0f;
+      for (int64_t j = 0; j < Dk; ++j) {
+        const float x = q[static_cast<size_t>(r * Dk + j)];
+        ss += x * x;
+      }
+      const float inv = 1.0f / std::sqrt(ss + 1e-6f);
+      for (int64_t j = 0; j < Dk; ++j) q[static_cast<size_t>(r * Dk + j)] *= inv;
+      ss = 0.0f;
+      for (int64_t j = 0; j < Dk; ++j) {
+        const float x = k[static_cast<size_t>(r * Dk + j)];
+        ss += x * x;
+      }
+      for (int64_t j = 0; j < Dk; ++j) k[static_cast<size_t>(r * Dk + j)] *= inv;
+    }
+  };
+
+  // --- Sweep A: the captured shape — ns=1, the 9-row DFlash2 verify block,
+  // a NON-trivial acceptance (nat=3: the init state reads column 2, the
+  // snapshots overwrite columns 0..8), slots at a non-zero offset.
+  for (auto [Hk, Hv] : {std::pair<int64_t, int64_t>{16, 32}, {16, 48}}) {
+    const int64_t T = 9, ncols = 9, slots = 4;
+    std::vector<float> q, k, v, g, beta;
+    gen(88000u + static_cast<uint32_t>(Hv), T, Hk, Hv, q, k, v, g, beta);
+    std::vector<float> st(static_cast<size_t>(slots * Hv * Dv * Dk));
+    {
+      uint32_t s = 88100u;
+      for (float& x : st) x = 0.05f * GdnLcg(s);
+    }
+    const std::vector<int32_t> cs{0, T};
+    const std::vector<int32_t> nat{3};
+    // init = column nat-1 = 2 -> slot 2 of 4; snapshots to slots 0,1,2,3, then
+    // columns 4..8 are NULL (past the slot row's live window — untouched).
+    std::vector<int32_t> idx2d{2, 0, 1, 3, -1, -1, -1, -1, -1};
+    std::vector<float> st_cpu = st, st_tt = st;
+    std::vector<float> out_cpu(static_cast<size_t>(T * Hv * Dv), 0.0f),
+        out_tt(static_cast<size_t>(T * Hv * Dv), 0.0f);
+    step(cpu, DeviceType::kCPU, Hk, Hv, q, k, v, g, beta, st_cpu, slots, cs, idx2d,
+         ncols, nat, out_cpu);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT, Hk,
+         Hv, q, k, v, g, beta, st_tt, slots, cs, idx2d, ncols, nat, out_tt);
+    // Device f32 compute path: the composed-step envelope (the kGdnDecode
+    // oracle arm's measured band).
+    const float tol = 0.02f;
+    GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 0.0f, tol);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 0.0f, tol);
+    MESSAGE("kGdnSpecDecode captured-shape Hk=", Hk, " Hv=", Hv,
+            ": out max_abs=", d.max_abs, " state max_abs=", ds.max_abs, " tol=", tol);
+    CHECK(std::isfinite(d.max_abs));
+    CHECK(d.within);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+  }
+
+  // --- Sweep B: rolling continuation — three spec steps with VARYING
+  // acceptance; each step's init slot must read the row the previous step's
+  // snapshot committed at column nat-1 (the rollback identity's cache half).
+  {
+    const int64_t T = 9, ncols = 9, slots = 3, Hk = 2, Hv = 8;
+    uint32_t s = 88200u;
+    std::vector<float> q0, k0, v0, g0, b0;
+    gen(s, T, Hk, Hv, q0, k0, v0, g0, b0);
+    std::vector<float> st(static_cast<size_t>(slots * Hv * Dv * Dk));
+    {
+      uint32_t s2 = 88300u;
+      for (float& x : st) x = 0.05f * GdnLcg(s2);
+    }
+    const std::vector<int32_t> cs{0, T};
+    // identity slot rows 0,1,2 then NULLs (only 3 slots; a step whose
+    // snapshots run past them skips the store)
+    const std::vector<int32_t> idx2d{0, 1, 2, -1, -1, -1, -1, -1, -1};
+    for (int step_i = 0; step_i < 3; ++step_i) {
+      const int32_t acc = static_cast<int32_t>(1 + (step_i % T));  // 1..9
+      std::vector<float> q = q0, k = k0, v = v0, g = g0, beta = b0;
+      for (float& x : q) x += 0.01f * step_i;
+      for (float& x : k) x += 0.01f * step_i;
+      for (float& x : v) x += 0.01f * step_i;
+      std::vector<float> st_cpu = st, st_tt = st;
+      std::vector<float> out_cpu(static_cast<size_t>(T * Hv * Dv), 0.0f),
+          out_tt(static_cast<size_t>(T * Hv * Dv), 0.0f);
+      step(cpu, DeviceType::kCPU, Hk, Hv, q, k, v, g, beta, st_cpu, slots, cs,
+           idx2d, ncols, {acc}, out_cpu);
+      step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+           Hk, Hv, q, k, v, g, beta, st_tt, slots, cs, idx2d, ncols, {acc}, out_tt);
+      GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 0.0f, 0.02f);
+      GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 0.0f, 0.02f);
+      MESSAGE("kGdnSpecDecode continuation step=", step_i, " nat=", acc,
+              ": out max_abs=", d.max_abs, " state max_abs=", ds.max_abs);
+      CHECK(std::isfinite(d.max_abs));
+      CHECK(d.within);
+      CHECK(std::isfinite(ds.max_abs));
+      CHECK(ds.within);
+      st = st_tt;
+    }
+  }
+
+  // --- Sweep C: mixed seqlens (the ragged varlen form) + disjoint slot rows.
+  {
+    const int64_t Hk = 2, Hv = 8, ncols = 9, slots = 10;
+    const std::vector<int32_t> cs{0, 4, 9};  // request 0: 4 tokens, 1: 5
+    const int64_t T = cs.back();
+    std::vector<float> q, k, v, g, beta;
+    gen(88400u, T, Hk, Hv, q, k, v, g, beta);
+    std::vector<float> st(static_cast<size_t>(slots * Hv * Dv * Dk));
+    {
+      uint32_t s = 88500u;
+      for (float& x : st) x = 0.05f * GdnLcg(s);
+    }
+    const std::vector<int32_t> nat{2, 5};
+    // request 0: snapshots to slots 0..3 (4 timesteps), init = column 1 -> 1
+    // request 1: snapshots to slots 5..9 (5 timesteps), init = column 4 -> 9
+    const std::vector<int32_t> idx2d{0, 1, 2, 3, -1, -1, -1, -1, -1,
+                                     5, 6, 7, 8, 9, -1, -1, -1, -1};
+    std::vector<float> st_cpu = st, st_tt = st;
+    std::vector<float> out_cpu(static_cast<size_t>(T * Hv * Dv), 0.0f),
+        out_tt(static_cast<size_t>(T * Hv * Dv), 0.0f);
+    step(cpu, DeviceType::kCPU, Hk, Hv, q, k, v, g, beta, st_cpu, slots, cs, idx2d,
+         ncols, nat, out_cpu);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT, Hk,
+         Hv, q, k, v, g, beta, st_tt, slots, cs, idx2d, ncols, nat, out_tt);
+    const float tol = 0.02f;
+    GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 0.0f, tol);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 0.0f, tol);
+    MESSAGE("kGdnSpecDecode mixed-seqlen: out max_abs=", d.max_abs,
+            " state max_abs=", ds.max_abs, " tol=", tol);
+    CHECK(std::isfinite(d.max_abs));
+    CHECK(d.within);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+  }
+
+  // --- Sweep D: NULL init slot — the oracle skips the WHOLE request (zeroed
+  // out rows, NO snapshots even from live columns) and the named slots keep
+  // their bytes.
+  {
+    const int64_t Hk = 2, Hv = 8, ncols = 9, slots = 10;
+    const std::vector<int32_t> cs{0, 5, 9};  // request 0: 5 tokens, 1: 4
+    const int64_t T = cs.back();
+    std::vector<float> q, k, v, g, beta;
+    gen(88600u, T, Hk, Hv, q, k, v, g, beta);
+    std::vector<float> st(static_cast<size_t>(slots * Hv * Dv * Dk));
+    {
+      uint32_t s = 88700u;
+      for (float& x : st) x = 0.05f * GdnLcg(s);
+    }
+    const std::vector<int32_t> nat{5, 1};
+    // request 0: identity slots 0..4 (5 live columns); request 1: NULL init
+    // (column 0 = -1) with LIVE snapshot columns 1..4 — the oracle must NOT
+    // store them.
+    const std::vector<int32_t> idx2d{0, 1, 2, 3, 4, -1, -1, -1, -1,
+                                     -1, 5, 6, 7, 8, -1, -1, -1, -1};
+    std::vector<float> st_cpu = st, st_tt = st;
+    std::vector<float> out_cpu(static_cast<size_t>(T * Hv * Dv), 0.0f),
+        out_tt(static_cast<size_t>(T * Hv * Dv), 0.0f);
+    step(cpu, DeviceType::kCPU, Hk, Hv, q, k, v, g, beta, st_cpu, slots, cs, idx2d,
+         ncols, nat, out_cpu);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT, Hk,
+         Hv, q, k, v, g, beta, st_tt, slots, cs, idx2d, ncols, nat, out_tt);
+    const float tol = 0.02f;
+    GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 0.0f, tol);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 0.0f, tol);
+    MESSAGE("kGdnSpecDecode NULL-init: out max_abs=", d.max_abs,
+            " state max_abs=", ds.max_abs, " tol=", tol);
+    CHECK(std::isfinite(d.max_abs));
+    CHECK(d.within);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+    // The NULL request's out rows are explicitly ZEROED by the oracle — not
+    // left stale (rows 5..8 = request 1's tokens).
+    for (int64_t e = 5 * Hv * Dv; e < 9 * Hv * Dv; ++e)
+      CHECK(out_tt[static_cast<size_t>(e)] == 0.0f);
+  }
+
+  // --- Sweep E: bf16 ssm_state (the compressed-state storage contract) — a
+  // two-step chain. The reference is the EMULATED oracle (the CPU backend
+  // does not answer SupportsCompressedGdnState, so it refuses bf16 state):
+  // the CPU step runs f32 on the bf16-ROUNDED state and the committed state
+  // rounds through bf16 after the step — the storage boundary the TT arm
+  // honors at its shadow commit.
+  {
+    const int64_t T = 9, ncols = 9, slots = 2, Hk = 2, Hv = 8;
+    std::vector<float> q0, k0, v0, g0, b0;
+    gen(88800u, T, Hk, Hv, q0, k0, v0, g0, b0);
+    std::vector<float> st(static_cast<size_t>(slots * Hv * Dv * Dk));
+    {
+      uint32_t s = 88900u;
+      for (float& x : st) x = 0.05f * GdnLcg(s);
+    }
+    const std::vector<int32_t> cs{0, T};
+    const std::vector<int32_t> idx2d{0, 1, -1, -1, -1, -1, -1, -1, -1};
+    for (int step_i = 0; step_i < 2; ++step_i) {
+      std::vector<float> q = q0, k = k0, v = v0, g = g0, beta = b0;
+      for (float& x : q) x += 0.01f * step_i;
+      for (float& x : k) x += 0.01f * step_i;
+      for (float& x : v) x += 0.01f * step_i;
+      const int32_t acc = static_cast<int32_t>(1 + (step_i % T));
+      // The storage truth on BOTH sides: the state the step READS is the
+      // bf16-rounded values (widened back), not the host f32.
+      for (float& x : st) x = vt::BF16ToF32(vt::F32ToBF16(x));
+      std::vector<float> st_cpu = st, st_tt = st;
+      std::vector<float> out_cpu(static_cast<size_t>(T * Hv * Dv), 0.0f),
+          out_tt(static_cast<size_t>(T * Hv * Dv), 0.0f);
+      step(cpu, DeviceType::kCPU, Hk, Hv, q, k, v, g, beta, st_cpu, slots, cs,
+           idx2d, ncols, {acc}, out_cpu, /*bf16_state=*/false);
+      for (float& x : st_cpu) x = vt::BF16ToF32(vt::F32ToBF16(x));
+      step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+           Hk, Hv, q, k, v, g, beta, st_tt, slots, cs, idx2d, ncols, {acc}, out_tt,
+           /*bf16_state=*/true);
+      GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 0.0f, 0.02f);
+      GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 0.0f, 0.02f);
+      MESSAGE("kGdnSpecDecode bf16-state step=", step_i, " nat=", acc,
+              ": out max_abs=", d.max_abs, " state max_abs=", ds.max_abs);
+      CHECK(std::isfinite(d.max_abs));
+      CHECK(d.within);
+      CHECK(std::isfinite(ds.max_abs));
+      CHECK(ds.within);
+      st = st_tt;
+    }
+  }
+
+  // --- Sweep F: THE ROLLBACK IDENTITY, device vs device (bit-exact). The
+  // spec kernel's snapshot at column j must equal the native kGdnDecode
+  // chain's state after j+1 tokens — the property the stage-B commit-or-
+  // restore rides (a rejected verify tail rolls the state back to a slot a
+  // later step can resume from). Both arms run the SAME composed step on the
+  // SAME device, so the comparison carries NO tolerance.
+  {
+    const int64_t T = 9, ncols = 9, Hk = 2, Hv = 8;
+    std::vector<float> q, k, v, g, beta;
+    gen(89000u, T, Hk, Hv, q, k, v, g, beta);
+    std::vector<float> s0(static_cast<size_t>(Hv * Dv * Dk));
+    {
+      uint32_t s = 89100u;
+      for (float& x : s0) x = 0.05f * GdnLcg(s);
+    }
+    // The spec step: slots = 9 identity columns, every row seeded with s0 so
+    // the init slot (column nat-1 = 8) holds s0.
+    const int64_t slots = 9;
+    std::vector<float> st_spec(static_cast<size_t>(slots) * s0.size());
+    for (int64_t c = 0; c < slots; ++c)
+      std::copy(s0.begin(), s0.end(),
+                st_spec.begin() + static_cast<std::ptrdiff_t>(c * s0.size()));
+    const std::vector<int32_t> cs{0, T};
+    const std::vector<int32_t> idx2d{0, 1, 2, 3, 4, 5, 6, 7, 8};
+    const std::vector<int32_t> nat{T};  // init from column 8 == s0
+    std::vector<float> out_spec(static_cast<size_t>(T * Hv * Dv), 0.0f);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+         Hk, Hv, q, k, v, g, beta, st_spec, slots, cs, idx2d, ncols, nat, out_spec);
+    // The native chain: 9 single-token kGdnDecode steps from s0, the state
+    // after each step recorded (snapshot j must equal the state after j+1
+    // tokens).
+    std::vector<std::vector<float>> nat_states;
+    std::vector<float> out_nat(static_cast<size_t>(T * Hv * Dv), 0.0f);
+    {
+      std::vector<float> st_nat = s0;
+      nat_states.push_back(st_nat);  // (unused; indices below are 1-based)
+      Backend& tt = *vt::TryGetBackend(DeviceType::kTENSTORRENT);
+      void* mq = tt.Alloc(Hk * Dk * sizeof(float));
+      void* mk = tt.Alloc(Hk * Dk * sizeof(float));
+      void* mv = tt.Alloc(Hv * Dv * sizeof(float));
+      void* mg = tt.Alloc(Hv * sizeof(float));
+      void* mb = tt.Alloc(Hv * sizeof(float));
+      void* ms = tt.Alloc(s0.size() * sizeof(float));
+      void* mo = tt.Alloc(Hv * Dv * sizeof(float));
+      Queue qq = tt.CreateQueue();
+      tt.Copy(qq, ms, s0.data(), s0.size() * sizeof(float));
+      Tensor ts = Tensor::Contiguous(ms, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0},
+                                     {1, Hv, Dv, Dk});
+      vt::GdnArgs args;
+      args.scale = 1.0f / std::sqrt(static_cast<float>(Dk));
+      for (int64_t t = 0; t < T; ++t) {
+        tt.Copy(qq, mq, q.data() + static_cast<size_t>(t * Hk * Dk),
+                Hk * Dk * sizeof(float));
+        tt.Copy(qq, mk, k.data() + static_cast<size_t>(t * Hk * Dk),
+                Hk * Dk * sizeof(float));
+        tt.Copy(qq, mv, v.data() + static_cast<size_t>(t * Hv * Dv),
+                Hv * Dv * sizeof(float));
+        tt.Copy(qq, mg, g.data() + static_cast<size_t>(t * Hv), Hv * sizeof(float));
+        tt.Copy(qq, mb, beta.data() + static_cast<size_t>(t * Hv),
+                Hv * sizeof(float));
+        Tensor tq = Tensor::Contiguous(mq, vt::DType::kF32,
+                                       Device{DeviceType::kTENSTORRENT, 0},
+                                       {1, Hk, Dk});
+        Tensor tk = Tensor::Contiguous(mk, vt::DType::kF32,
+                                       Device{DeviceType::kTENSTORRENT, 0},
+                                       {1, Hk, Dk});
+        Tensor tv = Tensor::Contiguous(mv, vt::DType::kF32,
+                                       Device{DeviceType::kTENSTORRENT, 0},
+                                       {1, Hv, Dv});
+        Tensor tg = Tensor::Contiguous(mg, vt::DType::kF32,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {1, Hv});
+        Tensor tb = Tensor::Contiguous(mb, vt::DType::kF32,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {1, Hv});
+        Tensor to = Tensor::Contiguous(
+            mo, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, {1, Hv, Dv});
+        vt::GdnDecode(qq, to, tq, tk, tv, tg, tb, ts, args, nullptr);
+        tt.Copy(qq, out_nat.data() + static_cast<size_t>(t * Hv * Dv), mo,
+                Hv * Dv * sizeof(float));
+        tt.Copy(qq, st_nat.data(), ms, s0.size() * sizeof(float));
+        nat_states.push_back(st_nat);
+      }
+      tt.Free(mq);
+      tt.Free(mk);
+      tt.Free(mv);
+      tt.Free(mg);
+      tt.Free(mb);
+      tt.Free(ms);
+      tt.Free(mo);
+    }
+    // Snapshot column j == the native chain's state after j+1 tokens.
+    size_t out_mism = 0, st_mism = 0;
+    for (int64_t j = 0; j < T; ++j) {
+      const size_t off = static_cast<size_t>(j) * s0.size();
+      const std::vector<float>& want = nat_states[static_cast<size_t>(j + 1)];
+      for (size_t e = 0; e < s0.size(); ++e)
+        if (std::memcmp(&st_spec[off + e], &want[e], sizeof(float)) != 0) ++st_mism;
+    }
+    for (size_t e = 0; e < out_nat.size(); ++e)
+      if (std::memcmp(&out_spec[e], &out_nat[e], sizeof(float)) != 0) ++out_mism;
+    MESSAGE("kGdnSpecDecode rollback identity: out bit mismatches=", out_mism,
+            "/", out_nat.size(), " state bit mismatches=", st_mism, "/",
+            static_cast<size_t>(T) * s0.size());
+    CHECK(out_mism == 0);
+    CHECK(st_mism == 0);
+  }
+}
+
+// QWEN38-DFLASH2-STAGE-C W4: the verify's greedy rejection sampler on TT
+// (ISSUE-LOCAL-01M7FTQR1HT8B61DVC00Y5AHZ8). The TT arm is HOST-STAGED — the
+// identical host arithmetic the CPU reference runs (same strict-> lowest-index
+// tie-break, same accept walk) — so the comparison is BIT-EXACT, and what the
+// case actually pins is the registration + the device-tensor plumbing
+// (EnsureHost on the logits/draft/cu operands, CommitHost on the outputs)
+// through the vt:: facade.
+TEST_CASE("kTENSTORRENT kGreedyRejectionSample is BIT-EXACT vs the CPU oracle (accept, reject, bonus)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& cpu = *vt::TryGetBackend(DeviceType::kCPU);
+  constexpr int64_t V = 512, W = 9;
+
+  // One case: per-request logits row counts from cu; the draft provokes a
+  // reject at walk depth `reject_depth` (-1 = full accept) by overriding
+  // dp[reject_depth + 1] — the expanded row the walk reads for draft token
+  // reject_depth. seed-free: each row's max sits at column (r*7)%V.
+  auto run = [&](Backend& b, DeviceType dt, int64_t num_logits,
+                 const std::vector<int32_t>& cu, int64_t reject_depth,
+                 std::vector<int32_t>& sampled, std::vector<int32_t>& num_sampled,
+                 std::vector<int32_t>& target_argmax) {
+    std::vector<float> logits(static_cast<size_t>(num_logits * V));
+    {
+      uint32_t s = 91000u + static_cast<uint32_t>(num_logits);
+      for (float& x : logits) x = GdnLcg(s);
+      for (int64_t r = 0; r < num_logits; ++r)
+        logits[static_cast<size_t>(r) * V +
+               static_cast<size_t>((r * 7) % V)] = 10.0f + static_cast<float>(r);
+    }
+    // The walk reads draft token i at dp[start + i + 1]; a full accept needs
+    // dp[i + 1] == ta[i] == (i*7)%V, i.e. dp[r] = ((r-1)*7)%V for r >= 1.
+    std::vector<int32_t> dp(static_cast<size_t>(num_logits));
+    dp[0] = -7;  // never read (the walk starts at +1)
+    for (int64_t r = 1; r < num_logits; ++r)
+      dp[static_cast<size_t>(r)] = static_cast<int32_t>(((r - 1) * 7) % V);
+    if (reject_depth >= 0)
+      dp[static_cast<size_t>(reject_depth) + 1] =
+          (dp[static_cast<size_t>(reject_depth) + 1] + 1) % V;
+
+    void* ml = b.Alloc(logits.size() * sizeof(float));
+    void* md = b.Alloc(dp.size() * sizeof(int32_t));
+    void* mc = b.Alloc(cu.size() * sizeof(int32_t));
+    void* ms = b.Alloc(sampled.size() * sizeof(int32_t));
+    void* mn = b.Alloc(num_sampled.size() * sizeof(int32_t));
+    void* ma = b.Alloc(target_argmax.size() * sizeof(int32_t));
+    Queue q = b.CreateQueue();
+    b.Copy(q, ml, logits.data(), logits.size() * sizeof(float));
+    b.Copy(q, md, dp.data(), dp.size() * sizeof(int32_t));
+    b.Copy(q, mc, cu.data(), cu.size() * sizeof(int32_t));
+    b.Copy(q, ms, sampled.data(), sampled.size() * sizeof(int32_t));
+    b.Copy(q, mn, num_sampled.data(), num_sampled.size() * sizeof(int32_t));
+    b.Copy(q, ma, target_argmax.data(), target_argmax.size() * sizeof(int32_t));
+    Tensor tl = Tensor::Contiguous(ml, vt::DType::kF32, Device{dt, 0}, {num_logits, V});
+    Tensor td = Tensor::Contiguous(md, vt::DType::kI32, Device{dt, 0},
+                                   {static_cast<int64_t>(dp.size())});
+    Tensor tc = Tensor::Contiguous(mc, vt::DType::kI32, Device{dt, 0},
+                                   {static_cast<int64_t>(cu.size())});
+    Tensor tsm = Tensor::Contiguous(ms, vt::DType::kI32, Device{dt, 0},
+                                    {static_cast<int64_t>(cu.size() - 1), W});
+    Tensor tn = Tensor::Contiguous(mn, vt::DType::kI32, Device{dt, 0},
+                                   {static_cast<int64_t>(cu.size() - 1)});
+    Tensor ta = Tensor::Contiguous(ma, vt::DType::kI32, Device{dt, 0},
+                                   {static_cast<int64_t>(num_logits)});
+    vt::GreedyRejectionSample(q, tsm, tn, ta, tl, td, tc);
+    b.Copy(q, sampled.data(), ms, sampled.size() * sizeof(int32_t));
+    b.Copy(q, num_sampled.data(), mn, num_sampled.size() * sizeof(int32_t));
+    b.Copy(q, target_argmax.data(), ma, target_argmax.size() * sizeof(int32_t));
+    b.Free(ml);
+    b.Free(md);
+    b.Free(mc);
+    b.Free(ms);
+    b.Free(mn);
+    b.Free(ma);
+  };
+
+  // Full accept (one request, 8 draft rows + bonus).
+  {
+    const int64_t nl = 9;
+    const std::vector<int32_t> cu{0, nl};
+    std::vector<int32_t> s_cpu(static_cast<size_t>(1 * W), -7), s_tt = s_cpu;
+    std::vector<int32_t> n_cpu(1, -7), n_tt = n_cpu;
+    std::vector<int32_t> a_cpu(nl, -7), a_tt = a_cpu;
+    run(cpu, DeviceType::kCPU, nl, cu, -1, s_cpu, n_cpu, a_cpu);
+    run(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT, nl,
+        cu, -1, s_tt, n_tt, a_tt);
+    const bool bit = s_cpu == s_tt && n_cpu == n_tt && a_cpu == a_tt;
+    MESSAGE("kGreedyRejectionSample full-accept: bit-exact=", bit,
+            " num_sampled=", n_tt[0]);
+    CHECK(bit);
+    CHECK(n_tt[0] == 9);  // 8 accepted + the bonus row
+    for (int64_t r = 0; r < nl; ++r)
+      CHECK(s_tt[static_cast<size_t>(r)] == static_cast<int32_t>((r * 7) % V));
+  }
+
+  // Reject at walk depth 2 (the third draft token): the walk stores the
+  // target argmax at the reject position and stops; num_sampled = 2 + 1.
+  {
+    const int64_t nl = 9;
+    const std::vector<int32_t> cu{0, nl};
+    std::vector<int32_t> s_cpu(static_cast<size_t>(1 * W), -7), s_tt = s_cpu;
+    std::vector<int32_t> n_cpu(1, -7), n_tt = n_cpu;
+    std::vector<int32_t> a_cpu(nl, -7), a_tt = a_cpu;
+    run(cpu, DeviceType::kCPU, nl, cu, 2, s_cpu, n_cpu, a_cpu);
+    run(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT, nl,
+        cu, 2, s_tt, n_tt, a_tt);
+    const bool bit = s_cpu == s_tt && n_cpu == n_tt && a_cpu == a_tt;
+    MESSAGE("kGreedyRejectionSample reject-at-2: bit-exact=", bit,
+            " num_sampled=", n_tt[0], " sampled[2]=", s_tt[2]);
+    CHECK(bit);
+    CHECK(n_tt[0] == 3);  // 2 accepted + the resampled target argmax
+    // The reject position carries the TARGET argmax (row 2's column), not the
+    // draft id.
+    CHECK(s_tt[2] == static_cast<int32_t>((2 * 7) % V));
+    // The pad beyond the accept length stays the placeholder.
+    CHECK(s_tt[3] == -1);
+  }
+
+  // Two requests (the second shorter): the cu walk pads both rows; the
+  // reject hits request 0 only.
+  {
+    const int64_t nl = 9;
+    const std::vector<int32_t> cu{0, 5, nl};  // request 0: 4 draft rows, 1: 3
+    std::vector<int32_t> s_cpu(static_cast<size_t>(2 * W), -7), s_tt = s_cpu;
+    std::vector<int32_t> n_cpu(2, -7), n_tt = n_cpu;
+    std::vector<int32_t> a_cpu(nl, -7), a_tt = a_cpu;
+    run(cpu, DeviceType::kCPU, nl, cu, 2, s_cpu, n_cpu, a_cpu);
+    run(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT, nl,
+        cu, 2, s_tt, n_tt, a_tt);
+    const bool bit = s_cpu == s_tt && n_cpu == n_tt && a_cpu == a_tt;
+    MESSAGE("kGreedyRejectionSample two-requests: bit-exact=", bit,
+            " num_sampled=", n_tt[0], "/", n_tt[1]);
+    CHECK(bit);
+    CHECK(n_tt[0] == 3);  // reject at depth 2
+    CHECK(n_tt[1] == 4);  // 3 accepted + bonus
+  }
+}
+
 TEST_CASE("kTENSTORRENT kGdnPrefill<->kGdnDecode round-trip (final states agree, both arms, traffic)") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
