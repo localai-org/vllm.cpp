@@ -2398,9 +2398,19 @@ void CausalConv1dSpecUpdate(Queue& q, Tensor& out, const Tensor& x, const Tensor
            std::string(name) + ": conv_state must be [N,C,state_len>=K-1]");
   VT_CHECK(IsFloat(x.dtype) && IsFloat(weight.dtype) && IsOutFloat(out.dtype),
            std::string(name) + ": float x/weight, f32/bf16 out");
+  // Same compressed-state gate as the non-spec update above: bf16 conv_state
+  // is admitted wherever the BACKEND says its conv kernels can address a
+  // compressed row in place (Backend::SupportsCompressedConvState — CUDA,
+  // ROCm, Vulkan and Tenstorrent answer true). This check used to name CUDA
+  // outright, which refused the TT spec verify before its kernel could even
+  // resolve (the W3 e2e evidence: `causal_conv1d_spec_update: conv_state
+  // must be f32, or bf16 on CUDA`, w3-bfp32.log).
+  const Backend* spec_conv_backend = TryGetBackend(q.device.type);
   VT_CHECK(conv_state.dtype == DType::kF32 ||
-               (conv_state.dtype == DType::kBF16 && q.device.type == DeviceType::kCUDA),
-           std::string(name) + ": conv_state must be f32, or bf16 on CUDA");
+               (conv_state.dtype == DType::kBF16 && spec_conv_backend != nullptr &&
+                spec_conv_backend->SupportsCompressedConvState()),
+           std::string(name) + ": conv_state must be f32, or bf16 on a backend whose conv kernels "
+                               "support a compressed state in place");
   VT_CHECK(x.stride[1] == 1 && x.stride[0] >= c && out.IsContiguous() &&
                weight.IsContiguous() && conv_state.IsContiguous(),
            std::string(name) +

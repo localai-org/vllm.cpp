@@ -1277,6 +1277,58 @@ void DFlashGroupedConvKernel(Queue&, Tensor& out, const Tensor& x,
   CommitDevice2D(out, std::move(acc));
 }
 
+// kIndexSelect: row gather out[i] = in[idx[i]] on Tenstorrent
+// (QWEN38-DFLASH2-STAGE-C W3). The direct-argmax draft arm's accepted-prefix
+// context append (AppendContextKVDeviceRows, qwen3_dflash.cpp:1558) gathers
+// device-resident rows; the CPU/CUDA backends had the op and Tenstorrent did
+// not — the same gap class W2 closed for the scatter twin (kIndexCopy below).
+//
+// The composition mirrors kIndexCopy: a ONE-HOT matmul with M[i, idx[i]] = 1
+// (else 0) over [out_rows, in_rows], then out = M @ in — every output row is
+// one one-hot product, so the result is the source row EXACTLY, but only in
+// bf16 (tf32 truncation cannot touch bf16-valued operands). An f32 input would
+// lose low mantissa bits, so the op refuses f32 by name rather than silently
+// corrupting a gather. The index is read on the host (the DBuf-built index
+// tensors keep a host master); the out side commits through its tracked slot
+// so the base buffer the caller holds a view of becomes device-current.
+void IndexSelectKernel(Queue&, Tensor& out, const Tensor& in, const Tensor& idx) {
+  TT_OP_TRACE("IndexSelect");
+  VT_CHECK(in.dtype == DType::kBF16,
+           "tenstorrent kIndexSelect: only bf16 rows are supported (the one-hot "
+           "matmul is exact there; an f32 in would lose mantissa bits to tf32)");
+  const int64_t rows = idx.shape[0];
+  if (rows == 0) return;
+  const int64_t out_rows = out.shape[0];
+  const int64_t in_rows = in.shape[0];
+  int64_t inner = 1;
+  for (int r = 1; r < out.rank; ++r) inner *= out.shape[r];
+  int64_t inner_in = 1;
+  for (int r = 1; r < in.rank; ++r) inner_in *= in.shape[r];
+  VT_CHECK(inner == inner_in, "tenstorrent kIndexSelect: inner extent mismatch");
+
+  EnsureHost(idx);
+  const int32_t* ix = idx.Ptr<int32_t>();
+  std::vector<float> onehot_host(static_cast<size_t>(rows) * in_rows, 0.0f);
+  for (int64_t i = 0; i < rows; ++i) {
+    VT_CHECK(ix[i] >= 0 && ix[i] < in_rows,
+             "tenstorrent kIndexSelect: idx out of range");
+    onehot_host[static_cast<size_t>(i) * in_rows + ix[i]] = 1.0f;
+  }
+
+  MeshDevice& device = SharedMeshDevice();
+  Tensor out2 = out.View({out_rows, inner});
+  Tensor in2 = in.View({in_rows, inner});
+  ttnn::Tensor dev_in = EnsureDevice2D(in2, device);
+  const ttnn::Tensor onehot = ttnn::Tensor::from_vector<float>(
+      onehot_host,
+      SpecOf(tt::tt_metal::Shape({static_cast<uint32_t>(rows),
+                                   static_cast<uint32_t>(in_rows)}),
+             ttnn::DataType::FLOAT32, ttnn::Layout::TILE),
+      &device);
+  const ttnn::Tensor onehot_bf = ttnn::typecast(onehot, ttnn::DataType::BFLOAT16);
+  ttnn::Tensor dev_out = ttnn::operations::matmul::matmul(onehot_bf, dev_in);
+  CommitDevice2D(out2, std::move(dev_out));
+}
 // kIndexCopy: row scatter out[idx[i]] = in[i] on Tenstorrent (QWEN38-DFLASH2-
 // STAGE-C W2). The DFlash2 drafter's combined [context; block] K/V assembly
 // (qwen3_dflash.cpp:988-994) scatters device-resident rows into a fresh combined
@@ -2209,6 +2261,8 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<CastBf16Fn>(&CastBf16Kernel)));
     RegisterOp(OpId::kCastF32, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<CastF32Fn>(&CastF32Kernel)));
+    RegisterOp(OpId::kIndexSelect, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<IndexSelectFn>(&IndexSelectKernel)));
     RegisterOp(OpId::kIndexCopy, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<IndexCopyFn>(&IndexCopyKernel)));
     RegisterOp(OpId::kDFlashGroupedConv, DeviceType::kTENSTORRENT,
@@ -2240,6 +2294,9 @@ struct Registrar {
              reinterpret_cast<void*>(static_cast<GdnPrefillFn>(&GdnPrefillKernel)));
     RegisterOp(OpId::kCausalConv1dUpdate, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<CausalConv1dUpdateFn>(&CausalConv1dUpdateKernel)));
+    RegisterOp(OpId::kCausalConv1dSpecUpdate, DeviceType::kTENSTORRENT,
+               reinterpret_cast<void*>(static_cast<CausalConv1dSpecUpdateFn>(
+                   &CausalConv1dSpecUpdateKernel)));
     RegisterOp(OpId::kGdnDecode, DeviceType::kTENSTORRENT,
                reinterpret_cast<void*>(static_cast<GdnDecodeFn>(&GdnDecodeKernel)));
     RegisterOp(OpId::kGdnStateGather, DeviceType::kTENSTORRENT,
