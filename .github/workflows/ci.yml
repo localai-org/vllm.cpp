@@ -614,6 +614,7 @@ jobs:
           # because this lane has no 598 MB checkpoint and a case that cannot
           # run must say so rather than pass.
           python3 tests/scripts/test_ltx25_prompt_adherence.py
+          python3 tests/scripts/test_glm4_neartie_gap.py
           # The diagnosis that decided whether the render's smoothness CAUSES
           # that adherence gap (#2513). Its answer is NEGATIVE, and a negative
           # answer is what a broken instrument returns for free, so the suite
