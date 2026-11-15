@@ -1,0 +1,15 @@
+F
+======================================================================
+FAIL: test_allocator_mid_line_canonical_reference_is_still_caught (tests.scripts.test_agent_record.CanonicalIssueReferenceTests.test_allocator_mid_line_canonical_reference_is_still_caught)
+A canonical ID after an allocator tag mid-line is a real reference.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/tt-embed/tests/scripts/test_agent_record.py", line 2357, in test_allocator_mid_line_canonical_reference_is_still_caught
+    self.assertEqual(len(errors), 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)

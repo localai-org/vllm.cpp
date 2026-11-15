@@ -2059,9 +2059,11 @@ ISSUE_ROW = re.compile(
 RETIRED_INDEX = AGENTS / "issue-index.md"
 
 
-# A device allocator-log line tags its `#N` with a bracketed -ALLOC label;
-# the number there is an allocator event ID, not an issue reference.
-ALLOCATOR_LOG_LINE_RE = re.compile(r"\[[A-Z][A-Z0-9-]*-ALLOC\]")
+# A device allocator-log line tags its `#N` with a bracketed -ALLOC label at
+# the start of the line; the number there is an allocator event ID, not an
+# issue reference. Only leading whitespace may precede the tag, so a prose
+# line that merely mentions the tag still scans for real references.
+ALLOCATOR_LOG_LINE_RE = re.compile(r"^\s*\[[A-Z][A-Z0-9-]*-ALLOC\]")
 
 # A quoted checker diagnostic line describes a reference it already
 # resolved; its tokens are the checker's own output, not the author's.
