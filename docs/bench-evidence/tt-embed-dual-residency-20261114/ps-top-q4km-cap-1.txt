@@ -1,12 +1,12 @@
 USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
-lu_zero   39446  104  0.0  31616 26560 ?        R    14:32   0:00 /usr/lib/python-exec/python3.13/python3 scripts/check-snapshot-pins.py
-lu_zero  120667  2.2  0.1 6209536 530752 pts/6  Sl+  13:54   0:51 claude --resume 2774bb5f-085e-481b-be2d-f0d379464dd9
-lu_zero  116071  1.0  0.8 21083840 2202880 pts/0 Sl+ Nov11  44:20 maki -r CeRgUcXiFK5bYWGSPS4sy
-lu_zero   18447  0.8  0.1 20033024 276928 pts/7 Sl+  11:28   1:29 maki
-root      38990  0.6  0.0      0     0 ?        I    14:32   0:00 [kworker/u556:1-btrfs-endio]
-lu_zero  120198  0.4  0.1 6205248 348160 pts/1  Sl+  13:54   0:10 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
-lu_zero  108872  0.4  0.1 24337728 504832 ?     Ssl  Nov10  23:34 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service
-lu_zero  113492  0.1  0.0 11132352 263616 pts/3 Sl+  Nov13   1:34 opencode -c
-lu_zero   95757  0.1  0.0  11392  6400 ?        Ss   Oct26  41:39 tmux
-root        801  0.1  0.0      0     0 ?        S    Aug31 132:45 [kcompactd1]
-root        800  0.1  0.0      0     0 ?        S    Aug31 116:57 [kcompactd0]
+lu_zero   24838  5.0  0.4 7899520 1228608 pts/8 Sl+  18:50  14:01 /home/lu_zero/.local/share/uv/tools/huggingface-hub/bin/python /home/lu_zero/.local/bin/hf download unsloth/Inkling-2-Small-GGUF --include UD-IQ2_XXS/* --local-dir Inkling-2-Small-GGUF
+root      99393  1.1  0.0      0     0 ?        I    23:29   0:00 [kworker/u602:2-btrfs-endio-meta]
+lu_zero  116071  1.0  0.3 21219008 906624 pts/0 Sl+  Nov11  50:16 maki -r CeRgUcXiFK5bYWGSPS4sy
+root      99395  1.0  0.0      0     0 ?        I    23:29   0:00 [kworker/u602:4-btrfs-endio-meta]
+lu_zero  120667  0.9  0.1 6217856 531968 pts/6  Sl+  13:54   5:34 claude --resume 2774bb5f-085e-481b-be2d-f0d379464dd9
+lu_zero   18447  0.6  0.1 20030656 328576 pts/7 Sl+  11:28   4:52 maki
+lu_zero  108872  0.4  0.1 24337728 501568 ?     Ssl  Nov10  24:39 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service
+lu_zero  120198  0.3  0.1 6213568 355136 pts/1  Sl+  13:54   1:45 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+root      99368  0.1  0.0      0     0 ?        I    23:28   0:00 [kworker/u606:0-btrfs-endio-meta]
+lu_zero  113492  0.1  0.0 11132352 233344 pts/3 Sl+  Nov13   2:30 opencode -c
+lu_zero   95757  0.1  0.0  11392  6336 ?        Ss   Oct26  41:59 tmux

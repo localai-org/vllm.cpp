@@ -7,7 +7,7 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-14
-Updated: 2026-11-14
+Updated: 2026-11-15
 Closed: -
 
 ## Problem
@@ -35,3 +35,34 @@ TT-STAGING-FOOTPRINT's W3 recorded the captured-arm serving gap (~80 MB trace-re
   `docs/bench-evidence/tt-embed-dual-residency-20261114/`. Owed: root-cause
   the W2 captured divergence; W3(b)-(d) re-measure after it lands. State
   stays OPEN.
+- 2026-11-15, root cause + fix + STOP lifted: **the recorded
+  `ttnn::copy` FROM the persistent row shadow replays CAPTURE-TIME
+  bytes.** Poison probe (`VT_TT_EMB_POISON`, the bisection instrument): the
+  per-step refresh provably writes fresh, correct rows into the SAME buffer
+  address the trace pinned (`[TT-EMB-DBG]` prints: constant shadow_addr,
+  per-step hash changes; the eager arm — which decodes through the same
+  `RefreshQuantEmbedRows` — is byte-identical, so the decode is exact), yet
+  zeroing the ENTIRE shadow before every replay left the captured stream
+  bit-for-bit unchanged. The read side, not the refresh, is frozen: the
+  capture bakes the staged buffer's content, not just its address (#2812
+  class), for the high-level copy op — while `ttnn::embedding`'s recorded
+  ids read (WarmDecodeIds) and the custom kernels' recorded reads
+  (WarmRacIdx) are replay-live. The W3 conversion (`typecast`/`to_layout`
+  in-region) and the pure-copy variant diverge identically because BOTH
+  route the commit through that frozen recorded copy. Fix per the stage-B
+  contract ("representation changes land OUTSIDE captured regions"): the
+  quant arm commits the embedding OUTSIDE the region — new
+  `EmbedQuantRowArm(table_host, n, h)` query, drivers `qwen3.cpp` and
+  `qwen3_5.cpp` gate the in-region `EmbedDeviceIdsInto` on it and commit
+  beside `WarmEmbedQuantRows` per replay step (no allocation; program
+  warmed by the R4 mirror); a float table keeps the in-region embedding
+  (proven replay-live). qwen3_5.cpp's capture step additionally gained the
+  missing pre-mirror `WarmEmbedQuantRows` (qwen3.cpp:1022-1025 already had
+  it). Gates all green (3 reps each): Q4_K_M captured 64 blocks
+  `d49c53d2…` 3/3 AND eager `d49c53d2…` unchanged; UD-Q6_K_XL captured
+  KV 8 `b36bc61a…` 3/3 AND eager `b36bc61a…`; TPOT (correct stream now a
+  real result) captured 5329.15/5319.70/5318.76 ms vs eager 5341.31 ms;
+  KV 16 fits and is deterministic 2/2 (`5b34331d…`); DRAM ledger kept
+  (tightest `total_free=2,634,189,824 B`, ~2.5 GB/bank-set freed, no OOM);
+  `test_gguf_keep_quant` 63/63 cases, 12205/12205 assertions. Row stays
+  OPEN for the fresh-review cycle.

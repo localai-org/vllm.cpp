@@ -336,6 +336,21 @@ void WarmEmbedQuantRows(const Tensor& table, const int32_t* ids, int64_t n) {
     host[static_cast<size_t>(i)] = static_cast<uint32_t>(ids[i]);
   }
   (void)RefreshQuantEmbedRows(table, host.data(), n, device);
+  if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr) {
+    std::fprintf(stderr, "[TT-EMB-DBG] WarmEmbedQuantRows n=%lld ids0=",
+                 (long long)n);
+    for (int64_t i = 0; i < n && i < 8; ++i)
+      std::fprintf(stderr, "%u,", host[static_cast<size_t>(i)]);
+    std::fprintf(stderr, "\n");
+  }
+}
+
+bool EmbedQuantRowArm(const void* table_host, int64_t n, int64_t hidden) {
+  std::lock_guard<std::mutex> gq(QuantEmbedMutex());
+  auto itq = QuantEmbedRows().find(reinterpret_cast<uintptr_t>(table_host));
+  return itq != QuantEmbedRows().end() && itq->second.device.has_value() &&
+         itq->second.rows == static_cast<uint32_t>(n) &&
+         itq->second.h == static_cast<uint32_t>(hidden);
 }
 
 void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
@@ -364,6 +379,15 @@ void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
         itq->second.h == static_cast<uint32_t>(hidden)) {
       dev_table = *itq->second.device;
       quant_rows = true;
+      if (std::getenv("VT_TT_TRACE_DEBUG") != nullptr)
+        std::fprintf(stderr,
+                     "[TT-EMB-DBG] EmbedDeviceIdsInto quant_rows=1 n=%lld "
+                     "shadow_addr=%u dtype=%d layout=%d capture=%d\n",
+                     (long long)n,
+                     static_cast<uint32_t>(dev_table.mesh_buffer().address()),
+                     static_cast<int>(dev_table.dtype()),
+                     static_cast<int>(dev_table.layout()),
+                     tt_capture_active() ? 1 : 0);
     }
   }
   if (!quant_rows) {
@@ -378,24 +402,27 @@ void EmbedDeviceIdsInto(void* out_host, int64_t rows, int64_t cols,
   }
   ttnn::Tensor dev_out;
   if (quant_rows) {
-    // The row shadow is F32 ROW_MAJOR (see RefreshQuantEmbedRows). The
-    // recorded copy must
-    // be PURE (same dtype, same layout): ttnn::copy's dtype-conversion path
-    // only supports TILE inputs and mis-serves a ROW_MAJOR source (the
-    // captured-vs-eager divergence). The hidden slot's shadow dtype churns
-    // with whichever op committed last (f32 here, bf16 after a layer op), so
-    // convert the rows to the SLOT's current dtype and layout instead of
-    // asking the copy to convert.
+    // The row shadow is BF16 ROW_MAJOR (see RefreshQuantEmbedRows): the
+    // captured copy must be PURE (same dtype, same layout). ttnn::copy's
+    // dtype-conversion path and the in-region typecast/to_layout of a
+    // ROW_MAJOR source both bake capture-time bytes the per-step H2D refresh
+    // never reaches (the W3 captured-vs-eager divergence — the refresh wrote
+    // fresh rows into the SAME buffer address the trace pinned and the
+    // replay still read the capture-time snapshot), so a slot whose storage
+    // is not the shadow's own dtype+layout is refused by name instead of
+    // being converted in-region.
     {
       std::lock_guard<std::mutex> g(SlotMutex());
       BufferSlot* hs = FindSlot(out_host);
       VT_CHECK(hs != nullptr && hs->device.has_value(),
                "tenstorrent: EmbedDeviceIdsInto hidden shadow not resident");
       const auto& dst = *hs->device;
-      if (dev_table.dtype() != dst.dtype())
-        dev_table = ttnn::typecast(dev_table, dst.dtype());
-      if (dev_table.layout() != dst.layout())
-        dev_table = ttnn::to_layout(dev_table, dst.layout());
+      VT_CHECK(dst.dtype() == dev_table.dtype() && dst.layout() == dev_table.layout(),
+               "tenstorrent: EmbedDeviceIdsInto hidden slot storage " +
+                   std::to_string(static_cast<int>(dst.dtype())) + "/" +
+                   std::to_string(static_cast<int>(dst.layout())) +
+                   " does not match the quant row shadow — an in-region "
+                   "conversion would replay frozen capture-time bytes");
     }
     dev_out = dev_table;
   } else {

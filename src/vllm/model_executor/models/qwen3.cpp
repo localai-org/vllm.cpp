@@ -954,13 +954,24 @@ ForwardLogits Qwen3DenseDecodeGraph::Step(
       vt::tenstorrent::WarmDecodeIds(
           s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
       // TT-EMBED-DUAL-RESIDENCY: a block-quant gather table has no full-table
-      // twin — its [n, h] row shadow rides the same per-step refresh.
+      // twin — its [n, h] row shadow rides the same per-step refresh. The
+      // refresh alone is NOT enough: a recorded copy FROM the shadow replays
+      // capture-time bytes (the poison probe — the whole shadow zeroed per
+      // step, the captured stream unchanged), so the quant arm commits the
+      // embedding OUTSIDE the region, here, before the replay. A float table
+      // keeps the in-region embedding (its recorded ttnn::embedding reads the
+      // refreshed ids replay-live and its twin never changes).
       {
         Tensor dtabw = ResidentWeight(d, impl_->weights.embed_tokens,
                                       {impl_->config.vocab_size,
                                        impl_->config.hidden_size});
-        vt::tenstorrent::WarmEmbedQuantRows(
-            dtabw, s.token_ids.data(), static_cast<int64_t>(s.token_ids.size()));
+        const int64_t n = static_cast<int64_t>(s.token_ids.size());
+        vt::tenstorrent::WarmEmbedQuantRows(dtabw, s.token_ids.data(), n);
+        if (vt::tenstorrent::EmbedQuantRowArm(dtabw.data, n,
+                                              impl_->config.hidden_size))
+          vt::tenstorrent::EmbedDeviceIdsInto(
+              s.hidden->ptr(), S, impl_->config.hidden_size, dtabw.data,
+              impl_->config.vocab_size, impl_->config.hidden_size, n);
       }
     } else {
       EmbedInto(d, *s.hidden, s.token_ids, impl_->weights, impl_->config);
@@ -1053,14 +1064,20 @@ ForwardLogits Qwen3DenseDecodeGraph::Step(
       vt::GraphCaptureScope scope(b, impl_->queue, s.graph, vt::GraphCaptureMode::kFull);
       if (tt_dev) {
         // Capture-safe embedding over the persistent ids tensor, writing the
-        // persistent hidden shadow the layer region reads.
+        // persistent hidden shadow the layer region reads. The QUANT row arm
+        // skips this: its recorded copy would replay capture-time bytes, so
+        // the R4 mirror above already committed the embed OUTSIDE the scope
+        // and the replay steps commit beside WarmEmbedQuantRows.
         Tensor dtab = ResidentWeight(d, impl_->weights.embed_tokens,
                                      {impl_->config.vocab_size,
                                       impl_->config.hidden_size});
-        vt::tenstorrent::EmbedDeviceIdsInto(
-            s.hidden->ptr(), S, impl_->config.hidden_size, dtab.data,
-            impl_->config.vocab_size, impl_->config.hidden_size,
-            static_cast<int64_t>(s.token_ids.size()));
+        if (!vt::tenstorrent::EmbedQuantRowArm(
+                dtab.data, static_cast<int64_t>(s.token_ids.size()),
+                impl_->config.hidden_size))
+          vt::tenstorrent::EmbedDeviceIdsInto(
+              s.hidden->ptr(), S, impl_->config.hidden_size, dtab.data,
+              impl_->config.vocab_size, impl_->config.hidden_size,
+              static_cast<int64_t>(s.token_ids.size()));
       }
       lg = ForwardLayers(d, s.hidden->t(), s.positions, s.attn_meta, attn_kv,
                          impl_->weights, impl_->config, kNoGather);

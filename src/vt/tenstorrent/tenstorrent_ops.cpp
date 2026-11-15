@@ -344,12 +344,13 @@ void EmbeddingKernel(Queue&, Tensor& out, const Tensor& table, const Tensor& ids
     ttnn::Tensor dev_rows = RefreshQuantEmbedRows(table, host_ids.data(), t, device);
     // The committed shadow MUST carry the OUT slot's storage width: the
     // download path (EnsureHostBytes) writes the SHADOW's dtype, and an f32
-    // out consumer reads f32 words. The row shadow is F32 (see
-    // RefreshQuantEmbedRows), so an f32 out commits as-is and a bf16 out
-    // gets the explicit downcast.
+    // out consumer reads f32 words. The row shadow is BF16 (the twin's exact
+    // bits — see RefreshQuantEmbedRows), so a bf16 out commits as-is and an
+    // f32 out gets the exact upcast. The typecast runs OUTSIDE any captured
+    // region (this is the eager kernel); the captured path never sees it.
     dev_out = out.dtype == DType::kF32
-                  ? dev_rows
-                  : ttnn::typecast(dev_rows, ttnn::DataType::BFLOAT16);
+                  ? ttnn::typecast(dev_rows, ttnn::DataType::FLOAT32)
+                  : dev_rows;
   } else {
     ttnn::Tensor dev_table = EnsureEmbedTableDevice(table, device);
     // TILE output → CommitDevice2D so the first residual/RMS/matmul reuses it.

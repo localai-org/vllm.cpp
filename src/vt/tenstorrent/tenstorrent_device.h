@@ -479,6 +479,21 @@ void WarmEmbedQuantRows(const Tensor& table, const int32_t* ids, int64_t n);
 inline void WarmEmbedQuantRows(const Tensor&, const int32_t*, int64_t) {}
 #endif
 
+// TT-EMBED-DUAL-RESIDENCY: true when `table_host` maps a block-quant gather
+// table whose persistent [n, h] bf16 row shadow serves this embedding shape —
+// the same condition EmbedDeviceIdsInto's quant arm matches. A recorded
+// ttnn::copy FROM that shadow replays CAPTURE-TIME bytes (the trace pins the
+// staged buffer's content, not just its address — the poison probe: the whole
+// shadow zeroed per replay step, the captured stream unchanged), so the quant
+// arm's embed commit must run OUTSIDE the captured region: drivers gate the
+// in-region EmbedDeviceIdsInto on this returning false, and commit per replay
+// step beside WarmEmbedQuantRows instead.
+#ifdef VLLM_CPP_TENSTORRENT
+bool EmbedQuantRowArm(const void* table_host, int64_t n, int64_t hidden);
+#else
+inline bool EmbedQuantRowArm(const void*, int64_t, int64_t) { return false; }
+#endif
+
 // HOST-FREE-DECODE: capture-safe embedding over the persistent decode-ids
 // tensor (see WarmDecodeIds) into the hidden buffer whose host base is
 // `out_host` — the same device->device in-place refresh EmbeddingKernel

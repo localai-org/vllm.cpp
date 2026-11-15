@@ -1,0 +1,12 @@
+USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+lu_zero   58692  100  0.0  51584 12672 ?        R    00:28   0:09 target/release/utf32-bench
+lu_zero    6873  2.6  0.1 6201472 490624 pts/8  Sl+  00:01   0:43 claude
+lu_zero  116071  1.0  0.3 21219008 902464 pts/0 Sl+  Nov11  51:03 maki -r CeRgUcXiFK5bYWGSPS4sy
+lu_zero  120667  1.0  0.1 6217856 512896 pts/6  Sl+  Nov14   6:40 claude --resume 2774bb5f-085e-481b-be2d-f0d379464dd9
+lu_zero   58529  0.9  0.0 8834560 51584 ?       Sl   00:28   0:00 /home/lu_zero/.cargo/bin/mbx run --release -p utf32-bench --bin utf32-bench
+lu_zero  110995  0.9  0.1 7034240 422720 ?      Ssl  Nov14   0:25 /home/lu_zero/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe serve --service
+lu_zero   18447  0.6  0.0 20030656 183040 pts/7 Sl+  Nov14   5:13 maki
+lu_zero  120198  0.3  0.1 6213568 331968 pts/1  Sl+  Nov14   1:56 claude --resume 2b67982d-4fd2-46cf-96d6-03d9aee99892
+root      58705  0.2  0.0      0     0 ?        I    00:28   0:00 [kworker/u577:0-events_unbound]
+root      58717  0.1  0.0      0     0 ?        I    00:28   0:00 [kworker/u592:4-btrfs-endio]
+lu_zero  113492  0.1  0.0 11132352 236608 pts/3 Sl+  Nov13   2:39 opencode -c
