@@ -221,3 +221,46 @@ from it unchanged, and any local repair of it is recorded as ours.
 Split, per the developer's answer on 2026-11-16: this pull request carries the
 spec, the row registration and the oracle pin only. U1 onwards are separate
 pull requests, each red-first against this spec.
+
+## U1 as built (2026-11-16)
+
+`row/QUANT-MACH2-ADDITIVE-U1` lands `include/vt/mach2_decode.h`,
+`src/vt/cpu/cpu_mach2_decode.cpp` and `tests/vt/test_mach2_decode.cpp`
+(13 cases, 2714 assertions), with both the TU and the suite registered in
+`CMakeLists.txt` and `tests/CMakeLists.txt`.
+
+**Landed:** the wave map, the tail-biting trellis state walk, the expert LUT
+gather, the folded 512-to-65536 spine LUT with its sign bit, `rc_grid`, int5
+unpacking, grouped integer dequantisation, the bf16 round, the butterfly
+transform, the quadratic-residue radix-12/20 matrices, the expert orthonormal
+transform, the Philox sign expansion, and the expert tile assembly (gather,
+per-tile `wave_gamma`, `wscale`, both rotations, both sign tables).
+
+**Still owed by U1:** the `_HS` string tables the SPINE rotation uses, and the
+SHA-256 that turns `sign_seed()`'s text into a seed. The string tables are
+deliberately not embedded: the fetched `decode.py` text is not yet trusted, and a
+table copied from a possibly-mangled source is worse than no table, because a
+test written against the same text would agree with it. The SHA-256 is a loader
+concern rather than a decode primitive, so `ExpertSigns` takes the derived seed.
+
+**Four findings.**
+- `wave_map` assigns ONE index per anti-diagonal - the start index, constant
+  along the walk - not a running counter. The bottom-left corner is therefore
+  visited twice, and on a 2x3 tiling index 1 belongs to no tile at all. The first
+  expectation in this row was written against a counter and failed, which is how
+  the distinction surfaced.
+- The first version of the suite contained no rounding TIE, so mutating the bf16
+  bias from `0x7FFF` to `0x8000` (round-half-up) survived it. The tie case
+  `0x3F808000 -> 0x3F800000` and its odd control are now in the suite and that
+  mutation fails.
+- `wave_gamma` is indexed by anti-diagonal START, not by tile, so the array must
+  hold at least `mb + nb` entries. The release decoder has the same requirement:
+  the transcription of `decode.py` raised `IndexError` on a 1x1 tiling with a
+  one-element gamma array, because that tiling's map reads index 1. Copying the
+  number of tiles into the gamma length is therefore a real bug, not a style
+  choice.
+- A codeword's four values become four consecutive COLUMNS of one row of the
+  tile, not four rows: the gathered stream is reshaped to
+  `(mb, nb, TD, TD)` before the transpose, so the last axis spans four `c`
+  positions per codeword. Reading the codeword as a column quadruple instead
+  changes every value in the tile.

@@ -3461,6 +3461,12 @@ target_include_directories(test_neon_q6k_dot PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # plus a dense double-precision blockwise-Hadamard reference and a real
 # rank-sliced DeepSeek-V4 expert linear (skips when the shard is not mounted).
 vllm_cpp_add_test(test_exl3_dequant vt/test_exl3_dequant.cpp)
+# QUANT-MACH2-ADDITIVE U1: the Mach-2 (`fn_packed_v2`) decode primitives - the
+# trellis state walk, the wave map, both LUT foldings, the integer group
+# unpackings and the rotation. Every expectation is re-derived in the test from
+# the bit layout the release decoder states, so this suite never echoes the code
+# it checks; the byte-exact differential against `decode.py` itself is U2.
+vllm_cpp_add_test(test_mach2_decode vt/test_mach2_decode.cpp)
 vllm_cpp_add_test(test_exl3_gemm vt/test_exl3_gemm.cpp)
 # ISSUE-LOCAL-01M2BYPW7YTC2B2MY023ETTKQ2: the M > 144 reconstruct dispatch through
 # dense_attn::Exl3MatmulD must fall back to Exl3Gemm where no reconstruct kernel exists.
