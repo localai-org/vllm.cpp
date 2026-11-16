@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <random>
 #include <string>
@@ -65,6 +66,8 @@ void WarmPaMeta(const int32_t* block_table, int64_t num_reqs, int64_t max_blocks
                 int64_t bt_row_stride, int64_t bt_col_stride,
                 const int32_t* seq_lens);
 void WarmDecodePos(const int32_t* seq_lens, int64_t num_reqs, bool replay_regime);
+// TT-PA-SMALL-WINDOW W1: the program-cache toggle (tenstorrent_device.cpp).
+void ProgramCacheToggleForTest(bool enable);
 }  // namespace vt::tenstorrent
 
 namespace {
@@ -13686,4 +13689,550 @@ TEST_CASE("kTENSTORRENT Q8_K keep-quant composite matmul matches the CPU "
                                         << ref[n]);
   }
   MESSAGE("Q8_K composite matmul: matches the CPU dequant oracle");
+}
+
+// ===========================================================================
+// TT-PA-SMALL-WINDOW (W1 characterization). The stage-C W22 discriminator
+// (67d041d76 on row/QWEN38-DFLASH2-STAGE-C) isolated the compute class: ONE
+// raw RAC write + ONE raw paged-attention decode yields deterministic
+// garbage at seq=2 (4.86e33) and seq=5/7 (2.99717e+32, identical bytes),
+// clean at seq=1/3/4/6/8/64, while the Copy-seeded arm is clean and the
+// RAC's own writes land everywhere. The engine's DFlash2 degeneracy is this
+// defect through the engine's allocator/program-cache state. The cases below
+// map the defect's boundary:
+//   1. the RAC-seeded seq sweep 1..64 (the focused red — the boundary map);
+//   2. the same sweep Copy-seeded — is the defect in READING RAC-written
+//      bytes (a write-visibility/coherence gap) or in the small-window
+//      decode compute generally;
+//   3. payload tracking at the garbage seqs — do the garbage bytes track the
+//      RAC payload (a live read of a wrong buffer) or stay identical
+//      (an uninitialized/recycled read);
+//   4. a fresh cache per seq — intrinsic to cur_pos vs process state;
+//   5. the sweep with the program cache disabled — the cache-hit run-args
+//      class (the layernorm d1be4cf5b precedent).
+// Geometry: the W22 discriminator's — D=128, block 32 (the engine's KV
+// layout) with the head counts scaled to 4/2.
+// ===========================================================================
+
+namespace {
+
+constexpr int64_t kPaSweepHq = 4, kPaSweepHkv = 2, kPaSweepD = 128;
+constexpr int64_t kPaSweepBsz = 32, kPaSweepNBlocks = 8;
+constexpr int64_t kPaSweepPage = kPaSweepHkv * kPaSweepD;
+constexpr float kPaSweepGarbage = 0.5f;  // clean sweeps measure 0.03-0.13
+
+struct PaSeqRow {
+  int seq = 0;
+  float max_abs = 0.0f;
+  bool garbage = false;
+  std::string fingerprint;  // "h<hi> e<ei> got=<v> bits=<hex>" when garbage
+};
+
+// ONE raw PA decode at seq=`seq` against tkc/tvc (fresh metadata + fresh
+// output buffers), checked against the slot-0-only softmax oracle over the
+// host cache mirrors. Appends the row to `rows`.
+void PaSmallWindowRunSeq(Backend& backend, Queue& q, const Tensor& tq,
+                         const Tensor& tkc, const Tensor& tvc,
+                         const Tensor& tbt, int32_t seq, float scale,
+                         const std::vector<float>& host_q,
+                         const std::vector<float>& host_kc,
+                         const std::vector<float>& host_vc,
+                         std::vector<PaSeqRow>* rows) {
+  const int64_t hq = kPaSweepHq, d = kPaSweepD;
+  const size_t out_elems = static_cast<size_t>(hq * d);
+  void* mem_out = backend.Alloc(out_elems * sizeof(float));
+  void* mem_sl = backend.Alloc(sizeof(int32_t));
+  void* mem_qsl = backend.Alloc(sizeof(int32_t) * 2);
+  backend.Copy(q, mem_sl, &seq, sizeof(int32_t));
+  const int32_t qsl[2] = {0, 1};
+  backend.Copy(q, mem_qsl, qsl, sizeof(qsl));
+  Tensor tout = Tensor::Contiguous(mem_out, vt::DType::kF32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {1, hq, d});
+  Tensor tsl = Tensor::Contiguous(mem_sl, vt::DType::kI32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {1});
+  Tensor tqsl = Tensor::Contiguous(mem_qsl, vt::DType::kI32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {2});
+  vt::PagedAttentionArgs pargs;
+  pargs.scale = scale;
+  pargs.causal = true;
+  auto pa = reinterpret_cast<vt::PagedAttentionFn>(
+      vt::GetOp(vt::OpId::kPagedAttention, DeviceType::kTENSTORRENT));
+  pa(q, tout, tq, tkc, tvc, tbt, tsl, tqsl, pargs);
+  std::vector<float> ob(out_elems);
+  backend.Copy(q, ob.data(), mem_out, ob.size() * sizeof(float));
+  backend.Free(mem_out);
+  backend.Free(mem_sl);
+  backend.Free(mem_qsl);
+
+  // TT-PA-SMALL-WINDOW W2 mechanism check: the device arm commits a BF16
+  // shadow on this F32-contract output slot, so EnsureHostBytes writes the
+  // values at the SHADOW's width (2 B/elem) into the 4 B/elem host buffer.
+  // Re-reading the first half of the buffer as bf16 pairs must then match
+  // the oracle where the f32 read diverges — the dtype-width conviction.
+  std::vector<float> ob_bf16(out_elems, 0.0f);
+  {
+    const size_t bf16_elems = ob.size() * 4 / 2;  // the bytes the bf16 write covered
+    std::vector<uint16_t> raw(bf16_elems);
+    std::memcpy(raw.data(), ob.data(), bf16_elems * 2);
+    for (size_t i = 0; i < bf16_elems && i < ob_bf16.size(); ++i) {
+      // bf16 -> f32: the 16-bit pattern is the f32's top half.
+      uint32_t bits = static_cast<uint32_t>(raw[i]) << 16;
+      std::memcpy(&ob_bf16[i], &bits, 4);
+    }
+  }
+
+  // The oracle: softmax over positions 0..seq-1 of the host cache (slot 0 =
+  // the payload, the rest zeros), GQA group g = h / (Hq/Hkv).
+  const int64_t qpk = kPaSweepHq / kPaSweepHkv;
+  PaSeqRow row;
+  row.seq = seq;
+  int64_t worst_h = 0, worst_e = 0;
+  for (int64_t h = 0; h < hq; ++h) {
+    const int64_t g = h / qpk;
+    float mm = -std::numeric_limits<float>::infinity();
+    std::vector<float> sc(static_cast<size_t>(seq));
+    for (int64_t j = 0; j < seq; ++j) {
+      float dot = 0.0f;
+      for (int64_t e = 0; e < d; ++e)
+        dot += host_q[static_cast<size_t>(h * d + e)] *
+               host_kc[static_cast<size_t>(j * kPaSweepPage + g * d + e)];
+      sc[static_cast<size_t>(j)] = dot * scale;
+      mm = std::max(mm, sc[static_cast<size_t>(j)]);
+    }
+    float den = 0.0f;
+    for (int64_t j = 0; j < seq; ++j) {
+      sc[static_cast<size_t>(j)] = std::exp(sc[static_cast<size_t>(j)] - mm);
+      den += sc[static_cast<size_t>(j)];
+    }
+    for (int64_t e = 0; e < d; ++e) {
+      float acc = 0.0f;
+      for (int64_t j = 0; j < seq; ++j)
+        acc += sc[static_cast<size_t>(j)] / den *
+               host_vc[static_cast<size_t>(j * kPaSweepPage + g * d + e)];
+      float diff = std::fabs(ob[static_cast<size_t>(h * d + e)] - acc);
+      if (diff > row.max_abs) {
+        row.max_abs = diff;
+        worst_h = h;
+        worst_e = e;
+      }
+    }
+  }
+  if (row.garbage) {
+    // The stale-read fingerprint: the worst element's raw bits plus the
+    // worst head's first four, so identical-bytes across seqs/payloads is
+    // checkable from the log alone.
+    char buf[96];
+    uint32_t bits;
+    std::memcpy(&bits, &ob[static_cast<size_t>(worst_h * d + worst_e)], 4);
+    std::snprintf(buf, sizeof(buf), "h%lld e%lld got=%.7g bits=%08x first4=",
+                  (long long)worst_h, (long long)worst_e,
+                  ob[static_cast<size_t>(worst_h * d + worst_e)], bits);
+    row.fingerprint = buf;
+    for (int k = 0; k < 4; ++k) {
+      std::memcpy(&bits, &ob[static_cast<size_t>(worst_h * d + k)], 4);
+      std::snprintf(buf, sizeof(buf), "%08x%s", bits, k == 3 ? "" : " ");
+      row.fingerprint += buf;
+    }
+  }
+  row.garbage = row.max_abs >= kPaSweepGarbage;
+  if (row.garbage) {
+    // The mechanism check: the same buffer re-read as bf16 pairs. When the
+    // dtype-width conviction holds, the bf16 read of the FIRST half matches
+    // the oracle (the shadow's values are correct; only the width is wrong)
+    // while the f32 read diverges.
+    const int64_t qpk2 = kPaSweepHq / kPaSweepHkv;
+    float bf16_max = 0.0f;
+    for (int64_t h = 0; h < kPaSweepHq; ++h) {
+      const int64_t g = h / qpk2;
+      float mm = -std::numeric_limits<float>::infinity();
+      std::vector<float> sc(static_cast<size_t>(seq));
+      for (int64_t j = 0; j < seq; ++j) {
+        float dot = 0.0f;
+        for (int64_t e = 0; e < kPaSweepD; ++e)
+          dot += host_q[static_cast<size_t>(h * kPaSweepD + e)] *
+                 host_kc[static_cast<size_t>(j * kPaSweepPage + g * kPaSweepD + e)];
+        sc[static_cast<size_t>(j)] = dot * scale;
+        mm = std::max(mm, sc[static_cast<size_t>(j)]);
+      }
+      float den = 0.0f;
+      for (int64_t j = 0; j < seq; ++j) {
+        sc[static_cast<size_t>(j)] = std::exp(sc[static_cast<size_t>(j)] - mm);
+        den += sc[static_cast<size_t>(j)];
+      }
+      for (int64_t e = 0; e < kPaSweepD; ++e) {
+        float acc = 0.0f;
+        for (int64_t j = 0; j < seq; ++j)
+          acc += sc[static_cast<size_t>(j)] / den *
+                 host_vc[static_cast<size_t>(j * kPaSweepPage + g * kPaSweepD + e)];
+        bf16_max = std::max(bf16_max,
+                            std::fabs(ob_bf16[static_cast<size_t>(h * kPaSweepD + e)] - acc));
+      }
+    }
+    char buf2[80];
+    std::snprintf(buf2, sizeof(buf2), " bf16-reread max_abs=%.5g", bf16_max);
+    row.fingerprint += buf2;
+  }
+  rows->push_back(row);
+}
+
+// Allocates a fresh zeroed KV cache pair + tensors, seeds slot 0, and runs
+// the seq sweep. `rac_seeded` selects the RAC write (device path) vs the
+// Copy seed (host bytes staged before the shadow build). Returns the rows.
+std::vector<PaSeqRow> PaSmallWindowSweep(
+    Backend& backend, Queue& q, const std::vector<float>& host_q, float scale,
+    bool rac_seeded, int seq_lo, int seq_hi,
+    const std::function<void(int64_t /*seq*/)>& per_seq_hook = {}) {
+  const size_t cache_elems =
+      static_cast<size_t>(kPaSweepNBlocks * kPaSweepBsz * kPaSweepPage);
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0f) - 0.5f;
+  };
+  std::vector<float> k_row(static_cast<size_t>(kPaSweepPage)),
+      v_row(static_cast<size_t>(kPaSweepPage));
+  for (auto& v : k_row) v = lcg() * 0.15f;
+  for (auto& v : v_row) v = lcg() * 0.05f - 0.1f;
+
+  std::vector<float> host_kc(cache_elems, 0.0f), host_vc(cache_elems, 0.0f);
+  void* mem_kc = backend.Alloc(cache_elems * sizeof(float));
+  void* mem_vc = backend.Alloc(cache_elems * sizeof(float));
+  void* mem_kr = backend.Alloc(kPaSweepPage * sizeof(float));
+  void* mem_vr = backend.Alloc(kPaSweepPage * sizeof(float));
+  void* mem_slots = backend.Alloc(sizeof(int64_t));
+  void* mem_q = backend.Alloc(host_q.size() * sizeof(float));
+  backend.Copy(q, mem_q, host_q.data(), host_q.size() * sizeof(float));
+  if (rac_seeded) {
+    backend.Copy(q, mem_kr, k_row.data(), kPaSweepPage * sizeof(float));
+    backend.Copy(q, mem_vr, v_row.data(), kPaSweepPage * sizeof(float));
+    const int64_t slot_val = 0;
+    backend.Copy(q, mem_slots, &slot_val, sizeof(int64_t));
+  } else {
+    // Copy seed: the host cache carries slot 0 BEFORE the shadow build.
+    std::memcpy(host_kc.data(), k_row.data(), kPaSweepPage * sizeof(float));
+    std::memcpy(host_vc.data(), v_row.data(), kPaSweepPage * sizeof(float));
+    backend.Copy(q, mem_kc, host_kc.data(), cache_elems * sizeof(float));
+    backend.Copy(q, mem_vc, host_vc.data(), cache_elems * sizeof(float));
+  }
+  Tensor tkc = Tensor::Contiguous(mem_kc, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0},
+                                  {kPaSweepNBlocks, kPaSweepBsz, kPaSweepHkv, kPaSweepD});
+  Tensor tvc = Tensor::Contiguous(mem_vc, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0},
+                                  {kPaSweepNBlocks, kPaSweepBsz, kPaSweepHkv, kPaSweepD});
+  Tensor tk = Tensor::Contiguous(mem_kr, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHkv, kPaSweepD});
+  Tensor tv = Tensor::Contiguous(mem_vr, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHkv, kPaSweepD});
+  Tensor tslots = Tensor::Contiguous(mem_slots, vt::DType::kI64,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {1});
+  Tensor tq = Tensor::Contiguous(mem_q, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHq, kPaSweepD});
+  if (rac_seeded) {
+    auto rac = reinterpret_cast<vt::ReshapeAndCacheFn>(
+        vt::GetOp(vt::OpId::kReshapeAndCache, DeviceType::kTENSTORRENT));
+    rac(q, tk, tv, tkc, tvc, tslots);
+    // The mirror patch RAC performs: keep the host oracle in step with the
+    // device cache.
+    std::memcpy(host_kc.data(), k_row.data(), kPaSweepPage * sizeof(float));
+    std::memcpy(host_vc.data(), v_row.data(), kPaSweepPage * sizeof(float));
+  }
+
+  // The block table: identity (virtual block b = physical block b), all 8.
+  void* mem_bt = backend.Alloc(sizeof(int32_t) * static_cast<size_t>(kPaSweepNBlocks));
+  std::vector<int32_t> block_table(static_cast<size_t>(kPaSweepNBlocks));
+  for (int64_t b = 0; b < kPaSweepNBlocks; ++b)
+    block_table[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+  backend.Copy(q, mem_bt, block_table.data(), block_table.size() * sizeof(int32_t));
+  Tensor tbt = Tensor::Contiguous(mem_bt, vt::DType::kI32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepNBlocks});
+
+  std::vector<PaSeqRow> rows;
+  for (int s = seq_lo; s <= seq_hi; ++s) {
+    if (per_seq_hook) per_seq_hook(s);
+    PaSmallWindowRunSeq(backend, q, tq, tkc, tvc, tbt, s, scale, host_q,
+                        host_kc, host_vc, &rows);
+  }
+
+  backend.Free(mem_kc);
+  backend.Free(mem_vc);
+  backend.Free(mem_kr);
+  backend.Free(mem_vr);
+  backend.Free(mem_slots);
+  backend.Free(mem_q);
+  backend.Free(mem_bt);
+  return rows;
+}
+
+void PaSmallWindowReport(const char* arm, const std::vector<PaSeqRow>& rows) {
+  std::string garbage_seqs;
+  for (const auto& r : rows) {
+    MESSAGE(arm << " seq=" << r.seq << ": max_abs=" << r.max_abs
+                << (r.garbage ? " GARBAGE " : "") << r.fingerprint);
+    if (r.garbage) garbage_seqs += std::to_string(r.seq) + " ";
+  }
+  MESSAGE(arm << ": garbage seqs = [" << garbage_seqs << "] / "
+              << rows.size() << " swept");
+}
+
+}  // namespace
+
+TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded PA decode seq sweep 1..64 (the focused red)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0f) - 0.5f;
+  };
+  std::vector<float> host_q(static_cast<size_t>(kPaSweepHq * kPaSweepD));
+  for (auto& v : host_q) v = lcg() * 0.3f;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(kPaSweepD));
+
+  const auto rows = PaSmallWindowSweep(backend, q, host_q, scale,
+                                       /*rac_seeded=*/true, 1, 64);
+  PaSmallWindowReport("rac-sweep", rows);
+  for (const auto& r : rows)
+    CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
+                  "rac-sweep seq=" << r.seq << " max_abs=" << r.max_abs);
+}
+
+TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: Copy-seeded PA decode seq sweep 1..64 (coherence discriminator)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0f) - 0.5f;
+  };
+  std::vector<float> host_q(static_cast<size_t>(kPaSweepHq * kPaSweepD));
+  for (auto& v : host_q) v = lcg() * 0.3f;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(kPaSweepD));
+
+  const auto rows = PaSmallWindowSweep(backend, q, host_q, scale,
+                                       /*rac_seeded=*/false, 1, 64);
+  PaSmallWindowReport("copy-sweep", rows);
+  for (const auto& r : rows)
+    CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
+                  "copy-sweep seq=" << r.seq << " max_abs=" << r.max_abs);
+}
+
+TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: payload tracking at the garbage seqs (stale-read vs live-read)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0f) - 0.5f;
+  };
+  std::vector<float> host_q(static_cast<size_t>(kPaSweepHq * kPaSweepD));
+  for (auto& v : host_q) v = lcg() * 0.3f;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(kPaSweepD));
+
+  const size_t cache_elems =
+      static_cast<size_t>(kPaSweepNBlocks * kPaSweepBsz * kPaSweepPage);
+  void* mem_kc = backend.Alloc(cache_elems * sizeof(float));
+  void* mem_vc = backend.Alloc(cache_elems * sizeof(float));
+  void* mem_kr = backend.Alloc(kPaSweepPage * sizeof(float));
+  void* mem_vr = backend.Alloc(kPaSweepPage * sizeof(float));
+  void* mem_slots = backend.Alloc(sizeof(int64_t));
+  void* mem_q = backend.Alloc(host_q.size() * sizeof(float));
+  void* mem_bt = backend.Alloc(sizeof(int32_t) * static_cast<size_t>(kPaSweepNBlocks));
+  std::vector<int32_t> block_table(static_cast<size_t>(kPaSweepNBlocks));
+  for (int64_t b = 0; b < kPaSweepNBlocks; ++b)
+    block_table[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+  backend.Copy(q, mem_bt, block_table.data(), block_table.size() * sizeof(int32_t));
+  const int64_t slot_val = 0;
+  backend.Copy(q, mem_slots, &slot_val, sizeof(int64_t));
+  backend.Copy(q, mem_q, host_q.data(), host_q.size() * sizeof(float));
+  Tensor tkc = Tensor::Contiguous(mem_kc, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0},
+                                  {kPaSweepNBlocks, kPaSweepBsz, kPaSweepHkv, kPaSweepD});
+  Tensor tvc = Tensor::Contiguous(mem_vc, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0},
+                                  {kPaSweepNBlocks, kPaSweepBsz, kPaSweepHkv, kPaSweepD});
+  Tensor tk = Tensor::Contiguous(mem_kr, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHkv, kPaSweepD});
+  Tensor tv = Tensor::Contiguous(mem_vr, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHkv, kPaSweepD});
+  Tensor tslots = Tensor::Contiguous(mem_slots, vt::DType::kI64,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {1});
+  Tensor tq = Tensor::Contiguous(mem_q, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHq, kPaSweepD});
+  Tensor tbt = Tensor::Contiguous(mem_bt, vt::DType::kI32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepNBlocks});
+  auto rac = reinterpret_cast<vt::ReshapeAndCacheFn>(
+      vt::GetOp(vt::OpId::kReshapeAndCache, DeviceType::kTENSTORRENT));
+
+  // Two DIFFERENT payloads, both valid slot-0 contents. The PA decode at the
+  // garbage seqs runs against each; the garbage fingerprints between the two
+  // payloads answer stale-read vs live-read.
+  auto make_payload = [&lcg](float k_amp, float v_amp) {
+    std::vector<float> k(static_cast<size_t>(kPaSweepPage)),
+        v(static_cast<size_t>(kPaSweepPage));
+    for (auto& e : k) e = lcg() * k_amp;
+    for (auto& e : v) e = lcg() * v_amp - 0.1f;
+    return std::make_pair(k, v);
+  };
+  const auto payload_a = make_payload(0.15f, 0.05f);
+  const auto payload_b = make_payload(0.30f, 0.10f);  // a genuinely different stream
+
+  std::vector<PaSeqRow> rows_a, rows_b;
+  for (int rep = 0; rep < 2; ++rep) {
+    const auto& [k_row, v_row] = rep == 0 ? payload_a : payload_b;
+    std::vector<float> host_kc(cache_elems, 0.0f), host_vc(cache_elems, 0.0f);
+    backend.Copy(q, mem_kr, k_row.data(), kPaSweepPage * sizeof(float));
+    backend.Copy(q, mem_vr, v_row.data(), kPaSweepPage * sizeof(float));
+    rac(q, tk, tv, tkc, tvc, tslots);
+    std::memcpy(host_kc.data(), k_row.data(), kPaSweepPage * sizeof(float));
+    std::memcpy(host_vc.data(), v_row.data(), kPaSweepPage * sizeof(float));
+    for (int s = 1; s <= 8; ++s)
+      PaSmallWindowRunSeq(backend, q, tq, tkc, tvc, tbt, s, scale, host_q,
+                          host_kc, host_vc, rep == 0 ? &rows_a : &rows_b);
+  }
+  PaSmallWindowReport("track-A", rows_a);
+  PaSmallWindowReport("track-B", rows_b);
+  // The discriminator: for every seq garbage in BOTH reps, compare the raw
+  // fingerprints. Equal bits = the same wrong source regardless of the cache
+  // content (an uninitialized/recycled read); differing bits = the read
+  // tracks the live cache bytes (a misaddressed but live read).
+  for (const auto& ra : rows_a) {
+    if (!ra.garbage) continue;
+    for (const auto& rb : rows_b) {
+      if (rb.seq != ra.seq || !rb.garbage) continue;
+      MESSAGE("track seq=" << ra.seq << " A-bits=" << ra.fingerprint
+                           << " | B-bits=" << rb.fingerprint
+                           << " -> "
+                           << (ra.fingerprint == rb.fingerprint
+                                   ? "IDENTICAL (stale/recycled read)"
+                                   : "TRACKS PAYLOAD (live wrong-buffer read)"));
+    }
+  }
+  for (const auto& r : rows_a)
+    CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
+                  "track-A seq=" << r.seq << " max_abs=" << r.max_abs);
+  for (const auto& r : rows_b)
+    CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
+                  "track-B seq=" << r.seq << " max_abs=" << r.max_abs);
+  backend.Free(mem_kc);
+  backend.Free(mem_vc);
+  backend.Free(mem_kr);
+  backend.Free(mem_vr);
+  backend.Free(mem_slots);
+  backend.Free(mem_q);
+  backend.Free(mem_bt);
+}
+
+TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: fresh cache per seq (intrinsic-to-cur_pos vs process state)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0f) - 0.5f;
+  };
+  std::vector<float> host_q(static_cast<size_t>(kPaSweepHq * kPaSweepD));
+  for (auto& v : host_q) v = lcg() * 0.3f;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(kPaSweepD));
+  const size_t cache_elems =
+      static_cast<size_t>(kPaSweepNBlocks * kPaSweepBsz * kPaSweepPage);
+
+  std::vector<float> k_row(static_cast<size_t>(kPaSweepPage)),
+      v_row(static_cast<size_t>(kPaSweepPage));
+  for (auto& v : k_row) v = lcg() * 0.15f;
+  for (auto& v : v_row) v = lcg() * 0.05f - 0.1f;
+
+  // Per seq: a FRESH cache (fresh pointers -> a fresh shadow), zeroed, RAC
+  // slot 0, ONE PA decode at that seq, free. No shared cache state across
+  // seqs; the sweep's allocation rhythm repeats per seq.
+  const int64_t slot_val = 0;
+  std::vector<PaSeqRow> rows;
+  for (int s = 1; s <= 8; ++s) {
+    void* mem_kc = backend.Alloc(cache_elems * sizeof(float));
+    void* mem_vc = backend.Alloc(cache_elems * sizeof(float));
+    void* mem_kr = backend.Alloc(kPaSweepPage * sizeof(float));
+    void* mem_vr = backend.Alloc(kPaSweepPage * sizeof(float));
+    void* mem_slots = backend.Alloc(sizeof(int64_t));
+    void* mem_q = backend.Alloc(host_q.size() * sizeof(float));
+    void* mem_bt = backend.Alloc(sizeof(int32_t) * static_cast<size_t>(kPaSweepNBlocks));
+    backend.Copy(q, mem_q, host_q.data(), host_q.size() * sizeof(float));
+    backend.Copy(q, mem_kr, k_row.data(), kPaSweepPage * sizeof(float));
+    backend.Copy(q, mem_vr, v_row.data(), kPaSweepPage * sizeof(float));
+    backend.Copy(q, mem_slots, &slot_val, sizeof(int64_t));
+    std::vector<int32_t> block_table(static_cast<size_t>(kPaSweepNBlocks));
+    for (int64_t b = 0; b < kPaSweepNBlocks; ++b)
+      block_table[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+    backend.Copy(q, mem_bt, block_table.data(), block_table.size() * sizeof(int32_t));
+    Tensor tkc = Tensor::Contiguous(mem_kc, vt::DType::kF32,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {kPaSweepNBlocks, kPaSweepBsz, kPaSweepHkv, kPaSweepD});
+    Tensor tvc = Tensor::Contiguous(mem_vc, vt::DType::kF32,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {kPaSweepNBlocks, kPaSweepBsz, kPaSweepHkv, kPaSweepD});
+    Tensor tk = Tensor::Contiguous(mem_kr, vt::DType::kF32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHkv, kPaSweepD});
+    Tensor tv = Tensor::Contiguous(mem_vr, vt::DType::kF32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHkv, kPaSweepD});
+    Tensor tslots = Tensor::Contiguous(mem_slots, vt::DType::kI64,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {1});
+    Tensor tq = Tensor::Contiguous(mem_q, vt::DType::kF32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepHq, kPaSweepD});
+    Tensor tbt = Tensor::Contiguous(mem_bt, vt::DType::kI32,
+                                    Device{DeviceType::kTENSTORRENT, 0}, {1, kPaSweepNBlocks});
+    auto rac = reinterpret_cast<vt::ReshapeAndCacheFn>(
+        vt::GetOp(vt::OpId::kReshapeAndCache, DeviceType::kTENSTORRENT));
+    rac(q, tk, tv, tkc, tvc, tslots);
+    std::vector<float> host_kc(cache_elems, 0.0f), host_vc(cache_elems, 0.0f);
+    std::memcpy(host_kc.data(), k_row.data(), kPaSweepPage * sizeof(float));
+    std::memcpy(host_vc.data(), v_row.data(), kPaSweepPage * sizeof(float));
+    PaSmallWindowRunSeq(backend, q, tq, tkc, tvc, tbt, s, scale, host_q,
+                        host_kc, host_vc, &rows);
+    backend.Free(mem_kc);
+    backend.Free(mem_vc);
+    backend.Free(mem_kr);
+    backend.Free(mem_vr);
+    backend.Free(mem_slots);
+    backend.Free(mem_q);
+    backend.Free(mem_bt);
+  }
+  PaSmallWindowReport("fresh-per-seq", rows);
+  for (const auto& r : rows)
+    CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
+                  "fresh-per-seq seq=" << r.seq << " max_abs=" << r.max_abs);
+}
+
+TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program cache disabled (cache-hit run-args class)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0f) - 0.5f;
+  };
+  std::vector<float> host_q(static_cast<size_t>(kPaSweepHq * kPaSweepD));
+  for (auto& v : host_q) v = lcg() * 0.3f;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(kPaSweepD));
+
+  vt::tenstorrent::ProgramCacheToggleForTest(/*enable=*/false);
+  const auto rows = PaSmallWindowSweep(backend, q, host_q, scale,
+                                       /*rac_seeded=*/true, 1, 8);
+  PaSmallWindowReport("nocache-sweep", rows);
+  vt::tenstorrent::ProgramCacheToggleForTest(/*enable=*/true);
+  for (const auto& r : rows)
+    CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
+                  "nocache-sweep seq=" << r.seq << " max_abs=" << r.max_abs);
 }

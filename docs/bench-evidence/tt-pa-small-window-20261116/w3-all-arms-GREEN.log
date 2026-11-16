@@ -1,0 +1,385 @@
+2026-11-16 18:18:31.239 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 18:18:31.240 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 18:18:31.240 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 18:18:31.240 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 18:18:56.028 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 18:18:56.028 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 18:18:56.057 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 18:18:56.057 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 18:18:56.057 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 18:18:56.057 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 18:18:56.058 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 18:18:56.144 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 18:18:56.191 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 18:18:56.191 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 18:18:56.191 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 18:18:56.191 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 18:18:56.191 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 18:18:56.993 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:13979:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded PA decode seq sweep 1..64 (the focused red)
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=1: max_abs=0.001210051
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=2: max_abs=0.001914531
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=3: max_abs=0.002238351
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=4: max_abs=0.001539891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=5: max_abs=0.001356221
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=6: max_abs=0.00113821
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=7: max_abs=0.00106791
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=8: max_abs=0.0008703561
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=9: max_abs=0.0009023571
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=10: max_abs=0.00076861
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=11: max_abs=0.0007268391
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=12: max_abs=0.0007446541
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=13: max_abs=0.0006500691
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=14: max_abs=0.000579171
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=15: max_abs=0.0005430271
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=16: max_abs=0.0005811421
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=17: max_abs=0.0005805691
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=18: max_abs=0.0005095241
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=19: max_abs=0.0005032371
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=20: max_abs=0.0004156291
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=21: max_abs=0.0004363221
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=22: max_abs=0.0003849651
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=23: max_abs=0.0003946421
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=24: max_abs=0.000345521
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=25: max_abs=0.0003712021
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=26: max_abs=0.0003506591
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=27: max_abs=0.0003522941
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=28: max_abs=0.0003047051
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=29: max_abs=0.0002854961
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=30: max_abs=0.0002769891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=31: max_abs=0.0002643971
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=32: max_abs=0.0002855981
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=33: max_abs=0.0002934431
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=34: max_abs=0.0002683481
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=35: max_abs=0.0002651261
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=36: max_abs=0.0002401921
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=37: max_abs=0.0002374091
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=38: max_abs=0.0002316871
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=39: max_abs=0.0002432151
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=40: max_abs=0.0002449631
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=41: max_abs=0.0002013811
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=42: max_abs=0.0002220731
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=43: max_abs=0.0002208921
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=44: max_abs=0.000223891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=45: max_abs=0.0001895141
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=46: max_abs=0.0002026041
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=47: max_abs=0.0001790991
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=48: max_abs=0.0001979591
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=49: max_abs=0.0001928321
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=50: max_abs=0.0001793751
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=51: max_abs=0.0001748331
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=52: max_abs=0.0001669321
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=53: max_abs=0.0001682251
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=54: max_abs=0.0001655041
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=55: max_abs=0.0001650931
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=56: max_abs=0.0001717641
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=57: max_abs=0.0001498131
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=58: max_abs=0.0001602871
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=59: max_abs=0.0001417321
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=60: max_abs=0.0001554261
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=61: max_abs=0.0001401451
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=62: max_abs=0.0001475661
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=63: max_abs=0.0001365031
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=64: max_abs=0.0001570551
+
+./tests/vt/test_tenstorrent_backend.cpp:13973: MESSAGE: 1: garbage seqs = [] / 64 swept
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:14002:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: Copy-seeded PA decode seq sweep 1..64 (coherence discriminator)
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=1: max_abs=0.001210051
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=2: max_abs=0.001914531
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=3: max_abs=0.002238351
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=4: max_abs=0.001539891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=5: max_abs=0.001356221
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=6: max_abs=0.00113821
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=7: max_abs=0.00106791
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=8: max_abs=0.0008703561
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=9: max_abs=0.0009023571
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=10: max_abs=0.00076861
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=11: max_abs=0.0007268391
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=12: max_abs=0.0007446541
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=13: max_abs=0.0006500691
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=14: max_abs=0.000579171
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=15: max_abs=0.0005430271
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=16: max_abs=0.0005811421
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=17: max_abs=0.0005805691
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=18: max_abs=0.0005095241
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=19: max_abs=0.0005032371
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=20: max_abs=0.0004156291
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=21: max_abs=0.0004363221
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=22: max_abs=0.0003849651
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=23: max_abs=0.0003946421
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=24: max_abs=0.000345521
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=25: max_abs=0.0003712021
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=26: max_abs=0.0003506591
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=27: max_abs=0.0003522941
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=28: max_abs=0.0003047051
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=29: max_abs=0.0002854961
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=30: max_abs=0.0002769891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=31: max_abs=0.0002643971
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=32: max_abs=0.0002855981
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=33: max_abs=0.0002934431
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=34: max_abs=0.0002683481
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=35: max_abs=0.0002651261
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=36: max_abs=0.0002401921
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=37: max_abs=0.0002374091
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=38: max_abs=0.0002316871
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=39: max_abs=0.0002432151
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=40: max_abs=0.0002449631
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=41: max_abs=0.0002013811
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=42: max_abs=0.0002220731
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=43: max_abs=0.0002208921
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=44: max_abs=0.000223891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=45: max_abs=0.0001895141
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=46: max_abs=0.0002026041
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=47: max_abs=0.0001790991
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=48: max_abs=0.0001979591
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=49: max_abs=0.0001928321
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=50: max_abs=0.0001793751
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=51: max_abs=0.0001748331
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=52: max_abs=0.0001669321
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=53: max_abs=0.0001682251
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=54: max_abs=0.0001655041
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=55: max_abs=0.0001650931
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=56: max_abs=0.0001717641
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=57: max_abs=0.0001498131
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=58: max_abs=0.0001602871
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=59: max_abs=0.0001417321
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=60: max_abs=0.0001554261
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=61: max_abs=0.0001401451
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=62: max_abs=0.0001475661
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=63: max_abs=0.0001365031
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=64: max_abs=0.0001570551
+
+./tests/vt/test_tenstorrent_backend.cpp:13973: MESSAGE: 1: garbage seqs = [] / 64 swept
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:14025:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: payload tracking at the garbage seqs (stale-read vs live-read)
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=1: max_abs=0.001213241
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=2: max_abs=0.001405841
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=3: max_abs=0.001187751
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=4: max_abs=0.0008869131
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=5: max_abs=0.0007174161
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=6: max_abs=0.0005790591
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=7: max_abs=0.0005873461
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=8: max_abs=0.0005208911
+
+./tests/vt/test_tenstorrent_backend.cpp:13973: MESSAGE: 1: garbage seqs = [] / 8 swept
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=1: max_abs=0.001750561
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=2: max_abs=0.002779561
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=3: max_abs=0.00237941
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=4: max_abs=0.002208231
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=5: max_abs=0.001649091
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=6: max_abs=0.001526131
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=7: max_abs=0.001203051
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=8: max_abs=0.001106661
+
+./tests/vt/test_tenstorrent_backend.cpp:13973: MESSAGE: 1: garbage seqs = [] / 8 swept
+
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:14134:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: fresh cache per seq (intrinsic-to-cur_pos vs process state)
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=1: max_abs=0.001213241
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=2: max_abs=0.001405841
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=3: max_abs=0.001187751
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=4: max_abs=0.0008869131
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=5: max_abs=0.0007174161
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=6: max_abs=0.0005790591
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=7: max_abs=0.0005873461
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=8: max_abs=0.0005208911
+
+./tests/vt/test_tenstorrent_backend.cpp:13973: MESSAGE: 1: garbage seqs = [] / 8 swept
+
+2026-11-16 18:18:57.071 | info     |           Metal | Disabling and clearing program cache on MeshDevice 1 (mesh_device.cpp:1203)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:14215:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program cache disabled (cache-hit run-args class)
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=1: max_abs=0.001210051
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=2: max_abs=0.001914531
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=3: max_abs=0.002238351
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=4: max_abs=0.001539891
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=5: max_abs=0.001356221
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=6: max_abs=0.00113821
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=7: max_abs=0.00106791
+
+./tests/vt/test_tenstorrent_backend.cpp:13969: MESSAGE: 1 seq=8: max_abs=0.0008703561
+
+./tests/vt/test_tenstorrent_backend.cpp:13973: MESSAGE: 1: garbage seqs = [] / 8 swept
+
+2026-11-16 18:18:57.099 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+[doctest] test cases:   5 |   5 passed | 0 failed | 117 skipped
+[doctest] assertions: 160 | 160 passed | 0 failed |
+[doctest] Status: SUCCESS!
+2026-11-16 18:18:57.099 | info     |    BuildKernels | JIT cache stats: 27/27 hits (100.0%) [27 cached, 88 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 18:18:57.099 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 18:18:57.142 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 18:18:57.142 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 18:18:57.145 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 18:18:57.145 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 18:18:57.145 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

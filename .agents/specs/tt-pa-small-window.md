@@ -68,3 +68,40 @@ loop changes (stage-C owns them), any other PA behavior change.
 
 One pull request; worktree `/tmp/tt-pa`; push to `mine`. The stage-C row
 consumes this row's fix for its acceptance gate.
+
+## Now
+
+DONE 2026-11-16. The defect is characterized (the seq-parity set is process
+state, the invariants are the second-KV-group heads, never-computed bytes,
+recycled content), root-caused (OURS: the bf16 SDPA output committed on an
+f32-contract output slot; EnsureHostBytes writes at the shadow's width —
+the upstream kernel, the RAC write, and the writer-L1-fence candidate are
+all falsified), and fixed (PaOutTypedForCommit typecasts the SDPA output to
+OUT's dtype in both commit arms). All five characterization arms green; the
+existing PA/RAC suites unchanged. The stage-C consumption gates run from
+/tmp/q38-stage-c after this branch merges there.
+
+## Outcome
+
+- Measured: the focused sweep (RAC-seeded, 64 seqs) red-before garbage at
+  seq=1 (1.43305e+38, byte-identical to the stage-C discriminator's main
+  arm), green-after 0 garbage / 64 with max_abs 0.002238 (the bf16
+  envelope); the Copy-seeded sweep 31/64 garbage red-before, 0 green-after.
+- The mechanism check that pinned it: re-reading the garbage rows' output
+  buffer as bf16 pairs matches the oracle to ~1e-3 while the f32 read shows
+  1e38 — the values were correct, the write width was not.
+- Rejected: the RAC-write-visibility hypothesis (the Copy-seeded arm
+  garbages too); the upstream tt-metal SDPA kernel (dev_out clean at every
+  call, env-dump bisect); the program-cache run-args class (worse with the
+  cache off; the buffer bindings re-patch on every hit at this pin); the
+  writer-kernel Blackhole L1-cache fence (applied to the pin tree, changed
+  nothing — reverted).
+- Defaults: the fix typecasts on device rather than declining f32 outs to
+  the host scatter, because the f32 A/B path is a registered production
+  arm and the host scatter would forfeit the device-resident o_proj input;
+  the typecast is capture-safe by the W4 doctrine (the eager warmup runs
+  the same out dtype). f16 outs decline to the host scatter: ttnn carries
+  no f16 dtype at this pin.
+- The stage-C seq-parity fingerprint (2/5/7) is recorded as a state
+  fingerprint of that process, so the hunt's "which seq" question is closed
+  as malformed: the invariants travel, the set does not.

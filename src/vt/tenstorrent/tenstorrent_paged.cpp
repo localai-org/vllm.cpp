@@ -9,7 +9,39 @@
 
 #include "vt/tenstorrent/tenstorrent_internal.h"
 
+#include <atomic>
+
 namespace vt::tenstorrent {
+namespace {
+
+// TT-PA-SMALL-WINDOW (the fix): reconcile a device SDPA output's dtype with
+// the OUT tensor's contract before CommitDeviceLogical2D. EnsureHostBytes
+// writes the host bytes at the SHADOW's dtype width (the shadow's dtype is
+// authoritative — the FLINT slot-serve rule, tenstorrent_residency.cpp), so
+// the bf16 sdpa_decode/chunked-SDPA output committed on an f32-contract out
+// wrote 2 B/elem into a 4 B/elem host buffer: the f32 consumer's second half
+// read recycled host bytes (the isolated defect's garbage at the second KV
+// group, deterministic per allocator state; the bf16 re-read of the same
+// buffer matched the oracle to ~1e-3). The host scatter paths honor out's
+// dtype via StoreElemF32; the device commit paths must too. Capture-safe by
+// the W4 doctrine: the eager warmup step runs the same out dtype, so the
+// typecast program is warmed before any capture replays it. Returns false
+// when OUT's dtype has no ttnn dtype at this pin (f16 and the rest) — the
+// caller then declines to the host scatter, which honors every dtype through
+// the VT dtype machinery.
+bool PaOutTypedForCommit(ttnn::Tensor& dev, const Tensor& out) {
+  ttnn::DataType want;
+  switch (out.dtype) {
+    case vt::DType::kF32: want = ttnn::DataType::FLOAT32; break;
+    case vt::DType::kBF16: want = ttnn::DataType::BFLOAT16; break;
+    default: return false;  // no ttnn f16 at this pin: decline to the host scatter
+  }
+  if (dev.dtype() == want) return true;
+  dev = ttnn::typecast(dev, want);
+  return true;
+}
+
+}  // namespace
 namespace {
 // ---- Paged KV device shadows (ttnn layout) ---------------------------------
 // Host keeps vLLM NHD [nb, block, nkv, d] (LMCache/plane). Device PA needs
@@ -1527,6 +1559,40 @@ bool TryPagedAttentionDeviceDecode(Tensor& out, const Tensor& query, const Tenso
         /*paged_cache_geometry=*/std::nullopt,
         /*cache_position_modulo=*/std::nullopt);
 
+    // TT-PA-SMALL-WINDOW W2 bisect (env-gated, default off): dump the RAW
+    // sdpa_decode output before our commit path touches it. Garbage present
+    // HERE convicts the upstream kernel; garbage absent here but present in
+    // the committed output convicts our reshape/commit path.
+    if (std::getenv("VT_TT_PA_DUMP") != nullptr && !tt_capture_active()) {
+      static std::atomic<int> dump_count{0};
+      if (dump_count++ < 96) {
+        std::vector<float> dv = dev_out.to_vector<float>();
+        const uint32_t out_h = dev_out.logical_shape()[2];
+        std::fprintf(stderr, "[TT-PA-DUMP] call=%d seq_lens0=%d dev_out=[1,%u,%u,%u]\n",
+                     dump_count.load(), (int)slens[0], (unsigned)dev_out.logical_shape()[1],
+                     out_h, (unsigned)dev_out.logical_shape()[3]);
+        for (uint32_t h = 0; h < out_h && h < 4; ++h) {
+          // Scan the FULL head row: an element whose low 16 bits are nonzero
+          // was never computed (every bf16 op result rounds them to zero) —
+          // the recycled-bytes signature. Print each one with its bits.
+          int susp = 0;
+          for (int64_t e = 0; e < d; ++e) {
+            if (static_cast<size_t>(h * d + e) >= dv.size()) break;
+            float v = dv[static_cast<size_t>(h * d + e)];
+            uint32_t bits;
+            std::memcpy(&bits, &v, 4);
+            if (bits != 0 && (bits & 0xFFFF) != 0) {
+              if (susp == 0) std::fprintf(stderr, "[TT-PA-DUMP]   h%u NON-BF16:", h);
+              std::fprintf(stderr, " e%lld=%.5g/%08x", (long long)e, v, bits);
+              if (++susp >= 8) break;
+            }
+          }
+          if (susp == 0) std::fprintf(stderr, "[TT-PA-DUMP]   h%u all-bf16", h);
+          std::fprintf(stderr, "\n");
+        }
+      }
+    }
+
     // Dump PA output for comparison (first layer, cold step)
     {
     }
@@ -1544,6 +1610,12 @@ bool TryPagedAttentionDeviceDecode(Tensor& out, const Tensor& query, const Tenso
     if (identity_order && total_q == num_reqs) {
       try {
         const uint32_t flat_cols = static_cast<uint32_t>(hq * d);
+        // TT-PA-SMALL-WINDOW (the fix): the commit's shadow dtype must equal
+        // OUT's contract — see PaOutTypedForCommit. An unhandled out dtype
+        // declines to the host scatter below.
+        if (!PaOutTypedForCommit(dev_out, out)) {
+          throw std::runtime_error("PA device decode: out dtype not committable");
+        }
         // B == 1: CaptureSafeReshape's metadata view (padded volume equals
         // the buffer) keeps the captured decode replay capture-safe. B > 1:
         // no metadata view of the [1, B, pad32(H), D] buffer can represent
@@ -1556,6 +1628,42 @@ bool TryPagedAttentionDeviceDecode(Tensor& out, const Tensor& query, const Tenso
             tt_capture_active()
                 ? CaptureSafeReshape(dev_out, ttnn::Shape({Bu, flat_cols}))
                 : ttnn::reshape(dev_out, ttnn::Shape({Bu, flat_cols}));
+        // TT-PA-SMALL-WINDOW W2 bisect: dump the reshaped view BEFORE the
+        // commit — garbage here convicts the reshape's spec mapping.
+        if (std::getenv("VT_TT_PA_DUMP") != nullptr && !tt_capture_active()) {
+          static std::atomic<int> flat_dump{0};
+          if (flat_dump++ < 96) {
+            std::vector<float> fv = flat.to_vector<float>();
+            const auto& fls = flat.logical_shape();
+            const auto& fps = flat.padded_shape();
+            std::fprintf(stderr,
+                         "[TT-PA-DUMP] flat call=%d logical=[%u,%u,%u,%u] padded=[%u,%u,%u,%u]\n",
+                         flat_dump.load(), fls.rank() > 0 ? (unsigned)fls[0] : 0,
+                         fls.rank() > 1 ? (unsigned)fls[1] : 0,
+                         fls.rank() > 2 ? (unsigned)fls[2] : 0,
+                         fls.rank() > 3 ? (unsigned)fls[3] : 0,
+                         fps.rank() > 0 ? (unsigned)fps[0] : 0,
+                         fps.rank() > 1 ? (unsigned)fps[1] : 0,
+                         fps.rank() > 2 ? (unsigned)fps[2] : 0,
+                         fps.rank() > 3 ? (unsigned)fps[3] : 0);
+            for (int64_t h = 0; h < hq; ++h) {
+              int susp = 0;
+              for (int64_t e = 0; e < d; ++e) {
+                if (static_cast<size_t>(h * d + e) >= fv.size()) break;
+                float v = fv[static_cast<size_t>(h * d + e)];
+                uint32_t bits;
+                std::memcpy(&bits, &v, 4);
+                if (bits != 0 && (bits & 0xFFFF) != 0) {
+                  if (susp == 0) std::fprintf(stderr, "[TT-PA-DUMP]   flat h%lld NON-BF16:", (long long)h);
+                  std::fprintf(stderr, " e%lld=%.5g/%08x", (long long)e, v, bits);
+                  if (++susp >= 6) break;
+                }
+              }
+              if (susp == 0) std::fprintf(stderr, "[TT-PA-DUMP]   flat h%lld all-bf16", (long long)h);
+              std::fprintf(stderr, "\n");
+            }
+          }
+        }
         CommitDeviceLogical2D(out, std::move(flat), Bu, flat_cols);
         // Verify the committed output matches the PA output
         {
@@ -1777,6 +1885,13 @@ bool TryPagedAttentionDevicePrefill(Tensor& out, const Tensor& query, const Tens
       ttnn::Tensor flat = out_pieces.size() == 1
                               ? std::move(out_pieces[0])
                               : ttnn::concat(out_pieces, /*dim=*/0);
+      // TT-PA-SMALL-WINDOW (the fix): the same dtype-contract reconciliation
+      // as the decode arm — the chunked-SDPA output is bf16 and OUT's dtype
+      // governs the host write width. An unhandled dtype declines to CommitHost.
+      if (!PaOutTypedForCommit(flat, out)) {
+        CommitHost(out);
+        return true;
+      }
       CommitDeviceLogical2D(out, std::move(flat), static_cast<uint32_t>(total_q),
                             static_cast<uint32_t>(hq * d));
       return true;
