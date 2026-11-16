@@ -261,6 +261,42 @@ concern rather than a decode primitive, so `ExpertSigns` takes the derived seed.
   choice.
 - A codeword's four values become four consecutive COLUMNS of one row of the
   tile, not four rows: the gathered stream is reshaped to
-  `(mb, nb, TD, TD)` before the transpose, so the last axis spans four `c`
+  `(mb, nb, TD, TD)` before   the transpose, so the last axis spans four `c`
   positions per codeword. Reading the codeword as a column quadruple instead
   changes every value in the tile.
+
+## U2 findings (2026-11-16)
+
+**The `decode.py` runnability risk is retired.** The published file downloads
+clean at 17,766 bytes, sha256
+`e27dbbe500250364506f8b7e8afb46b7c86971c782c7e0824e49a851a1158b1e`, with LF
+endings and intact indentation, and `python3 -m py_compile decode.py` exits 0.
+The mangled indentation recorded above was the fetch, not the file, so fixtures
+can be generated from it unmodified.
+
+**The `_HS` tables are present** in the same file for radix 12 and 20, each with
+an in-file `H @ H.T == radix * I` assertion. The spine rotation is therefore
+portable without any further download; it stays owed as work, not as a risk.
+
+**Three format facts the real source settled.**
+- The tape is stored **per tile**: `_ex_states` derives its `nstep` from
+  `EX_TD * EX_TD // EX_V`, so one trellis row is one 16x16 tile of 64 codewords
+  (24 words at K4=6, 28 at K4=7), not one expert's whole matrix.
+- `_lut`'s `dict.get(f"lut.k{K4}", cb["lut"])` evaluates its default **eagerly**,
+  so every codebook must carry `lut` as well as `lut.k6`/`lut.k7`.
+- The expert path divides by `sqrt(radix)` and recurses into a normalised
+  transform for the inner block, while the spine path divides by `sqrt(N)` and
+  uses `_HS`. Mixing the two normalisations is the defect the gate found.
+
+**Byte equality is not reachable on the radix path, and the gate must say so.**
+Against the real shapes the C++ and the oracle agree bit-for-bit on 240,719 of
+1,638,400 values in the gate tensor and 229,772 in the down tensor, with a
+maximum deviation of 9.2e-05 and 7.6e-05: about two units in the last place of
+the tensor's own magnitude, at 459.9 and 321.5. The remaining difference is
+accumulation order - `np.matmul` reaches BLAS, while a portable implementation
+sums the radix products in index order - so a byte gate there would bind the
+format to one BLAS build rather than to the arithmetic. The gate is therefore
+**byte equality on the butterfly-only path**, where no BLAS is involved, and a
+**two-ulp-of-magnitude bound on the radix path**, with the measured maxima
+recorded above. That supersedes the earlier "byte equality, not a tolerance"
+line in `## Design`, which assumed the oracle was bit-reproducible.

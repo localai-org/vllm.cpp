@@ -276,8 +276,14 @@ TEST_CASE("mach2 radix matrices are symmetric and orthogonal to exact equality")
 
 TEST_CASE("mach2 expert hadamard is orthonormal on both radix and power-of-two sizes") {
   // 20 columns takes the radix-20 path with a one-wide butterfly block; 256 takes
-  // the pure butterfly path. Applying the transform twice returns the input.
-  for (const int cols : {20, 256}) {
+  // the pure butterfly path. 40, 80 and 640 are the cases that MATTER: they put
+  // an inner butterfly block in front of the radix matrix, and the first version
+  // of this suite omitted them. Without them the radix branch could skip the
+  // inner stage's 1/sqrt(inner) normalisation - which it did - and still pass,
+  // because a one-wide inner block has nothing to normalise. The differential
+  // gate against decode.py exposed it as an exact factor of 64 on the real
+  // expert shapes, sqrt(128 * 32).
+  for (const int cols : {20, 40, 80, 256, 640}) {
     std::vector<float> x(static_cast<size_t>(cols)), orig(static_cast<size_t>(cols));
     for (int i = 0; i < cols; ++i) orig[static_cast<size_t>(i)] = 0.25f * static_cast<float>(i) - 3.0f;
     x = orig;

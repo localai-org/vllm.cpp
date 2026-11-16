@@ -288,7 +288,12 @@ void HadamardExpert(float* x, std::size_t rows, int cols) {
   const int radix = (cols % 12 == 0 && IsPowerOfTwo(cols / 12)) ? 12 : 20;
   const int inner = cols / radix;
   if (cols % radix != 0 || !IsPowerOfTwo(inner)) return;  // shape not supported
-  if (inner > 1) Butterflies(x, rows * static_cast<std::size_t>(radix), inner);
+  // The inner stage is a NORMALISED transform of its own: `decode.py` recurses
+  // into `hadamard` here, which divides by sqrt(inner). Calling the bare
+  // butterflies leaves that factor out and scales the whole result by
+  // sqrt(inner) - a factor the differential gate caught as exactly 64x on the
+  // real expert shapes (sqrt(128 * 32)).
+  if (inner > 1) HadamardExpert(x, rows * static_cast<std::size_t>(radix), inner);
   ApplyRadix(x, rows, radix, inner, static_cast<double>(radix));
 }
 
