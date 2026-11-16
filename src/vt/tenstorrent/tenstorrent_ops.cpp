@@ -18,6 +18,8 @@
 // ttnn::sdpa_decode is deferred. kQkvSplit is hybrid: device-slice when the
 #include "vt/tenstorrent/tenstorrent_internal.h"
 
+#include <deque>
+
 #include <ttnn/operations/data_movement/bcast/bcast.hpp>
 #include <ttnn/operations/data_movement/repeat/repeat.hpp>
 #include <ttnn/operations/experimental/topk_large_indices/topk_large_indices.hpp>
@@ -153,6 +155,69 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
   MeshDevice& device = SharedMeshDevice();
   ttnn::Tensor dev_a = EnsureDevice2D(a, device);
   ttnn::Tensor dev_b = EnsureMatmulWeightDevice(b, device);
+  // W20: the bf16 GEMM's operand ledger at the spec geometry — the z GEMM
+  // (N=6144) committed garbage at the first spec step's l=9 while the mixed
+  // GEMM (N=10240, same h) stayed clean. The weight's staged address per
+  // call answers "re-staged per call?" (the [QKVZ-W] probe's moving host
+  // pointers); the dual-read of the staged weight answers "the staged
+  // weight bytes are garbage?".
+  if (M == 9 && std::getenv("VT_DUMP_TRUST") != nullptr &&
+      !tt_capture_active()) {
+    static std::atomic<int64_t> mm_seq{0};
+    if (mm_seq.fetch_add(1, std::memory_order_relaxed) < 512) {
+      // W20b: the ACTIVATION's trusted dual-read at the z GEMM — after the
+      // mixed GEMM ran on the same h. If this reads garbage where the
+      // [QKVZ-IN] probe (which runs BEFORE both GEMMs) read clean, the
+      // mixed GEMM's allocations clobbered the h shadow — the alias, named.
+      std::vector<float> a1 = dev_a.to_vector<float>();
+      std::vector<float> a2 = dev_a.to_vector<float>();
+      double aacc = 0.0;
+      uint64_t anan = 0, ainf = 0;
+      for (float f : a1) {
+        if (std::isnan(f)) {
+          ++anan;
+          continue;
+        }
+        if (std::isinf(f)) {
+          ++ainf;
+          continue;
+        }
+        aacc += f > 0.0f ? f : -f;
+      }
+      std::vector<float> w1 = dev_b.to_vector<float>();
+      std::vector<float> w2 = dev_b.to_vector<float>();
+      const bool wagree = (w1 == w2);
+      double wacc = 0.0;
+      uint64_t wnan = 0, winf = 0;
+      for (float f : w1) {
+        if (std::isnan(f)) {
+          ++wnan;
+          continue;
+        }
+        if (std::isinf(f)) {
+          ++winf;
+          continue;
+        }
+        wacc += f > 0.0f ? f : -f;
+      }
+      std::fprintf(stderr,
+                   "[MMBT9] N=%u wagree=%d wn=%zu w_asum=%.6g w_nan=%llu "
+                   "w_inf=%llu a_addr=%llx w_addr=%llx dt=%d "
+                   "a_agree=%d a_asum=%.6g a_nan=%llu a_inf=%llu\n",
+                   N, wagree ? 1 : 0, w1.size(), wacc,
+                   static_cast<unsigned long long>(wnan),
+                   static_cast<unsigned long long>(winf),
+                   static_cast<unsigned long long>(
+                       dev_a.mesh_buffer().address()),
+                   static_cast<unsigned long long>(
+                       dev_b.mesh_buffer().address()),
+                   static_cast<int>(dev_b.dtype()),
+                   (a1 == a2) ? 1 : 0, aacc,
+                   static_cast<unsigned long long>(anan),
+                   static_cast<unsigned long long>(ainf));
+      std::fflush(stderr);
+    }
+  }
   if (dev_b.dtype() == ttnn::DataType::BFLOAT8_B) Bfp8MatmulUse();
   const std::optional<ttnn::DataType> out_dt =
       out.dtype == DType::kF32 ? std::optional(ttnn::DataType::FLOAT32)
@@ -169,6 +234,87 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
       dev_a, dev_b, /*transpose_a=*/false, /*transpose_b=*/true,
       /*memory_config=*/std::nullopt, out_dt, /*program_config=*/std::nullopt,
       /*activation=*/std::nullopt, F32AccKernelConfig());
+  // W20 (ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the OUTPUT-BLOCK KEEP-ALIVE.
+  // The z GEMM's committed output read recycled garbage at the first spec
+  // step's l=9 with VERIFIED-CLEAN inputs (the [MMBT9] dual-reads: h and the
+  // staged weight both clean, both stable across calls) and a PRE-COMMIT
+  // read already garbage ([ZGEMM-PRECOMMIT]) — the corruption is in the
+  // output buffer's bytes, not in the compute (c56's zero input produced a
+  // correct all-zero output through the same program). The commit ledger
+  // ([TT-COMMIT]) shows every commit replacing an ALREADY-FREED old shadow
+  // (old_live=0): each call's output is a fresh ttnn allocation recycling a
+  // recently-freed block, and the recycled block's bytes were replaced
+  // between the previous call's verified read and this call's write. The
+  // keep-alive holds the last kGemmOutKeepAliveDepth outputs per (M,N,dtype)
+  // geometry, so the current call's output block is never a recent recycle
+  // of this geometry's own blocks — a late or aliased writer to a recycled
+  // address can no longer reach the live output. Handle copies only (shared
+  // TensorAttributes keep the MeshBuffer alive — the UploadRowsBf16
+  // persistent-arm mechanism); the memory cost is depth x output bytes per
+  // geometry (~1.2 MiB total at the 27B spec geometry). VT_TT_GEMM_OUT_KEEPALIVE=0
+  // restores the old lifetime (the same-binary rollback).
+  static const bool gemm_out_keepalive = [] {
+    const char* e = std::getenv("VT_TT_GEMM_OUT_KEEPALIVE");
+    return e == nullptr || e[0] != '0';
+  }();
+  if (gemm_out_keepalive) {
+    struct GemmOutKey {
+      uint32_t m, n;
+      unsigned dt;
+      bool operator<(const GemmOutKey& o) const {
+        if (m != o.m) return m < o.m;
+        if (n != o.n) return n < o.n;
+        return dt < o.dt;
+      }
+    };
+    constexpr int kGemmOutKeepAliveDepth = 3;
+    static std::mutex ka_mutex;  // #1486: never destroyed
+    static std::map<GemmOutKey, std::deque<ttnn::Tensor>>* keepalive =
+        new std::map<GemmOutKey, std::deque<ttnn::Tensor>>();
+    GemmOutKey key{M, N, static_cast<unsigned>(out.dtype)};
+    std::lock_guard<std::mutex> g(ka_mutex);
+    auto& dq = (*keepalive)[key];
+    dq.push_back(dev_c);  // handle copy — holds THIS call's block alive too
+    while (static_cast<int>(dq.size()) > kGemmOutKeepAliveDepth) dq.pop_front();
+  }
+  // W20: the PRE-COMMIT trusted read of the matmul's own output — before
+  // any commit/slot machinery touches it. With the keep-alive this must read
+  // clean at every call; garbage here with the keep-alive on convicts the
+  // matmul compute itself.
+  if (M == 9 && N == 6144 && std::getenv("VT_DUMP_TRUST") != nullptr &&
+      !tt_capture_active()) {
+    static std::atomic<int64_t> dc_seq{0};
+    if (dc_seq.fetch_add(1, std::memory_order_relaxed) < 64) {
+      std::vector<float> c1 = dev_c.to_vector<float>();
+      std::vector<float> c2 = dev_c.to_vector<float>();
+      double acc = 0.0;
+      uint64_t nan = 0, inf = 0;
+      for (float f : c1) {
+        if (std::isnan(f)) {
+          ++nan;
+          continue;
+        }
+        if (std::isinf(f)) {
+          ++inf;
+          continue;
+        }
+        acc += f > 0.0f ? f : -f;
+      }
+      std::fprintf(stderr,
+                   "[ZGEMM-PRECOMMIT] agree=%d n=%zu asum=%.6g nan=%llu "
+                   "inf=%llu out_addr=%llx a_addr=%llx w_addr=%llx\n",
+                   (c1 == c2) ? 1 : 0, c1.size(), acc,
+                   static_cast<unsigned long long>(nan),
+                   static_cast<unsigned long long>(inf),
+                   static_cast<unsigned long long>(
+                       dev_c.mesh_buffer().address()),
+                   static_cast<unsigned long long>(
+                       dev_a.mesh_buffer().address()),
+                   static_cast<unsigned long long>(
+                       dev_b.mesh_buffer().address()));
+      std::fflush(stderr);
+    }
+  }
   CommitDevice2D(out, std::move(dev_c));
 }
 

@@ -366,3 +366,199 @@ repair). Issues: the row issue's W4 entry,
 taskset 32-63 bench / 64-127 builds, run FROM THE REPO ROOT, INT8DOT=1) with
 `VT_DFLASH_DRAFT=1` restored on the drafter-ON legs and
 `VLLM_CPP_CUDAGRAPH=0 VT_TT_WEIGHT_RESIDENCY=bfp8` per the W3 disposition.
+
+## W6-W13 bisect (2026-11-15 evening — the verify's stream death localized)
+
+All legs Q4_K_M KV64, seed 0, degenerate stream `daa113b5` unless noted.
+Instrumentation: `VT_TT_GDN_SPEC_DEBUG` probes (serve-time readbacks, slot
+states, per-layer asum/nan/inf/zero) — pure diagnostics, uncommitted.
+
+### The stream's shape
+- The good drafter-ON reference `d49c53d2` = the DRAFTER-OFF stream
+  (`w3f-off-{1,2,3}`): spec-decode token identity means the verify must
+  reproduce the greedy stream byte-for-byte.
+- Degenerate = `[220, 0, 0, ...]`: token #0 (from the clean prefill) correct;
+  every verified token after = 0 — the verify's logits collapse to argmax-0.
+- The poison is live in the FIRST spec step. Its T=9 geometry (9 rows, not a
+  tile multiple) is unique to the drafter-ON path: prefill T=32 = exactly one
+  tile; decode T=1 pads to one tile.
+
+### The layer traces (per staging arm)
+- w7 (default device-residual norms): layers 0-9 clean; l=10+ hidden=0,
+  res=garbage (9.46e41) forever.
+- w8/w9 (`VT_TT_FORCE_HOST_RESIDUAL=1`): layers 0-2 clean; l=3+ (the first
+  full-attn layer) res=inf, hidden=0. Mixer outputs: FA layers read
+  clean-looking, GDN block outputs all-zero from l=4.
+- w12 (`VT_TT_HOST_FREE_DECODE=0`): onset at l=1. **The onset layer moves with
+  the staging arm — the poison is pool-state dependent, not op-fixed.**
+
+### The op-level exonerations (standalone tests, all GREEN at engine geometry)
+- `kCausalConv1dSpecUpdate` sweep F (C=10240, widened state_len=11, T=9,
+  slots=9, nat=1, NaN-seeded out): max_abs 2.98e-08, nonfinite=0.
+- Sweep G (shifted-address second call — call 1's buffers held alive so call
+  2 lands at different addresses): max_abs 2.98e-08. The stale-address
+  replay hypothesis is dead for this op.
+- New stride test (row-strided bf16 view upload): EnsureDevice2D REFUSES
+  row-strided views outright (residency.cpp:930) — the engine never uploads
+  through it.
+- `GdnSpecDecodeKernel` checksums: clean at every T=9 call (nat0=1, no NaN).
+- The gated norm's operand probes (`[RNG-IN]`): x and g clean through the
+  spec step's first 8 GDN layers.
+- `VT_TT_ALLOC_TRACE` slot-census alias scan (w10): ZERO duplicate device
+  addresses across all slots — no double-hand.
+- w13 `[DRAFT_LOGITS]`: propose #1 CLEAN (asum 4.94e6, 0 NaN) — the drafter
+  is a VICTIM, not the poisoner; proposes #2-3 read 100% NaN (the verify's
+  poisoned aux taps). The poisoner is the first verify's own forward.
+
+### The z-gate collapse signature (w11 `[SPEC-OUT]` / `[RNG-IN]`)
+- g#55 (the spec step's 8th GDN layer, l=9): the z gate reads asum 3.62e40
+  with 109 Infs, from CLEAN h (22227). From g#56 (l=10): the gate reads
+  ALL-ZEROS for the rest of the run.
+- The z = the merged/split qkvz GEMM's gate output; h clean + z inf/garbage
+  pins the poison to the qkvz GEMM's output commit or the serve that reads it.
+- `[QKVZ-OUT]` mixed reads: call 50 (l=2) clean 62540; call 51+ (l=4+)
+  8.67e40-9.68e40 garbage — the qkvz GEMM's committed output reads garbage
+  while its input h reads clean, in BOTH staging arms.
+
+### Where this leaves the bisect
+Every op is GREEN in isolation at the engine geometry (47/47 assertions);
+the engine dies with a moving onset. The probes cannot distinguish a stale
+clean read from a fresh write (the codebase's own dual-read control exists
+for exactly this: `TrustDump`'s two-pass verified read, and the
+`post_input_norm_DIRECT` control at qwen3_5.cpp:8457). The next instrument
+is the trusted dual-read applied at the spec step's qkvz commit + mixer
+output — it splits "the download patterns diverge" from "a kernel
+difference" before any fix is written. The `[CONV-SPEC-STAGE]` fill-stage
+garbage (every 3rd fill, identical bytes) remains the strongest single
+anomaly: the cached zeros base reads ZEROS at fill time while the fill's
+output reads recycled garbage — but the standalone fill test at the same
+geometry is GREEN, so the engine's allocator/cache state participates.
+
+### Runners (this dir)
+`run-w6-pinpoint.sh` (w7 base), `run-w8-hostresid.sh`, `run-w9-mixer.sh`,
+`run-w10-alias.sh` (+VT_TT_ALLOC_TRACE), `run-w11-spectok.sh`,
+`run-w12-hostfree-off.sh`, `run-w13-draftlog.sh`. Each = the W4 discipline
+(file mutex, luwen reset + 15 s + /dev/shm cleanup, idle gate, taskset
+32-63 bench / 64-127 builds, FROM THE REPO ROOT, INT8DOT=1,
+VLLM_CPP_CUDAGRAPH=0, VT_TT_WEIGHT_RESIDENCY=bfp8, VT_DFLASH_DRAFT=1).
+
+## W20 the decisive instrument (2026-11-16 — the trusted dual-read: the alias theory FALSIFIED)
+
+All legs Q4_K_M KV64, seed 0, degenerate `daa113b5` (the w14-w19 TrustDump
+runs — 826/962/1154 dumps — are the same verdicts this section's reads
+cross-check; the qkvz commit-side dumps they intended NEVER FIRED: the
+dead agent's TrustDump calls sat AFTER `return out;` in BOTH ProjectGdnQkvzRaw
+arms — unreachable dead code, fixed this wave).
+
+### The verdict
+
+**The task's working hypothesis ("the COMMITTED bytes are correct at commit
+time but the SERVE reads different bytes at the same address") is
+FALSIFIED.** The read-only trusted dual-read (`DebugSlotTrustRead`, new —
+two independent to_vector passes, NO slot mutation, so the consumer's serve
+path stays pristine) at the qkvz COMMMIT side reads the poison:
+
+```
+[TRUST-SLOT] qkvz-z-c54 agree=1 asum=36816.6  addr=4f4c6f00   clean
+[TRUST-SLOT] qkvz-z-c55 agree=1 asum=3.75443e+40 inf=113 addr=4f4c6f00   GARBAGE
+[TRUST-SLOT] qkvz-z-c56 agree=1 asum=0 zero=55296 addr=4f4c6f00   all zeros
+```
+
+The SAME garbage (asum 3.75443e+40, 113 Infs) the serve-side reads
+([GSERVE-TRUST] at the gated norm, [RNG-IN]) — commit and serve AGREE. The
+serve is exonerated; the commit is the convict.
+
+### The commit is garbage PRE-commit, with verified-clean operands
+
+`[ZGEMM-PRECOMMIT]` (new — the trusted dual-read of the matmul's own output
+INSIDE MatmulBTKernel, before any commit machinery): c55's output reads
+asum 3.75443e+40 inf=113 — Identical to the commit-side and serve-side
+reads. The operands, dual-read at the same site ([MMBT9]): the activation h
+(a_asum 22227.6 — matches [QKVZ-IN]) and the staged weight (w_asum 396486 —
+byte-identical at the same position of every spec step, same device
+address) — BOTH CLEAN, BOTH STABLE. The matmul computed garbage from clean
+operands; c56's all-zero input produced a correct all-zero output through
+the same program — the compute works; the failure is state-dependent.
+
+### The alias/block-recycle theory: falsified by intervention
+
+- The commit ledger ([TT-COMMIT], new): EVERY commit replaces an
+  already-freed old shadow (old_live=0) — the output blocks cycle through
+  the allocator's free list call to call (the z slot: 4f4c6f00, 4ca6af00; a
+  legal-looking recycle).
+- THE INTERVENTION: a 3-deep output keep-alive in MatmulBTKernel
+  (VT_TT_GEMM_OUT_KEEPALIVE=0 rolls back) — the current call's output block
+  can never be a recent recycle of its own geometry's blocks. **The poison
+  MOVED (clean through the first 12 spec-step z GEMMs, then garbage with a
+  BIGGER signature: asum ~9e42, ~2500 Infs) instead of disappearing — the
+  recycled-block content is NOT the mechanism.** (The keep-alive stays in
+  the tree: it is harmless, it moved the onset later, and the first emitted
+  token changed 220→23066 — the recorded stream's third token — but it is
+  NOT the fix and the stream stays degenerate: e171d6b1.)
+- The garbage's bit signature (asum 1e38-1e42, Infs, no NaNs until late) is
+  consistent with BFP8/bf16 bit-pattern reinterpretation, but no staging
+  lifecycle reproduces it (below).
+
+### Isolated reproductions: ALL GREEN (the poison needs the engine's op mix)
+
+Three new focused cases in tests/vt/test_tenstorrent_backend.cpp, all at the
+engine's exact z geometry (M=9 partial tile, K=5120, N=6144, bf16
+activation/weight/out, the weight staged through the REAL EnsureBfp8WeightDevice
+cold path via the new Bfp8StageForTest surface):
+
+1. `w20-bfp8-m9.log` — the bfp8-staged weight at M=9 AND M=32 vs the f32
+   CPU oracle: max_rel 0.75 percent, 0 non-finite. **The W3 scope claim
+   ("the GDN layers stage via EnsureDevice2D directly and never route
+   through EnsureMatmulWeightDevice") is WRONG — MatmulBTKernel stages EVERY
+   weight, so VT_TT_WEIGHT_RESIDENCY=bfp8 has been degrading the TARGET's
+   bf16 GDN in_proj weights since W3 — but the bfp8 matmul itself is
+   numerically FINE at the spec geometry (the degradation is the expected
+   BFP8 band, not the poison).**
+2. `w20-bfp8-warm.log` — 200 warm repeated calls (program-cache hits + the
+   allocator's per-call output Alloc/Free cycle): 0/200 bad.
+3. `w20-bfp8-unsynced.log` — the engine's staging lifecycle (a ~33 MB
+   bf16_dev temporary created, typedcast on device ASYNC, dropped with NO
+   sync, then the matmul) x 50 fresh weights: 0/50 bad.
+
+### Where this leaves the bisect
+
+**SHARPENED (the w20 log's [SPEC-OUT] core series, read post-run): the
+recurrence's core output is ~ZERO at the spec calls** — asum 120 (the first
+call) then 1.2 / 1.18 / 0.9 / ... with EXACTLY 24576 zeros (= 4 of 9 rows)
+per call, later NaN — while the recurrence's q/k/v inputs (the pc_q/pc_v
+trusted dumps) are CLEAN at every pre-collapse spec call (no zero rows in
+any [9x16] dump before seq 795; the all-zero dumps start at the post-
+collapse steps). A ~zero core from clean q/k/v points at the recurrence's
+UNPROBED inputs: the INITIAL-STATE gather (column num_accepted-1 of the
+slot row — the prefill's committed state) and the BA outputs (araw/braw →
+g/beta; the sba_* dumps only cover the prefill). The core ~0 explains the
+stream's degeneracy on its own (the GDN blocks contribute noise-direction
+only → the verify's logits diverge from token 1), and the z GEMM's 1e40
+read at c55 is a SECOND anomaly on top (it is what collapses h to zero at
+l=10). The W4 focused gate tested nat=1/2/3 and the initial-state column
+read — but with TEST-built inputs; the ENGINE's state-cache content at the
+gather is unprobed.
+
+The poison lives in the interaction the isolated harness cannot see: the
+engine's INTERLEAVED op mix — the conv-spec fill's `indexed_fill` (whose
+cached-zeros-base/clone anomaly stands: the fill's output reads recycled
+bytes while the base reads zeros, and the fill's output buffer is the
+3.3 MB allocation whose freed block the 110 KB z output splits into), the
+GDN recurrence's gathers/scatters, and the paged attention — all sharing
+the tt-metal program cache and the DRAM allocator with the matmuls. The
+strongest remaining hypothesis: a tt-metal-pin program-cache/runtime-arg
+staleness under interleaved programs (the kernel writing a PREVIOUS call's
+buffer while the current output reads uninitialized recycled bytes — which
+explains the keep-alive intervention moving the poison, the identical-bytes
+periodicity, and the staging-arm-dependent onset). The next instrument is
+the interleaved-op focused case: matmul + indexed_fill + gather through the
+SHARED program cache in one harness — scoped, well-defined, and the first
+reproduction attempt that varies the op MIX rather than the op.
+
+### Runners/tests this wave
+
+`run-w20-trust2.sh` (the W6 discipline + VT_DUMP_TRUST + VT_TT_ALLOC_TRACE),
+the w20-trust2/ dump dir, the three focused logs above. New instrumentation
+(all env-gated, default-off): DebugSlotTrustRead, [XSERVE-TRUST],
+[GSERVE-TRUST], [MMBT9], [ZGEMM-PRECOMMIT], [TT-COMMIT], [I8DOT-OUT], the
+dead-code TrustDump placements fixed, the 3-deep GEMM output keep-alive.

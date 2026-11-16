@@ -624,6 +624,11 @@ void DumpSlotCensus(const char* label) {
   size_t n_dev = 0, n_pers = 0;
   std::map<std::string, std::pair<size_t, size_t>> dev_hist;  // shape -> bytes, slots
   std::map<std::string, std::pair<size_t, size_t>> pers_hist;
+  // W9: the aliasing detector. Two live slots whose device tensors report one
+  // buffer address are one buffer handed out twice — every write through
+  // either corrupts the other, and every read returns the last writer's
+  // bytes. Prints ONLY when a duplicate exists (spam-free otherwise).
+  std::map<unsigned long long, std::vector<unsigned long>> addr_owners;
   for (auto& kv : Slots()) {
     BufferSlot& s = kv.second;
     if (s.device) {
@@ -634,6 +639,7 @@ void DumpSlotCensus(const char* label) {
                          std::to_string(s.dev_cols)];
       e.first += b;
       e.second += 1;
+      addr_owners[s.device->mesh_buffer().address()].push_back(kv.first);
     }
     if (s.persistent) {
       const size_t b = bytes_of(*s.persistent);
@@ -645,6 +651,15 @@ void DumpSlotCensus(const char* label) {
       e.second += 1;
     }
     if (s.gemma_device) gemma_bytes += bytes_of(*s.gemma_device);
+  }
+  for (auto& [addr, owners] : addr_owners) {
+    if (owners.size() < 2) continue;
+    std::fprintf(stderr,
+                 "[TT-SLOT-ALIAS] addr=%llx held by %zu slots:",
+                 static_cast<unsigned long long>(addr), owners.size());
+    for (size_t i = 0; i < owners.size() && i < 4; ++i)
+      std::fprintf(stderr, " %lu", owners[i]);
+    std::fprintf(stderr, "\n");
   }
   std::fprintf(stderr,
                "[TT-SLOT-CENSUS] %s: dev=%zu B in %zu slots, "

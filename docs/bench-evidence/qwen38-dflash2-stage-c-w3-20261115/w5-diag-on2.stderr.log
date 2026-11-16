@@ -1,0 +1,1750 @@
+vllm-bench: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf engine | num_prompts=1 input_len=32 output_len=24 concurrency=1 seed=0 temp=0.00 dataset=generated output_wait=poll kv_cache_dtype=auto ignore_eos=1 chat_template=skipped
+vllm.cpp: the draft checkpoint at "/mnt/models/qwen38-dflash2-drafter" declares architecture "DFlash2DraftModel". Its grouped dynamic depthwise convolution, its CANDIDATE SELECTOR and its PATH WALK are all implemented and will run, so this draft DRAFTS -- from safetensors and from GGUF alike (row SPEC-DFLASH2 waves W1-W5, .agents/specs/dflash2-spec-decode.md, issue #1314). Two things are still owed and neither is silent: a GGUF drafter is DEQUANTIZED wholesale to bf16 at load, so a k-quant draft costs its bf16 residency rather than its file size, and no throughput number has been taken for this architecture -- a DFlash2 draft runs its block forward off the paged CUDA-graph fast path, because the candidate selector needs the hidden states of the same forward its logits came from. This port mirrors vllm-project/vllm#52816, which MERGED upstream on 2026-08-21 at head 3406ec1dae9916f920b90f0dbf90dcf54923d042, merge commit b389ac29465b33f9e9c534df221ea3c129e9793f. It does not advance the parity pin, and the port is not yet reconciled onto that merged head (issue #1561).
+engine: device placement: --fit resolved NO placement: the model has no routed-expert layers, so a placement has nothing to move
+engine: qwen3.5 gguf: SKIPPING the MTP drafter head — 15 tensor(s), 289527808 B, none of them read by this trunk-only load: blk.64.attn_k.weight, blk.64.attn_k_norm.weight, blk.64.attn_norm.weight, blk.64.attn_output.weight, blk.64.attn_q.weight, blk.64.attn_q_norm.weight, blk.64.attn_v.weight, blk.64.ffn_down.weight, blk.64.ffn_gate.weight, blk.64.ffn_up.weight, blk.64.nextn.eh_proj.weight, blk.64.nextn.enorm.weight, blk.64.nextn.hnorm.weight, blk.64.nextn.shared_head_norm.weight, blk.64.post_attention_norm.weight. They are the multi-token-prediction head at blk.64 (block_count 65 = 64 trunk + 1 head); they load only when speculative decoding is configured (speculative-config method "mtp"). Denominator parity: the pinned llama.cpp b10451 oracle IGNORES these same tensors too (64 trunk layers, no MTP head; .agents/oracles/llama-cpp.md), so a gate against it is matched work only with this skip loud.
+vllm.cpp: DFlash2 draft: grouped conv taps=2 group=16 block=9
+vllm.cpp: DFlash draft loaded from safetensors /mnt/models/qwen38-dflash2-drafter (k=8, taps=5, mask=248070, vocab=248320, shared head from the GGUF target file)
+vllm.cpp: the draft checkpoint at "/mnt/models/qwen38-dflash2-drafter" declares architecture "DFlash2DraftModel". Its grouped dynamic depthwise convolution, its CANDIDATE SELECTOR and its PATH WALK are all implemented and will run, so this draft DRAFTS -- from safetensors and from GGUF alike (row SPEC-DFLASH2 waves W1-W5, .agents/specs/dflash2-spec-decode.md, issue #1314). Two things are still owed and neither is silent: a GGUF drafter is DEQUANTIZED wholesale to bf16 at load, so a k-quant draft costs its bf16 residency rather than its file size, and no throughput number has been taken for this architecture -- a DFlash2 draft runs its block forward off the paged CUDA-graph fast path, because the candidate selector needs the hidden states of the same forward its logits came from. This port mirrors vllm-project/vllm#52816, which MERGED upstream on 2026-08-21 at head 3406ec1dae9916f920b90f0dbf90dcf54923d042, merge commit b389ac29465b33f9e9c534df221ea3c129e9793f. It does not advance the parity pin, and the port is not yet reconciled onto that merged head (issue #1561).
+vllm.cpp: DFlash draft embed SHARED with the target (one device copy, 2542796800 B saved)
+vllm.cpp: DFlash draft head SHARED with the target (one device copy, 1042944000 B saved)
+INFO auto-fit max_model_len: reduced from 262144 to 576 to fit the KV cache (64 blocks, one of them the null block, shared by 3 KV cache groups). Raise --num-blocks / --kv-cache-memory for a longer context.
+vllm.cpp: DFlash draft weights staged to device at load (5 layers)
+vllm.cpp: VT_DFLASH_DRAFT=1 — the DFlash2 draft proposes through the DIRECT-ARGMAX arm (bundle dflash2.py has_selector=false): full-vocab argmax per block row, candidate selector NOT resident (~254 MB freed). The verify stays lossless (greedy accept = the target's argmax); only acceptance can differ from the selector arm.
+vllm.cpp: draft speculative context is limited to 592 tokens (37 pages x 16, 11.5625 MiB per concurrent request across 5 draft layers, so 11.5625 MiB of device memory at max_num_seqs 1 — NOT counted by gpu_memory_utilization). max_model_len is 576 and the (1+k) draft block needs 9 more, so the whole advertised context is speculated.
+vllm.cpp: Asynchronous scheduling is disabled (max_concurrent_batches=1)
+[QKVZ-IN] call=0 T=32 h_asum=70166.3 h_nan=0
+[QKVZ-OUT] call=0 mixed_asum=662276 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=44057.2 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2551.96 q_nan=0
+[QKVZ-IN] call=1 T=32 h_asum=16386.7 h_nan=0
+[QKVZ-OUT] call=1 mixed_asum=75067.5 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=1821.67 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3319.26 q_nan=0
+[QKVZ-IN] call=2 T=32 h_asum=21693.9 h_nan=0
+[QKVZ-OUT] call=2 mixed_asum=89330.4 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=2547.49 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3308.73 q_nan=0
+[QKVZ-IN] call=3 T=32 h_asum=29087.8 h_nan=0
+[QKVZ-OUT] call=3 mixed_asum=93564 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=2733.93 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3276.56 q_nan=0
+[QKVZ-IN] call=4 T=32 h_asum=30500.4 h_nan=0
+[QKVZ-OUT] call=4 mixed_asum=106760 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=2755.88 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3198.65 q_nan=0
+[QKVZ-IN] call=5 T=32 h_asum=34135.6 h_nan=0
+[QKVZ-OUT] call=5 mixed_asum=122427 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=3679.04 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2948.81 q_nan=0
+[QKVZ-IN] call=6 T=32 h_asum=40684.6 h_nan=0
+[QKVZ-OUT] call=6 mixed_asum=146358 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=4339.91 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3005.05 q_nan=0
+[QKVZ-IN] call=7 T=32 h_asum=40132.5 h_nan=0
+[QKVZ-OUT] call=7 mixed_asum=139300 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=3722.68 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3020.93 q_nan=0
+[QKVZ-IN] call=8 T=32 h_asum=40695.9 h_nan=0
+[QKVZ-OUT] call=8 mixed_asum=149037 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=4270.16 nan=0 zero=32/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3112.75 q_nan=0
+[QKVZ-IN] call=9 T=32 h_asum=44671.2 h_nan=0
+[QKVZ-OUT] call=9 mixed_asum=163962 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=4755.59 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3183.23 q_nan=0
+[QKVZ-IN] call=10 T=32 h_asum=45405.4 h_nan=0
+[QKVZ-OUT] call=10 mixed_asum=157967 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=4201.63 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3270.42 q_nan=0
+[QKVZ-IN] call=11 T=32 h_asum=46384.3 h_nan=0
+[QKVZ-OUT] call=11 mixed_asum=173562 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=5080.96 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3010.43 q_nan=0
+[QKVZ-IN] call=12 T=32 h_asum=49248.2 h_nan=0
+[QKVZ-OUT] call=12 mixed_asum=177848 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=4502.27 nan=0 zero=32/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2958.06 q_nan=0
+[QKVZ-IN] call=13 T=32 h_asum=50866 h_nan=0
+[QKVZ-OUT] call=13 mixed_asum=180283 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=5459.75 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2893.78 q_nan=0
+[QKVZ-IN] call=14 T=32 h_asum=52666.1 h_nan=0
+[QKVZ-OUT] call=14 mixed_asum=197397 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=6166.68 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2834.82 q_nan=0
+[QKVZ-IN] call=15 T=32 h_asum=73698.4 h_nan=0
+[QKVZ-OUT] call=15 mixed_asum=277309 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=9606.78 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2779.79 q_nan=0
+[QKVZ-IN] call=16 T=32 h_asum=85731.6 h_nan=0
+[QKVZ-OUT] call=16 mixed_asum=280122 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=9820.56 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3087.73 q_nan=0
+[QKVZ-IN] call=17 T=32 h_asum=78618.1 h_nan=0
+[QKVZ-OUT] call=17 mixed_asum=233069 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=6468.97 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2729.63 q_nan=0
+[QKVZ-IN] call=18 T=32 h_asum=73814.8 h_nan=0
+[QKVZ-OUT] call=18 mixed_asum=259976 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=7918.3 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3215.77 q_nan=0
+[QKVZ-IN] call=19 T=32 h_asum=72288.1 h_nan=0
+[QKVZ-OUT] call=19 mixed_asum=264015 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=8742.12 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3171.75 q_nan=0
+[QKVZ-IN] call=20 T=32 h_asum=68074.3 h_nan=0
+[QKVZ-OUT] call=20 mixed_asum=246512 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=7444.67 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3338.86 q_nan=0
+[QKVZ-IN] call=21 T=32 h_asum=68996.5 h_nan=0
+[QKVZ-OUT] call=21 mixed_asum=251668 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=9031.76 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3412.02 q_nan=0
+[QKVZ-IN] call=22 T=32 h_asum=73396.9 h_nan=0
+[QKVZ-OUT] call=22 mixed_asum=245262 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=7981.86 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3281.37 q_nan=0
+[QKVZ-IN] call=23 T=32 h_asum=72003.3 h_nan=0
+[QKVZ-OUT] call=23 mixed_asum=256799 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=8812.56 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3427.79 q_nan=0
+[QKVZ-IN] call=24 T=32 h_asum=75332.4 h_nan=0
+[QKVZ-OUT] call=24 mixed_asum=251182 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=8925.75 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3371.01 q_nan=0
+[QKVZ-IN] call=25 T=32 h_asum=79333 h_nan=0
+[QKVZ-OUT] call=25 mixed_asum=251124 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=9563.85 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3209.14 q_nan=0
+[QKVZ-IN] call=26 T=32 h_asum=79970.8 h_nan=0
+[QKVZ-OUT] call=26 mixed_asum=263566 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=9689.31 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3430.13 q_nan=0
+[QKVZ-IN] call=27 T=32 h_asum=96209.1 h_nan=0
+[QKVZ-OUT] call=27 mixed_asum=327436 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=15203.2 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3070.77 q_nan=0
+[QKVZ-IN] call=28 T=32 h_asum=97346 h_nan=0
+[QKVZ-OUT] call=28 mixed_asum=318601 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=14299.1 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3127.2 q_nan=0
+[QKVZ-IN] call=29 T=32 h_asum=89776.1 h_nan=0
+[QKVZ-OUT] call=29 mixed_asum=252326 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=8925.24 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2634.41 q_nan=0
+[QKVZ-IN] call=30 T=32 h_asum=82741.4 h_nan=0
+[QKVZ-OUT] call=30 mixed_asum=272665 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=10814.3 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3232.71 q_nan=0
+[QKVZ-IN] call=31 T=32 h_asum=82170.9 h_nan=0
+[QKVZ-OUT] call=31 mixed_asum=267143 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=9771.77 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3190.22 q_nan=0
+[QKVZ-IN] call=32 T=32 h_asum=78273.7 h_nan=0
+[QKVZ-OUT] call=32 mixed_asum=252754 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=7999.08 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3149.7 q_nan=0
+[QKVZ-IN] call=33 T=32 h_asum=80108.2 h_nan=0
+[QKVZ-OUT] call=33 mixed_asum=263336 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=10628.1 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3302.78 q_nan=0
+[QKVZ-IN] call=34 T=32 h_asum=81925.2 h_nan=0
+[QKVZ-OUT] call=34 mixed_asum=246719 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=8587.5 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3311.05 q_nan=0
+[QKVZ-IN] call=35 T=32 h_asum=81854.7 h_nan=0
+[QKVZ-OUT] call=35 mixed_asum=264001 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=10059.9 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3476.48 q_nan=0
+[QKVZ-IN] call=36 T=32 h_asum=87427.6 h_nan=0
+[QKVZ-OUT] call=36 mixed_asum=275181 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=10407.3 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3371.9 q_nan=0
+[QKVZ-IN] call=37 T=32 h_asum=92113.7 h_nan=0
+[QKVZ-OUT] call=37 mixed_asum=283339 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=12748.3 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3157.19 q_nan=0
+[QKVZ-IN] call=38 T=32 h_asum=94390.4 h_nan=0
+[QKVZ-OUT] call=38 mixed_asum=303423 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=12704.9 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3515.86 q_nan=0
+[QKVZ-IN] call=39 T=32 h_asum=115154 h_nan=0
+[QKVZ-OUT] call=39 mixed_asum=430970 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=26047.7 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3185.56 q_nan=0
+[QKVZ-IN] call=40 T=32 h_asum=115427 h_nan=0
+[QKVZ-OUT] call=40 mixed_asum=424305 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=26765.3 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3320.85 q_nan=0
+[QKVZ-IN] call=41 T=32 h_asum=114553 h_nan=0
+[QKVZ-OUT] call=41 mixed_asum=364712 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=20019.2 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2984.54 q_nan=0
+[QKVZ-IN] call=42 T=32 h_asum=114938 h_nan=0
+[QKVZ-OUT] call=42 mixed_asum=436694 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=29168.9 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3209.27 q_nan=0
+[QKVZ-IN] call=43 T=32 h_asum=115129 h_nan=0
+[QKVZ-OUT] call=43 mixed_asum=451828 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=28939.4 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2693.17 q_nan=0
+[QKVZ-IN] call=44 T=32 h_asum=112534 h_nan=0
+[QKVZ-OUT] call=44 mixed_asum=395962 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=25323.9 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2385.34 q_nan=0
+[QKVZ-IN] call=45 T=32 h_asum=125623 h_nan=0
+[QKVZ-OUT] call=45 mixed_asum=534555 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=31403.2 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2597.14 q_nan=0
+[QKVZ-IN] call=46 T=32 h_asum=115045 h_nan=0
+[QKVZ-OUT] call=46 mixed_asum=400624 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=22523.4 nan=0 zero=0/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=2899.37 q_nan=0
+[QKVZ-IN] call=47 T=32 h_asum=121830 h_nan=0
+[QKVZ-OUT] call=47 mixed_asum=521405 mixed_nan=0
+[POSTCONV-IN] T=32 conv_dim=10240 conv_asum=27859.9 nan=0 zero=1/327680 conv_dt=2
+[POSTCONV-OUT] T=32 q_asum=3331.03 q_nan=0
+[TT-STEP-PHASE] step=1 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6608503079.2 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-1.0
+[QKVZ-IN] call=48 T=9 h_asum=13170 h_nan=0
+[QKVZ-OUT] call=48 mixed_asum=196869 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00af9ac0 y_n=829440 y_asum=-nan x_asum=nan T_asum=64862.8 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=2396.62 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=371.822 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff724620040 out_n=55296 fnv=d3669989bf0be99e asum=0x1.dd507dc654c54p+6 s_asum=11984.7 q_asum=1115.47 v_asum=1537.21 q_nan=0 v_nan=0
+[QKVZ-IN] call=49 T=9 h_asum=18049.7 h_nan=0
+[QKVZ-OUT] call=49 mixed_asum=72755.6 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00d1c2c0 y_n=829440 y_asum=2170.27 x_asum=73502.8 T_asum=6137.51 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=91.0774 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=378.446 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff722b10040 out_n=55296 fnv=23250715f64572d0 asum=0x1.1f419e69741d7p+0 s_asum=301.568 q_asum=1135.34 v_asum=41.7588 q_nan=0 v_nan=0
+[QKVZ-IN] call=50 T=9 h_asum=20486.3 h_nan=0
+[QKVZ-OUT] call=50 mixed_asum=62532.4 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00f0b300 y_n=829440 y_asum=2023.17 x_asum=63341.5 T_asum=6933.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=113.839 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=451.825 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff721000040 out_n=55296 fnv=ce7232c8c1b958da asum=0x1.409d1a3499936p+0 s_asum=394.118 q_asum=1355.47 v_asum=57.1256 q_nan=0 v_nan=0
+[QKVZ-IN] call=51 T=9 h_asum=21551 h_nan=0
+[QKVZ-OUT] call=51 mixed_asum=53130.5 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0191bc80 y_n=829440 y_asum=-nan x_asum=nan T_asum=8095.36 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=124.352 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=416.864 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff71a4f0040 out_n=55296 fnv=045a249fa7b59dd5 asum=0x1.c1dfafd48b288p-1 s_asum=356.086 q_asum=1250.59 v_asum=53.5041 q_nan=0 v_nan=0
+[QKVZ-IN] call=52 T=9 h_asum=21699.9 h_nan=0
+[QKVZ-OUT] call=52 mixed_asum=58380.7 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01b0acc0 y_n=829440 y_asum=1860.54 x_asum=58518.5 T_asum=9059.29 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=148.641 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=385.318 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7189e0040 out_n=55296 fnv=7c7681c6eea617b9 asum=0x1.07712de5f1168p+0 s_asum=390.255 q_asum=1155.95 v_asum=62.822 q_nan=0 v_nan=0
+[QKVZ-IN] call=53 T=9 h_asum=21731.7 h_nan=0
+[QKVZ-OUT] call=53 mixed_asum=63659.6 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01cf9d00 y_n=829440 y_asum=2333.74 x_asum=64306.2 T_asum=10307.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=188.084 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=439.209 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff716ed0040 out_n=55296 fnv=90cd1bf0d5a888b0 asum=0x1.b7d665b090a7cp+0 s_asum=459.639 q_asum=1317.63 v_asum=74.3948 q_nan=0 v_nan=0
+[QKVZ-IN] call=54 T=9 h_asum=22370.5 h_nan=0
+[QKVZ-OUT] call=54 mixed_asum=61602.5 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab026e8d80 y_n=829440 y_asum=-nan x_asum=nan T_asum=12356 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=219.399 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=411.999 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7153c0040 out_n=55296 fnv=f928f96022241c92 asum=0x1.abce0d8a1badcp+0 s_asum=510.238 q_asum=1236 v_asum=81.5714 q_nan=0 v_nan=0
+[QKVZ-IN] call=55 T=9 h_asum=22227.4 h_nan=0
+[QKVZ-OUT] call=55 mixed_asum=60129.5 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab028d7dc0 y_n=829440 y_asum=1953.08 x_asum=60259.9 T_asum=11705.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=194.309 nan=0 zero=40961/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=394.238 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7138b0040 out_n=55296 fnv=03f53e580d78f5be asum=0x1.46dc884ef2f57p+0 s_asum=604.686 q_asum=1182.71 v_asum=79.3099 q_nan=0 v_nan=0
+[QKVZ-IN] call=56 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=56 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab02ac6e00 y_n=829440 y_asum=38.7424 x_asum=130.372 T_asum=12691.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=18.7226 nan=0 zero=81922/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=131.983 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff711da0040 out_n=55296 fnv=33ccc9f9196a362d asum=0x1.00053fa10a3acp+0 s_asum=569.553 q_asum=395.949 v_asum=8.84315 q_nan=0 v_nan=0
+[QKVZ-IN] call=57 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=57 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab034b5e80 y_n=829440 y_asum=-nan x_asum=nan T_asum=14315.7 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=16.6208 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=139.464 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff710290040 out_n=55296 fnv=1e078770a813d148 asum=0x1.597ab766ace48p-1 s_asum=648.755 q_asum=418.393 v_asum=7.30439 q_nan=0 v_nan=0
+[QKVZ-IN] call=58 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=58 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab036a5180 y_n=829440 y_asum=25.0573 x_asum=5.32792 T_asum=13549.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=12.9822 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=138.2 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff70e780040 out_n=55296 fnv=b21e9e74e37ca707 asum=0x1.7ecec7e021ap-1 s_asum=676.198 q_asum=414.6 v_asum=7.45403 q_nan=0 v_nan=0
+[QKVZ-IN] call=59 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=59 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab03894ac0 y_n=829440 y_asum=43.8367 x_asum=5.32792 T_asum=14854.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=24.2577 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=126.653 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff70cc70040 out_n=55296 fnv=59426ef9b26b2355 asum=0x1.d4783918579bp-1 s_asum=716.319 q_asum=379.959 v_asum=12.6813 q_nan=0 v_nan=0
+[QKVZ-IN] call=60 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=60 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04284880 y_n=829440 y_asum=-nan x_asum=nan T_asum=15654.4 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=18.1483 nan=0 zero=81922/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=133.618 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff70b160040 out_n=55296 fnv=5a1c08654b5cb4d4 asum=0x1.dc9508b21fdp-1 s_asum=695.189 q_asum=400.855 v_asum=10.0297 q_nan=0 v_nan=0
+[QKVZ-IN] call=61 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=61 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab044741c0 y_n=829440 y_asum=44.4728 x_asum=5.32792 T_asum=15957.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=24.2171 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=140.163 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff709650040 out_n=55296 fnv=34cf1d5a2aee2d7d asum=0x1.62827c47b8bep-1 s_asum=732.638 q_asum=420.489 v_asum=12.1608 q_nan=0 v_nan=0
+[QKVZ-IN] call=62 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=62 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04663b00 y_n=829440 y_asum=47.4216 x_asum=5.32792 T_asum=17295 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=26.3046 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=129.582 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff707b40040 out_n=55296 fnv=c2d2edabbc37b808 asum=0x1.e3f6004fd1398p-1 s_asum=921.751 q_asum=388.745 v_asum=11.7177 q_nan=0 v_nan=0
+[QKVZ-IN] call=63 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=63 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab050538c0 y_n=829440 y_asum=-nan x_asum=nan T_asum=24349.1 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=39.6647 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=126.973 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff706030040 out_n=55296 fnv=be80fcc2ebc3536d asum=0x1.04f6ca999058p+1 s_asum=1698.17 q_asum=380.919 v_asum=20.5031 q_nan=0 v_nan=0
+[QKVZ-IN] call=64 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=64 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05243200 y_n=829440 y_asum=66.3097 x_asum=5.32792 T_asum=24446.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=34.4865 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=121.356 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff704520040 out_n=55296 fnv=1abcafd553667826 asum=0x1.694fc5a5e1754p+0 s_asum=1517.96 q_asum=364.068 v_asum=17.8475 q_nan=0 v_nan=0
+[QKVZ-IN] call=65 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=65 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05432b40 y_n=829440 y_asum=46.5112 x_asum=5.32792 T_asum=19717.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=25.6961 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=126.287 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff702a10040 out_n=55296 fnv=ac1ad36555ca13f6 asum=0x1.a781a6321194p-1 s_asum=1030.57 q_asum=378.86 v_asum=10.93 q_nan=0 v_nan=0
+[QKVZ-IN] call=66 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=66 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05e22900 y_n=829440 y_asum=-nan x_asum=nan T_asum=22429.8 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=27.9025 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=130.35 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff700f00040 out_n=55296 fnv=4b4f3b23cf0a517a asum=0x1.ad6b905c5d68cp+0 s_asum=1302.33 q_asum=391.049 v_asum=13.2095 q_nan=0 v_nan=0
+[QKVZ-IN] call=67 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=67 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06012240 y_n=829440 y_asum=49.8688 x_asum=5.32792 T_asum=23337.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=25.8688 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=127.642 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6ff3f0040 out_n=55296 fnv=3053fcbaf7e92bff asum=0x1.7a6b734187afdp+0 s_asum=1365.16 q_asum=382.927 v_asum=11.1959 q_nan=0 v_nan=0
+[QKVZ-IN] call=68 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=68 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06201b80 y_n=829440 y_asum=70.2686 x_asum=5.32792 T_asum=22062.7 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=34.7057 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=131.613 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6fd8e0040 out_n=55296 fnv=dbbb67599534ebfb asum=0x1.3d75f9f1c28cp+0 s_asum=1364.55 q_asum=394.84 v_asum=18.9545 q_nan=0 v_nan=0
+[QKVZ-IN] call=69 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=69 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06bf1940 y_n=829440 y_asum=-nan x_asum=nan T_asum=22669.4 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=21.3273 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=140.805 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6fbdd0040 out_n=55296 fnv=0e00aac7d650d6bf asum=0x1.a58dc9aa8ee3bp+0 s_asum=1278.62 q_asum=422.415 v_asum=7.99374 q_nan=0 v_nan=0
+[QKVZ-IN] call=70 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=70 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06de1280 y_n=829440 y_asum=27.0731 x_asum=5.32792 T_asum=22208.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=13.855 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=141.336 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6fa2c0040 out_n=55296 fnv=fcdefffd8f3de511 asum=0x1.8244e4e6e09aep+0 s_asum=1371.94 q_asum=424.008 v_asum=7.3444 q_nan=0 v_nan=0
+[QKVZ-IN] call=71 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=71 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06fd0bc0 y_n=829440 y_asum=67.0867 x_asum=5.32792 T_asum=23638.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=34.6886 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=127.229 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f87b0040 out_n=55296 fnv=4378934cc1653c2a asum=0x1.d47ebc7c17568p+0 s_asum=1579.12 q_asum=381.687 v_asum=18.0704 q_nan=0 v_nan=0
+[QKVZ-IN] call=72 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=72 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab079c0980 y_n=829440 y_asum=-nan x_asum=nan T_asum=23149.1 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=15.397 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=134.781 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f6ca0040 out_n=55296 fnv=6559a5a628aba3c2 asum=0x1.d48aa82f4dcp+0 s_asum=1488.65 q_asum=404.342 v_asum=6.95075 q_nan=0 v_nan=0
+[QKVZ-IN] call=73 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=73 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07bb0340 y_n=829440 y_asum=42.6169 x_asum=5.32792 T_asum=23423.7 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=22.8372 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=135.056 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f5190040 out_n=55296 fnv=03ac8f117872ef1c asum=0x1.c0d192050e4ap+0 s_asum=1407.51 q_asum=405.168 v_asum=10.1747 q_nan=0 v_nan=0
+[QKVZ-IN] call=74 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=74 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07d9fcc0 y_n=829440 y_asum=37.2763 x_asum=5.32792 T_asum=24533.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=19.4037 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=118.882 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f3680040 out_n=55296 fnv=d4b41ea0f6e73e89 asum=0x1.cc605b788adfp+0 s_asum=1515 q_asum=356.647 v_asum=8.16548 q_nan=0 v_nan=0
+[QKVZ-IN] call=75 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=75 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0878fac0 y_n=829440 y_asum=-nan x_asum=nan T_asum=30691.5 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=50.6151 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=121.491 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f1b70040 out_n=55296 fnv=6857907e35492845 asum=0x1.55e0e64b2f18p+1 s_asum=2449.23 q_asum=364.474 v_asum=25.2006 q_nan=0 v_nan=0
+[QKVZ-IN] call=76 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=76 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0897f440 y_n=829440 y_asum=88.7633 x_asum=27.415 T_asum=30066.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=47.8913 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=109.079 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f0060040 out_n=55296 fnv=d7e692fbd2e95b79 asum=0x1.e394a5635a685p+0 s_asum=1953.86 q_asum=327.236 v_asum=25.3839 q_nan=0 v_nan=0
+[QKVZ-IN] call=77 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=77 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab08b6ee00 y_n=829440 y_asum=58.5682 x_asum=27.415 T_asum=23431.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=32.0232 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=123.972 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6ee550040 out_n=55296 fnv=93925f997a7c7c3c asum=0x1.f1335ac52f16p-1 s_asum=1276.44 q_asum=371.917 v_asum=14.711 q_nan=0 v_nan=0
+[QKVZ-IN] call=78 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=78 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0955ec00 y_n=829440 y_asum=-nan x_asum=nan T_asum=24367.7 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=35.2022 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=129.328 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6eca40040 out_n=55296 fnv=a60480c4d9c7edbf asum=0x1.9b137004f3a77p+0 s_asum=1791.48 q_asum=387.983 v_asum=22.7882 q_nan=0 v_nan=0
+[QKVZ-IN] call=79 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=79 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0974e600 y_n=829440 y_asum=52.3173 x_asum=27.415 T_asum=24168.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=26.0304 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=127.012 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6eaf30040 out_n=55296 fnv=8fb535c5f0fe7507 asum=0x1.a188cd9d4dep+0 s_asum=1454.26 q_asum=381.036 v_asum=11.2286 q_nan=0 v_nan=0
+[QKVZ-IN] call=80 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=80 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0993df80 y_n=829440 y_asum=63.8954 x_asum=27.415 T_asum=23097.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=32.1936 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=136.115 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e9420040 out_n=55296 fnv=2f347f220465a05e asum=0x1.f6dc98dc8ae8p+0 s_asum=1394.39 q_asum=408.345 v_asum=17.0743 q_nan=0 v_nan=0
+[QKVZ-IN] call=81 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=81 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a32e3c0 y_n=829440 y_asum=-nan x_asum=nan T_asum=23796.6 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=22.2699 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=138.822 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e7910040 out_n=55296 fnv=5639ae943586a4b5 asum=0x1.e687924dcd7dep+0 s_asum=1296.39 q_asum=416.467 v_asum=7.19626 q_nan=0 v_nan=0
+[QKVZ-IN] call=82 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=82 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a51dd80 y_n=829440 y_asum=27.6458 x_asum=27.415 T_asum=22484.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=14.5981 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=142.843 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e5e00040 out_n=55296 fnv=0ed84313930117e3 asum=0x1.d666ee3f2fp+0 s_asum=1270.3 q_asum=428.528 v_asum=7.76662 q_nan=0 v_nan=0
+[QKVZ-IN] call=83 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=83 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a70d740 y_n=829440 y_asum=66.2692 x_asum=27.415 T_asum=24022.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=33.4464 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=125.669 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e42f0040 out_n=55296 fnv=07d88e5b07acb80e asum=0x1.a9759fadc6908p+0 s_asum=1351.79 q_asum=377.007 v_asum=17.5371 q_nan=0 v_nan=0
+[QKVZ-IN] call=84 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=84 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b0fd540 y_n=829440 y_asum=-nan x_asum=nan T_asum=25630.1 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=18.8121 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=125.083 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e27e0040 out_n=55296 fnv=455b0fa2403f46fb asum=0x1.4ba64a276e28p+0 s_asum=1321.76 q_asum=375.25 v_asum=8.76192 q_nan=0 v_nan=0
+[QKVZ-IN] call=85 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=85 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b2ecf40 y_n=829440 y_asum=60.5443 x_asum=27.415 T_asum=25834.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=33.0839 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=136.283 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e0cd0040 out_n=55296 fnv=3098d478dec49784 asum=0x1.85c138993b078p+0 s_asum=1362.42 q_asum=408.85 v_asum=15.5583 q_nan=0 v_nan=0
+[QKVZ-IN] call=86 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=86 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b4dc8c0 y_n=829440 y_asum=44.6745 x_asum=27.415 T_asum=27687.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=25.3392 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=129.136 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6df1c0040 out_n=55296 fnv=8ac1c6f7ee26f2dd asum=0x1.3a8dd6dc4168p+1 s_asum=1574.64 q_asum=387.409 v_asum=11.0929 q_nan=0 v_nan=0
+[QKVZ-IN] call=87 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=87 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0becc700 y_n=829440 y_asum=-nan x_asum=nan T_asum=39724 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=69.1459 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=118.46 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6dd6b0040 out_n=55296 fnv=22bc308d1cfd3814 asum=0x1.14b1efd8c504p+2 s_asum=4367.48 q_asum=355.379 v_asum=37.3537 q_nan=0 v_nan=0
+[QKVZ-IN] call=88 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=88 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c0bc0c0 y_n=829440 y_asum=124.401 x_asum=27.415 T_asum=38857.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=66.3529 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=118.362 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6dbba0040 out_n=55296 fnv=34124d2f7b609c50 asum=0x1.cf392ca15443cp+1 s_asum=3999.43 q_asum=355.086 v_asum=34.1055 q_nan=0 v_nan=0
+[QKVZ-IN] call=89 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=89 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c2aba80 y_n=829440 y_asum=113.204 x_asum=27.415 T_asum=33389.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=61.655 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=122.774 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6da090040 out_n=55296 fnv=0bb1bbffa88b75f0 asum=0x1.518f1b3807ap+1 s_asum=2755.75 q_asum=368.323 v_asum=30.4676 q_nan=0 v_nan=0
+[QKVZ-IN] call=90 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=90 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0cc9b880 y_n=829440 y_asum=-nan x_asum=nan T_asum=41237.7 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=95.169 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=125.518 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d8580040 out_n=55296 fnv=37ecee83aa773acc asum=0x1.4b55d984788ep+2 s_asum=5390.06 q_asum=376.555 v_asum=46.6936 q_nan=0 v_nan=0
+[QKVZ-IN] call=91 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=91 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0ce8b280 y_n=829440 y_asum=231.065 x_asum=27.415 T_asum=42372.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=120.117 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=127.884 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d6a70040 out_n=55296 fnv=b77ef8b57258459d asum=0x1.d97be80c8b0d8p+1 s_asum=4572.62 q_asum=383.652 v_asum=60.529 q_nan=0 v_nan=0
+[QKVZ-IN] call=92 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=92 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0d07ac00 y_n=829440 y_asum=228.148 x_asum=27.415 T_asum=36968.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=110.24 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=127.193 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d4f60040 out_n=55296 fnv=003817030be856da asum=0x1.44b19765c4bfcp+1 s_asum=3979.2 q_asum=381.579 v_asum=53.7816 q_nan=0 v_nan=0
+[QKVZ-IN] call=93 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=93 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0da6aa40 y_n=829440 y_asum=-nan x_asum=nan T_asum=52697.4 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=215.06 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=119.533 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d3450040 out_n=55296 fnv=299eab9cb2a1079f asum=0x1.4633eaa04e21dp+2 s_asum=5976.11 q_asum=358.6 v_asum=106.764 q_nan=0 v_nan=0
+[QKVZ-IN] call=94 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=94 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0dc5a400 y_n=829440 y_asum=228.818 x_asum=27.415 T_asum=37320.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=133.574 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=127.326 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d1940040 out_n=55296 fnv=66156274d533515a asum=0x1.256e0a25f92cp+1 s_asum=2866.89 q_asum=381.977 v_asum=63.7279 q_nan=0 v_nan=0
+[QKVZ-IN] call=95 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=95 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0de49dc0 y_n=829440 y_asum=209.427 x_asum=27.415 T_asum=48575 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=123.199 nan=0 zero=81920/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=138.3 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6cfe30040 out_n=55296 fnv=e7ce6487e2641041 asum=0x1.7119493ac4bf1p+2 s_asum=4458.35 q_asum=414.899 v_asum=34.2274 q_nan=0 v_nan=0
+[GDN-SHADOW-PROBE] step=0 ssm[0] rows=9x786432 n=7077888 fnv=e803ac8d212e7bc8 asum=0x1.657f8e4bf01acp+16 tmin=-0x1.55708ep+4 tmax=0x1.922bp+4 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[0] rows=12x92160 n=1105920 fnv=76141dba8ca28383 asum=0x1.5c36e090ep+16 tmin=-0x1.c8p+5 tmax=0x1.54p+5 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[1] rows=9x786432 n=7077888 fnv=b993966d82da2c69 asum=0x1.a45a36797a8c5p+10 tmin=-0x1.7bb976p-2 tmax=0x1.08d038p-1 zeros=130908/7077888
+[GDN-SHADOW-PROBE] step=0 conv[1] rows=12x92160 n=1105920 fnv=c07d78ce1c278383 asum=0x1.fa9cd4cd2f8p+12 tmin=-0x1.92p+2 tmax=0x1.2p+2 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[2] rows=9x786432 n=7077888 fnv=12ef16f0d6c5ff27 asum=0x1.c8dbd4ac72de4p+10 tmin=-0x1.9f4d02p-2 tmax=0x1.155382p-2 zeros=98305/7077888
+[GDN-SHADOW-PROBE] step=0 conv[2] rows=12x92160 n=1105920 fnv=9946871e68ef8383 asum=0x1.1b2a13418p+13 tmin=-0x1.5ep+2 tmax=0x1.0cp+2 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[3] rows=9x786432 n=7077888 fnv=087716310e9ec7ce asum=0x1.73f9d78d1115cp+10 tmin=-0x1.de3a38p-3 tmax=0x1.67c2dap-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[3] rows=12x92160 n=1105920 fnv=20fd4b31c38b8383 asum=0x1.3cecabe02cp+13 tmin=-0x1.fap+1 tmax=0x1.f6p+1 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[4] rows=9x786432 n=7077888 fnv=853f633cfb29a0ca asum=0x1.e75230c7bc2c6p+10 tmin=-0x1.06121cp-3 tmax=0x1.228d32p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[4] rows=12x92160 n=1105920 fnv=ce32a9cdb2c78383 asum=0x1.7cd6e9d78p+13 tmin=-0x1.08p+3 tmax=0x1.eap+2 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[5] rows=9x786432 n=7077888 fnv=19b6335d6981d677 asum=0x1.38e6198944359p+11 tmin=-0x1.de0b22p-2 tmax=0x1.d533eap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[5] rows=12x92160 n=1105920 fnv=3fb90f6e81298383 asum=0x1.ad6036f1e3p+13 tmin=-0x1.48p+3 tmax=0x1.fcp+3 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[6] rows=9x786432 n=7077888 fnv=e919fb1517cdd14a asum=0x1.5a52b5b5a4a28p+11 tmin=-0x1.9fd40cp-3 tmax=0x1.391d02p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[6] rows=12x92160 n=1105920 fnv=cd0b3054983f8383 asum=0x1.06660f7fed8p+14 tmin=-0x1.4ap+3 tmax=0x1.38p+3 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[7] rows=9x786432 n=7077888 fnv=e5ccbc969767bf47 asum=0x1.4ac0f8b7b51bap+11 tmin=-0x1.540dc4p-2 tmax=0x1.9a2776p-2 zeros=1596/7077888
+[GDN-SHADOW-PROBE] step=0 conv[7] rows=12x92160 n=1105920 fnv=400bff01c04e8383 asum=0x1.e459134558p+13 tmin=-0x1.38p+3 tmax=0x1.1ep+3 zeros=1064960/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[8] rows=9x786432 n=7077888 fnv=f741362e5018c803 asum=0x1.010351820a044p+12 tmin=-0x1.2fc8c6p-1 tmax=0x1.a1c6c6p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[8] rows=12x92160 n=1105920 fnv=a677a496a64f8383 asum=0x1.0882ac8248p+13 tmin=-0x1.dcp+2 tmax=0x1.7p+2 zeros=1085441/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[9] rows=9x786432 n=7077888 fnv=484e7e7ce781bda3 asum=0x1.217ee71fe7542p+12 tmin=-0x1.00409p-1 tmax=0x1.c3e1cap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[9] rows=12x92160 n=1105920 fnv=a4ec1ac50c3e8383 asum=0x1.28b2193bap+13 tmin=-0x1.14p+3 tmax=0x1.1cp+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[10] rows=9x786432 n=7077888 fnv=b09bcd818bf4b936 asum=0x1.25ca27d0881c3p+12 tmin=-0x1.3312f2p-1 tmax=0x1.06cdf2p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[10] rows=12x92160 n=1105920 fnv=a3dee3d44c558383 asum=0x1.15d7d6e92p+13 tmin=-0x1.02p+3 tmax=0x1.0ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[11] rows=9x786432 n=7077888 fnv=7d58259e9a8ada78 asum=0x1.48f6ee983d5c2p+12 tmin=-0x1.e66ce2p-2 tmax=0x1.845fbap-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[11] rows=12x92160 n=1105920 fnv=597210bd746f8383 asum=0x1.21de19f8p+13 tmin=-0x1.f8p+2 tmax=0x1.0ep+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[12] rows=9x786432 n=7077888 fnv=b33f6ec8f970f57c asum=0x1.163e48969e906p+12 tmin=-0x1.119ccp-2 tmax=0x1.62eba2p-1 zeros=1152/7077888
+[GDN-SHADOW-PROBE] step=0 conv[12] rows=12x92160 n=1105920 fnv=60384b6b773c8383 asum=0x1.465ac0135p+13 tmin=-0x1.2p+3 tmax=0x1.2p+3 zeros=1085441/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[13] rows=9x786432 n=7077888 fnv=3258592a7cbfd332 asum=0x1.575da11ba3359p+12 tmin=-0x1.32c748p-1 tmax=0x1.b61044p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[13] rows=12x92160 n=1105920 fnv=e308168dce3d8383 asum=0x1.4b2d136cep+13 tmin=-0x1.1cp+3 tmax=0x1.4p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[14] rows=9x786432 n=7077888 fnv=6ebc70efd02ba5d9 asum=0x1.c5df17638fa87p+12 tmin=-0x1.85f7fep+0 tmax=0x1.221ddp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[14] rows=12x92160 n=1105920 fnv=eeb70d0b97a68383 asum=0x1.5e386e674p+13 tmin=-0x1.2cp+3 tmax=0x1.3p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[15] rows=9x786432 n=7077888 fnv=eba743038b131c25 asum=0x1.a21035c13e7ap+13 tmin=-0x1.3a47d6p-1 tmax=0x1.fdb092p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[15] rows=12x92160 n=1105920 fnv=17c8b06026f88383 asum=0x1.040b1e15dfp+14 tmin=-0x1.52p+3 tmax=0x1.7p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[16] rows=9x786432 n=7077888 fnv=17c07c5c06cf1f36 asum=0x1.4d605a253b242p+13 tmin=-0x1.21dc8ap-1 tmax=0x1.318feep+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[16] rows=12x92160 n=1105920 fnv=40c7275b2b6a8383 asum=0x1.ff5ca290ap+13 tmin=-0x1.9p+3 tmax=0x1.5ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[17] rows=9x786432 n=7077888 fnv=70daada16ecbd318 asum=0x1.92ff153b33423p+12 tmin=-0x1.a91e6cp-2 tmax=0x1.1c2052p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[17] rows=12x92160 n=1105920 fnv=f1df6b023ef08383 asum=0x1.9e2276ca8p+13 tmin=-0x1.56p+3 tmax=0x1.5ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[18] rows=9x786432 n=7077888 fnv=d9430752679df098 asum=0x1.ef087a035745bp+12 tmin=-0x1.2c98b8p-1 tmax=0x1.bde712p-1 zeros=11302/7077888
+[GDN-SHADOW-PROBE] step=0 conv[18] rows=12x92160 n=1105920 fnv=bf7f1940a80f8383 asum=0x1.ccad8a0bcp+13 tmin=-0x1.04p+3 tmax=0x1.f8p+2 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[19] rows=9x786432 n=7077888 fnv=174ba92b054308dc asum=0x1.542f8a8c49687p+13 tmin=-0x1.998678p-1 tmax=0x1.0f4d4cp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[19] rows=12x92160 n=1105920 fnv=f7ddf4db2e128383 asum=0x1.ec8c566bbp+13 tmin=-0x1.eap+2 tmax=0x1.1p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[20] rows=9x786432 n=7077888 fnv=a28a73c66d02b575 asum=0x1.3cd24b72c9683p+13 tmin=-0x1.1c6822p-1 tmax=0x1.169e8cp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[20] rows=12x92160 n=1105920 fnv=c98c13b62afb8383 asum=0x1.dcba71c84p+13 tmin=-0x1.1ep+3 tmax=0x1.1ep+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[21] rows=9x786432 n=7077888 fnv=98e10f7676e4e2ba asum=0x1.38f13c9727572p+13 tmin=-0x1.79966cp-2 tmax=0x1.0f2224p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[21] rows=12x92160 n=1105920 fnv=3fd7cebd09818383 asum=0x1.dd768d65bp+13 tmin=-0x1.2ap+3 tmax=0x1.12p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[22] rows=9x786432 n=7077888 fnv=50d54774b9f4148d asum=0x1.ee9fbcfaef456p+12 tmin=-0x1.677fcp-2 tmax=0x1.012768p-1 zeros=3/7077888
+[GDN-SHADOW-PROBE] step=0 conv[22] rows=12x92160 n=1105920 fnv=9921c443dc278383 asum=0x1.c8e4b40e6p+13 tmin=-0x1.92p+2 tmax=0x1.4ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[23] rows=9x786432 n=7077888 fnv=ade105ee2f209780 asum=0x1.6fe0c10313cbbp+13 tmin=-0x1.1837fep-1 tmax=0x1.a5d036p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[23] rows=12x92160 n=1105920 fnv=b79c32b43af78383 asum=0x1.dcd24cfefp+13 tmin=-0x1.1ap+3 tmax=0x1.16p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[24] rows=9x786432 n=7077888 fnv=e855416d8db8dc63 asum=0x1.79a891cb55b3dp+13 tmin=-0x1.6dcde2p-2 tmax=0x1.c71a58p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[24] rows=12x92160 n=1105920 fnv=a7d75987d90f8383 asum=0x1.ca1e586c18p+13 tmin=-0x1.28p+3 tmax=0x1.1ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[25] rows=9x786432 n=7077888 fnv=e9cc0d70e1253d05 asum=0x1.f4fe955ab5634p+12 tmin=-0x1.9df8e4p-3 tmax=0x1.0ab0a2p-2 zeros=4/7077888
+[GDN-SHADOW-PROBE] step=0 conv[25] rows=12x92160 n=1105920 fnv=dcfca0beb5168383 asum=0x1.d068b5b3p+13 tmin=-0x1.3ep+3 tmax=0x1.c4p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[26] rows=9x786432 n=7077888 fnv=710990248d879655 asum=0x1.77c741c748a78p+13 tmin=-0x1.20ddc8p-1 tmax=0x1.cd4152p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[26] rows=12x92160 n=1105920 fnv=bfa5739e09258383 asum=0x1.ea7a7f641p+13 tmin=-0x1.3ep+3 tmax=0x1.36p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[27] rows=9x786432 n=7077888 fnv=b2495d861e7625a8 asum=0x1.30e9d9832b201p+14 tmin=-0x1.abe106p-2 tmax=0x1.106a66p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[27] rows=12x92160 n=1105920 fnv=33d13439048d8383 asum=0x1.3bf0616c23p+14 tmin=-0x1.48p+3 tmax=0x1.4ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[28] rows=9x786432 n=7077888 fnv=956cc1db80472cf5 asum=0x1.b6ae2b0537cf3p+13 tmin=-0x1.c6555cp-2 tmax=0x1.c160cp+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[28] rows=12x92160 n=1105920 fnv=d469313326b08383 asum=0x1.2bf10acep+14 tmin=-0x1.48p+3 tmax=0x1.b4p+4 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[29] rows=9x786432 n=7077888 fnv=355b4ae588476be7 asum=0x1.06ea9a1bcf336p+13 tmin=-0x1.5e786cp-2 tmax=0x1.94040cp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[29] rows=12x92160 n=1105920 fnv=1084b3b177398383 asum=0x1.e2c2e0c5bp+13 tmin=-0x1.4p+3 tmax=0x1.38p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[30] rows=9x786432 n=7077888 fnv=e1f19172ddab2fe8 asum=0x1.9c9e01e0da518p+13 tmin=-0x1.4478d2p-1 tmax=0x1.f083f6p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[30] rows=12x92160 n=1105920 fnv=15131a00d8c48383 asum=0x1.fe3873b6cp+13 tmin=-0x1.16p+3 tmax=0x1.1p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[31] rows=9x786432 n=7077888 fnv=aae03cf2a5a07554 asum=0x1.6558791038364p+13 tmin=-0x1.21311cp-2 tmax=0x1.c690d2p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[31] rows=12x92160 n=1105920 fnv=1c400f10703d8383 asum=0x1.fddd9170bp+13 tmin=-0x1.1cp+3 tmax=0x1.04p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[32] rows=9x786432 n=7077888 fnv=2c181cdf846348d1 asum=0x1.41e7297befb95p+13 tmin=-0x1.a1b4f2p-2 tmax=0x1.3c565ep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[32] rows=12x92160 n=1105920 fnv=b3b40f1f12518383 asum=0x1.ed91fe1a14p+13 tmin=-0x1.e2p+2 tmax=0x1.84p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[33] rows=9x786432 n=7077888 fnv=e6ba5adfc7bf202e asum=0x1.f9a8e246aeec2p+12 tmin=-0x1.b353aep-3 tmax=0x1.455eep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[33] rows=12x92160 n=1105920 fnv=9997b06c907b8383 asum=0x1.ef50d1dc58p+13 tmin=-0x1.62p+3 tmax=0x1.2cp+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[34] rows=9x786432 n=7077888 fnv=23f032e1a10f66d5 asum=0x1.1c5b1899bb882p+13 tmin=-0x1.85cf4ap-2 tmax=0x1.dce4aep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[34] rows=12x92160 n=1105920 fnv=dc8c0ea7bfa38383 asum=0x1.d22ee3f84p+13 tmin=-0x1.cap+2 tmax=0x1.64p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[35] rows=9x786432 n=7077888 fnv=fc9d1b5f8c45c31f asum=0x1.2d66322d64bfep+13 tmin=-0x1.35488cp-2 tmax=0x1.6d58b2p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[35] rows=12x92160 n=1105920 fnv=e2d1603779ab8383 asum=0x1.e77234feap+13 tmin=-0x1.5p+3 tmax=0x1.58p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[36] rows=9x786432 n=7077888 fnv=c2cc75ddc2275e8f asum=0x1.dac2e9a688babp+12 tmin=-0x1.dc3d8cp-3 tmax=0x1.55056p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[36] rows=12x92160 n=1105920 fnv=dfeca6a6ec3b8383 asum=0x1.00ace573fp+14 tmin=-0x1.02p+3 tmax=0x1.36p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[37] rows=9x786432 n=7077888 fnv=dc0503901cdd6240 asum=0x1.3c6a119f2e06ep+13 tmin=-0x1.531eap-3 tmax=0x1.597596p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[37] rows=12x92160 n=1105920 fnv=2a27121063a78383 asum=0x1.021e340a2p+14 tmin=-0x1.64p+3 tmax=0x1.8ep+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[38] rows=9x786432 n=7077888 fnv=276fa89f77615f6c asum=0x1.8363c1b8a0d3dp+13 tmin=-0x1.aa17aap-2 tmax=0x1.90ecfp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[38] rows=12x92160 n=1105920 fnv=ae2f3bfe082d8383 asum=0x1.0bfd0752cp+14 tmin=-0x1.2ep+3 tmax=0x1.8ep+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[39] rows=9x786432 n=7077888 fnv=f829a07a623fa7cf asum=0x1.15e46c0a98d7ep+15 tmin=-0x1.e9506ep-2 tmax=0x1.0fd7bep+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[39] rows=12x92160 n=1105920 fnv=90e14efb6b168383 asum=0x1.975375e7fp+14 tmin=-0x1.62p+3 tmax=0x1.9ap+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[40] rows=9x786432 n=7077888 fnv=34d6453d281f3ba5 asum=0x1.a124f7cc7cb17p+14 tmin=-0x1.3ee588p-1 tmax=0x1.18caep+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[40] rows=12x92160 n=1105920 fnv=ed1df6a7107a8383 asum=0x1.75a3cf278p+14 tmin=-0x1.4p+3 tmax=0x1.7ep+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[41] rows=9x786432 n=7077888 fnv=c70a749388bd6d06 asum=0x1.330fd1b11e20dp+14 tmin=-0x1.2cc38p-2 tmax=0x1.48081ap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[41] rows=12x92160 n=1105920 fnv=8fc08f6030318383 asum=0x1.4658b2b3f4p+14 tmin=-0x1.84p+3 tmax=0x1.b6p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[42] rows=9x786432 n=7077888 fnv=20540ec712ba6616 asum=0x1.30b60b44fd069p+15 tmin=-0x1.ef0c46p-2 tmax=0x1.249068p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[42] rows=12x92160 n=1105920 fnv=2a55717244fb8383 asum=0x1.8ef9050dcp+14 tmin=-0x1.82p+3 tmax=0x1.84p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[43] rows=9x786432 n=7077888 fnv=1f7f91058ba8b7a2 asum=0x1.10441bb4d8e17p+15 tmin=-0x1.41be42p-1 tmax=0x1.33bd74p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[43] rows=12x92160 n=1105920 fnv=55a364aab7a78383 asum=0x1.a3bbf3994p+14 tmin=-0x1.ap+3 tmax=0x1.c8p+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[44] rows=9x786432 n=7077888 fnv=9f05fafd04798202 asum=0x1.cd9abd818b688p+14 tmin=-0x1.030f1p+0 tmax=0x1.e9b466p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[44] rows=12x92160 n=1105920 fnv=6eba3d07f0858383 asum=0x1.75182b9f08p+14 tmin=-0x1.5ep+3 tmax=0x1.8cp+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[45] rows=9x786432 n=7077888 fnv=8e69fbf057c4bc14 asum=0x1.4cbfbaf36a1a4p+15 tmin=-0x1.85a12ap-1 tmax=0x1.ad399cp+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[45] rows=12x92160 n=1105920 fnv=e9b6125a01ea8383 asum=0x1.f761a3865p+14 tmin=-0x1.ccp+3 tmax=0x1.2cp+4 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[46] rows=9x786432 n=7077888 fnv=5735d5fdf2c3a8e9 asum=0x1.3930a2588d778p+14 tmin=-0x1.1d2afap-2 tmax=0x1.d9035cp+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[46] rows=12x92160 n=1105920 fnv=ddb87386d7b58383 asum=0x1.5d5e0cb37ep+14 tmin=-0x1.b8p+3 tmax=0x1.6cp+3 zeros=1085440/1105920
+[GDN-SHADOW-PROBE] step=0 ssm[47] rows=9x786432 n=7077888 fnv=641b6e26af7626a0 asum=0x1.10accd0272c5ap+15 tmin=-0x1.abe6ccp-1 tmax=0x1.539fb6p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=0 conv[47] rows=12x92160 n=1105920 fnv=f6db49ad8d6d8383 asum=0x1.cbda455ecp+14 tmin=-0x1.8ep+4 tmax=0x1.0cp+4 zeros=1085440/1105920
+[GDN-TAP] kind=eager-mtap step=0 LOGITS argmax=0(0x0p+0) top2=1(0x0p+0) margin=0x0p+0 zeros=248320/248320 first5=[0x0p+0,0x0p+0,0x0p+0,0x0p+0,0x0p+0]
+[TT-STEP-PHASE] step=2 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6608567271.8 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-6608503079.2
+[QKVZ-IN] call=96 T=9 h_asum=32069.9 h_nan=0
+[QKVZ-OUT] call=96 mixed_asum=195955 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00af9ac0 y_n=829440 y_asum=-nan x_asum=nan T_asum=89142.9 x_nan=36 y_nan=36 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=3179.08 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=393.157 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff724620040 out_n=55296 fnv=2f0a80a26c22c568 asum=0x1.c99c81af848b8p+6 s_asum=11550.9 q_asum=1179.47 v_asum=2192.03 q_nan=0 v_nan=0
+[QKVZ-IN] call=97 T=9 h_asum=15206.1 h_nan=0
+[QKVZ-OUT] call=97 mixed_asum=53285.3 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00d1c2c0 y_n=829440 y_asum=1563.59 x_asum=53321.2 T_asum=8105.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=131.751 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=415.244 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff722b10040 out_n=55296 fnv=7d5ee569f059a159 asum=0x1.570cd1626c869p+0 s_asum=238.983 q_asum=1245.73 v_asum=67.8142 q_nan=0 v_nan=0
+[QKVZ-IN] call=98 T=9 h_asum=17158.4 h_nan=0
+[QKVZ-OUT] call=98 mixed_asum=54082.6 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00f0b300 y_n=829440 y_asum=1728.02 x_asum=54126.1 T_asum=9061.26 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=161.823 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=468.776 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff721000040 out_n=55296 fnv=76a1becd2f23e739 asum=0x1.49660ffaabefdp+0 s_asum=355.903 q_asum=1406.33 v_asum=86.9022 q_nan=0 v_nan=0
+[QKVZ-IN] call=99 T=9 h_asum=15792 h_nan=0
+[QKVZ-OUT] call=99 mixed_asum=45694.2 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0191bc80 y_n=829440 y_asum=1591.35 x_asum=45822.4 T_asum=10141.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=188.476 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=455.466 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff71a4f0040 out_n=55296 fnv=09831434fe4bf502 asum=0x1.1c8616bcfebebp+0 s_asum=291.351 q_asum=1366.4 v_asum=90.71 q_nan=0 v_nan=0
+[QKVZ-IN] call=100 T=9 h_asum=16275.5 h_nan=0
+[QKVZ-OUT] call=100 mixed_asum=51350.5 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01b0acc0 y_n=829440 y_asum=1659.43 x_asum=51394.1 T_asum=12186.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=217.631 nan=0 zero=40961/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=418.082 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7189e0040 out_n=55296 fnv=2baa2b899d3dada3 asum=0x1.3a912111290a9p+0 s_asum=325.224 q_asum=1254.25 v_asum=100.312 q_nan=0 v_nan=0
+[QKVZ-IN] call=101 T=9 h_asum=16639 h_nan=0
+[QKVZ-OUT] call=101 mixed_asum=52020 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01cf9d00 y_n=829440 y_asum=1887.15 x_asum=52063.6 T_asum=13740 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=270.359 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=441.841 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff716ed0040 out_n=55296 fnv=46d4bcba5955c721 asum=0x1.f7a1210a7b6e2p+0 s_asum=426.991 q_asum=1325.52 v_asum=114.246 q_nan=0 v_nan=0
+[QKVZ-IN] call=102 T=9 h_asum=17046.5 h_nan=0
+[QKVZ-OUT] call=102 mixed_asum=53491.2 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab026e8d80 y_n=829440 y_asum=1959.18 x_asum=53593.2 T_asum=16793.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=311.37 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=426.751 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7153c0040 out_n=55296 fnv=784a8818f6e5c2ce asum=0x1.00a672a2d8545p+1 s_asum=440.118 q_asum=1280.25 v_asum=126.674 q_nan=0 v_nan=0
+[QKVZ-IN] call=103 T=9 h_asum=17068.4 h_nan=0
+[QKVZ-OUT] call=103 mixed_asum=52547.6 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab028d7dc0 y_n=829440 y_asum=1793.93 x_asum=52591.2 T_asum=15499.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=283.013 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=417.265 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff7138b0040 out_n=55296 fnv=49c2e0d8673aff77 asum=0x1.8f95e7e99705p+0 s_asum=490.675 q_asum=1251.79 v_asum=128.267 q_nan=0 v_nan=0
+[QKVZ-IN] call=104 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=104 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab02ac6e00 y_n=829440 y_asum=24.4373 x_asum=43.5438 T_asum=8464.33 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=5.76984 nan=0 zero=87041/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=66.0562 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff711da0040 out_n=55296 fnv=053a6397665c2f0e asum=0x1.0944a9d6221b8p-1 s_asum=527.164 q_asum=198.169 v_asum=2.60192 q_nan=0 v_nan=0
+[QKVZ-IN] call=105 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=105 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab034b5e80 y_n=829440 y_asum=25.3131 x_asum=296.078 T_asum=9494.26 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=6.66455 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=70.1574 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff710290040 out_n=55296 fnv=1c6155aff8f9f0e0 asum=0x1.67ae266a2d14p-2 s_asum=587.915 q_asum=210.472 v_asum=2.8989 q_nan=0 v_nan=0
+[QKVZ-IN] call=106 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=106 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab036a5180 y_n=829440 y_asum=17.4558 x_asum=43.5438 T_asum=8890.98 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=5.01968 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=67.9118 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff70e780040 out_n=55296 fnv=757b3c5637f9c31a asum=0x1.89cebff1864p-2 s_asum=629.815 q_asum=203.736 v_asum=2.80622 q_nan=0 v_nan=0
+[QKVZ-IN] call=107 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=107 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab03894ac0 y_n=829440 y_asum=27.8441 x_asum=43.5117 T_asum=9275.76 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.91619 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=64.8423 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff70cc70040 out_n=55296 fnv=30be696fe7bde184 asum=0x1.d4c7922a4a8ep-2 s_asum=667.091 q_asum=194.527 v_asum=3.58722 q_nan=0 v_nan=0
+[QKVZ-IN] call=108 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=108 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04284880 y_n=829440 y_asum=28.2881 x_asum=379.429 T_asum=10443.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.06944 nan=0 zero=87041/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=65.9994 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff70b160040 out_n=55296 fnv=ead1f04e1deac34f asum=0x1.ed99ddb4c75p-2 s_asum=620.903 q_asum=197.998 v_asum=3.74676 q_nan=0 v_nan=0
+[QKVZ-IN] call=109 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=109 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab044741c0 y_n=829440 y_asum=28.8472 x_asum=43.5117 T_asum=10597.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.32001 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=70.6835 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff709650040 out_n=55296 fnv=86265cf9079287a9 asum=0x1.6397550e8758p-2 s_asum=695.776 q_asum=212.051 v_asum=3.63469 q_nan=0 v_nan=0
+[QKVZ-IN] call=110 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=110 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04663b00 y_n=829440 y_asum=32.4899 x_asum=43.5117 T_asum=11207.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=10.9893 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=63.798 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff707b40040 out_n=55296 fnv=519cafee81676802 asum=0x1.0c90ef664e058p-1 s_asum=877.274 q_asum=191.394 v_asum=4.57134 q_nan=0 v_nan=0
+[QKVZ-IN] call=111 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=111 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab050538c0 y_n=829440 y_asum=70.5634 x_asum=403.651 T_asum=16642.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=15.6611 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=63.252 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff706030040 out_n=55296 fnv=8fdc7123ea303984 asum=0x1.15e51c803eap+0 s_asum=1630.2 q_asum=189.756 v_asum=8.42425 q_nan=0 v_nan=0
+[QKVZ-IN] call=112 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=112 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05243200 y_n=829440 y_asum=47.2315 x_asum=43.5117 T_asum=16363.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=14.7338 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=61.3996 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff704520040 out_n=55296 fnv=f3b8ad0f052205a9 asum=0x1.7207c48009c62p-1 s_asum=1340.8 q_asum=184.199 v_asum=7.96707 q_nan=0 v_nan=0
+[QKVZ-IN] call=113 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=113 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05432b40 y_n=829440 y_asum=32.2446 x_asum=43.5117 T_asum=13252.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=10.626 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=64.2285 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff702a10040 out_n=55296 fnv=740ca9ad390b11a2 asum=0x1.c0b8889b9898p-2 s_asum=919.386 q_asum=192.686 v_asum=4.5354 q_nan=0 v_nan=0
+[QKVZ-IN] call=114 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=114 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05e22900 y_n=829440 y_asum=38.1814 x_asum=498.913 T_asum=14741.7 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.61664 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=66.6186 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff700f00040 out_n=55296 fnv=50016f8f7264e795 asum=0x1.8fe667da3de2cp-1 s_asum=1102.33 q_asum=199.856 v_asum=3.68749 q_nan=0 v_nan=0
+[QKVZ-IN] call=115 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=115 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06012240 y_n=829440 y_asum=33.9483 x_asum=43.5117 T_asum=15761.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=9.79482 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=66.169 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6ff3f0040 out_n=55296 fnv=bdef36bad7c9d036 asum=0x1.8208560ff9cbep-1 s_asum=1313.41 q_asum=198.507 v_asum=4.29143 q_nan=0 v_nan=0
+[QKVZ-IN] call=116 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=116 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06201b80 y_n=829440 y_asum=43.5016 x_asum=43.5117 T_asum=15255.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.76669 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=64.8533 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6fd8e0040 out_n=55296 fnv=e1126c5f0e615609 asum=0x1.3083d63e5d08p-1 s_asum=1288.22 q_asum=194.56 v_asum=3.53562 q_nan=0 v_nan=0
+[QKVZ-IN] call=117 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=117 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06bf1940 y_n=829440 y_asum=35.2233 x_asum=447.099 T_asum=15278.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.88824 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=71.0401 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6fbdd0040 out_n=55296 fnv=c5c6d6af396b272c asum=0x1.b0928fe1ce687p-1 s_asum=1225.29 q_asum=213.12 v_asum=3.18676 q_nan=0 v_nan=0
+[QKVZ-IN] call=118 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=118 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06de1280 y_n=829440 y_asum=18.9225 x_asum=43.5117 T_asum=14620.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=5.43474 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=74.3207 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6fa2c0040 out_n=55296 fnv=ee5ed48c99afdc14 asum=0x1.8ddf8889001ccp-1 s_asum=1145.15 q_asum=222.962 v_asum=2.52931 q_nan=0 v_nan=0
+[QKVZ-IN] call=119 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=119 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06fd0bc0 y_n=829440 y_asum=41.2654 x_asum=43.5117 T_asum=15258.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.28471 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=64.5322 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f87b0040 out_n=55296 fnv=4468346443b16cfd asum=0x1.c986538de1a5p-1 s_asum=1463.72 q_asum=193.596 v_asum=3.57312 q_nan=0 v_nan=0
+[QKVZ-IN] call=120 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=120 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab079c0980 y_n=829440 y_asum=27.9 x_asum=419.615 T_asum=14659.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=6.29218 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=68.1695 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f6ca0040 out_n=55296 fnv=8d7d366cafbcbc7b asum=0x1.db4bb6d957cp-1 s_asum=1447.5 q_asum=204.509 v_asum=2.79453 q_nan=0 v_nan=0
+[QKVZ-IN] call=121 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=121 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07bb0340 y_n=829440 y_asum=25.8879 x_asum=43.5117 T_asum=14861.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=6.0018 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=67.3301 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f5190040 out_n=55296 fnv=a95bdf4adb129d65 asum=0x1.91cf88160001p-1 s_asum=1120.51 q_asum=201.99 v_asum=2.25914 q_nan=0 v_nan=0
+[QKVZ-IN] call=122 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=122 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07d9fcc0 y_n=829440 y_asum=25.955 x_asum=43.5117 T_asum=15695.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.64739 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=60.0375 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f3680040 out_n=55296 fnv=07f61b355b3e91ca asum=0x1.b41490f4c67ep-1 s_asum=1445.47 q_asum=180.113 v_asum=2.89827 q_nan=0 v_nan=0
+[QKVZ-IN] call=123 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=123 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0878fac0 y_n=829440 y_asum=84.4506 x_asum=521.17 T_asum=20220.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=15.9584 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=60.5741 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f1b70040 out_n=55296 fnv=7343b7bda43035d2 asum=0x1.4f2c3a9b9d9p+0 s_asum=2366.43 q_asum=181.722 v_asum=8.44499 q_nan=0 v_nan=0
+[QKVZ-IN] call=124 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=124 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0897f440 y_n=829440 y_asum=60.0211 x_asum=43.5117 T_asum=19196.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=18.8645 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=54.9854 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6f0060040 out_n=55296 fnv=4d9ef58d1e64614e asum=0x1.ce0f8b3642aeap-1 s_asum=1746.91 q_asum=164.956 v_asum=10.5888 q_nan=0 v_nan=0
+[QKVZ-IN] call=125 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=125 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab08b6ee00 y_n=829440 y_asum=38.3378 x_asum=43.5117 T_asum=15448.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=11.6713 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=65.355 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6ee550040 out_n=55296 fnv=9a95dd11f5698cac asum=0x1.06211cb1c0d6p-1 s_asum=1144.95 q_asum=196.065 v_asum=5.34505 q_nan=0 v_nan=0
+[QKVZ-IN] call=126 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=126 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0955ec00 y_n=829440 y_asum=46.986 x_asum=404.56 T_asum=16327.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.88983 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=65.8755 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6eca40040 out_n=55296 fnv=68b873793d56f049 asum=0x1.8f8c6a53c2db8p-1 s_asum=1638.97 q_asum=197.626 v_asum=4.55451 q_nan=0 v_nan=0
+[QKVZ-IN] call=127 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=127 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0974e600 y_n=829440 y_asum=34.9925 x_asum=43.3553 T_asum=16315.7 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.78814 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=65.0048 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6eaf30040 out_n=55296 fnv=1fd06577b884e979 asum=0x1.90b969efa44p-1 s_asum=1389.27 q_asum=195.014 v_asum=3.55151 q_nan=0 v_nan=0
+[QKVZ-IN] call=128 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=128 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0993df80 y_n=829440 y_asum=38.0047 x_asum=43.3553 T_asum=15794.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=6.32043 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=70.2871 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e9420040 out_n=55296 fnv=958e814599351237 asum=0x1.bf2a5785dfe8p-1 s_asum=1309.7 q_asum=210.861 v_asum=2.53597 q_nan=0 v_nan=0
+[QKVZ-IN] call=129 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=129 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a32e3c0 y_n=829440 y_asum=35.4338 x_asum=473.276 T_asum=15850.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.98092 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=70.2294 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e7910040 out_n=55296 fnv=27379a43de8002a7 asum=0x1.ca3e37ac6b47cp-1 s_asum=1139.46 q_asum=210.688 v_asum=2.84877 q_nan=0 v_nan=0
+[QKVZ-IN] call=130 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=130 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a51dd80 y_n=829440 y_asum=18.3686 x_asum=43.3553 T_asum=14917.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=5.13808 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=72.9329 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e5e00040 out_n=55296 fnv=20aa29d1bb3f60f0 asum=0x1.a4ee216bb58p-1 s_asum=1195.73 q_asum=218.799 v_asum=2.34854 q_nan=0 v_nan=0
+[QKVZ-IN] call=131 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=131 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a70d740 y_n=829440 y_asum=40.9532 x_asum=43.3553 T_asum=15598.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.90505 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=63.7867 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e42f0040 out_n=55296 fnv=837e68943ed9edc4 asum=0x1.9fa6171957e11p-1 s_asum=1227.86 q_asum=191.36 v_asum=3.22421 q_nan=0 v_nan=0
+[QKVZ-IN] call=132 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=132 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b0fd540 y_n=829440 y_asum=34.704 x_asum=580.683 T_asum=16427.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=7.27248 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=62.426 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e27e0040 out_n=55296 fnv=a468fc6c1b7d1a0a asum=0x1.21876915a17p-1 s_asum=1072.63 q_asum=187.278 v_asum=3.45537 q_nan=0 v_nan=0
+[QKVZ-IN] call=133 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=133 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b2ecf40 y_n=829440 y_asum=35.731 x_asum=43.3553 T_asum=16519.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.28649 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=69.2345 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6e0cd0040 out_n=55296 fnv=82fec82d4c4eb66a asum=0x1.724d7b37c2ffp-1 s_asum=1286.99 q_asum=207.703 v_asum=3.12537 q_nan=0 v_nan=0
+[QKVZ-IN] call=134 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=134 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b4dc8c0 y_n=829440 y_asum=27.8492 x_asum=43.3553 T_asum=17151.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=8.38625 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=65.5778 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6df1c0040 out_n=55296 fnv=29bb3c91af0613e8 asum=0x1.30b96933b52p+0 s_asum=1509.59 q_asum=196.733 v_asum=3.1325 q_nan=0 v_nan=0
+[QKVZ-IN] call=135 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=135 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0becc700 y_n=829440 y_asum=121.992 x_asum=613.575 T_asum=26068.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=22.8528 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=60.8418 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6dd6b0040 out_n=55296 fnv=d81f1d8555910c21 asum=0x1.0aab424a4be8p+1 s_asum=4246.86 q_asum=182.525 v_asum=12.8531 q_nan=0 v_nan=0
+[QKVZ-IN] call=136 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=136 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c0bc0c0 y_n=829440 y_asum=82.4625 x_asum=43.3553 T_asum=23913 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=24.1896 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=60.4803 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6dbba0040 out_n=55296 fnv=0949fefa6ce4dfa2 asum=0x1.d138bd897aebap+0 s_asum=3630.11 q_asum=181.441 v_asum=13.3393 q_nan=0 v_nan=0
+[QKVZ-IN] call=137 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=137 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c2aba80 y_n=829440 y_asum=71.5781 x_asum=43.3553 T_asum=20886.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=19.941 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=62.2821 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6da090040 out_n=55296 fnv=4f616d5123482688 asum=0x1.422b3dc77f4p+0 s_asum=2555.91 q_asum=186.846 v_asum=9.84204 q_nan=0 v_nan=0
+[QKVZ-IN] call=138 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=138 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0cc9b880 y_n=829440 y_asum=149.891 x_asum=737.182 T_asum=25534.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=36.082 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=62.7252 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d8580040 out_n=55296 fnv=98b6352c963d1ea9 asum=0x1.fe5be77a46e8p+0 s_asum=5039.15 q_asum=188.176 v_asum=18.0852 q_nan=0 v_nan=0
+[QKVZ-IN] call=139 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=139 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0ce8b280 y_n=829440 y_asum=159.309 x_asum=43.3553 T_asum=26863 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=47.2251 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=63.8838 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d6a70040 out_n=55296 fnv=f384e9ad0329ce34 asum=0x1.deb228a44993p+0 s_asum=4367.63 q_asum=191.652 v_asum=21.9 q_nan=0 v_nan=0
+[QKVZ-IN] call=140 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=140 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0d07ac00 y_n=829440 y_asum=156.974 x_asum=43.3553 T_asum=23878 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=38.9975 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=63.3617 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d4f60040 out_n=55296 fnv=3ebb208b14628dd5 asum=0x1.597e56bd61428p+0 s_asum=3745.6 q_asum=190.085 v_asum=18.3761 q_nan=0 v_nan=0
+[QKVZ-IN] call=141 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=141 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0da6aa40 y_n=829440 y_asum=299.344 x_asum=1593.03 T_asum=32216.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=82.8526 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=59.5852 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d3450040 out_n=55296 fnv=8d8a87d6b22ad81a asum=0x1.3c90bbb6485fap+1 s_asum=5595.15 q_asum=178.756 v_asum=40.2589 q_nan=0 v_nan=0
+[QKVZ-IN] call=142 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=142 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0dc5a400 y_n=829440 y_asum=141.848 x_asum=43.3553 T_asum=22359.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=46.22 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=63.6539 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6d1940040 out_n=55296 fnv=68afa728bb506963 asum=0x1.1ca14d4543b8p+0 s_asum=2668.82 q_asum=190.962 v_asum=19.7588 q_nan=0 v_nan=0
+[QKVZ-IN] call=143 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=143 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0de49dc0 y_n=829440 y_asum=131.293 x_asum=43.3553 T_asum=29430.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=44.5841 nan=0 zero=87040/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=68.1064 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=1 init0=0 slots=9 cache=0xfff6cfe30040 out_n=55296 fnv=4cd58f30baad3454 asum=0x1.6ce20baecc5dap+1 s_asum=4217.18 q_asum=204.319 v_asum=11.3888 q_nan=0 v_nan=0
+[GDN-SHADOW-PROBE] step=1 ssm[0] rows=9x786432 n=7077888 fnv=0a9ebf69572dbf7b asum=0x1.5c9ad0f9f5b69p+16 tmin=-0x1.26313ep+4 tmax=0x1.599534p+4 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[0] rows=12x92160 n=1105920 fnv=c4d89e601efb8383 asum=0x1.7c9884218p+16 tmin=-0x1.c8p+5 tmax=0x1.6ap+5 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[1] rows=9x786432 n=7077888 fnv=2c678f450d6597b6 asum=0x1.bf9197b9ddd0fp+10 tmin=-0x1.584424p-2 tmax=0x1.fa8914p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[1] rows=12x92160 n=1105920 fnv=6b269b4be69f8383 asum=0x1.293ca186e3cp+13 tmin=-0x1.9cp+2 tmax=0x1.3cp+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[2] rows=9x786432 n=7077888 fnv=2444cd9fd42c752e asum=0x1.19fdc364fb2dp+11 tmin=-0x1.75cad6p-2 tmax=0x1.fa0444p-3 zeros=49151/7077888
+[GDN-SHADOW-PROBE] step=1 conv[2] rows=12x92160 n=1105920 fnv=f2008953a9ba8383 asum=0x1.4c3e1dfe8p+13 tmin=-0x1.38p+2 tmax=0x1.08p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[3] rows=9x786432 n=7077888 fnv=3fd63b2215d8293f asum=0x1.ff7b4ba9a12e3p+10 tmin=-0x1.ddb5a6p-3 tmax=0x1.6752a2p-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[3] rows=12x92160 n=1105920 fnv=426d7b80bf1a8383 asum=0x1.7733d11e08p+13 tmin=-0x1.0ep+2 tmax=0x1.0cp+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[4] rows=9x786432 n=7077888 fnv=067e8a8edbb3ed34 asum=0x1.2bf2b924e8a52p+11 tmin=-0x1.dd1bb4p-4 tmax=0x1.e648dcp-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[4] rows=12x92160 n=1105920 fnv=1473860cae068383 asum=0x1.bf34a431bp+13 tmin=-0x1.a4p+2 tmax=0x1.9ap+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[5] rows=9x786432 n=7077888 fnv=7187915aced00574 asum=0x1.9a57b7c22864p+11 tmin=-0x1.df0eb6p-2 tmax=0x1.8ef036p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[5] rows=12x92160 n=1105920 fnv=5757dd55903d8383 asum=0x1.e71f0b8d33p+13 tmin=-0x1.ap+2 tmax=0x1.3p+3 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[6] rows=9x786432 n=7077888 fnv=a2915194c1d7e249 asum=0x1.bea6d26a9f20ap+11 tmin=-0x1.560f96p-2 tmax=0x1.330304p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[6] rows=12x92160 n=1105920 fnv=6df3cbba69148383 asum=0x1.20690b5b758p+14 tmin=-0x1.dep+2 tmax=0x1.d2p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[7] rows=9x786432 n=7077888 fnv=4c6fa7116bda1b64 asum=0x1.b7cc8531a219ap+11 tmin=-0x1.6d0964p-2 tmax=0x1.922128p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[7] rows=12x92160 n=1105920 fnv=d9b5421187238383 asum=0x1.1741bfa988p+14 tmin=-0x1.1p+3 tmax=0x1.86p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[8] rows=9x786432 n=7077888 fnv=de0815a1c2851223 asum=0x1.f2b2d3819ee25p+11 tmin=-0x1.2f9196p-1 tmax=0x1.a1c6c6p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[8] rows=12x92160 n=1105920 fnv=fe79e9def1b78383 asum=0x1.862c11889p+12 tmin=-0x1.dcp+2 tmax=0x1.cp+1 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[9] rows=9x786432 n=7077888 fnv=5e634f2dd18e750b asum=0x1.1956a59ce1828p+12 tmin=-0x1.0031d4p-1 tmax=0x1.c3c396p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[9] rows=12x92160 n=1105920 fnv=93cbe8c3b90c8383 asum=0x1.aa0fdf3b4p+12 tmin=-0x1.14p+3 tmax=0x1.1cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[10] rows=9x786432 n=7077888 fnv=eaccd6ad2fbcd5c9 asum=0x1.19787a11ca66cp+12 tmin=-0x1.2faf9p-1 tmax=0x1.0659eep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[10] rows=12x92160 n=1105920 fnv=9e9458f549c98383 asum=0x1.96e66aeecp+12 tmin=-0x1.02p+3 tmax=0x1.fp+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[11] rows=9x786432 n=7077888 fnv=09fd4d8b68fb2659 asum=0x1.3f1bd2b1ba5acp+12 tmin=-0x1.e659c6p-2 tmax=0x1.82c13p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[11] rows=12x92160 n=1105920 fnv=f41aba688d868383 asum=0x1.989f17ccp+12 tmin=-0x1.f8p+2 tmax=0x1.f8p+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[12] rows=9x786432 n=7077888 fnv=51a74988f30ba63d asum=0x1.08e8e12e6fe68p+12 tmin=-0x1.10ba3cp-2 tmax=0x1.61d81ap-1 zeros=1152/7077888
+[GDN-SHADOW-PROBE] step=1 conv[12] rows=12x92160 n=1105920 fnv=cdebc8b22b298383 asum=0x1.c7bd19ca8p+12 tmin=-0x1.2p+3 tmax=0x1.2p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[13] rows=9x786432 n=7077888 fnv=7407b995fd9034ad asum=0x1.4d3a23e895ecap+12 tmin=-0x1.2fd5dep-1 tmax=0x1.aa34f8p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[13] rows=12x92160 n=1105920 fnv=99c0aec77c8c8383 asum=0x1.ce9887584p+12 tmin=-0x1.18p+3 tmax=0x1.2cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[14] rows=9x786432 n=7077888 fnv=4c017eb717e63420 asum=0x1.bd3f144fd3bbbp+12 tmin=-0x1.85b00ap+0 tmax=0x1.18532ep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[14] rows=12x92160 n=1105920 fnv=33878bd449fa8383 asum=0x1.db09c99a8p+12 tmin=-0x1.cp+2 tmax=0x1.3p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[15] rows=9x786432 n=7077888 fnv=c7a4d1edeacc7ac9 asum=0x1.99c7616b95094p+13 tmin=-0x1.3a0fb6p-1 tmax=0x1.fdb092p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[15] rows=12x92160 n=1105920 fnv=27ebed548b608383 asum=0x1.76ccc4f2bep+13 tmin=-0x1.52p+3 tmax=0x1.7p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[16] rows=9x786432 n=7077888 fnv=2eebb27c87517095 asum=0x1.459cd6e7fe52cp+13 tmin=-0x1.fa8afp-2 tmax=0x1.2fc40ap+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[16] rows=12x92160 n=1105920 fnv=f5731561b5ed8383 asum=0x1.63d78166ap+13 tmin=-0x1.9p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[17] rows=9x786432 n=7077888 fnv=63f942e6c5e8695b asum=0x1.7c2b77073a74dp+12 tmin=-0x1.a83d5p-2 tmax=0x1.fe20b8p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[17] rows=12x92160 n=1105920 fnv=5b5dc037c8d98383 asum=0x1.266bb0148p+13 tmin=-0x1.56p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[18] rows=9x786432 n=7077888 fnv=a73a9dfac1f39e55 asum=0x1.d6f4b1960568ap+12 tmin=-0x1.2c7176p-1 tmax=0x1.bd8e36p-1 zeros=24137/7077888
+[GDN-SHADOW-PROBE] step=1 conv[18] rows=12x92160 n=1105920 fnv=20f2d00a85338383 asum=0x1.48df808dp+13 tmin=-0x1.04p+3 tmax=0x1.b8p+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[19] rows=9x786432 n=7077888 fnv=343fe33210cbd71b asum=0x1.4db3f7417c69ep+13 tmin=-0x1.93e124p-1 tmax=0x1.0ba752p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[19] rows=12x92160 n=1105920 fnv=f688f6621d8b8383 asum=0x1.62a7e1c2bp+13 tmin=-0x1.8ap+2 tmax=0x1.acp+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[20] rows=9x786432 n=7077888 fnv=b4f9d81f8aa274ad asum=0x1.33d2759e1d0a3p+13 tmin=-0x1.1c6822p-1 tmax=0x1.15751cp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[20] rows=12x92160 n=1105920 fnv=1e234f2bac638383 asum=0x1.5ac28cff4p+13 tmin=-0x1.1ep+3 tmax=0x1.02p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[21] rows=9x786432 n=7077888 fnv=43cc3c98cfeb6b74 asum=0x1.3276e2dce8be9p+13 tmin=-0x1.796cdcp-2 tmax=0x1.0f044cp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[21] rows=12x92160 n=1105920 fnv=23c5a44c4bc98383 asum=0x1.56df3571fp+13 tmin=-0x1.24p+3 tmax=0x1.12p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[22] rows=9x786432 n=7077888 fnv=9a3b11e3ce24123b asum=0x1.d1b6ca30b45a2p+12 tmin=-0x1.4c3294p-2 tmax=0x1.00d51p-1 zeros=5101/7077888
+[GDN-SHADOW-PROBE] step=1 conv[22] rows=12x92160 n=1105920 fnv=9a92adcc5b3e8383 asum=0x1.4a1069c86p+13 tmin=-0x1.9p+2 tmax=0x1.4ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[23] rows=9x786432 n=7077888 fnv=8fa4beb6d8a8cb16 asum=0x1.6685df85ef718p+13 tmin=-0x1.17708cp-1 tmax=0x1.9d4d4ap-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[23] rows=12x92160 n=1105920 fnv=039030845afe8383 asum=0x1.4cebcac7fp+13 tmin=-0x1.f4p+2 tmax=0x1.08p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[24] rows=9x786432 n=7077888 fnv=da239073cc0f169d asum=0x1.7356cf3ffdcb8p+13 tmin=-0x1.fadb44p-3 tmax=0x1.c71a58p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[24] rows=12x92160 n=1105920 fnv=cfde688b8dcb8383 asum=0x1.4610e5f918p+13 tmin=-0x1.28p+3 tmax=0x1.1ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[25] rows=9x786432 n=7077888 fnv=bd588c6027d7db10 asum=0x1.dc390079a68eep+12 tmin=-0x1.9df1c8p-3 tmax=0x1.0aa144p-2 zeros=5837/7077888
+[GDN-SHADOW-PROBE] step=1 conv[25] rows=12x92160 n=1105920 fnv=fb76828425a78383 asum=0x1.4792a9c2p+13 tmin=-0x1.3ep+3 tmax=0x1.3p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[26] rows=9x786432 n=7077888 fnv=215da5d7591b26db asum=0x1.71036cb531c1p+13 tmin=-0x1.1f3deap-1 tmax=0x1.bc1c2ap-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[26] rows=12x92160 n=1105920 fnv=10337cce22838383 asum=0x1.5242216e6p+13 tmin=-0x1.24p+3 tmax=0x1.0ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[27] rows=9x786432 n=7077888 fnv=07a9e03e766d4fc2 asum=0x1.2b43ead9e868p+14 tmin=-0x1.aa49dep-2 tmax=0x1.1054ccp+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[27] rows=12x92160 n=1105920 fnv=14d4c69b81928383 asum=0x1.c156ba1a36p+13 tmin=-0x1.48p+3 tmax=0x1.4ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[28] rows=9x786432 n=7077888 fnv=455716ede7221be7 asum=0x1.ad2e405e44025p+13 tmin=-0x1.c5ead2p-2 tmax=0x1.aeec34p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[28] rows=12x92160 n=1105920 fnv=dbd152df13db8383 asum=0x1.9b8e8112cp+13 tmin=-0x1.48p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[29] rows=9x786432 n=7077888 fnv=e45aed4cf4ffbab5 asum=0x1.f6892feafc4f7p+12 tmin=-0x1.55316cp-2 tmax=0x1.895248p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[29] rows=12x92160 n=1105920 fnv=0ff778863ec18383 asum=0x1.5569938a4p+13 tmin=-0x1.4p+3 tmax=0x1.38p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[30] rows=9x786432 n=7077888 fnv=4df592c60f927baa asum=0x1.933771eb98dp+13 tmin=-0x1.43a5fp-1 tmax=0x1.ef090ep+1 zeros=3/7077888
+[GDN-SHADOW-PROBE] step=1 conv[30] rows=12x92160 n=1105920 fnv=585d948062a78383 asum=0x1.75faef498p+13 tmin=-0x1.16p+3 tmax=0x1.1p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[31] rows=9x786432 n=7077888 fnv=b0e8fc39ee82e308 asum=0x1.5e098847bfe83p+13 tmin=-0x1.21311cp-2 tmax=0x1.c661aap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[31] rows=12x92160 n=1105920 fnv=2ec4bed357708383 asum=0x1.6e08b33a4p+13 tmin=-0x1.b4p+2 tmax=0x1.8ep+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[32] rows=9x786432 n=7077888 fnv=7e943ec67135da14 asum=0x1.38915012c49adp+13 tmin=-0x1.9c3c7ap-2 tmax=0x1.3bc2aep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[32] rows=12x92160 n=1105920 fnv=e68edf5d3df38383 asum=0x1.68be2a4534p+13 tmin=-0x1.e2p+2 tmax=0x1.0cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[33] rows=9x786432 n=7077888 fnv=fec8c4e9584cac99 asum=0x1.e11a7d1bd7171p+12 tmin=-0x1.b32762p-3 tmax=0x1.453dc4p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[33] rows=12x92160 n=1105920 fnv=ab3c1052aa218383 asum=0x1.612ef638p+13 tmin=-0x1.62p+3 tmax=0x1.2cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[34] rows=9x786432 n=7077888 fnv=ccefab1c5662d24d asum=0x1.11873996a14eap+13 tmin=-0x1.83efb4p-2 tmax=0x1.dc499p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[34] rows=12x92160 n=1105920 fnv=dc6e20b6bbf78383 asum=0x1.4b24c0b98p+13 tmin=-0x1.84p+2 tmax=0x1.64p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[35] rows=9x786432 n=7077888 fnv=4cc8f9b4ef8eab93 asum=0x1.2469fa7ecf97ep+13 tmin=-0x1.339384p-2 tmax=0x1.6abe24p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[35] rows=12x92160 n=1105920 fnv=a2ad4e7a48848383 asum=0x1.5872119dcp+13 tmin=-0x1.02p+3 tmax=0x1.58p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[36] rows=9x786432 n=7077888 fnv=a29cd33d04875208 asum=0x1.c6953195ce078p+12 tmin=-0x1.cf11fp-3 tmax=0x1.54caccp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[36] rows=12x92160 n=1105920 fnv=2fc5775dcb3b8383 asum=0x1.6b96a6b46p+13 tmin=-0x1.02p+3 tmax=0x1.36p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[37] rows=9x786432 n=7077888 fnv=5e85ba9a4bb64f3b asum=0x1.32ede211cd3d1p+13 tmin=-0x1.517f4p-3 tmax=0x1.585968p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[37] rows=12x92160 n=1105920 fnv=c035f53ae26b8383 asum=0x1.68de8d554p+13 tmin=-0x1.64p+3 tmax=0x1.12p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[38] rows=9x786432 n=7077888 fnv=3a240e02a369e7df asum=0x1.7b91d241d606dp+13 tmin=-0x1.a559dp-2 tmax=0x1.75d124p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[38] rows=12x92160 n=1105920 fnv=5a54588c465d8383 asum=0x1.743ea2758p+13 tmin=-0x1.0ep+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[39] rows=9x786432 n=7077888 fnv=6018670adf0057a8 asum=0x1.11aa1a667174dp+15 tmin=-0x1.e6603cp-2 tmax=0x1.0faf82p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[39] rows=12x92160 n=1105920 fnv=799822f840518383 asum=0x1.2e1ae5e0cp+14 tmin=-0x1.62p+3 tmax=0x1.6ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[40] rows=9x786432 n=7077888 fnv=9e8e7d6ebff80ed1 asum=0x1.8e582f115c39ep+14 tmin=-0x1.232e64p-1 tmax=0x1.0204d6p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[40] rows=12x92160 n=1105920 fnv=0357ed61772d8383 asum=0x1.07b1a6ca8p+14 tmin=-0x1.4p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[41] rows=9x786432 n=7077888 fnv=6f119266c9c20094 asum=0x1.28a09015e8eaep+14 tmin=-0x1.2cc38p-2 tmax=0x1.41597ap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[41] rows=12x92160 n=1105920 fnv=c74e13c4a0e28383 asum=0x1.ceae4006e8p+13 tmin=-0x1.84p+3 tmax=0x1.34p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[42] rows=9x786432 n=7077888 fnv=65500cedbb8c81b0 asum=0x1.2658ab5291a46p+15 tmin=-0x1.d9e802p-2 tmax=0x1.177d62p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[42] rows=12x92160 n=1105920 fnv=1dc0e67c3a7e8383 asum=0x1.1fd918f94p+14 tmin=-0x1.82p+3 tmax=0x1.7p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[43] rows=9x786432 n=7077888 fnv=3aead54e6aead977 asum=0x1.09354bccfb0b1p+15 tmin=-0x1.413cbap-1 tmax=0x1.31013p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[43] rows=12x92160 n=1105920 fnv=d07f30e273968383 asum=0x1.343a4c464p+14 tmin=-0x1.94p+3 tmax=0x1.9p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[44] rows=9x786432 n=7077888 fnv=6223a7cf121c2799 asum=0x1.c105d522f4362p+14 tmin=-0x1.fb8bb6p-1 tmax=0x1.e88c1ap+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[44] rows=12x92160 n=1105920 fnv=095d575cc2f18383 asum=0x1.14ece891p+14 tmin=-0x1.5ep+3 tmax=0x1.7ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[45] rows=9x786432 n=7077888 fnv=7b937fb77e7c986b asum=0x1.4026731d7f6f5p+15 tmin=-0x1.84ff6p-1 tmax=0x1.ac85f6p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[45] rows=12x92160 n=1105920 fnv=e30336a09c368383 asum=0x1.5c9cc08p+14 tmin=-0x1.a4p+3 tmax=0x1.2cp+4 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[46] rows=9x786432 n=7077888 fnv=5ce741c51e15128a asum=0x1.2d6302bb743b7p+14 tmin=-0x1.18a88p-2 tmax=0x1.d88842p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[46] rows=12x92160 n=1105920 fnv=93fc2246d4f38383 asum=0x1.d79e6481fcp+13 tmin=-0x1.b8p+3 tmax=0x1.6cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=1 ssm[47] rows=9x786432 n=7077888 fnv=21bd31a78355106e asum=0x1.0b92d1bc46434p+15 tmin=-0x1.a3b67ep-1 tmax=0x1.4d1fe2p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=1 conv[47] rows=12x92160 n=1105920 fnv=cf3c19fe3e9e8383 asum=0x1.3fd9d9b6cp+14 tmin=-0x1.8ep+4 tmax=0x1.0cp+4 zeros=1090560/1105920
+[GDN-TAP] kind=eager-mtap step=1 LOGITS argmax=0(0x0p+0) top2=1(0x0p+0) margin=0x0p+0 zeros=248320/248320 first5=[0x0p+0,0x0p+0,0x0p+0,0x0p+0,0x0p+0]
+[TT-STEP-PHASE] step=3 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6608630219.5 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-6608567271.8
+[QKVZ-IN] call=144 T=9 h_asum=32069.9 h_nan=0
+[QKVZ-OUT] call=144 mixed_asum=195955 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00af9ac0 y_n=829440 y_asum=-nan x_asum=inf T_asum=97432.5 x_nan=0 y_nan=2249 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=3055.73 nan=0 zero=40975/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=392.142 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff724620040 out_n=55296 fnv=41c439648f4dfefb asum=0x1.98b2b18b580bdp+6 s_asum=9605.52 q_asum=1176.42 v_asum=2124.88 q_nan=0 v_nan=0
+[QKVZ-IN] call=145 T=9 h_asum=15361.3 h_nan=0
+[QKVZ-OUT] call=145 mixed_asum=53769 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00d1c2c0 y_n=829440 y_asum=1579.95 x_asum=53812.3 T_asum=9511.58 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=145.211 nan=0 zero=40961/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=420.139 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff722b10040 out_n=55296 fnv=5bfb9b216c25bf4e asum=0x1.73c14dec95548p+0 s_asum=172.438 q_asum=1260.42 v_asum=75.9162 q_nan=0 v_nan=0
+[QKVZ-IN] call=146 T=9 h_asum=17314.5 h_nan=0
+[QKVZ-OUT] call=146 mixed_asum=54548.2 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00f0b300 y_n=829440 y_asum=1745.59 x_asum=54591.6 T_asum=10631.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=191.394 nan=0 zero=40961/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=476.906 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff721000040 out_n=55296 fnv=2f77f3a9143ab247 asum=0x1.3cfe65104423fp+0 s_asum=228.245 q_asum=1430.72 v_asum=105.281 q_nan=0 v_nan=0
+[QKVZ-IN] call=147 T=9 h_asum=15897.1 h_nan=0
+[QKVZ-OUT] call=147 mixed_asum=46202.1 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0191bc80 y_n=829440 y_asum=1623.58 x_asum=46512.4 T_asum=12006.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=206.469 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=462.564 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff71a4f0040 out_n=55296 fnv=b5aaf22cea83a6b5 asum=0x1.14fe776754a35p+0 s_asum=198.42 q_asum=1387.69 v_asum=101.086 q_nan=0 v_nan=0
+[QKVZ-IN] call=148 T=9 h_asum=16272.5 h_nan=0
+[QKVZ-OUT] call=148 mixed_asum=51260.5 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01b0acc0 y_n=829440 y_asum=1658.44 x_asum=51303.8 T_asum=14310.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=228.9 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=418.236 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7189e0040 out_n=55296 fnv=d71bef18c592150f asum=0x1.546dbe454a829p+0 s_asum=232.461 q_asum=1254.71 v_asum=107.666 q_nan=0 v_nan=0
+[QKVZ-IN] call=149 T=9 h_asum=16705.8 h_nan=0
+[QKVZ-OUT] call=149 mixed_asum=51979.7 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01cf9d00 y_n=829440 y_asum=1891.79 x_asum=52023 T_asum=15587.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=313.702 nan=0 zero=40962/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=430.872 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff716ed0040 out_n=55296 fnv=7ffceb26825d83a1 asum=0x1.b0cf79c149788p+0 s_asum=312.014 q_asum=1292.61 v_asum=132.816 q_nan=0 v_nan=0
+[QKVZ-IN] call=150 T=9 h_asum=16978.7 h_nan=0
+[QKVZ-OUT] call=150 mixed_asum=52979.2 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab026e8d80 y_n=829440 y_asum=1952.26 x_asum=53261.6 T_asum=18458.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=358.964 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=421.196 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7153c0040 out_n=55296 fnv=1b8ca85c4b0515d1 asum=0x1.d3ca3776fc587p+0 s_asum=362.059 q_asum=1263.59 v_asum=148.587 q_nan=0 v_nan=0
+[QKVZ-IN] call=151 T=9 h_asum=16745.6 h_nan=0
+[QKVZ-OUT] call=151 mixed_asum=51157.6 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab028d7dc0 y_n=829440 y_asum=1759.4 x_asum=51201 T_asum=17872.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=304.477 nan=0 zero=40961/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=425.244 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7138b0040 out_n=55296 fnv=d622ed5e44da6aaa asum=0x1.6cb43275faf2cp+0 s_asum=337.132 q_asum=1275.73 v_asum=142.678 q_nan=0 v_nan=0
+[QKVZ-IN] call=152 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=152 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab02ac6e00 y_n=829440 y_asum=0.188991 x_asum=43.3553 T_asum=6242.75 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff711da0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=404.545 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=153 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=153 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab034b5e80 y_n=829440 y_asum=0.506284 x_asum=43.3553 T_asum=6816.99 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff710290040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=457.399 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=154 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=154 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab036a5180 y_n=829440 y_asum=0.401765 x_asum=43.3553 T_asum=6510.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff70e780040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=432.71 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=155 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=155 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab03894ac0 y_n=829440 y_asum=0.378303 x_asum=43.3553 T_asum=6537.94 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff70cc70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=509.397 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=156 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=156 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04284880 y_n=829440 y_asum=0.61711 x_asum=43.3553 T_asum=7291.82 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff70b160040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=407.566 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=157 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=157 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab044741c0 y_n=829440 y_asum=0.339339 x_asum=43.3553 T_asum=7401.53 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff709650040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=533.558 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=158 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=158 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04663b00 y_n=829440 y_asum=0.424439 x_asum=43.3553 T_asum=7600.61 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff707b40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=739.273 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=159 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=159 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab050538c0 y_n=829440 y_asum=0.614371 x_asum=43.3553 T_asum=11993.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff706030040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1365.1 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=160 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=160 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05243200 y_n=829440 y_asum=0.817049 x_asum=43.3553 T_asum=11386.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff704520040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1092.36 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=161 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=161 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05432b40 y_n=829440 y_asum=0.887053 x_asum=43.3553 T_asum=9421.46 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff702a10040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=554.16 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=162 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=162 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05e22900 y_n=829440 y_asum=0.410769 x_asum=43.3553 T_asum=10523.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff700f00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=717.092 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=163 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=163 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06012240 y_n=829440 y_asum=0.173764 x_asum=43.3553 T_asum=11349 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6ff3f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1105.97 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=164 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=164 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06201b80 y_n=829440 y_asum=0.20048 x_asum=43.3553 T_asum=11096.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6fd8e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1000.24 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=165 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=165 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06bf1940 y_n=829440 y_asum=0.406564 x_asum=43.3553 T_asum=10971.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6fbdd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1017.99 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=166 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=166 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06de1280 y_n=829440 y_asum=0.29682 x_asum=43.3553 T_asum=10562.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6fa2c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=682.586 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=167 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=167 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06fd0bc0 y_n=829440 y_asum=0.611137 x_asum=43.3553 T_asum=10653.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f87b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1164.36 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=168 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=168 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab079c0980 y_n=829440 y_asum=0.554951 x_asum=43.3553 T_asum=10434.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f6ca0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1245.28 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=169 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=169 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07bb0340 y_n=829440 y_asum=0.178653 x_asum=43.3553 T_asum=10482.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f5190040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=724.162 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=170 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=170 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07d9fcc0 y_n=829440 y_asum=0.479574 x_asum=43.3553 T_asum=10824.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f3680040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1228.99 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=171 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=171 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0878fac0 y_n=829440 y_asum=0.548086 x_asum=43.3553 T_asum=14378.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f1b70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2004.95 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=172 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=172 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0897f440 y_n=829440 y_asum=0.874625 x_asum=43.3553 T_asum=13169.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f0060040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1442.92 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=173 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=173 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab08b6ee00 y_n=829440 y_asum=0.703262 x_asum=43.3553 T_asum=10925.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6ee550040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=772.197 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=174 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=174 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0955ec00 y_n=829440 y_asum=0.381439 x_asum=43.3553 T_asum=11967.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6eca40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1338.15 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=175 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=175 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0974e600 y_n=829440 y_asum=0.177473 x_asum=42.2949 T_asum=11713.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6eaf30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1155.4 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=176 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=176 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0993df80 y_n=829440 y_asum=0.187258 x_asum=42.2949 T_asum=11543.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e9420040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1010.97 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=177 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=177 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a32e3c0 y_n=829440 y_asum=0.245632 x_asum=42.2949 T_asum=11301.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e7910040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=746.564 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=178 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=178 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a51dd80 y_n=829440 y_asum=0.375495 x_asum=42.2949 T_asum=10596.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e5e00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=849.243 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=179 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=179 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a70d740 y_n=829440 y_asum=0.391215 x_asum=42.2949 T_asum=11022.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e42f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=940.336 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=180 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=180 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b0fd540 y_n=829440 y_asum=0.580233 x_asum=42.2949 T_asum=11634.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e27e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=749.776 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=181 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=181 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b2ecf40 y_n=829440 y_asum=0.306733 x_asum=42.2949 T_asum=11547.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e0cd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=983.464 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=182 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=182 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b4dc8c0 y_n=829440 y_asum=0.443267 x_asum=42.2949 T_asum=11911.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6df1c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1259.35 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=183 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=183 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0becc700 y_n=829440 y_asum=0.995976 x_asum=42.2949 T_asum=19334.7 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6dd6b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3705.7 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=184 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=184 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c0bc0c0 y_n=829440 y_asum=1.09948 x_asum=42.2949 T_asum=16876.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6dbba0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2426.91 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=185 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=185 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c2aba80 y_n=829440 y_asum=0.908931 x_asum=42.2949 T_asum=14805.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6da090040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1888.1 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=186 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=186 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0cc9b880 y_n=829440 y_asum=1.87729 x_asum=42.2949 T_asum=18422.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d8580040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3712.46 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=187 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=187 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0ce8b280 y_n=829440 y_asum=2.25493 x_asum=42.2949 T_asum=19726.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d6a70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3464.23 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=188 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=188 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0d07ac00 y_n=829440 y_asum=1.57267 x_asum=42.2949 T_asum=17723.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d4f60040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2940.37 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=189 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=189 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0da6aa40 y_n=829440 y_asum=1.77521 x_asum=42.2949 T_asum=22311.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d3450040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3982.51 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=190 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=190 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0dc5a400 y_n=829440 y_asum=1.19524 x_asum=42.2949 T_asum=15091.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d1940040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1913.41 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=191 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=191 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0de49dc0 y_n=829440 y_asum=1.35684 x_asum=42.2949 T_asum=20470.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6cfe30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3564.19 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[GDN-SHADOW-PROBE] step=2 ssm[0] rows=9x786432 n=7077888 fnv=19ce44414a2baca1 asum=0x1.51037580e9032p+16 tmin=-0x1.2463f2p+4 tmax=0x1.5cd0fp+4 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[0] rows=12x92160 n=1105920 fnv=1bd90f1876e48383 asum=0x1.782aedf0ep+16 tmin=-0x1.c4p+5 tmax=0x1.6ap+5 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[1] rows=9x786432 n=7077888 fnv=c540053f8dd8d26e asum=0x1.b1fa5a473f442p+10 tmin=-0x1.256578p-2 tmax=0x1.e37598p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[1] rows=12x92160 n=1105920 fnv=ae1588a071658383 asum=0x1.4318ed993p+13 tmin=-0x1.aap+2 tmax=0x1.5p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[2] rows=9x786432 n=7077888 fnv=3e9b67bfbf63704c asum=0x1.01820678c1bdcp+11 tmin=-0x1.3a43d8p-2 tmax=0x1.ad1fb8p-3 zeros=49151/7077888
+[GDN-SHADOW-PROBE] step=2 conv[2] rows=12x92160 n=1105920 fnv=b1d467c919408383 asum=0x1.73836b4f8p+13 tmin=-0x1.5cp+2 tmax=0x1.d6p+1 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[3] rows=9x786432 n=7077888 fnv=aca26b73aa7f661b asum=0x1.f161d14ebeebp+10 tmin=-0x1.8e22eep-3 tmax=0x1.558cd4p-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[3] rows=12x92160 n=1105920 fnv=d4b855c34dcb8383 asum=0x1.8bf3a9c9c8p+13 tmin=-0x1.f2p+1 tmax=0x1.eap+1 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[4] rows=9x786432 n=7077888 fnv=c7bdace96f0ebcb0 asum=0x1.2515d6246d87p+11 tmin=-0x1.86d948p-4 tmax=0x1.91c9d2p-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[4] rows=12x92160 n=1105920 fnv=4c61ece1701a8383 asum=0x1.d263fe6b28p+13 tmin=-0x1.78p+2 tmax=0x1.9ap+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[5] rows=9x786432 n=7077888 fnv=e9df3abe924bad71 asum=0x1.7694178cbd9c5p+11 tmin=-0x1.5c4b4ap-2 tmax=0x1.7928dap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[5] rows=12x92160 n=1105920 fnv=c83b15c14e1e8383 asum=0x1.0b1157828d8p+14 tmin=-0x1.b8p+2 tmax=0x1.48p+3 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[6] rows=9x786432 n=7077888 fnv=807292e1dd422dfd asum=0x1.c013f7635b2dep+11 tmin=-0x1.8f8b24p-2 tmax=0x1.2b71f6p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[6] rows=12x92160 n=1105920 fnv=246a85a5902a8383 asum=0x1.3b3c129c5d8p+14 tmin=-0x1.aap+2 tmax=0x1.8ap+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[7] rows=9x786432 n=7077888 fnv=a12172c84fe7ea45 asum=0x1.898bbeec34b5ep+11 tmin=-0x1.005ef4p-2 tmax=0x1.7165a4p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[7] rows=12x92160 n=1105920 fnv=9071e7b836868383 asum=0x1.2679055e08p+14 tmin=-0x1.08p+3 tmax=0x1.9ap+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[8] rows=9x786432 n=7077888 fnv=210cd561eb99be7e asum=0x1.a75496d9740ap+11 tmin=-0x1.2da2a8p-1 tmax=0x1.9f1dbp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[8] rows=12x92160 n=1105920 fnv=fe79e9def1b78383 asum=0x1.862c11889p+12 tmin=-0x1.dcp+2 tmax=0x1.cp+1 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[9] rows=9x786432 n=7077888 fnv=f4d68ee82c5a496c asum=0x1.e42853a126212p+11 tmin=-0x1.ff2fc6p-2 tmax=0x1.c2b41cp-1 zeros=109278/7077888
+[GDN-SHADOW-PROBE] step=2 conv[9] rows=12x92160 n=1105920 fnv=93cbe8c3b90c8383 asum=0x1.aa0fdf3b4p+12 tmin=-0x1.14p+3 tmax=0x1.1cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[10] rows=9x786432 n=7077888 fnv=9836436dd4823ae1 asum=0x1.b089e78df6cacp+11 tmin=-0x1.12d362p-1 tmax=0x1.02664ep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[10] rows=12x92160 n=1105920 fnv=9e9458f549c98383 asum=0x1.96e66aeecp+12 tmin=-0x1.02p+3 tmax=0x1.fp+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[11] rows=9x786432 n=7077888 fnv=75b5faa4298e14e0 asum=0x1.02527934f0b25p+12 tmin=-0x1.e5ade4p-2 tmax=0x1.747b44p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[11] rows=12x92160 n=1105920 fnv=f41aba688d868383 asum=0x1.989f17ccp+12 tmin=-0x1.f8p+2 tmax=0x1.f8p+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[12] rows=9x786432 n=7077888 fnv=c975e50f662e7df8 asum=0x1.a6725f96b1218p+11 tmin=-0x1.08e44p-2 tmax=0x1.584d9cp-1 zeros=1152/7077888
+[GDN-SHADOW-PROBE] step=2 conv[12] rows=12x92160 n=1105920 fnv=cdebc8b22b298383 asum=0x1.c7bd19ca8p+12 tmin=-0x1.2p+3 tmax=0x1.2p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[13] rows=9x786432 n=7077888 fnv=cc5091f8461ed14f asum=0x1.114cc2ce08e5dp+12 tmin=-0x1.16962cp-1 tmax=0x1.4cf1ap-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[13] rows=12x92160 n=1105920 fnv=99c0aec77c8c8383 asum=0x1.ce9887584p+12 tmin=-0x1.18p+3 tmax=0x1.2cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[14] rows=9x786432 n=7077888 fnv=34fb7d0504322ce6 asum=0x1.866cf58528a3ep+12 tmin=-0x1.832accp+0 tmax=0x1.fdeb64p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[14] rows=12x92160 n=1105920 fnv=33878bd449fa8383 asum=0x1.db09c99a8p+12 tmin=-0x1.cp+2 tmax=0x1.3p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[15] rows=9x786432 n=7077888 fnv=4b70ad7dbd4f5bfb asum=0x1.6c142ebc38154p+13 tmin=-0x1.381858p-1 tmax=0x1.fa7fb2p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[15] rows=12x92160 n=1105920 fnv=27ebed548b608383 asum=0x1.76ccc4f2bep+13 tmin=-0x1.52p+3 tmax=0x1.7p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[16] rows=9x786432 n=7077888 fnv=2a94afc088d249ca asum=0x1.2a3738f93eebbp+13 tmin=-0x1.f75f4p-2 tmax=0x1.2c41fep+0 zeros=181712/7077888
+[GDN-SHADOW-PROBE] step=2 conv[16] rows=12x92160 n=1105920 fnv=f5731561b5ed8383 asum=0x1.63d78166ap+13 tmin=-0x1.9p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[17] rows=9x786432 n=7077888 fnv=6af84c9514b056e6 asum=0x1.09ee2c235d343p+12 tmin=-0x1.a06826p-2 tmax=0x1.b636dp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[17] rows=12x92160 n=1105920 fnv=5b5dc037c8d98383 asum=0x1.266bb0148p+13 tmin=-0x1.56p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[18] rows=9x786432 n=7077888 fnv=30eb3b319d16cfab asum=0x1.683595858ea2dp+12 tmin=-0x1.2b110ap-1 tmax=0x1.ba7196p-1 zeros=423576/7077888
+[GDN-SHADOW-PROBE] step=2 conv[18] rows=12x92160 n=1105920 fnv=20f2d00a85338383 asum=0x1.48df808dp+13 tmin=-0x1.04p+3 tmax=0x1.b8p+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[19] rows=9x786432 n=7077888 fnv=73a4afda2596348f asum=0x1.22574aa29ac39p+13 tmin=-0x1.6471a6p-1 tmax=0x1.dc2118p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[19] rows=12x92160 n=1105920 fnv=f688f6621d8b8383 asum=0x1.62a7e1c2bp+13 tmin=-0x1.8ap+2 tmax=0x1.acp+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[20] rows=9x786432 n=7077888 fnv=d35e79f2983441eb asum=0x1.05720777afdaep+13 tmin=-0x1.19efc8p-1 tmax=0x1.0b8b7ap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[20] rows=12x92160 n=1105920 fnv=1e234f2bac638383 asum=0x1.5ac28cff4p+13 tmin=-0x1.1ep+3 tmax=0x1.02p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[21] rows=9x786432 n=7077888 fnv=d526d7a161d345b0 asum=0x1.0fd971c40d194p+13 tmin=-0x1.77f796p-2 tmax=0x1.0df844p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[21] rows=12x92160 n=1105920 fnv=23c5a44c4bc98383 asum=0x1.56df3571fp+13 tmin=-0x1.24p+3 tmax=0x1.12p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[22] rows=9x786432 n=7077888 fnv=563881cb97e42245 asum=0x1.4c37a0645f272p+12 tmin=-0x1.12ccaap-2 tmax=0x1.fb7084p-2 zeros=230738/7077888
+[GDN-SHADOW-PROBE] step=2 conv[22] rows=12x92160 n=1105920 fnv=9a92adcc5b3e8383 asum=0x1.4a1069c86p+13 tmin=-0x1.9p+2 tmax=0x1.4ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[23] rows=9x786432 n=7077888 fnv=ac2298741193c5cf asum=0x1.2baf1cb68d8dfp+13 tmin=-0x1.108644p-1 tmax=0x1.5806b4p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[23] rows=12x92160 n=1105920 fnv=039030845afe8383 asum=0x1.4cebcac7fp+13 tmin=-0x1.f4p+2 tmax=0x1.08p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[24] rows=9x786432 n=7077888 fnv=81f06a0ba88c6dd6 asum=0x1.4c348bd2e8b71p+13 tmin=-0x1.f8d5c2p-3 tmax=0x1.c549acp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[24] rows=12x92160 n=1105920 fnv=cfde688b8dcb8383 asum=0x1.4610e5f918p+13 tmin=-0x1.28p+3 tmax=0x1.1ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[25] rows=9x786432 n=7077888 fnv=09ce73290e0c96b0 asum=0x1.6b5cbcfa50316p+12 tmin=-0x1.9db1dcp-3 tmax=0x1.0a172p-2 zeros=239661/7077888
+[GDN-SHADOW-PROBE] step=2 conv[25] rows=12x92160 n=1105920 fnv=fb76828425a78383 asum=0x1.4792a9c2p+13 tmin=-0x1.3ep+3 tmax=0x1.3p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[26] rows=9x786432 n=7077888 fnv=3ca5f1cbbe801e49 asum=0x1.450c4d4a318b5p+13 tmin=-0x1.1106c6p-1 tmax=0x1.741a02p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[26] rows=12x92160 n=1105920 fnv=10337cce22838383 asum=0x1.5242216e6p+13 tmin=-0x1.24p+3 tmax=0x1.0ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[27] rows=9x786432 n=7077888 fnv=dcb9f9ab731c59aa asum=0x1.0d46eda69d578p+14 tmin=-0x1.a8ca9cp-2 tmax=0x1.0f92b6p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[27] rows=12x92160 n=1105920 fnv=14d4c69b81928383 asum=0x1.c156ba1a36p+13 tmin=-0x1.48p+3 tmax=0x1.4ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[28] rows=9x786432 n=7077888 fnv=42f5b1621b853311 asum=0x1.8a55dc2787e12p+13 tmin=-0x1.c23058p-2 tmax=0x1.ab6214p+0 zeros=22711/7077888
+[GDN-SHADOW-PROBE] step=2 conv[28] rows=12x92160 n=1105920 fnv=dbd152df13db8383 asum=0x1.9b8e8112cp+13 tmin=-0x1.48p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[29] rows=9x786432 n=7077888 fnv=5e98f3a6e995d6f5 asum=0x1.81f95026d59f7p+12 tmin=-0x1.0c00c4p-2 tmax=0x1.34f3p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[29] rows=12x92160 n=1105920 fnv=0ff778863ec18383 asum=0x1.5569938a4p+13 tmin=-0x1.4p+3 tmax=0x1.38p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[30] rows=9x786432 n=7077888 fnv=86a477b59d21fe7b asum=0x1.64aebe27fc2d4p+13 tmin=-0x1.3b116p-1 tmax=0x1.e1e94ap+1 zeros=201632/7077888
+[GDN-SHADOW-PROBE] step=2 conv[30] rows=12x92160 n=1105920 fnv=585d948062a78383 asum=0x1.75faef498p+13 tmin=-0x1.16p+3 tmax=0x1.1p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[31] rows=9x786432 n=7077888 fnv=f3deb1b082858bfb asum=0x1.2dcd3cb186599p+13 tmin=-0x1.1ef0a2p-2 tmax=0x1.c4ba18p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[31] rows=12x92160 n=1105920 fnv=2ec4bed357708383 asum=0x1.6e08b33a4p+13 tmin=-0x1.b4p+2 tmax=0x1.8ep+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[32] rows=9x786432 n=7077888 fnv=21059537ead8d10c asum=0x1.05a0baa1992a6p+13 tmin=-0x1.6e1d74p-2 tmax=0x1.38d0cap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[32] rows=12x92160 n=1105920 fnv=e68edf5d3df38383 asum=0x1.68be2a4534p+13 tmin=-0x1.e2p+2 tmax=0x1.0cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[33] rows=9x786432 n=7077888 fnv=ccb951865b8d2bd1 asum=0x1.86695feea988cp+12 tmin=-0x1.b1997ap-3 tmax=0x1.44145ep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[33] rows=12x92160 n=1105920 fnv=ab3c1052aa218383 asum=0x1.612ef638p+13 tmin=-0x1.62p+3 tmax=0x1.2cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[34] rows=9x786432 n=7077888 fnv=af8169ec319ed1d7 asum=0x1.a983be4d3462p+12 tmin=-0x1.82f3c6p-2 tmax=0x1.d6de54p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[34] rows=12x92160 n=1105920 fnv=dc6e20b6bbf78383 asum=0x1.4b24c0b98p+13 tmin=-0x1.84p+2 tmax=0x1.64p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[35] rows=9x786432 n=7077888 fnv=06ffa9b4700384d6 asum=0x1.e238cdc6309afp+12 tmin=-0x1.24a136p-2 tmax=0x1.685b74p-2 zeros=1/7077888
+[GDN-SHADOW-PROBE] step=2 conv[35] rows=12x92160 n=1105920 fnv=a2ad4e7a48848383 asum=0x1.5872119dcp+13 tmin=-0x1.02p+3 tmax=0x1.58p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[36] rows=9x786432 n=7077888 fnv=4b682049062cb002 asum=0x1.9598eacc26febp+12 tmin=-0x1.7dab06p-3 tmax=0x1.52bd5ap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[36] rows=12x92160 n=1105920 fnv=2fc5775dcb3b8383 asum=0x1.6b96a6b46p+13 tmin=-0x1.02p+3 tmax=0x1.36p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[37] rows=9x786432 n=7077888 fnv=80a406e8f337b3a6 asum=0x1.f958d8cd3715ap+12 tmin=-0x1.433d28p-3 tmax=0x1.4f4f34p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[37] rows=12x92160 n=1105920 fnv=c035f53ae26b8383 asum=0x1.68de8d554p+13 tmin=-0x1.64p+3 tmax=0x1.12p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[38] rows=9x786432 n=7077888 fnv=e9ac50bef289e88a asum=0x1.4d4ed44201d41p+13 tmin=-0x1.84f85cp-2 tmax=0x1.6356p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[38] rows=12x92160 n=1105920 fnv=5a54588c465d8383 asum=0x1.743ea2758p+13 tmin=-0x1.0ep+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[39] rows=9x786432 n=7077888 fnv=761b7fead53369fc asum=0x1.f5d1d41b059d1p+14 tmin=-0x1.e3899cp-2 tmax=0x1.0e4674p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[39] rows=12x92160 n=1105920 fnv=799822f840518383 asum=0x1.2e1ae5e0cp+14 tmin=-0x1.62p+3 tmax=0x1.6ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[40] rows=9x786432 n=7077888 fnv=f752b40c20eba570 asum=0x1.3088e8b82187cp+14 tmin=-0x1.fc6234p-2 tmax=0x1.f723cp-1 zeros=43330/7077888
+[GDN-SHADOW-PROBE] step=2 conv[40] rows=12x92160 n=1105920 fnv=0357ed61772d8383 asum=0x1.07b1a6ca8p+14 tmin=-0x1.4p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[41] rows=9x786432 n=7077888 fnv=c12f5affdc9d100f asum=0x1.e3e093735ed71p+13 tmin=-0x1.1fc138p-2 tmax=0x1.3e704p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[41] rows=12x92160 n=1105920 fnv=c74e13c4a0e28383 asum=0x1.ceae4006e8p+13 tmin=-0x1.84p+3 tmax=0x1.34p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[42] rows=9x786432 n=7077888 fnv=c19f70c991adbbd3 asum=0x1.d3b90c5cc1c89p+14 tmin=-0x1.5118b8p-2 tmax=0x1.1153b2p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[42] rows=12x92160 n=1105920 fnv=1dc0e67c3a7e8383 asum=0x1.1fd918f94p+14 tmin=-0x1.82p+3 tmax=0x1.7p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[43] rows=9x786432 n=7077888 fnv=3ac3e0b5e321360f asum=0x1.c7cb71411b9a6p+14 tmin=-0x1.3cb80ep-1 tmax=0x1.19745ap+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[43] rows=12x92160 n=1105920 fnv=d07f30e273968383 asum=0x1.343a4c464p+14 tmin=-0x1.94p+3 tmax=0x1.9p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[44] rows=9x786432 n=7077888 fnv=26d7e5f3d73cc979 asum=0x1.8577778b0d125p+14 tmin=-0x1.f34e78p-1 tmax=0x1.e09ddp+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[44] rows=12x92160 n=1105920 fnv=095d575cc2f18383 asum=0x1.14ece891p+14 tmin=-0x1.5ep+3 tmax=0x1.7ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[45] rows=9x786432 n=7077888 fnv=fa38c52f5eb1222a asum=0x1.eec0a303ddefep+14 tmin=-0x1.7f503cp-1 tmax=0x1.a642f4p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[45] rows=12x92160 n=1105920 fnv=e30336a09c368383 asum=0x1.5c9cc08p+14 tmin=-0x1.a4p+3 tmax=0x1.2cp+4 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[46] rows=9x786432 n=7077888 fnv=b9171a4dd4540c06 asum=0x1.ed065c0994f0ep+13 tmin=-0x1.f84b8cp-3 tmax=0x1.d43b4cp+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[46] rows=12x92160 n=1105920 fnv=93fc2246d4f38383 asum=0x1.d79e6481fcp+13 tmin=-0x1.b8p+3 tmax=0x1.6cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=2 ssm[47] rows=9x786432 n=7077888 fnv=ca909f08df8557af asum=0x1.d5c8bcf688944p+14 tmin=-0x1.60b7e8p-1 tmax=0x1.17f384p+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=2 conv[47] rows=12x92160 n=1105920 fnv=cf3c19fe3e9e8383 asum=0x1.3fd9d9b6cp+14 tmin=-0x1.8ep+4 tmax=0x1.0cp+4 zeros=1090560/1105920
+[GDN-TAP] kind=eager-mtap step=2 LOGITS argmax=0(0x0p+0) top2=1(0x0p+0) margin=0x0p+0 zeros=248320/248320 first5=[0x0p+0,0x0p+0,0x0p+0,0x0p+0,0x0p+0]
+[TT-STEP-PHASE] step=4 kind=eager-mtap B=9 S=0 boundary=0 warm_calls=0 dram_free_mib=-1 dispatches=0 segments=0 wall_ms=6608692930.9 warms_ms=0.0 embed_ms=0.0 pregrow_ms=0.0 cap_begin_ms=0.0 cap_body_ms=0.0 cap_end_ms=0.0 pin_ms=0.0 replay_ms=0.0 body_ms=0.0 gap_prev_ms=-6608630219.5
+[QKVZ-IN] call=192 T=9 h_asum=32069.9 h_nan=0
+[QKVZ-OUT] call=192 mixed_asum=195955 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00af9ac0 y_n=829440 y_asum=-nan x_asum=inf T_asum=96298.9 x_nan=0 y_nan=2249 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=3055.73 nan=0 zero=40975/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=392.142 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff724620040 out_n=55296 fnv=4c2c0ce5938b76e6 asum=0x1.93afe2927c926p+6 s_asum=9533.67 q_asum=1176.42 v_asum=2124.88 q_nan=0 v_nan=0
+[QKVZ-IN] call=193 T=9 h_asum=15389.8 h_nan=0
+[QKVZ-OUT] call=193 mixed_asum=53898.3 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00d1c2c0 y_n=829440 y_asum=1587.66 x_asum=53941.9 T_asum=10339.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=151.138 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=420.576 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff722b10040 out_n=55296 fnv=05996c7a8a8eed11 asum=0x1.6f6c118330618p+0 s_asum=172.1 q_asum=1261.73 v_asum=80.0033 q_nan=0 v_nan=0
+[QKVZ-IN] call=194 T=9 h_asum=17181 h_nan=0
+[QKVZ-OUT] call=194 mixed_asum=54273 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab00f0b300 y_n=829440 y_asum=1737.02 x_asum=54315.3 T_asum=11888.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=188.302 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=476.851 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff721000040 out_n=55296 fnv=5316eb69799855f0 asum=0x1.3bc05dfd6db91p+0 s_asum=214.621 q_asum=1430.55 v_asum=104.013 q_nan=0 v_nan=0
+[QKVZ-IN] call=195 T=9 h_asum=15649.3 h_nan=0
+[QKVZ-OUT] call=195 mixed_asum=45648.7 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0191bc80 y_n=829440 y_asum=1605.1 x_asum=45957.2 T_asum=12670.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=187.94 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=463.255 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff71a4f0040 out_n=55296 fnv=8190728faa13f493 asum=0x1.09c16048a76f3p+0 s_asum=193.782 q_asum=1389.76 v_asum=90.4082 q_nan=0 v_nan=0
+[QKVZ-IN] call=196 T=9 h_asum=15986.3 h_nan=0
+[QKVZ-OUT] call=196 mixed_asum=50613.2 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01b0acc0 y_n=829440 y_asum=1634.3 x_asum=50655.5 T_asum=14924.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=209.695 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=417.678 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7189e0040 out_n=55296 fnv=a0c85aa2bd6806ac asum=0x1.469057d99b4dap+0 s_asum=228.05 q_asum=1253.03 v_asum=97.4111 q_nan=0 v_nan=0
+[QKVZ-IN] call=197 T=9 h_asum=16468 h_nan=0
+[QKVZ-OUT] call=197 mixed_asum=51349.5 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab01cf9d00 y_n=829440 y_asum=1870.17 x_asum=51391.9 T_asum=17092.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=299.575 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=429.47 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff716ed0040 out_n=55296 fnv=d9e116ec8bd28e6f asum=0x1.addca068ec066p+0 s_asum=294.301 q_asum=1288.41 v_asum=125.744 q_nan=0 v_nan=0
+[QKVZ-IN] call=198 T=9 h_asum=16667.6 h_nan=0
+[QKVZ-OUT] call=198 mixed_asum=52247.7 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab026e8d80 y_n=829440 y_asum=1928.41 x_asum=52522.7 T_asum=20175 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=333.556 nan=0 zero=40961/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=420.428 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7153c0040 out_n=55296 fnv=573840811bc4e873 asum=0x1.bdfe06b9738a8p+0 s_asum=363.178 q_asum=1261.28 v_asum=135.701 q_nan=0 v_nan=0
+[QKVZ-IN] call=199 T=9 h_asum=16410.7 h_nan=0
+[QKVZ-OUT] call=199 mixed_asum=50233 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab028d7dc0 y_n=829440 y_asum=1723.63 x_asum=50275.3 T_asum=18846.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=277.324 nan=0 zero=40960/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=420.33 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff7138b0040 out_n=55296 fnv=40c1106da90c7ae7 asum=0x1.604202d33ceecp+0 s_asum=316.083 q_asum=1260.99 v_asum=128.046 q_nan=0 v_nan=0
+[QKVZ-IN] call=200 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=200 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab02ac6e00 y_n=829440 y_asum=0.18244 x_asum=42.3755 T_asum=6242.75 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff711da0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=357.565 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=201 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=201 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab034b5e80 y_n=829440 y_asum=0.499408 x_asum=42.2949 T_asum=6816.99 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff710290040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=413.511 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=202 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=202 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab036a5180 y_n=829440 y_asum=0.394845 x_asum=42.2949 T_asum=6510.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff70e780040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=353.314 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=203 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=203 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab03894ac0 y_n=829440 y_asum=0.372947 x_asum=42.2949 T_asum=6537.94 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff70cc70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=424.705 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=204 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=204 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04284880 y_n=829440 y_asum=0.609221 x_asum=42.2949 T_asum=7291.82 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff70b160040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=356.938 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=205 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=205 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab044741c0 y_n=829440 y_asum=0.32911 x_asum=42.2949 T_asum=7401.53 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff709650040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=453.877 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=206 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=206 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab04663b00 y_n=829440 y_asum=0.417211 x_asum=42.2949 T_asum=7600.61 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff707b40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=663.247 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=207 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=207 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab050538c0 y_n=829440 y_asum=0.596054 x_asum=42.2949 T_asum=11993.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff706030040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1247.52 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=208 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=208 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05243200 y_n=829440 y_asum=0.794492 x_asum=42.2949 T_asum=11386.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff704520040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1041.41 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=209 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=209 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05432b40 y_n=829440 y_asum=0.864033 x_asum=42.2949 T_asum=9421.46 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff702a10040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=422.209 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=210 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=210 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab05e22900 y_n=829440 y_asum=0.399964 x_asum=42.2949 T_asum=10523.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff700f00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=592.256 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=211 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=211 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06012240 y_n=829440 y_asum=0.163834 x_asum=42.2949 T_asum=11349 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6ff3f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=980.627 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=212 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=212 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06201b80 y_n=829440 y_asum=0.193105 x_asum=42.2949 T_asum=11096.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6fd8e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=882.018 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=213 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=213 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06bf1940 y_n=829440 y_asum=0.400263 x_asum=42.2949 T_asum=10971.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6fbdd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=933.29 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=214 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=214 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06de1280 y_n=829440 y_asum=0.291317 x_asum=42.2949 T_asum=10562.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6fa2c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=533.599 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=215 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=215 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab06fd0bc0 y_n=829440 y_asum=0.60664 x_asum=42.2949 T_asum=10653.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f87b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=996.418 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=216 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=216 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab079c0980 y_n=829440 y_asum=0.547961 x_asum=42.2949 T_asum=10434.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f6ca0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1136.68 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=217 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=217 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07bb0340 y_n=829440 y_asum=0.168901 x_asum=42.2949 T_asum=10482.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f5190040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=597.43 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=218 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=218 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab07d9fcc0 y_n=829440 y_asum=0.472905 x_asum=42.2949 T_asum=10824.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f3680040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1105.03 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=219 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=219 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0878fac0 y_n=829440 y_asum=0.529236 x_asum=42.2949 T_asum=14378.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f1b70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1855.7 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=220 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=220 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0897f440 y_n=829440 y_asum=0.85129 x_asum=42.2949 T_asum=13169.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6f0060040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1377.83 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=221 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=221 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab08b6ee00 y_n=829440 y_asum=0.67916 x_asum=42.2949 T_asum=10925.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6ee550040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=629.309 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=222 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=222 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0955ec00 y_n=829440 y_asum=0.370486 x_asum=42.2949 T_asum=11967.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6eca40040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1220.81 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=223 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=223 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0974e600 y_n=829440 y_asum=0.171459 x_asum=41.5488 T_asum=11713.1 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6eaf30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1015.08 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=224 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=224 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0993df80 y_n=829440 y_asum=0.181792 x_asum=41.5488 T_asum=11543.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e9420040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=875.228 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=225 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=225 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a32e3c0 y_n=829440 y_asum=0.240518 x_asum=41.5488 T_asum=11301.9 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e7910040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=663.308 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=226 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=226 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a51dd80 y_n=829440 y_asum=0.370889 x_asum=41.5488 T_asum=10596.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e5e00040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=695.565 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=227 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=227 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0a70d740 y_n=829440 y_asum=0.387412 x_asum=41.5488 T_asum=11022.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e42f0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=799.936 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=228 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=228 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b0fd540 y_n=829440 y_asum=0.574665 x_asum=41.5488 T_asum=11634.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e27e0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=700.713 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=229 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=229 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b2ecf40 y_n=829440 y_asum=0.297886 x_asum=41.5488 T_asum=11547.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6e0cd0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=841.625 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=230 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=230 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0b4dc8c0 y_n=829440 y_asum=0.436286 x_asum=41.5488 T_asum=11911.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6df1c0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1134.91 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=231 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=231 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0becc700 y_n=829440 y_asum=0.971673 x_asum=41.5488 T_asum=19334.7 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6dd6b0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3479.31 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=232 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=232 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c0bc0c0 y_n=829440 y_asum=1.07406 x_asum=41.5488 T_asum=16876.4 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6dbba0040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2008.16 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=233 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=233 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0c2aba80 y_n=829440 y_asum=0.883974 x_asum=41.5488 T_asum=14805.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6da090040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1607.4 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=234 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=234 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0cc9b880 y_n=829440 y_asum=1.83746 x_asum=41.5488 T_asum=18422.3 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d8580040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3067.72 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=235 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=235 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0ce8b280 y_n=829440 y_asum=2.21736 x_asum=41.5488 T_asum=19726.6 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d6a70040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3092.1 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=236 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=236 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0d07ac00 y_n=829440 y_asum=1.53583 x_asum=41.5488 T_asum=17723.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d4f60040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=2656.41 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=237 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=237 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0da6aa40 y_n=829440 y_asum=1.74376 x_asum=41.5488 T_asum=22311.2 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d3450040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3200.36 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=238 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=238 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0dc5a400 y_n=829440 y_asum=1.17155 x_asum=41.5488 T_asum=15091.8 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6d1940040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=1643.02 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[QKVZ-IN] call=239 T=9 h_asum=0 h_nan=0
+[QKVZ-OUT] call=239 mixed_asum=0 mixed_nan=0
+[CONV-SPEC] T=9 nreq=1 conv_state=0xaaab0de49dc0 y_n=829440 y_asum=1.33335 x_asum=41.5488 T_asum=20470.5 x_nan=0 y_nan=0 x_shadow=1 x_dt=2
+[POSTCONV-IN] T=9 conv_dim=10240 conv_asum=0 nan=0 zero=92160/92160 conv_dt=2
+[POSTCONV-OUT] T=9 q_asum=0 q_nan=0
+[GDN-SPEC] T=9 nreq=1 nc=9 nat0=9 init0=8 slots=9 cache=0xfff6cfe30040 out_n=55296 fnv=23c0326cb17f2383 asum=0x0p+0 s_asum=3180.55 q_asum=0 v_asum=0 q_nan=0 v_nan=0
+[GDN-SHADOW-PROBE] step=3 ssm[0] rows=9x786432 n=7077888 fnv=f438d0e0beb4a7a4 asum=0x1.4e98a6f24a004p+16 tmin=-0x1.1b81a2p+4 tmax=0x1.59995ep+4 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[0] rows=12x92160 n=1105920 fnv=1bd90f1876e48383 asum=0x1.782aedf0ep+16 tmin=-0x1.c4p+5 tmax=0x1.6ap+5 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[1] rows=9x786432 n=7077888 fnv=976bd6621a36b062 asum=0x1.b3e05f7565521p+10 tmin=-0x1.1b0b6p-2 tmax=0x1.e559fcp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[1] rows=12x92160 n=1105920 fnv=7d32a7058dd68383 asum=0x1.4b0b4f5f18p+13 tmin=-0x1.aep+2 tmax=0x1.56p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[2] rows=9x786432 n=7077888 fnv=b828490e8d36b945 asum=0x1.ee726172218fap+10 tmin=-0x1.4812f6p-2 tmax=0x1.a9acf6p-3 zeros=49151/7077888
+[GDN-SHADOW-PROBE] step=3 conv[2] rows=12x92160 n=1105920 fnv=80c2111811818383 asum=0x1.71ea2f227p+13 tmin=-0x1.5cp+2 tmax=0x1.bap+1 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[3] rows=9x786432 n=7077888 fnv=3a764f456979253b asum=0x1.de8e018a44a64p+10 tmin=-0x1.6918ccp-3 tmax=0x1.4d0768p-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[3] rows=12x92160 n=1105920 fnv=0e6043f6cd2d8383 asum=0x1.776c8bbdep+13 tmin=-0x1.ccp+1 tmax=0x1.e8p+1 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[4] rows=9x786432 n=7077888 fnv=386bdd01789c7d8b asum=0x1.19f35795fe2d6p+11 tmin=-0x1.617c8ep-4 tmax=0x1.9cd08cp-3 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[4] rows=12x92160 n=1105920 fnv=fbb0f5e008ec8383 asum=0x1.bdb3dbf39p+13 tmin=-0x1.6ep+2 tmax=0x1.84p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[5] rows=9x786432 n=7077888 fnv=92451cbd7e5abf6c asum=0x1.6b92dcf21ee22p+11 tmin=-0x1.47223ep-2 tmax=0x1.7f390ap-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[5] rows=12x92160 n=1105920 fnv=8b2bd0d4cdaa8383 asum=0x1.03cf4cb2cd8p+14 tmin=-0x1.bcp+2 tmax=0x1.4cp+3 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[6] rows=9x786432 n=7077888 fnv=47d1e0167ca32ae6 asum=0x1.b3d5a92cffa74p+11 tmin=-0x1.2237b4p-2 tmax=0x1.0364dep-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[6] rows=12x92160 n=1105920 fnv=59e2f7a9ce628383 asum=0x1.2eccb7ddbd8p+14 tmin=-0x1.94p+2 tmax=0x1.92p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[7] rows=9x786432 n=7077888 fnv=facfc675001ed3ee asum=0x1.71d397326c956p+11 tmin=-0x1.dbc658p-3 tmax=0x1.582462p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[7] rows=12x92160 n=1105920 fnv=40e1c51170298383 asum=0x1.17c4fe674cp+14 tmin=-0x1.dep+2 tmax=0x1.78p+2 zeros=1059840/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[8] rows=9x786432 n=7077888 fnv=bd554339569ad1e7 asum=0x1.7e96c1afa0846p+11 tmin=-0x1.2bb6e4p-1 tmax=0x1.9c78fp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[8] rows=12x92160 n=1105920 fnv=fe79e9def1b78383 asum=0x1.862c11889p+12 tmin=-0x1.dcp+2 tmax=0x1.cp+1 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[9] rows=9x786432 n=7077888 fnv=07759f85618772d6 asum=0x1.c0fa567ed4c0cp+11 tmin=-0x1.fdfc9ep-2 tmax=0x1.c1a544p-1 zeros=229123/7077888
+[GDN-SHADOW-PROBE] step=3 conv[9] rows=12x92160 n=1105920 fnv=93cbe8c3b90c8383 asum=0x1.aa0fdf3b4p+12 tmin=-0x1.14p+3 tmax=0x1.1cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[10] rows=9x786432 n=7077888 fnv=16700f53ef25386f asum=0x1.6e84fc2c22b9dp+11 tmin=-0x1.f16aa4p-2 tmax=0x1.fd03ep-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[10] rows=12x92160 n=1105920 fnv=9e9458f549c98383 asum=0x1.96e66aeecp+12 tmin=-0x1.02p+3 tmax=0x1.fp+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[11] rows=9x786432 n=7077888 fnv=0b01529a7118c254 asum=0x1.b875af91bfbdap+11 tmin=-0x1.e5023ep-2 tmax=0x1.66bc3p-2 zeros=17574/7077888
+[GDN-SHADOW-PROBE] step=3 conv[11] rows=12x92160 n=1105920 fnv=f41aba688d868383 asum=0x1.989f17ccp+12 tmin=-0x1.f8p+2 tmax=0x1.f8p+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[12] rows=9x786432 n=7077888 fnv=f5ac0f06c5da9bfa asum=0x1.80ebc1cbd7b2bp+11 tmin=-0x1.0147e8p-2 tmax=0x1.4f04fcp-1 zeros=1152/7077888
+[GDN-SHADOW-PROBE] step=3 conv[12] rows=12x92160 n=1105920 fnv=cdebc8b22b298383 asum=0x1.c7bd19ca8p+12 tmin=-0x1.2p+3 tmax=0x1.2p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[13] rows=9x786432 n=7077888 fnv=dd2b557883534807 asum=0x1.dd3af9fd0ee22p+11 tmin=-0x1.fedf3ap-2 tmax=0x1.192fe8p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[13] rows=12x92160 n=1105920 fnv=99c0aec77c8c8383 asum=0x1.ce9887584p+12 tmin=-0x1.18p+3 tmax=0x1.2cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[14] rows=9x786432 n=7077888 fnv=12ee38148ed26ede asum=0x1.64838e84e652fp+12 tmin=-0x1.80a9bap+0 tmax=0x1.f00ba2p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[14] rows=12x92160 n=1105920 fnv=33878bd449fa8383 asum=0x1.db09c99a8p+12 tmin=-0x1.cp+2 tmax=0x1.3p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[15] rows=9x786432 n=7077888 fnv=eabd96a9020d65a1 asum=0x1.52caa198bcf53p+13 tmin=-0x1.362424p-1 tmax=0x1.f753fp-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[15] rows=12x92160 n=1105920 fnv=27ebed548b608383 asum=0x1.76ccc4f2bep+13 tmin=-0x1.52p+3 tmax=0x1.7p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[16] rows=9x786432 n=7077888 fnv=b14ca82f27419e9b asum=0x1.207aaa92133a2p+13 tmin=-0x1.f438ap-2 tmax=0x1.28ca5p+0 zeros=294912/7077888
+[GDN-SHADOW-PROBE] step=3 conv[16] rows=12x92160 n=1105920 fnv=f5731561b5ed8383 asum=0x1.63d78166ap+13 tmin=-0x1.9p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[17] rows=9x786432 n=7077888 fnv=46d69f480ec55cb4 asum=0x1.ad07849b00c35p+11 tmin=-0x1.98b802p-2 tmax=0x1.ae1f9ap-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[17] rows=12x92160 n=1105920 fnv=5b5dc037c8d98383 asum=0x1.266bb0148p+13 tmin=-0x1.56p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[18] rows=9x786432 n=7077888 fnv=5503824a49b02051 asum=0x1.3674fb03b7128p+12 tmin=-0x1.29b23cp-1 tmax=0x1.b75a86p-1 zeros=734780/7077888
+[GDN-SHADOW-PROBE] step=3 conv[18] rows=12x92160 n=1105920 fnv=20f2d00a85338383 asum=0x1.48df808dp+13 tmin=-0x1.04p+3 tmax=0x1.b8p+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[19] rows=9x786432 n=7077888 fnv=50b1b87aa69bbf48 asum=0x1.054f7d4d6c4bep+13 tmin=-0x1.3a9466p-1 tmax=0x1.d9fee6p-2 zeros=66206/7077888
+[GDN-SHADOW-PROBE] step=3 conv[19] rows=12x92160 n=1105920 fnv=f688f6621d8b8383 asum=0x1.62a7e1c2bp+13 tmin=-0x1.8ap+2 tmax=0x1.acp+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[20] rows=9x786432 n=7077888 fnv=8b672bcb73ed81f3 asum=0x1.d680e25a16514p+12 tmin=-0x1.177cecp-1 tmax=0x1.01fc84p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[20] rows=12x92160 n=1105920 fnv=1e234f2bac638383 asum=0x1.5ac28cff4p+13 tmin=-0x1.1ep+3 tmax=0x1.02p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[21] rows=9x786432 n=7077888 fnv=0c59aa11ae134606 asum=0x1.fc2c31ecbd264p+12 tmin=-0x1.7683c4p-2 tmax=0x1.0ced44p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[21] rows=12x92160 n=1105920 fnv=23c5a44c4bc98383 asum=0x1.56df3571fp+13 tmin=-0x1.24p+3 tmax=0x1.12p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[22] rows=9x786432 n=7077888 fnv=4e7d3e5cc4259a3a asum=0x1.1165a9e6e0c5ap+12 tmin=-0x1.d1f5dp-3 tmax=0x1.f54a36p-2 zeros=405441/7077888
+[GDN-SHADOW-PROBE] step=3 conv[22] rows=12x92160 n=1105920 fnv=9a92adcc5b3e8383 asum=0x1.4a1069c86p+13 tmin=-0x1.9p+2 tmax=0x1.4ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[23] rows=9x786432 n=7077888 fnv=f5317f303aec0742 asum=0x1.04f3383e12b7ep+13 tmin=-0x1.09c7dp-1 tmax=0x1.30ep-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[23] rows=12x92160 n=1105920 fnv=039030845afe8383 asum=0x1.4cebcac7fp+13 tmin=-0x1.f4p+2 tmax=0x1.08p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[24] rows=9x786432 n=7077888 fnv=d368557d43a39055 asum=0x1.3326a44f3e995p+13 tmin=-0x1.f6d25p-3 tmax=0x1.c37adep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[24] rows=12x92160 n=1105920 fnv=cfde688b8dcb8383 asum=0x1.4610e5f918p+13 tmin=-0x1.28p+3 tmax=0x1.1ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[25] rows=9x786432 n=7077888 fnv=d46443c0398cdc21 asum=0x1.3930692f6b01cp+12 tmin=-0x1.9d71f2p-3 tmax=0x1.098d44p-2 zeros=423369/7077888
+[GDN-SHADOW-PROBE] step=3 conv[25] rows=12x92160 n=1105920 fnv=fb76828425a78383 asum=0x1.4792a9c2p+13 tmin=-0x1.3ep+3 tmax=0x1.3p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[26] rows=9x786432 n=7077888 fnv=8388087145221af1 asum=0x1.28d3d5816a9f2p+13 tmin=-0x1.0383bep-1 tmax=0x1.61afc6p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[26] rows=12x92160 n=1105920 fnv=10337cce22838383 asum=0x1.5242216e6p+13 tmin=-0x1.24p+3 tmax=0x1.0ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[27] rows=9x786432 n=7077888 fnv=46c184a4f47b6126 asum=0x1.fae34e8f8a0cap+13 tmin=-0x1.a74cb2p-2 tmax=0x1.0ed12cp+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[27] rows=12x92160 n=1105920 fnv=14d4c69b81928383 asum=0x1.c156ba1a36p+13 tmin=-0x1.48p+3 tmax=0x1.4ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[28] rows=9x786432 n=7077888 fnv=fbabf280791c0678 asum=0x1.7dc2da189987ap+13 tmin=-0x1.be7db4p-2 tmax=0x1.a7df66p+0 zeros=248903/7077888
+[GDN-SHADOW-PROBE] step=3 conv[28] rows=12x92160 n=1105920 fnv=dbd152df13db8383 asum=0x1.9b8e8112cp+13 tmin=-0x1.48p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[29] rows=9x786432 n=7077888 fnv=ba3b751e87e92824 asum=0x1.4462f4569a8a2p+12 tmin=-0x1.a506b4p-3 tmax=0x1.09c1fp-2 zeros=1/7077888
+[GDN-SHADOW-PROBE] step=3 conv[29] rows=12x92160 n=1105920 fnv=0ff778863ec18383 asum=0x1.5569938a4p+13 tmin=-0x1.4p+3 tmax=0x1.38p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[30] rows=9x786432 n=7077888 fnv=2ddb912a383190a1 asum=0x1.4a7bb6ab0d8aep+13 tmin=-0x1.32b70ap-1 tmax=0x1.d5229ap+1 zeros=372946/7077888
+[GDN-SHADOW-PROBE] step=3 conv[30] rows=12x92160 n=1105920 fnv=585d948062a78383 asum=0x1.75faef498p+13 tmin=-0x1.16p+3 tmax=0x1.1p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[31] rows=9x786432 n=7077888 fnv=8e72e99cf3dafa46 asum=0x1.0d2ee07423b7ep+13 tmin=-0x1.1cb4a4p-2 tmax=0x1.c31412p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[31] rows=12x92160 n=1105920 fnv=2ec4bed357708383 asum=0x1.6e08b33a4p+13 tmin=-0x1.b4p+2 tmax=0x1.8ep+2 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[32] rows=9x786432 n=7077888 fnv=cb39b6251888065e asum=0x1.cea8d2bec9a65p+12 tmin=-0x1.45276cp-2 tmax=0x1.35e5eep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[32] rows=12x92160 n=1105920 fnv=e68edf5d3df38383 asum=0x1.68be2a4534p+13 tmin=-0x1.e2p+2 tmax=0x1.0cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[33] rows=9x786432 n=7077888 fnv=69eb02b7ffa60c73 asum=0x1.66ea98cdef06ep+12 tmin=-0x1.b00cfep-3 tmax=0x1.42ec06p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[33] rows=12x92160 n=1105920 fnv=ab3c1052aa218383 asum=0x1.612ef638p+13 tmin=-0x1.62p+3 tmax=0x1.2cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[34] rows=9x786432 n=7077888 fnv=5fc301effbcae4e3 asum=0x1.68595a29ae166p+12 tmin=-0x1.81f87ap-2 tmax=0x1.d182dep-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[34] rows=12x92160 n=1105920 fnv=dc6e20b6bbf78383 asum=0x1.4b24c0b98p+13 tmin=-0x1.84p+2 tmax=0x1.64p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[35] rows=9x786432 n=7077888 fnv=84e8e60087a963bb asum=0x1.a2800e5841454p+12 tmin=-0x1.1668d8p-2 tmax=0x1.65fcc8p-2 zeros=102375/7077888
+[GDN-SHADOW-PROBE] step=3 conv[35] rows=12x92160 n=1105920 fnv=a2ad4e7a48848383 asum=0x1.5872119dcp+13 tmin=-0x1.02p+3 tmax=0x1.58p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[36] rows=9x786432 n=7077888 fnv=a9b29f409545cd67 asum=0x1.7dfe69abf8d68p+12 tmin=-0x1.7b2a32p-3 tmax=0x1.50b312p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[36] rows=12x92160 n=1105920 fnv=2fc5775dcb3b8383 asum=0x1.6b96a6b46p+13 tmin=-0x1.02p+3 tmax=0x1.36p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[37] rows=9x786432 n=7077888 fnv=7ad0e3208361c683 asum=0x1.bbdb26e6a9de9p+12 tmin=-0x1.3ffefep-3 tmax=0x1.4681cp-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[37] rows=12x92160 n=1105920 fnv=c035f53ae26b8383 asum=0x1.68de8d554p+13 tmin=-0x1.64p+3 tmax=0x1.12p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[38] rows=9x786432 n=7077888 fnv=e306962abed971a0 asum=0x1.31db56aaacda3p+13 tmin=-0x1.6713f2p-2 tmax=0x1.619a9p-2 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[38] rows=12x92160 n=1105920 fnv=5a54588c465d8383 asum=0x1.743ea2758p+13 tmin=-0x1.0ep+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[39] rows=9x786432 n=7077888 fnv=9be76fd695667229 asum=0x1.de3d63057f928p+14 tmin=-0x1.e0b738p-2 tmax=0x1.0cdf4cp+1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[39] rows=12x92160 n=1105920 fnv=799822f840518383 asum=0x1.2e1ae5e0cp+14 tmin=-0x1.62p+3 tmax=0x1.6ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[40] rows=9x786432 n=7077888 fnv=80b424e30be8aae2 asum=0x1.09941de3034bcp+14 tmin=-0x1.f9bf2ep-2 tmax=0x1.f49beap-1 zeros=147456/7077888
+[GDN-SHADOW-PROBE] step=3 conv[40] rows=12x92160 n=1105920 fnv=0357ed61772d8383 asum=0x1.07b1a6ca8p+14 tmin=-0x1.4p+3 tmax=0x1.5ap+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[41] rows=9x786432 n=7077888 fnv=3b017a3730aa62df asum=0x1.a6078d70070b1p+13 tmin=-0x1.134ef8p-2 tmax=0x1.3b8dc8p-1 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[41] rows=12x92160 n=1105920 fnv=c74e13c4a0e28383 asum=0x1.ceae4006e8p+13 tmin=-0x1.84p+3 tmax=0x1.34p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[42] rows=9x786432 n=7077888 fnv=857ef118ae0651c0 asum=0x1.8e8443cb1f264p+14 tmin=-0x1.4ae6e6p-2 tmax=0x1.0df598p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[42] rows=12x92160 n=1105920 fnv=1dc0e67c3a7e8383 asum=0x1.1fd918f94p+14 tmin=-0x1.82p+3 tmax=0x1.7p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[43] rows=9x786432 n=7077888 fnv=f8da31f1679327b3 asum=0x1.9e964d1cd323p+14 tmin=-0x1.3843a2p-1 tmax=0x1.03b906p+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[43] rows=12x92160 n=1105920 fnv=d07f30e273968383 asum=0x1.343a4c464p+14 tmin=-0x1.94p+3 tmax=0x1.9p+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[44] rows=9x786432 n=7077888 fnv=4aa81b847d1b72be asum=0x1.66549686aac0fp+14 tmin=-0x1.eb3378p-1 tmax=0x1.d8d078p+1 zeros=75080/7077888
+[GDN-SHADOW-PROBE] step=3 conv[44] rows=12x92160 n=1105920 fnv=095d575cc2f18383 asum=0x1.14ece891p+14 tmin=-0x1.5ep+3 tmax=0x1.7ep+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[45] rows=9x786432 n=7077888 fnv=418c2f01e427a4e0 asum=0x1.97105eee15106p+14 tmin=-0x1.79b658p-1 tmax=0x1.a0176p+1 zeros=54274/7077888
+[GDN-SHADOW-PROBE] step=3 conv[45] rows=12x92160 n=1105920 fnv=e30336a09c368383 asum=0x1.5c9cc08p+14 tmin=-0x1.a4p+3 tmax=0x1.2cp+4 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[46] rows=9x786432 n=7077888 fnv=3e21dc4151ed2bb3 asum=0x1.af41fb439aa36p+13 tmin=-0x1.f3b48ep-3 tmax=0x1.cff85ap+0 zeros=0/7077888
+[GDN-SHADOW-PROBE] step=3 conv[46] rows=12x92160 n=1105920 fnv=93fc2246d4f38383 asum=0x1.d79e6481fcp+13 tmin=-0x1.b8p+3 tmax=0x1.6cp+3 zeros=1090560/1105920
+[GDN-SHADOW-PROBE] step=3 ssm[47] rows=9x786432 n=7077888 fnv=fcfbcade920d2c3d asum=0x1.a7ca3e5fe842fp+14 tmin=-0x1.286ae4p-1 tmax=0x1.d687ecp+0 zeros=96784/7077888
+[GDN-SHADOW-PROBE] step=3 conv[47] rows=12x92160 n=1105920 fnv=cf3c19fe3e9e8383 asum=0x1.3fd9d9b6cp+14 tmin=-0x1.8ep+4 tmax=0x1.0cp+4 zeros=1090560/1105920
+[GDN-TAP] kind=eager-mtap step=3 LOGITS argmax=0(0x0p+0) top2=1(0x0p+0) margin=0x0p+0 zeros=248320/248320 first5=[0x0p+0,0x0p+0,0x0p+0,0x0p+0,0x0p+0]

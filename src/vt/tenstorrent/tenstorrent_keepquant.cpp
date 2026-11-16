@@ -2703,6 +2703,23 @@ void MatmulBTQuantInt8DotKernel(Queue& q, Tensor& out, const Tensor& a,
       ttnn::empty(ttnn::Shape({static_cast<uint32_t>(M), n4}),
                   ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR, &device,
                   ttnn::MemoryConfig{});
+  // W20: the GEMM output's allocation address, filtered to the spec step's
+  // unique M==9 geometry — the ledger line that correlates a garbage commit
+  // ([TRUST-SLOT]) with the buffer the kernel just wrote, and with the
+  // neighbours the allocator handed out around it.
+  if (M == 9 && std::getenv("VT_DUMP_TRUST") != nullptr) {
+    static std::atomic<int64_t> i8_seq{0};
+    if (i8_seq.fetch_add(1, std::memory_order_relaxed) < 512)
+      std::fprintf(stderr,
+                   "[I8DOT-OUT] M=%lld K=%lld N=%lld dev_out_addr=%llx "
+                   "act_ptr=%p w_ptr=%p\n",
+                   static_cast<long long>(M), static_cast<long long>(K),
+                   static_cast<long long>(N),
+                   static_cast<unsigned long long>(
+                       dev_out.mesh_buffer().address()),
+                   static_cast<const void*>(a.data),
+                   static_cast<const void*>(b.data));
+  }
 
   // Grid: one core per 4-column GROUP slice. The write unit the out page
   // gets is one 16-B group (see the kernel's write loop), so the split is in

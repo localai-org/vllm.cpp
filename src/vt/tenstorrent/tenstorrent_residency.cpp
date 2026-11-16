@@ -1269,15 +1269,27 @@ void CommitDeviceLogical2D(Tensor& out, ttnn::Tensor dev, uint32_t rows, uint32_
   }
   std::lock_guard<std::mutex> g(SlotMutex());
   BufferSlot* s = FindSlot(out.data);
-  if (std::getenv("VT_TT_SLOT_TRACE") != nullptr) {
+  // W20: the commit's address ledger — gated to the spec step's qkvz
+  // geometries (rows==9, the z [9,6144] and mixed [9,10240] commits) so the
+  // log stays readable. A NEW address equal to a LIVE neighbour's is the
+  // alias; the z slot's stable address across calls is the reuse cycle.
+  if ((rows == 9 && (cols == 6144 || cols == 10240)) &&
+      (std::getenv("VT_TT_SLOT_TRACE") != nullptr ||
+       std::getenv("VT_DUMP_TRUST") != nullptr)) {
     const auto ds = dev.logical_shape();
     int64_t vol = 1;
     for (uint32_t i = 0; i < ds.rank(); ++i) vol *= ds[i];
     std::fprintf(stderr,
-                 "[TT-SLOT] commit out=%p rows=%u cols=%u tracked=%d vol=%" PRId64
-                 " dt=%d\n",
+                 "[TT-COMMIT] out=%p rows=%u cols=%u tracked=%d vol=%" PRId64
+                 " dt=%d new_addr=%llx old_addr=%llx old_live=%d\n",
                  static_cast<const void*>(out.data), rows, cols,
-                 s != nullptr ? 1 : 0, vol, static_cast<int>(dev.dtype()));
+                 s != nullptr ? 1 : 0, vol, static_cast<int>(dev.dtype()),
+                 static_cast<unsigned long long>(dev.mesh_buffer().address()),
+                 (s && s->device.has_value())
+                     ? static_cast<unsigned long long>(
+                         s->device->mesh_buffer().address())
+                     : 0ull,
+                 (s && s->device.has_value()) ? 1 : 0);
   }
   if (s == nullptr) {
     // Untracked buffer (e.g. stack/test scratch): fall back to host write.
@@ -1462,6 +1474,70 @@ void MarkScratchAcquired(void* host) {
   DropWeightViewShadowsInRange(host, bytes, /*drain=*/true);
 }
 
+// W20 (the drafter-ON NaN bisect's decisive instrument): the READ-ONLY
+// trusted dual-read of one tensor's committed device shadow. Two independent
+// to_vector passes must agree byte-for-byte; unlike TrustDump this touches
+// NO slot state (no EnsureHostBytes — host_current stays false), so the
+// consumer's serve path after this read is exactly what it would have been
+// and a commit-side read is comparable against a serve-side read of the
+// same slot. Prints [TRUST-SLOT] with the shadow's DRAM address.
+void DebugSlotTrustRead(const Tensor& t, const char* tag) {
+  ttnn::Tensor dev;
+  {
+    std::lock_guard<std::mutex> g(SlotMutex());
+    BufferSlot* s = FindSlot(t.data);
+    if (s == nullptr || !s->device_current || !s->device.has_value()) {
+      std::fprintf(stderr, "[TRUST-SLOT] %s noslot\n", tag);
+      std::fflush(stderr);
+      return;
+    }
+    dev = *s->device;
+  }
+  std::vector<float> a = dev.to_vector<float>();
+  std::vector<float> b = dev.to_vector<float>();
+  const bool agree = (a == b);
+  double acc = 0.0;
+  uint64_t nan = 0, inf = 0, zero = 0;
+  for (float f : a) {
+    if (std::isnan(f)) {
+      ++nan;
+      continue;
+    }
+    if (std::isinf(f)) {
+      ++inf;
+      continue;
+    }
+    if (f == 0.0f) {
+      ++zero;
+      continue;
+    }
+    acc += f > 0.0f ? f : -f;
+  }
+  const auto ls = dev.logical_shape();
+  std::fprintf(stderr,
+               "[TRUST-SLOT] %s agree=%d n=%zu asum=%.6g nan=%llu inf=%llu "
+               "zero=%llu shape=%ux%u dt=%d addr=%llx\n",
+               tag, agree ? 1 : 0, a.size(), acc,
+               static_cast<unsigned long long>(nan),
+               static_cast<unsigned long long>(inf),
+               static_cast<unsigned long long>(zero),
+               static_cast<unsigned>(ls.rank() > 0 ? ls[0] : 0),
+               static_cast<unsigned>(ls.rank() > 1 ? ls[1] : 0),
+               static_cast<int>(dev.dtype()),
+               static_cast<unsigned long long>(dev.mesh_buffer().address()));
+  std::fflush(stderr);
+}
+
+// W20c: the COLD BFP8 staging path, exposed for the focused test. Runs the
+// exact EnsureBfp8WeightDevice body (from_span + device typecast + cache
+// install) — the caller passes a FRESH host tensor per call (a new pointer =
+// a cache miss = a cold staging per call), which is the engine's
+// once-per-weight lifecycle whose unsynced temporary drop is the suspected
+// reuse hazard.
+void Bfp8StageForTest(const Tensor& t) {
+  (void)EnsureBfp8WeightDevice(t, SharedMeshDevice());
+}
+
 // TRUSTED dump (BACKEND-TENSTORRENT-QWEN35 W2c measurement reset): whole
 // tensors only, typed header, DUAL-READ verified. Two independent
 // Synchronize+Copy passes must agree byte-for-byte or the file records
@@ -1518,6 +1594,29 @@ std::vector<float> DebugDeviceReadbackF32(Queue& q, const Tensor& t) {
   ttnn::Tensor dev = EnsureDevice2D(t, device);
   std::vector<float> v = dev.to_vector<float>();
   return v;
+}
+
+// VT_TT_GDN_SPEC_DEBUG W7: the slot state + the resident buffer's DRAM
+// address for one host pointer — the aliasing probe. Two live tensors whose
+// device buffers report the SAME address are one buffer twice, and any
+// zero-fill / scatter into either corrupts both. Read under the slot mutex.
+DebugSlotState DebugSlotStateOf(const Tensor& t) {
+  DebugSlotState s;
+  std::lock_guard<std::mutex> g(SlotMutex());
+  BufferSlot* slot = FindSlot(t.data);
+  if (slot == nullptr) return s;
+  s.tracked = true;
+  s.dev_rows = slot->dev_rows;
+  s.dev_cols = slot->dev_cols;
+  s.bytes = slot->bytes;
+  s.host_current = slot->host_current;
+  s.device_current = slot->device_current;
+  s.reserved = slot->device_reserved;
+  if (slot->device.has_value()) {
+    s.dev_dtype = static_cast<int>(slot->device->dtype());
+    s.dev_buf_addr = slot->device->mesh_buffer().address();
+  }
+  return s;
 }
 
 void EnsureHostBytes(void* host) {

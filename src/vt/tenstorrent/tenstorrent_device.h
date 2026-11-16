@@ -107,6 +107,26 @@ MeshDevice& SharedMeshDevice();
 // ttnn themselves. `Queue`/`Tensor` are vt types (vt/ops.h is in scope
 // wherever this header is included after it).
 std::vector<float> DebugDeviceReadbackF32(Queue& q, const Tensor& t);
+// VT_TT_GDN_SPEC_DEBUG W7: the slot state + the resident buffer's DRAM
+// address for one host pointer (the aliasing probe). Same gating pattern as
+// DebugDeviceReadbackF32 — defined in the TT-gated ops TU, inline no-op
+// otherwise.
+struct DebugSlotState {
+  bool tracked = false;
+  uint32_t dev_rows = 0, dev_cols = 0;
+  size_t bytes = 0;
+  bool host_current = false, device_current = false, reserved = false;
+  int dev_dtype = -1;
+  uint64_t dev_buf_addr = 0;
+};
+DebugSlotState DebugSlotStateOf(const Tensor& t);
+// W20: the READ-ONLY trusted dual-read of the tensor's committed device
+// shadow (two passes must agree; no slot-state mutation). Defined in the
+// TT-gated ops TU, inline no-op otherwise.
+void DebugSlotTrustRead(const Tensor& t, const char* tag);
+// W20c: the COLD BFP8 staging path for the focused test (see the residency
+// TU). Defined in the TT-gated ops TU, inline no-op otherwise.
+void Bfp8StageForTest(const Tensor& t);
 // TRUSTED dump: whole tensor, typed header, dual-read verified (see ops.cpp).
 void TrustDump(Queue& q, const char* dir, const char* name, const Tensor& t);
 // Review finding F1 (#1715): these two are defined only in the TT-gated ops
@@ -118,6 +138,9 @@ void TrustDump(Queue& q, const char* dir, const char* name, const Tensor& t);
 inline std::vector<float> DebugDeviceReadbackF32(Queue&, const Tensor&) {
   return {};
 }
+inline DebugSlotState DebugSlotStateOf(const Tensor&) { return {}; }
+inline void DebugSlotTrustRead(const Tensor&, const char*) {}
+inline void Bfp8StageForTest(const Tensor&) {}
 inline void TrustDump(Queue&, const char*, const char*, const Tensor&) {}
 #endif
 void RegisterHostBuffer(void* host, size_t bytes);
