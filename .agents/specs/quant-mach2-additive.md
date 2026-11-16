@@ -129,11 +129,13 @@ from it unchanged, and any local repair of it is recorded as ours.
 
 ## Risks
 
-- **No token-exact gate is available yet.** The model card states the model can
-  loop without temperature 1.0 / top_p 0.95 / top_k 20, so a greedy stream may
-  not be stable and a token gate may be impossible. This is why the decode
-  oracle is U1: byte-exact weights are deterministic and need no sampling, and
-  the model-level gate is chosen after measurement rather than assumed.
+- **No token-exact gate is available, and none is planned.** The model card
+  states the model can loop without temperature 1.0 / top_p 0.95 / top_k 20, so a
+  sampled stream is not reproducible across runtimes. The model-level gate is
+  therefore designed on **next-token logits and per-layer activations**, which are
+  deterministic in one forward pass - see `## Acceptance gate: logits and layer
+  fingerprints, not a token stream`. A token stream is at most a smoke test and
+  is never the verdict.
 - **`decode.py` may not be runnable as published.** The fetched text loses
   leading whitespace in places (`C[1:, 1:] = Q` and several `return`s sit at
   column 0), which would be an `IndentationError`. Whether that is the file or
@@ -328,6 +330,105 @@ Six mutations of the spine port were tried and all six are caught: a `_HS` digit
 the normalisation using `sqrt(radix)` instead of `sqrt(cols)`, the fold's row
 shift `6 -> 5`, the fold's sign bit `15 -> 14`, `rc_grid` dividing instead of
 multiplying, and the column signs taken from `sv` instead of `su`.
+
+## Acceptance gate: logits and layer fingerprints, not a token stream (design, 2026-11-16)
+
+### Why not tokens
+
+The model card states the model can loop without `T=1.0, top_p=0.95, top_k=20`.
+A token gate has two separate problems. First, it is a **sampling** verdict: under
+the recommended settings the stream depends on a PRNG and a random draw sequence
+that no two runtimes share, so it cannot be reproduced. Second, and worse, it is
+a **lossy** verdict even when deterministic: a handful of corrupted weights in
+one expert can leave twenty tokens unchanged, which is why the earlier
+decode bug (a uniform 64x on every radix rotation) was invisible to every
+structural test and would have been invisible to a short token stream too.
+
+So the gate reads the two surfaces that are functions of the weights alone: the
+**next-token logits** and the **per-layer activations**. Both are deterministic in
+a single forward pass, need no sampler, and are defined for the model card's own
+looping regime.
+
+### The two arms
+
+Both arms are **the same binary and the same kernels**. They differ only in where
+the weights came from:
+
+- **A (packed):** the artifact's `fn_packed_v2` bytes decoded in-process by the
+  port landed here (expert and spine paths), bf16-rounded exactly where the
+  decoder rounds.
+- **B (reference):** `decode.py`, pinned by sha256, materialising the same
+  tensors, loaded as bf16.
+
+This isolates the **codec**, which is the open question. Comparing against
+upstream vLLM on the base model instead would conflate three questions - our
+decode, our `qwen4_exp` forward, and vLLM's - and needs an oracle that may not
+register the architecture at our pin. Forward parity is a separate row.
+
+### Protocol
+
+Fixed **token ids**, not text, so no tokenizer sits between the arms: one
+prefill of 512 ids, then 8 teacher-forced decode steps (the same ids fed to both
+arms, so no feedback). Batch 1, one thread, `temperature=0` is irrelevant here
+because nothing samples. The id sequence is chosen to span the model's layer mix
+(`linear_attention` x3 then `full_attention`), to exceed the indexer budget of
+2048 only in a second, longer case, and to place at least one real token on the
+**PLE layer (2)**, since that is the only layer whose output depends on the
+ngram table.
+
+### Metrics, and why each
+
+1. **Logits.** Primary: `max |z_A - z_B| / (max z - min z)` per step - scale-free,
+   so it does not move when a logit vector is merely shifted. Secondary: top-1
+   agreement, and `KL(p_B || p_A)` over the softmax.
+2. **Per-layer activations.** `VT_Q4EXP_LAYER_FP` on both arms, compared with
+   `scripts/q4exp-layerfp-diff.py`. The **`rel_proj` column is the one that
+   counts**: `sumabs`/`S|x|` are sign-insensitive and under-report a true
+   divergence by a median 75-140x (measured over 400 seeds in
+   `test_q4exp_layerfp_diff.py::MetricSpread`), so a gate keyed on `sumabs`
+   would pass a perturbation it cannot see.
+
+### Thresholds come from a measured budget, not taste
+
+Weight-level agreement is already known: spine values agree bit-for-bit on
+99.97% and 99.85% of two synthetic tensors with a ~1 ulp residue, and the expert
+path at ~2 ulp. The gate therefore has two numbers, both measured before it is
+declared:
+
+- **Noise floor.** Run A against a second B-built from the same `decode.py`
+  (different BLAS layout, same arithmetic): the resulting logit and `rel_proj`
+  spread is the floor. It is not zero, and pretending otherwise is how a gate
+  becomes a coin flip.
+- **Sensitivity.** Corrupt the packed side deliberately and record the smallest
+  corruption the gate still rejects: one flipped code bit in one codeword, one
+  expert's `wscale` off by 1e-3, one `_HS` row permuted. The gate is only worth
+  its run if that list is all rejected, and the measured margin between floor and
+  smallest detected corruption is the number to publish.
+
+### Coverage, and what it does not cover
+
+| Surface | Covered by |
+|---|---|
+| expert decode (trellis, LUT, gamma, wscale, rotation) | logits + `moe`, `s.mlp` taps |
+| spine decode (fold, `_HS`, rc grid) | logits + `in`, `blk`, `s.attn` taps |
+| PLE / n-gram table | `ple`, `s.ple` taps on layer 2 |
+| head (int5, `group` 64) | **nothing yet** - logits are computed in the registry and no tap writes them |
+
+That last row is the one piece of new code this gate needs: a `VT_Q4EXP_LOGITS`
+tap (top-k `(id, value)` per step, plus the same fixed-seed projections), because
+`LayerFp` stops at `out` and the `lm_head` decode is exactly the int5 path an
+unexercised tap would leave unverified. It is product code, so it needs its own
+red-first test and a fresh review; this design does not land it. Tracked as
+`ISSUE-LOCAL-01M7JPTTD1JN00JCMSJVNVQJHR`.
+
+### Ratification this asks for
+
+The repository requires an explicitly ratified distributional gate when the
+oracle's greedy decode is non-deterministic. What is requested here is narrower
+and stronger: **not** a distributional gate, but a **deterministic numeric gate
+on logits and activations**, with a measured noise floor and a measured
+sensitivity floor, in place of token equality. No sampling, no tolerance chosen
+by eye, and the pass/fail decision reproducible from two log files.
 
 **Byte equality is not reachable on the radix path, and the gate must say so.**
 Against the real shapes the C++ and the oracle agree bit-for-bit on 240,719 of
