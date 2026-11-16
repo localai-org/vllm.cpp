@@ -81,6 +81,17 @@ OUT's dtype in both commit arms). All five characterization arms green; the
 existing PA/RAC suites unchanged. The stage-C consumption gates run from
 /tmp/q38-stage-c after this branch merges there.
 
+## Owed
+
+- `ISSUE-LOCAL-01M7JYHQJEANK9Z6S0SJWKXWBC` — the TT batched-decode RAC
+  device lane's second-slot second-head garbage under rich suite state
+  (exposed by this row's consumption gate; the fix shifted the allocator/JIT
+  state that gated it).
+- `ISSUE-LOCAL-01M7JYJ1WDJJ3M7E23VQCYS6KC` — the program-cache-disabled PA
+  decode's value-level garbage under rich suite state (the characterization
+  arm that stays red there; out of the production path's reach — the engine
+  never disables the cache).
+
 ## Outcome
 
 - Measured: the focused sweep (RAC-seeded, 64 seqs) red-before garbage at
@@ -105,3 +116,24 @@ existing PA/RAC suites unchanged. The stage-C consumption gates run from
 - The stage-C seq-parity fingerprint (2/5/7) is recorded as a state
   fingerprint of that process, so the hunt's "which seq" question is closed
   as malformed: the invariants travel, the set does not.
+- The stage-C consumption gates (2026-11-16, from /tmp/q38-stage-c at the
+  merge e41f9fbbb): Q4_K_M KV64 drafter-ON ×3 — token-ids sha256
+  `e171d6b1…` all three reps = the recorded DEGENERATE signature, TPOT
+  9924.84 ms (the degenerate loop's band, not a number) — **THE ACCEPTANCE
+  MULTIPLE REMAINS UNMEASURABLE**: the engine's DFlash2 degeneracy is NOT
+  this defect. UD-Q6_K_XL KV8 drafter-OFF: `b36bc61a…` BYTE-IDENTICAL, TPOT
+  5370.57 vs the recorded 5340.9 (+0.55%, the rerun band); its drafter-ON
+  leg stays capacity-blocked (the standing named blocker). Q4_K_M drafter-OFF:
+  `d49c53d2…` BYTE-IDENTICAL, TPOT 6642.71 vs 6607 (+0.54%, the band). The
+  W22 mix harness: pa_bad 5/40 → **0/40** — every op 0-bad in all 40 reps.
+  The W22 discriminator: fully green (the main arm 1.43305e+38 → 0.00121).
+  The suite ledger (the honest comparison, full suite at each head):
+  pre-merge 17 failed → post-merge 16 failed; CLEARED by the fix: the
+  pure-decode PA case, the W22 harness, the W22 discriminator; UNCHANGED
+  pre-existing: kGdnStateGather/Scatter (the ScatterRowsExact guard's
+  refusal, present at 67d041d76 in isolation); NEWLY EXPOSED (filed under
+  ## Owed): the RAC device lane's second-slot second-head garbage (suite
+  context only) and the cache-disabled decode's value garbage (suite
+  context only). The suite teardown segfault (GraphTracker::is_enabled at
+  process exit, after the summary) reproduces at BOTH heads — pre-existing,
+  not this row's.

@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M7JHW5N40PWJCRG5BAKQN7Y8
 Title: TT paged-attention device-SDPA small-window defect: deterministic garbage at seq=2/5/7 — the first isolated reproduction of the DFlash2 degeneracy's compute class
 Row: TT-PA-SMALL-WINDOW
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-16
 Updated: 2026-11-16
-Closed: -
+Closed: 2026-11-16
 
 ## Problem
 
@@ -16,33 +16,4 @@ The QWEN38-DFLASH2-STAGE-C degeneracy hunt (20+ waves) reproduced the compute cl
 
 ## Resolution
 
-- 2026-11-16 (W1, characterization): the boundary is mapped and it moves
-  with process state — the stage-C seq-parity set (2/5/7) is that process's
-  fingerprint, not the defect's property. Invariants that travel: the
-  garbage is always in the second KV group's heads (2/3), never
-  bf16-rounded, and its bytes are recycled memory (RISC-V instructions,
-  RTA words, NaNs). The Copy-seeded arm garbages too — the RAC
-  write-visibility hypothesis is falsified. Evidence:
-  `docs/bench-evidence/tt-pa-small-window-20261116/` (flat).
-- 2026-11-16 (W2, root cause): OURS, in the commit path. The
-  `VT_TT_PA_DUMP=1` bisect shows the raw `sdpa_decode` output clean at
-  every call including the garbage ones; `CommitDeviceLogical2D` moved the
-  bf16 SDPA output onto the caller's f32-contract output slot and
-  `EnsureHostBytes` (tenstorrent_residency.cpp:1587-1597) wrote the host
-  bytes at the shadow's 2-byte width into the 4-byte buffer — the f32
-  consumer's second half (heads 2/3) read recycled bytes. The bf16 re-read
-  of the same buffer matches the oracle to ~1e-3 on every garbage row. The
-  upstream tt-metal SDPA kernel and the writer-L1-fence candidate are both
-  falsified (the fence was applied, changed nothing, reverted).
-- 2026-11-16 (W3, fix): `PaOutTypedForCommit` in tenstorrent_paged.cpp —
-  the decode and prefill commit arms typecast the SDPA output to OUT's
-  dtype before the commit; unhandled dtypes decline to the host scatter.
-  Green: the RAC-seeded sweep 0 garbage / 64 (was garbage at seq=1),
-  the Copy-seeded sweep 0 / 64 (was 31/64), payload tracking, fresh-cache
-  per seq, and the program-cache-disabled arm all clean; the existing PA
-  suites (5 cases) and the RAC bit-exact arm unchanged. Evidence in the
-  same directory (`w3-*-GREEN.log`, `w3-*-regression.log`).
-- Owed to the stage-C row: the consumption gates (Q4_K_M KV64 drafter-ON
-  3 reps token identity + TPOT vs 6607; UD-Q6_K_XL KV8 vs b36bc61a +
-  TPOT vs 5340.9; drafter-OFF 6/6) run from /tmp/q38-stage-c after this
-  row's fix merges there.
+FIXED 2026-11-16: the bf16 SDPA output committed on an f32-contract out; PaOutTypedForCommit typecasts the commit to OUT's dtype in both arms. Focused red/green (0 garbage / 64 swept, was garbage at seq=1), all five characterization arms green, the W22 mix harness pa_bad 5/40 -> 0/40, the W22 discriminator 1.43e38 -> 0.00121, the pure-decode PA suite case cleared. The consumption gates ran at the merge e41f9fbbb: the acceptance multiple stays UNMEASURABLE (the drafter-ON stream remains the degenerate e171d6b1 signature, 3/3) — the engine's DFlash2 degeneracy is NOT this defect; the OFF arms byte-identical in band. Two latent defects newly exposed, filed under the spec's ## Owed
