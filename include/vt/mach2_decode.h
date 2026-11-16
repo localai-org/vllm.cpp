@@ -9,13 +9,17 @@
 // weights and does no matmul. Every operation here is integer-exact except
 // `Bf16Round`, which is the release decoder's own deliberate rounding.
 //
-// What is deliberately NOT here yet, and why: `_HS`, the hand-written sign table
-// the SPINE path's rotation uses. `decode.py`'s `hadamard` carries two different
-// radix-12/20 matrices - `_HS` for the spine and the quadratic-residue
-// construction for the expert - and the fetched text of `_HS` is not trustworthy
-// until U2 has compiled the published file. Everything else the decoder needs to
-// turn a code stream into weights is landed, including the expert path's hashed
-// sign derivation and its tile assembly.
+// BOTH rotations are here. `decode.py`'s `hadamard` carries two different
+// radix-12/20 matrices - `_HS`, a hand-written sign table, for the spine path and
+// the quadratic-residue construction for the expert - and they also differ in
+// NORMALISATION: the spine branch runs the bare butterflies over its inner block
+// and divides the whole product by sqrt(N), while the expert branch recurses into
+// a normalised transform and divides by sqrt(radix). Mixing the two scales the
+// result, which is exactly the defect the differential gate first found.
+//
+// `_HS` is transcribed here from the published `decode.py`, which reproduces its
+// own `H @ H.T == radix * I` assertion in-file, so the tables are verifiable at
+// rest rather than trusted.
 //
 // Two constants of the format are worth stating up front because they are easy to
 // get wrong and the tests pin them: `wave_gamma` is indexed by anti-diagonal
@@ -126,6 +130,31 @@ void HadamardExpert(float* x, std::size_t rows, int cols);
 // a turn and the second as a uniform - a lane is `-1` only when the turn lands in
 // the upper half. Returns `dim` values of `+1` or `-1`.
 std::vector<float> ExpertSigns(std::uint64_t seed, int dim);
+
+// `hadamard(x, "spine")`: the spine path's orthonormal transform, radix 12 or 20
+// times a power-of-two inner block. Note the normalisation difference from
+// `HadamardExpert`: here the inner butterflies are bare and the whole product is
+// divided by sqrt(cols). `cols` must be a power of two, `12 * 2^k` or `20 * 2^k`.
+void HadamardSpine(float* x, std::size_t rows, int cols);
+
+// `decode_ne_tensor`: one non-expert tensor from its packed tape.
+//
+//   unit = fold[states] as (mb, nb, kTile, kTile) -> (m, kTile, nb, kTile) -> (m, n)
+//   unit *= wscale
+//   unit = hadamard_spine(unit) * sign(su)          // along n
+//   unit = hadamard_spine(unit^T) * sign(sv)        // along m
+//   out = rc_grid(rc_max_m, |sv|) row-wise * bf16_round(out) * rc_grid(rc_max_n, |su|)
+//
+// `su` holds `n` signed values and `sv` holds `m`: each carries BOTH the rotation
+// sign and, through its magnitude, the `rc_grid` multiplier. A codeword's two
+// values become two consecutive COLUMNS of one row (the spine tape holds 8 bits
+// per codeword: 4 bits for each of two weights).
+//
+// `states` holds `nstep = m * n / kSpineValues` windows, `tlut` is
+// `kSpineTlutRows` rows of `kSpineValues`, and `out` receives `m * n` floats.
+void DecodeNeTensor(const uint16_t* states, std::int64_t nstep, const float* tlut, int mb, int nb,
+                    float wscale, const std::int32_t* su, const std::int32_t* sv, float rc_max_m,
+                    float rc_max_n, float* out);
 
 // `decode_expert`'s assembly for one expert: the packed tape's windows become
 // tiles, each tile is scaled by its own `wave_gamma` and the expert's `wscale`,

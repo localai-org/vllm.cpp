@@ -226,7 +226,7 @@ pull requests, each red-first against this spec.
 
 `row/QUANT-MACH2-ADDITIVE-U1` lands `include/vt/mach2_decode.h`,
 `src/vt/cpu/cpu_mach2_decode.cpp` and `tests/vt/test_mach2_decode.cpp`
-(13 cases, 2714 assertions), with both the TU and the suite registered in
+(16 cases, 3513 assertions), with both the TU and the suite registered in
 `CMakeLists.txt` and `tests/CMakeLists.txt`.
 
 **Landed:** the wave map, the tail-biting trellis state walk, the expert LUT
@@ -236,8 +236,8 @@ transform, the quadratic-residue radix-12/20 matrices, the expert orthonormal
 transform, the Philox sign expansion, and the expert tile assembly (gather,
 per-tile `wave_gamma`, `wscale`, both rotations, both sign tables).
 
-**Still owed by U1:** the `_HS` string tables the SPINE rotation uses, and the
-SHA-256 that turns `sign_seed()`'s text into a seed. The string tables are
+**Still owed by U1:** only the SHA-256 that turns `sign_seed()`'s text into a
+seed. The `_HS` string tables LANDED with the spine path; see below. The string tables are
 deliberately not embedded: the fetched `decode.py` text is not yet trusted, and a
 table copied from a possibly-mangled source is worse than no table, because a
 test written against the same text would agree with it. The SHA-256 is a loader
@@ -287,6 +287,47 @@ portable without any further download; it stays owed as work, not as a risk.
 - The expert path divides by `sqrt(radix)` and recurses into a normalised
   transform for the inner block, while the spine path divides by `sqrt(N)` and
   uses `_HS`. Mixing the two normalisations is the defect the gate found.
+
+## Spine path landed (2026-11-16)
+
+`HadamardSpine`, `DecodeNeTensor` and the `_HS` tables join the already-landed
+`TrellisStates` (step 8, 128 windows per tile), `FoldSpineLut` and `RcGrid`, so
+the decoder now covers both halves of the format: expert tensors and non-expert
+("spine") tensors.
+
+`_HS` is transcribed **programmatically** from the published `decode.py` by
+`fill_tables.py`-style generation rather than typed, because a single wrong digit
+in a 20x12 sign table would otherwise be undetectable at rest. `decode.py`
+asserts `H @ H.T == radix * I` on import and so does the suite's energy test.
+
+**Differential result against the unmodified decoder**, on synthetic shards at
+two shapes that take different radices (160x320 radix-20, 96x48 radix-12):
+51,184 of 51,200 values bit-identical on the first and 4,601 of 4,608 on the
+second, with a maximum deviation of 3.9e-07 and 5.6e-07 at magnitudes of 39.9 and
+32.7 - about one unit in the last place. The residual is the same BLAS
+accumulation-order effect the expert path has, and much smaller here because the
+spine rotation is dominated by butterflies and by +/-1 matmuls.
+
+**A finding, and a corrected test.** `_HS` is orthogonal but **not symmetric**,
+unlike the expert path's quadratic-residue matrix (which `decode.py` separately
+asserts `H == H.T` on). An orthogonal matrix that is not symmetric is not its own
+inverse, so the spine transform is NOT an involution: two passes leave a residual
+of 27.5 on a 48-wide ramp, verified against `decode.py` itself, while energy is
+preserved to float32. The first version of the spine test asserted "twice is
+identity", failed, and was wrong - not the port, one pass of which reproduces
+`decode.py` to the last bit on every size tried. The suite now asserts Parseval,
+which is the invariant that catches a wrong table row or a wrong normalisation.
+
+**`rc_grid` multiplies by `1/127`; it does not divide by 127.** The two forms
+round differently on 100 of the 889 `(mx, k)` pairs tried - by about 3e-8, well
+above the test's tolerance - and the first pinned grid happened to contain only
+agreeing pairs, so a division survived every mutation. Two differing pairs are now
+pinned, and that mutation fails.
+
+Six mutations of the spine port were tried and all six are caught: a `_HS` digit,
+the normalisation using `sqrt(radix)` instead of `sqrt(cols)`, the fold's row
+shift `6 -> 5`, the fold's sign bit `15 -> 14`, `rc_grid` dividing instead of
+multiplying, and the column signs taken from `sv` instead of `su`.
 
 **Byte equality is not reachable on the radix path, and the gate must say so.**
 Against the real shapes the C++ and the oracle agree bit-for-bit on 240,719 of
