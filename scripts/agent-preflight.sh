@@ -513,6 +513,16 @@ else
     "numpy is not importable here, and the tool this suite exercises needs it." \
     "CI installs python3-numpy and runs the same suite."
 fi
+# The GLM4-MoE-Lite K1/K2 lease runner (#2839). It imports numpy, so an absent
+# numpy is a SKIP and never an `ok`.
+if python3 -c 'import numpy' >/dev/null 2>&1; then
+  run "test_glm4_k1k2_runner" python3 tests/scripts/test_glm4_k1k2_runner.py
+else
+  skip "test_glm4_k1k2_runner" \
+    "numpy is not importable here, and the runner this suite exercises needs it." \
+    "CI installs python3-numpy and runs the same suite."
+fi
+
 # THE PROMPT-ADHERENCE SUITE (#2295, owning #1854's first sub-question),
 # registered in the SAME change that adds it, for the reason the paragraph above
 # records. It exercises the third half of this tool: not "are these two renders
