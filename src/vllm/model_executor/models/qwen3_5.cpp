@@ -8548,6 +8548,10 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
     if (layer.is_linear_attention) {
       VT_CHECK(gdn_state != nullptr,
                "paged dense layer: GDN layer needs a GdnStateCache");
+      if (std::getenv("VT_TT_GDN_SPEC_DEBUG") != nullptr && gdn_meta.num_spec_decodes > 0)
+        std::fprintf(stderr, "[LAYER-GDN-PTR] layer=%lld ssm=%p conv=%p\n",
+                     static_cast<long long>(layer_index),
+                     gdn_state->ssm_state.data, gdn_state->conv_state.data);
       return GdnBlockPaged(d, layer.gdn, cfg, dhn.t(), sdi, gdn_meta, *gdn_state, T);
     }
     VT_CHECK(attn_kv != nullptr,
@@ -10515,6 +10519,10 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
         layer.is_linear_attention ? nullptr : &attn_kv[static_cast<size_t>(fa_idx++)];
     const GdnStateCache* gs =
         layer.is_linear_attention ? &gdn_state[static_cast<size_t>(gdn_idx++)] : nullptr;
+    if (gs != nullptr && std::getenv("VT_TT_GDN_SPEC_DEBUG") != nullptr &&
+        gdn_meta.num_spec_decodes > 0)
+      std::fprintf(stderr, "[LOOP-GDN-PTR] layer=%lld ssm=%p\n",
+                   static_cast<long long>(l), gs->ssm_state.data);
     const StepPhaseClk::time_point sph_l0 =
         sph_layer ? StepPhaseClk::now() : StepPhaseClk::time_point{};
 #ifdef VLLM_CPP_TENSTORRENT

@@ -127,6 +127,16 @@ void DebugSlotTrustRead(const Tensor& t, const char* tag);
 // W20c: the COLD BFP8 staging path for the focused test (see the residency
 // TU). Defined in the TT-gated ops TU, inline no-op otherwise.
 void Bfp8StageForTest(const Tensor& t);
+// W21 (the interleaved-op harness): the engine's EXACT multi-replacement
+// indexed_fill form and the exact GatherRowsExact form as test surfaces
+// (see the gdn TU). Defined in the TT-gated gdn TU, inline no-op otherwise.
+std::vector<float> ConvSpecFillForTest(const std::vector<float>& base,
+                                       const std::vector<float>& vals,
+                                       const std::vector<uint32_t>& ids,
+                                       int64_t base_rows, int64_t cols);
+std::vector<float> GatherRowsForTest(const std::vector<float>& cache,
+                                     const std::vector<uint32_t>& row_ids,
+                                     int64_t cache_rows, int64_t cols);
 // TRUSTED dump: whole tensor, typed header, dual-read verified (see ops.cpp).
 void TrustDump(Queue& q, const char* dir, const char* name, const Tensor& t);
 // Review finding F1 (#1715): these two are defined only in the TT-gated ops
@@ -141,6 +151,17 @@ inline std::vector<float> DebugDeviceReadbackF32(Queue&, const Tensor&) {
 inline DebugSlotState DebugSlotStateOf(const Tensor&) { return {}; }
 inline void DebugSlotTrustRead(const Tensor&, const char*) {}
 inline void Bfp8StageForTest(const Tensor&) {}
+inline std::vector<float> ConvSpecFillForTest(const std::vector<float>&,
+                                              const std::vector<float>&,
+                                              const std::vector<uint32_t>&,
+                                              int64_t, int64_t) {
+  return {};
+}
+inline std::vector<float> GatherRowsForTest(const std::vector<float>&,
+                                            const std::vector<uint32_t>&,
+                                            int64_t, int64_t) {
+  return {};
+}
 inline void TrustDump(Queue&, const char*, const char*, const Tensor&) {}
 #endif
 void RegisterHostBuffer(void* host, size_t bytes);

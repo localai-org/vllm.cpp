@@ -15593,3 +15593,158 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program
   MESSAGE("unsynced-staging M=9 bfp8: bad_reps=" << bad_reps << "/" << kReps);
 >>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
 }
+
+// W21 (QWEN38-DFLASH2-STAGE-C): the INTERLEAVED-OP harness — the first
+// reproduction that varies the op MIX rather than the op. The engine's
+// poison (the degenerate drafter-ON stream) survived every single-op
+// reproduction; the W21 raw-f32 dumps convicted the WRITE path of two
+// in-engine miswrites (indexed_fill's k-th replacement row landing at
+// id[k]+k; ttnn::copy into a resident shadow not landing) that every
+// isolated test passes. This case runs the engine's op mix through ONE
+// shared program cache in one process — per rep: the recycle-pattern
+// alloc/free churn (the 3.3 MB fill clone, the 110 KB z output, the 28 MB
+// state row), then the M=9 matmul, the multi-replacement indexed_fill at
+// the engine's exact conv-spec geometry (ConvSpecFillForTest), and a
+// GatherRowsExact-form gather (GatherRowsForTest) — checking EVERY output
+// against the CPU oracle. RED at rep k names the op and the cycle.
+TEST_CASE("kTENSTORRENT W21 interleaved op mix: matmul + multi-replacement indexed_fill + gather through one shared program cache") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 777u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0) - 0.5f;
+  };
+
+  // The engine's conv-spec fill geometry: base [81,10240] f32, values
+  // [9,10240] f32, 9 strided ids [0,9,...,72], dim=0.
+  constexpr int64_t kTokens = 9, kSlots = 9, kC = 10240;
+  constexpr int64_t kBaseRows = kTokens * kSlots;
+  std::vector<float> base(kBaseRows * kC, 0.0f);
+  std::vector<float> vals(kTokens * kC);
+  for (auto& v : vals) v = lcg() * 4.0f;
+  std::vector<uint32_t> ids(kTokens);
+  for (int64_t t = 0; t < kTokens; ++t) ids[t] = static_cast<uint32_t>(t * kSlots);
+
+  // The matmul geometry (the z GEMM): M=9, K=5120, N=6144 bf16.
+  constexpr int64_t kM = 9, kK = 5120, kN = 6144;
+  std::vector<float> host_a(kM * kK), host_b(kN * kK);
+  for (auto& v : host_a) v = lcg() * 2.0f;
+  for (auto& v : host_b) v = lcg() * 0.4f;
+  std::vector<uint16_t> a_bf(kM * kK), b_bf(kN * kK);
+  for (size_t i = 0; i < host_a.size(); ++i) a_bf[i] = vt::F32ToBF16(host_a[i]);
+  for (size_t i = 0; i < host_b.size(); ++i) b_bf[i] = vt::F32ToBF16(host_b[i]);
+  void* mem_ab = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+  void* mem_bb = backend.Alloc(b_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_ab, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_bb, b_bf.data(), b_bf.size() * sizeof(uint16_t));
+  Tensor ta = Tensor::Contiguous(mem_ab, vt::DType::kBF16,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {kM, kK});
+  Tensor tb = Tensor::Contiguous(mem_bb, vt::DType::kBF16,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {kN, kK});
+  auto matmul_bt = reinterpret_cast<vt::MatmulFn>(
+      vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+
+  // The gather source: the state cache [54, 131072] f32 (the split shadow of
+  // 9 slots x 786432 elems at sf=6) and 6 identity rows.
+  constexpr int64_t kGRows = 54, kGBlk = 131072, kGPick = 6;
+  std::vector<float> gsrc(kGRows * kGBlk);
+  for (auto& v : gsrc) v = lcg() * 0.1f;
+  std::vector<uint32_t> gpick(kGPick);
+  for (int64_t r = 0; r < kGPick; ++r) gpick[r] = static_cast<uint32_t>(r);
+
+  constexpr int kReps = 40;
+  int fill_bad = 0, matmul_bad = 0, gather_bad = 0;
+  for (int rep = 0; rep < kReps; ++rep) {
+    // The engine's recycle churn: allocate + free a spread of block sizes so
+    // the ops' outputs land on recycled blocks, like the DBuf cycle.
+    {
+      void* big = backend.Alloc(28311552);
+      void* mid = backend.Alloc(3317760);
+      void* small = backend.Alloc(110592);
+      backend.Free(big);
+      backend.Free(mid);
+      backend.Free(small);
+    }
+
+    // 1. the M=9 matmul into a fresh output
+    {
+      void* mem_ob = backend.Alloc(kM * kN * sizeof(uint16_t));
+      Tensor out = Tensor::Contiguous(mem_ob, vt::DType::kBF16,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {kM, kN});
+      matmul_bt(q, out, ta, tb);
+      std::vector<uint16_t> ob(kM * kN);
+      backend.Copy(q, ob.data(), mem_ob, ob.size() * sizeof(uint16_t));
+      backend.Free(mem_ob);
+      double max_rel = 0.0;
+      uint64_t nonfinite = 0;
+      for (int64_t i = 0; i < kM; ++i)
+        for (int64_t j = 0; j < kN; ++j) {
+          float acc = 0.0f;
+          for (int64_t k = 0; k < kK; ++k)
+            acc += host_a[i * kK + k] * host_b[j * kK + k];
+          float got = vt::BF16ToF32(ob[i * kN + j]);
+          if (!std::isfinite(got)) { ++nonfinite; continue; }
+          max_rel = std::max(max_rel, std::fabs(static_cast<double>(got) - acc) /
+                                          (std::fabs(acc) + 1.0));
+        }
+      if (nonfinite != 0 || max_rel >= 0.05) {
+        ++matmul_bad;
+        MESSAGE("REP " << rep << " MATMUL: nonfinite=" << nonfinite
+                       << " max_rel=" << max_rel);
+      }
+    }
+
+    // 2. the multi-replacement indexed_fill at the conv-spec geometry
+    {
+      auto got = vt::tenstorrent::ConvSpecFillForTest(base, vals, ids,
+                                                      kBaseRows, kC);
+      int wrong_written = 0, wrong_untouched = 0;
+      for (int64_t t = 0; t < kTokens; ++t) {
+        const int64_t blk = ids[t] * kC;
+        if (!std::equal(vals.begin() + t * kC, vals.begin() + (t + 1) * kC,
+                        got.begin() + blk))
+          ++wrong_written;
+      }
+      for (int64_t b = 0; b < kBaseRows; ++b) {
+        const bool written =
+            std::find(ids.begin(), ids.end(), static_cast<uint32_t>(b)) != ids.end();
+        if (written) continue;
+        if (!std::all_of(got.begin() + b * kC, got.begin() + (b + 1) * kC,
+                         [](float f) { return f == 0.0f; }))
+          ++wrong_untouched;
+      }
+      if (wrong_written != 0 || wrong_untouched != 0) {
+        ++fill_bad;
+        MESSAGE("REP " << rep << " FILL: wrong_written=" << wrong_written
+                       << " wrong_untouched=" << wrong_untouched);
+      }
+    }
+
+    // 3. the exact gather (the GatherRowsExact form)
+    {
+      auto got = vt::tenstorrent::GatherRowsForTest(gsrc, gpick, kGRows, kGBlk);
+      int wrong = 0;
+      for (int64_t r = 0; r < kGPick; ++r)
+        if (!std::equal(gsrc.begin() + static_cast<std::ptrdiff_t>(gpick[r]) * kGBlk,
+                        gsrc.begin() + static_cast<std::ptrdiff_t>(gpick[r] + 1) * kGBlk,
+                        got.begin() + r * kGBlk))
+          ++wrong;
+      if (wrong != 0) {
+        ++gather_bad;
+        MESSAGE("REP " << rep << " GATHER: wrong_rows=" << wrong);
+      }
+    }
+  }
+  backend.Free(mem_ab);
+  backend.Free(mem_bb);
+  MESSAGE("interleaved mix: fill_bad=" << fill_bad << " matmul_bad=" << matmul_bad
+                                       << " gather_bad=" << gather_bad << "/"
+                                       << kReps);
+  CHECK(fill_bad == 0);
+  CHECK(matmul_bad == 0);
+  CHECK(gather_bad == 0);
+}

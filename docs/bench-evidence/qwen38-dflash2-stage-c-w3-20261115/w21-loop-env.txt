@@ -1,0 +1,12 @@
+date: 2026-11-16T07:30:27+01:00
+head: 20318d42b941de64d4f6fa61ffd0b2719dde5409
+worktree: dirty (W21 spec-dump probes, uncommitted)
+governor: performance
+load1: 2.37
+bench: /tmp/build-stagec-w3/examples/vllm-bench
+model: /mnt/models/unsloth-qwen3.8-27B-gguf/Qwen3.8-27B-Q4_K_M.gguf
+model sha256: 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169
+num-blocks: 64
+extra-env: VLLM_CPP_CUDAGRAPH=0 VT_TT_WEIGHT_RESIDENCY=bfp8 VT_DFLASH_DRAFT=1 VT_TT_GDN_SPEC_DEBUG=1 VT_TT_SPEC_DUMP=/tmp/q38-stage-c/docs/bench-evidence/qwen38-dflash2-stage-c-w3-20261115/w21-loop
+output-len: 24
+spec: 1
