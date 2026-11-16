@@ -36,7 +36,13 @@ struct Gemma4Fp8ExpertMats {
   mutable void* dev_s_dn = nullptr;    // bf16 [H]
 };
 
+struct Gemma4QuantExpertMats {
+  std::vector<OwnedTensor> gate_up; // Q4_0/Q8_0 original-format shards.
+  OwnedTensor down;
+};
+
 struct Gemma4FusedExperts {
+  std::vector<Gemma4QuantExpertMats> compact;
   // Google BF16 fused stacks (optional).
   OwnedTensor gate_up;  // bf16 [E, 2I, H]
   OwnedTensor down;     // bf16 [E, H, I]
@@ -57,7 +63,7 @@ struct Gemma4FusedExperts {
   mutable void* fp8_sdn_base = nullptr;  // bf16 [E, H]
   mutable bool fp8_native_resident = false;
   mutable int dev_id = -1;
-  bool Empty() const { return gate_up.Empty() && fp8.empty(); }
+  bool Empty() const { return gate_up.Empty() && fp8.empty() && compact.empty(); }
 };
 
 struct Gemma4MoeLayerWeights {

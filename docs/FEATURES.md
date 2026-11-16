@@ -481,3 +481,14 @@ table row.
 The marks describe support, not speed or current ownership. See
 [Status](../README.md#project-status) for lifecycle state and [Benchmarks](BENCHMARKS.md) for
 performance. An inventoried row is not a supported feature.
+
+
+## Gemma4 CPU compressed-tensors repacks
+
+Gemma4 loads mixed group32 INT4/INT8 `pack-quantized` safetensors on the CPU.
+Dense projections and selected MoE experts retain Q4_0/Q8_0 blocks.
+The registered model forward uses the shared merged-GEMM and GeGLU seams.
+Fixture gates cover exact packed bytes, malformed metadata, and expert reachability.
+The supplied repack matches its original GGUF for the recorded 16-token greedy
+workloads. This result does not establish general logits or performance parity.
+See [Gemma4 CPU integer repacks](USAGE.md#gemma4-cpu-integer-repacks) for artifacts and refused formats.

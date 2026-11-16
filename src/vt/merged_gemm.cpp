@@ -9,10 +9,62 @@
 #include <vector>
 
 #include "vt/dtype.h"
+#include "vt/backend.h"
 #include "vt/op_provider.h"
 #include "vt/ops.h"
 
 namespace vt {
+
+void MergedGemmDense(Queue& q, const MergedGemmGroup& desc, Tensor* products,
+                     const Tensor& act, const Tensor* weights, int count,
+                     Tensor* epilogue_out) {
+  VT_CHECK(count == desc.arity && count >= 2 && products != nullptr && weights != nullptr,
+           "MergedGemmDense: descriptor and shard count must match");
+  VT_CHECK(desc.fast_op == kNoMergedFastOp,
+           "MergedGemmDense: no dense-shard fused provider is registered");
+  const bool swiglu = desc.epilogue == MergedEpilogue::kSiluMulClamp;
+  const bool geglu = desc.epilogue == MergedEpilogue::kGeluMul;
+  VT_CHECK(desc.epilogue == MergedEpilogue::kNone || ((swiglu || geglu) && count == 2),
+           "MergedGemmDense: unsupported dense epilogue");
+  VT_CHECK((swiglu || geglu) == (epilogue_out != nullptr),
+           "MergedGemmDense: gated epilogues require an output");
+  if (geglu) {
+    VT_CHECK(products[0].rank == 2 && products[1].rank == 2 &&
+                 products[0].shape[0] == products[1].shape[0] &&
+                 products[0].shape[1] == products[1].shape[1] &&
+                 products[0].dtype == products[1].dtype &&
+                 products[0].IsContiguous() && products[1].IsContiguous(),
+             "MergedGemmDense: GeGLU products must have matching contiguous matrices");
+    VT_CHECK(products[0].shape[1] > 0 && products[0].shape[1] <=
+                 std::numeric_limits<int64_t>::max() / 2,
+             "MergedGemmDense: invalid GeGLU width");
+  }
+  for (int i = 0; i < count; ++i) MatmulBT(q, products[i], act, weights[i]);
+  if (swiglu) MoeSiluMul(q, *epilogue_out, products[0], products[1]);
+  if (geglu) {
+    const int64_t rows = products[0].shape[0], cols = products[0].shape[1];
+    VT_CHECK(products[0].Bytes() <= std::numeric_limits<size_t>::max() / 2,
+             "MergedGemmDense: GeGLU scratch size overflow");
+    Backend& backend = GetBackend(q.device);
+    struct Scratch {
+      Backend& backend;
+      void* ptr;
+      ~Scratch() { backend.Free(ptr); }
+    } scratch{backend, backend.Alloc(products[0].Bytes() * 2)};
+    Tensor joined = Tensor::Contiguous(scratch.ptr, products[0].dtype, q.device,
+                                       {rows, 2 * cols});
+    const size_t row_bytes = static_cast<size_t>(cols) * SizeOf(products[0].dtype);
+    for (int64_t row = 0; row < rows; ++row) {
+      auto* dst = static_cast<uint8_t*>(scratch.ptr) + row * row_bytes * 2;
+      backend.Copy(q, dst, static_cast<const uint8_t*>(products[0].data) +
+                              row * row_bytes, row_bytes);
+      backend.Copy(q, dst + row_bytes, static_cast<const uint8_t*>(products[1].data) +
+                                          row * row_bytes, row_bytes);
+    }
+    GeluAndMul(q, *epilogue_out, joined);
+    backend.Synchronize(q);
+  }
+}
 
 void MergedGemm(Queue& q, const MergedGemmGroup& desc, Tensor& out, const Tensor& act,
                 const Tensor& gate_w, const Tensor& up_w, const Tensor& expert_ids,

@@ -17,6 +17,7 @@
 #include "vllm/model_executor/models/dense_weight_loaders.h"
 #include "vllm/model_executor/models/gemma4_moe.h"
 #include "vt/dtype.h"
+#include "gemma4_ct_weights.h"
 
 #include <cmath>
 #include <cstring>
@@ -341,6 +342,100 @@ Gemma4LayerWeights LoadGemma4Layer(
   return w;
 }
 
+
+Gemma4Weights LoadCt(const TensorResolver& get,
+                    const std::unordered_set<std::string>& names,
+                    const HfConfig& cfg, std::shared_ptr<const void> owner) {
+  gemma4_ct::Reader reader(get, cfg.raw);
+  const auto& text = TextCfg(cfg.raw);
+  VT_CHECK(RawInt(text, "hidden_size_per_layer_input", 0) == 0,
+           "gemma4 CT: per-layer embeddings are not implemented");
+  const int64_t H = cfg.hidden_size;
+  const int64_t I = cfg.intermediate_size;
+  const int64_t E = RawInt(text, "num_experts", 0);
+  const int64_t EI = RawInt(text, "moe_intermediate_size", 0);
+  const int64_t K = RawInt(text, "top_k_experts", 8);
+  const bool moe = RawBool(text, "enable_moe_block", false);
+  VT_CHECK(!moe || (E > 0 && EI > 0 && K > 0 && K <= E),
+           "gemma4 CT: invalid expert dimensions");
+  const LayerTopo topo = MakeTopo(cfg);
+  Gemma4Weights w;
+  w.compact_ct = true;
+  w.shards_keepalive = std::move(owner);
+  w.tie_word_embeddings = RawBool(text, "tie_word_embeddings", true);
+  // Retain F16 storage for the tied output head; Embedding converts selected
+  // rows by value into the existing BF16 activation stream.
+  w.embed_tokens = reader.Plain("model.language_model.embed_tokens.weight",
+                                {cfg.vocab_size, H}, true);
+  w.final_norm = reader.Plain("model.language_model.norm.weight", {H});
+  if (!w.tie_word_embeddings) {
+    // Keep torch Linear [vocab,H] orientation for the output head.
+    w.lm_head = reader.Linear("lm_head", cfg.vocab_size, H);
+  }
+  for (int64_t l = 0; l < cfg.num_hidden_layers; ++l) {
+    const std::string b = "model.language_model.layers." + std::to_string(l) + ".";
+    Gemma4LayerWeights v;
+    v.is_full_attention = topo.is_full[static_cast<size_t>(l)];
+    v.is_kv_shared = topo.is_shared[static_cast<size_t>(l)];
+    v.head_dim = topo.head_dim[static_cast<size_t>(l)];
+    v.kv_target_layer = topo.kv_target[static_cast<size_t>(l)];
+    v.num_kv_heads = v.is_full_attention
+                        ? RawInt(text, "num_global_key_value_heads", cfg.num_key_value_heads)
+                        : cfg.num_key_value_heads;
+    const int64_t qn = cfg.num_attention_heads * v.head_dim;
+    const int64_t kn = v.num_kv_heads * v.head_dim;
+    v.input_layernorm = reader.Plain(b + "input_layernorm.weight", {H});
+    v.post_attention_layernorm = reader.Plain(b + "post_attention_layernorm.weight", {H});
+    v.pre_feedforward_layernorm = reader.Plain(b + "pre_feedforward_layernorm.weight", {H});
+    v.post_feedforward_layernorm = reader.Plain(b + "post_feedforward_layernorm.weight", {H});
+    if (names.count(b + "layer_scalar"))
+      v.layer_scalar = reader.Plain(b + "layer_scalar", {1});
+    v.k_eq_v = names.count(b + "self_attn.v_proj.weight_packed") == 0 &&
+               names.count(b + "self_attn.v_proj.weight") == 0;
+    v.attn.qkv_parts.push_back(reader.Linear(b + "self_attn.q_proj", qn, H));
+    v.attn.qkv_parts.push_back(reader.Linear(b + "self_attn.k_proj", kn, H));
+    v.attn.qkv_parts.push_back(v.k_eq_v
+                                  ? v.attn.qkv_parts[1]
+                                  : reader.Linear(b + "self_attn.v_proj", kn, H));
+    v.attn.o_proj = reader.Linear(b + "self_attn.o_proj", H, qn);
+    v.attn.q_norm = reader.Plain(b + "self_attn.q_norm.weight", {v.head_dim});
+    v.attn.k_norm = reader.Plain(b + "self_attn.k_norm.weight", {v.head_dim});
+    v.mlp.gate_up_parts.push_back(reader.Linear(b + "mlp.gate_proj", I, H));
+    v.mlp.gate_up_parts.push_back(reader.Linear(b + "mlp.up_proj", I, H));
+    v.mlp.down_proj = reader.Linear(b + "mlp.down_proj", H, I);
+    if (moe) {
+      auto& m = v.moe;
+      m.enabled = true;
+      m.top_k = static_cast<int>(K);
+      m.moe_intermediate = EI;
+      m.router_scale = reader.Plain(b + "router.scale", {H});
+      m.router_proj = reader.Linear(b + "router.proj", E, H);
+      VT_CHECK(m.router_proj.dtype == vt::DType::kBF16,
+               "gemma4 CT: quantized router is not implemented");
+      m.per_expert_scale = reader.Plain(b + "router.per_expert_scale", {E});
+      m.pre_feedforward_layernorm_2 = reader.Plain(b + "pre_feedforward_layernorm_2.weight", {H});
+      m.post_feedforward_layernorm_1 = reader.Plain(b + "post_feedforward_layernorm_1.weight", {H});
+      m.post_feedforward_layernorm_2 = reader.Plain(b + "post_feedforward_layernorm_2.weight", {H});
+      FuseRouter(m, E, H);
+      auto& ex = m.experts;
+      ex.num_experts = E;
+      ex.intermediate = EI;
+      ex.hidden = H;
+      ex.compact.reserve(static_cast<size_t>(E));
+      for (int64_t e = 0; e < E; ++e) {
+        const std::string eb = b + "experts." + std::to_string(e) + ".";
+        Gemma4QuantExpertMats x;
+        x.gate_up.push_back(reader.Linear(eb + "gate_proj", EI, H));
+        x.gate_up.push_back(reader.Linear(eb + "up_proj", EI, H));
+        x.down = reader.Linear(eb + "down_proj", H, EI);
+        ex.compact.push_back(std::move(x));
+      }
+    }
+    w.layers.push_back(std::move(v));
+  }
+  return w;
+}
+
 Gemma4Weights LoadImpl(const std::vector<SafetensorsFile>& shards,
                        const HfConfig& config,
                        std::shared_ptr<const void> shards_owner) {
@@ -359,6 +454,11 @@ Gemma4Weights LoadImpl(const std::vector<SafetensorsFile>& shards,
   };
 
   VT_CHECK(config.num_hidden_layers > 0, "gemma4: num_hidden_layers");
+  const auto* quant = layers::compressed_tensors::QuantizationConfigOf(config.raw);
+  if (quant && quant->value("quant_method", std::string()) == "compressed-tensors" &&
+      quant->value("format", std::string()) == "pack-quantized")
+    return LoadCt(get, names, config, std::move(shards_owner));
+
   const nlohmann::json& text = TextCfg(config.raw);
   const int64_t H = config.hidden_size;
   const int64_t ple_cfg = RawInt(text, "hidden_size_per_layer_input", 0);

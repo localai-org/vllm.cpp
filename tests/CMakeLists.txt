@@ -4883,3 +4883,13 @@ vllm_cpp_add_test(test_qwen38_27b_radixark_w4a4_notice
   vllm/models/test_qwen38_27b_radixark_w4a4_notice.cpp)
 target_include_directories(test_qwen38_27b_radixark_w4a4_notice PRIVATE
   ${CMAKE_SOURCE_DIR}/src)
+
+vllm_cpp_add_test(test_gemma4_ct vllm/models/test_gemma4_ct.cpp)
+
+add_executable(test_dense_shard_geglu vt/test_dense_shard_geglu.cpp)
+target_link_libraries(test_dense_shard_geglu PRIVATE vllm::vllm)
+add_test(NAME test_dense_shard_geglu COMMAND test_dense_shard_geglu)
+
+add_executable(test_dual_rmsnorm_cpu vt/test_dual_rmsnorm_cpu.cpp)
+target_link_libraries(test_dual_rmsnorm_cpu PRIVATE vllm::vllm)
+add_test(NAME test_dual_rmsnorm_cpu COMMAND test_dual_rmsnorm_cpu)

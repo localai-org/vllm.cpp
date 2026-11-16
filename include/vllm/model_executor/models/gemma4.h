@@ -68,6 +68,7 @@ class SafetensorsFile;
 // WEIGHT-LESS V-norm (has_weight=false, no checkpoint tensor). No bias
 // (attention_bias=false). head_dim is per-layer (256 sliding / 512 full). RAW-NK.
 struct Gemma4AttnWeights {
+  std::vector<OwnedTensor> qkv_parts; // Original-format CT projections.
   OwnedTensor qkv_proj;  // bf16 raw-NK [Hq*Dh + 2*Hkv*Dh, H] (rows q|k|v)
   OwnedTensor o_proj;    // bf16 raw-NK [H, Hq*Dh]
   OwnedTensor q_norm;    // bf16 [Dh]  (per-head plain RMSNorm)
@@ -78,6 +79,7 @@ struct Gemma4AttnWeights {
 // Gemma-4 GeGLU MLP (gemma4.py::Gemma4MLP): merged gate_up -> GeluAndMul(tanh) ->
 // down. Raw-NK. (E4B: intermediate 10240, single width — no double-wide MLP.)
 struct Gemma4MlpWeights {
+  std::vector<OwnedTensor> gate_up_parts; // Original-format CT gate and up.
   OwnedTensor gate_up_proj;  // bf16 raw-NK [2*I, H] (rows gate|up)
   OwnedTensor down_proj;     // bf16 raw-NK [H, I]
 };
@@ -112,6 +114,7 @@ struct Gemma4LayerWeights {
 // aliases embed_tokens; the checkpoint has no lm_head.weight). PLE tables live at
 // model level (gemma4.py:986-1063).
 struct Gemma4Weights {
+  bool compact_ct = false; // CPU-only integer compressed-tensors arm.
   bool tie_word_embeddings = true;
   OwnedTensor embed_tokens;             // bf16 [vocab, H]  (scaled by sqrt(H) at use)
   OwnedTensor embed_tokens_per_layer;   // bf16 [vocab, ple_dim*num_layers]
