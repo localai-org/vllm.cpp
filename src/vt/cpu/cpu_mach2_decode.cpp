@@ -65,6 +65,86 @@ std::vector<GfElem> Elements(int radix) {
 
 bool IsPowerOfTwo(int n) { return n > 0 && (n & (n - 1)) == 0; }
 
+// `_HS`: the hand-written sign tables `decode.py` uses for the spine rotation,
+// one row per output component. Transcribed from the published file, where the
+// same matrices are asserted orthogonal in-file; `HadamardSpine` relies on that.
+//
+static const std::int8_t kHs12[12][12] = {
+    {1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+    {1, 1, -1, 1, -1, -1, -1, 1, 1, 1, -1, 1},
+    {1, 1, 1, -1, 1, -1, -1, -1, 1, 1, 1, -1},
+    {1, -1, 1, 1, -1, 1, -1, -1, -1, 1, 1, 1},
+    {1, 1, -1, 1, 1, -1, 1, -1, -1, -1, 1, 1},
+    {1, 1, 1, -1, 1, 1, -1, 1, -1, -1, -1, 1},
+    {1, 1, 1, 1, -1, 1, 1, -1, 1, -1, -1, -1},
+    {1, -1, 1, 1, 1, -1, 1, 1, -1, 1, -1, -1},
+    {1, -1, -1, 1, 1, 1, -1, 1, 1, -1, 1, -1},
+    {1, -1, -1, -1, 1, 1, 1, -1, 1, 1, -1, 1},
+    {1, 1, -1, -1, -1, 1, 1, 1, -1, 1, 1, -1},
+    {1, -1, 1, -1, -1, -1, 1, 1, 1, -1, 1, 1},
+};
+
+static const std::int8_t kHs20[20][20] = {
+    {1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+    {1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1},
+    {1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1},
+    {1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1},
+    {1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1},
+    {1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1},
+    {1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1},
+    {1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1},
+    {1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1},
+    {1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1},
+    {1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1, -1},
+    {1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1, 1},
+    {1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1, -1},
+    {1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1, -1},
+    {1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1, -1},
+    {1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1, -1},
+    {1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, 1},
+    {1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1},
+    {1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1, -1},
+    {1, -1, 1, 1, -1, -1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, 1, 1},
+};
+
+const std::int8_t* SpineTable(int radix) {
+  if (radix == 12) return &kHs12[0][0];
+  if (radix == 20) return &kHs20[0][0];
+  return nullptr;
+}
+
+// `matmul(_HS, x)` over the radix axis of a `(blocks, radix, cols)` view, times
+// `scale`. The same shape as `ApplyRadix`, but with the spine table and the
+// spine normalisation, which is 1/sqrt(cols) rather than 1/sqrt(radix).
+void ApplySpineRadix(float* x, std::size_t blocks, int radix, int cols, float scale) {
+  const std::int8_t* h = SpineTable(radix);
+  if (h == nullptr) return;
+  std::vector<float> col(static_cast<std::size_t>(radix));
+  std::vector<float> acc(static_cast<std::size_t>(radix));
+  for (std::size_t b = 0; b < blocks; ++b) {
+    for (int c = 0; c < cols; ++c) {
+      for (int i = 0; i < radix; ++i) {
+        col[static_cast<std::size_t>(i)] =
+            x[(b * static_cast<std::size_t>(radix) + static_cast<std::size_t>(i)) *
+                  static_cast<std::size_t>(cols) +
+              static_cast<std::size_t>(c)];
+      }
+      std::fill(acc.begin(), acc.end(), 0.0f);
+      for (int i = 0; i < radix; ++i) {
+        for (int j = 0; j < radix; ++j) {
+          const float hv = static_cast<float>(h[i * radix + j]);
+          acc[static_cast<std::size_t>(i)] += hv * col[static_cast<std::size_t>(j)];
+        }
+      }
+      for (int i = 0; i < radix; ++i) {
+        x[(b * static_cast<std::size_t>(radix) + static_cast<std::size_t>(i)) *
+              static_cast<std::size_t>(cols) +
+          static_cast<std::size_t>(c)] = acc[static_cast<std::size_t>(i)] * scale;
+      }
+    }
+  }
+}
+
 }  // namespace
 namespace detail {
 
@@ -416,6 +496,105 @@ void DecodeExpertTile(const uint16_t* states, std::int64_t nstep, const float* l
   for (int r = 0; r < m; ++r) {
     for (int c = 0; c < n; ++c) out[r * n + c] = t[static_cast<std::size_t>(c) * static_cast<std::size_t>(m) +
                                                      static_cast<std::size_t>(r)];
+  }
+}
+
+void HadamardSpine(float* x, std::size_t rows, int cols) {
+  if (x == nullptr || rows == 0 || cols <= 0) return;
+  if (IsPowerOfTwo(cols)) {
+    Butterflies(x, rows, cols);
+    const float s = static_cast<float>(1.0 / std::sqrt(static_cast<double>(cols)));
+    for (std::size_t i = 0; i < rows * static_cast<std::size_t>(cols); ++i) x[i] *= s;
+    return;
+  }
+  const int radix = (cols % 12 == 0 && IsPowerOfTwo(cols / 12)) ? 12 : 20;
+  const int inner = cols / radix;
+  if (cols % radix != 0 || !IsPowerOfTwo(inner)) return;  // shape not supported
+  // The spine branch's own convention: BARE butterflies on the inner block, then
+  // the whole product divided by sqrt(cols). The expert branch is the mirror of
+  // this, and using either one's scale in the other path is a silent rescale.
+  Butterflies(x, rows * static_cast<std::size_t>(radix), inner);
+  ApplySpineRadix(x, rows, radix, inner,
+                  static_cast<float>(1.0 / std::sqrt(static_cast<double>(cols))));
+}
+
+void DecodeNeTensor(const uint16_t* states, std::int64_t nstep, const float* tlut, int mb, int nb,
+                    float wscale, const std::int32_t* su, const std::int32_t* sv, float rc_max_m,
+                    float rc_max_n, float* out) {
+  const int td = kTile;
+  const int m = mb * td;
+  const int n = nb * td;
+  if (mb <= 0 || nb <= 0 || nstep <= 0 || states == nullptr || tlut == nullptr || su == nullptr ||
+      sv == nullptr || out == nullptr) {
+    return;
+  }
+  const auto fold = FoldSpineLut(tlut);
+  // Two values per codeword, so a codeword fills two consecutive columns of one
+  // row - the spine tape spends 8 bits (NE_K * NE_V) on it.
+  for (int bm = 0; bm < mb; ++bm) {
+    for (int bn = 0; bn < nb; ++bn) {
+      for (int r = 0; r < td; ++r) {
+        for (int c = 0; c < td; ++c) {
+          const std::int64_t flat =
+              (static_cast<std::int64_t>(bm) * nb + bn) * td * td + r * td + c;
+          const std::int64_t cw = flat / kSpineValues;
+          if (cw >= nstep) return;
+          const int v = static_cast<int>(flat % kSpineValues);
+          out[(bm * td + r) * n + (bn * td + c)] =
+              fold[static_cast<std::size_t>(states[cw]) * kSpineValues + static_cast<std::size_t>(v)];
+        }
+      }
+    }
+  }
+  const std::size_t total = static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
+  for (std::size_t i = 0; i < total; ++i) out[i] *= wscale;
+
+  // Row rotation and its signs, then the same on the other axis. `np.sign` of an
+  // int is zero at zero, so a zero entry zeroes its line rather than leaving it.
+  HadamardSpine(out, static_cast<std::size_t>(m), n);
+  for (int c = 0; c < n; ++c) {
+    const float sgn = static_cast<float>((su[c] > 0) - (su[c] < 0));
+    for (int r = 0; r < m; ++r) out[r * n + c] *= sgn;
+  }
+  std::vector<float> t(total, 0.0f);
+  for (int r = 0; r < m; ++r) {
+    for (int c = 0; c < n; ++c) {
+      t[static_cast<std::size_t>(c) * static_cast<std::size_t>(m) +
+        static_cast<std::size_t>(r)] = out[r * n + c];
+    }
+  }
+  HadamardSpine(t.data(), static_cast<std::size_t>(n), m);
+  for (int r = 0; r < m; ++r) {
+    const float sgn = static_cast<float>((sv[r] > 0) - (sv[r] < 0));
+    for (int c = 0; c < n; ++c) {
+      t[static_cast<std::size_t>(c) * static_cast<std::size_t>(m) +
+        static_cast<std::size_t>(r)] *= sgn;
+    }
+  }
+  for (int r = 0; r < m; ++r) {
+    for (int c = 0; c < n; ++c) {
+      out[r * n + c] = t[static_cast<std::size_t>(c) * static_cast<std::size_t>(m) +
+                         static_cast<std::size_t>(r)];
+    }
+  }
+
+  // The decoder rounds here, before the two rescales, and a byte gate depends on
+  // that order.
+  for (std::size_t i = 0; i < total; ++i) out[i] = detail::Bf16RoundOne(out[i]);
+
+  std::vector<float> row_rc(static_cast<std::size_t>(m));
+  std::vector<float> col_rc(static_cast<std::size_t>(n));
+  std::vector<std::int32_t> mag_m(static_cast<std::size_t>(m));
+  std::vector<std::int32_t> mag_n(static_cast<std::size_t>(n));
+  for (int r = 0; r < m; ++r) mag_m[static_cast<std::size_t>(r)] = sv[r] < 0 ? -sv[r] : sv[r];
+  for (int c = 0; c < n; ++c) mag_n[static_cast<std::size_t>(c)] = su[c] < 0 ? -su[c] : su[c];
+  RcGrid(rc_max_m, mag_m.data(), static_cast<std::size_t>(m), row_rc.data());
+  RcGrid(rc_max_n, mag_n.data(), static_cast<std::size_t>(n), col_rc.data());
+  for (int r = 0; r < m; ++r) {
+    for (int c = 0; c < n; ++c) {
+      out[r * n + c] = (row_rc[static_cast<std::size_t>(r)] * out[r * n + c]) *
+                       col_rc[static_cast<std::size_t>(c)];
+    }
   }
 }
 

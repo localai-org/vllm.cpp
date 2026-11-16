@@ -385,3 +385,141 @@ TEST_CASE("mach2 expert tile assembly matches the release decoder's pipeline") {
   CHECK(tile[15 * 16] == doctest::Approx(-3.53515625).epsilon(1e-6));
   CHECK(tile[7 * 16 + 9] == doctest::Approx(-4.51171875).epsilon(1e-6));
 }
+
+TEST_CASE("mach2 spine fold and rc grid are integer-exact against the oracle") {
+  // `_ne_full_lut` is pure integer arithmetic on `p = s * (s + 1)`, so ALL 65,536
+  // states are pinned by one digest instead of sampled: `row = (p >> 6) & 511` and
+  // bit 15 of `p` negates the first component. The digest is the release decoder's
+  // own `_ne_full_lut` output over the same table.
+  std::vector<float> tlut(512 * 2);
+  for (int r = 0; r < 512; ++r) {
+    tlut[static_cast<size_t>(r) * 2 + 0] = static_cast<float>((r % 17) - 8) * 0.25f;
+    tlut[static_cast<size_t>(r) * 2 + 1] = static_cast<float>((r % 13) - 6) * 0.125f;
+  }
+  const auto fold = vt::mach2::FoldSpineLut(tlut.data());
+  REQUIRE(fold.size() == 65536u * 2u);
+  std::uint64_t h = 0xCBF29CE484222325ull;
+  const auto* bytes = reinterpret_cast<const std::uint8_t*>(fold.data());
+  for (std::size_t i = 0; i < fold.size() * sizeof(float); ++i) {
+    h ^= static_cast<std::uint64_t>(bytes[i]);
+    h *= 0x100000001B3ull;
+  }
+  CHECK(h == 16382240767026136229ull);
+  // `rc_grid(mx, k) = mx * k * (1/127)`, and the multiply by `1/127` is what the
+  // oracle's float32 form does - a division rounds differently in the last bit on
+  // some inputs, so this pins the operation and not just the formula.
+  // 127, -1, 0, 1 and 37 agree under both forms; -104 and -72 do NOT, and they are
+  // here because the first version of this case only carried the agreeing ones, so
+  // replacing the multiply with a division survived the whole suite. On the
+  // differing pairs the two round differently in the last bit (by about 3e-8).
+  const std::int32_t k[8] = {-127, -125, -1, 0, 1, 37, -104, -72};
+  float rc[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+  vt::mach2::RcGrid(0.5f, k, 8, rc);
+  const float want[8] = {-0.5f,
+                         -0.4921259880065918f,
+                         -0.003937007859349251f,
+                         0.0f,
+                         0.003937007859349251f,
+                         0.14566929638385773f,
+                         -0.4094488024711609f,
+                         -0.28346455097198486f};
+  for (int i = 0; i < 8; ++i) CHECK(rc[i] == doctest::Approx(want[i]).epsilon(1e-12));
+}
+
+TEST_CASE("mach2 spine hadamard preserves energy for both radix tables") {
+  // 48 and 96 take the radix-12 `_HS` table, 160 and 320 the radix-20 one, each in
+  // front of a real inner butterfly block; 256 is the power-of-two branch.
+  //
+  // The invariant here is PARSEVAL, not "applying it twice returns the input".
+  // `_HS` is orthogonal - `H @ H.T == radix * I`, which decode.py asserts on
+  // import - but it is NOT symmetric, unlike the expert path's quadratic-residue
+  // matrix, which decode.py separately asserts `H == H.T` on. An orthogonal
+  // matrix that is not symmetric is not its own inverse, so `T . T` is not the
+  // identity here: run against the real `decode.py`, two spine passes leave a
+  // residual of 27.5 on a 48-wide ramp while the energy matches to float32. The
+  // first version of this case asserted the inverse, failed, and was wrong, not
+  // the port - one pass of which reproduces `decode.py` to the last bit on every
+  // size below.
+  for (const int cols : {48, 96, 160, 256, 320}) {
+    std::vector<float> x(static_cast<size_t>(cols));
+    double before = 0.0;
+    for (int i = 0; i < cols; ++i) {
+      x[static_cast<size_t>(i)] = 0.5f * static_cast<float>(i) - 7.0f;
+      before += static_cast<double>(x[static_cast<size_t>(i)]) * static_cast<double>(x[static_cast<size_t>(i)]);
+    }
+    vt::mach2::HadamardSpine(x.data(), 1, cols);
+    double after = 0.0;
+    for (const float v : x) after += static_cast<double>(v) * static_cast<double>(v);
+    CHECK(after == doctest::Approx(before).epsilon(1e-6));
+
+    // A delta pins the same property far more sharply: a table row that is not a
+    // unit vector after scaling shows up here as a norm other than 1.
+    std::vector<float> e(static_cast<size_t>(cols), 0.0f);
+    e[0] = 1.0f;
+    vt::mach2::HadamardSpine(e.data(), 1, cols);
+    double energy = 0.0;
+    for (const float v : e) energy += static_cast<double>(v) * static_cast<double>(v);
+    CHECK(energy == doctest::Approx(1.0).epsilon(1e-5));
+    // ...and it must not leave the delta untouched, which a stub would.
+    CHECK(e[1] != 0.0f);
+  }
+}
+
+TEST_CASE("mach2 spine tensor assembly matches the release decoder") {
+  // Synthetic inputs at two shapes that take different `_HS` radices, with the
+  // expectations read off the unmodified `decode.py`: `decode_ne_tensor` is
+  // gathered, scaled by `Wscale`, rotated on both axes with the `su`/`sv` signs,
+  // bf16-rounded, then rescaled by `rc_grid` - and any reordering of those five
+  // steps moves these numbers. Only the matmul's accumulation order differs, at
+  // about one unit in the last place, which is why the samples use a tolerance at
+  // all rather than exact equality.
+  struct Case {
+    int m;
+    int n;
+    float row0[6];
+    float absmax;
+  };
+  const Case cases[] = {
+      {160, 320, {-4.6025176f, 14.079598f, -4.701323f, -1.3647293f, -2.8147542f, -4.3230557f}, 39.87543869018555f},
+      {96, 48, {-11.390404f, -1.95809f, -5.0255523f, -1.95809f, 0.22085464f, -0.78673255f}, 32.683876037597656f},
+  };
+  std::vector<float> tlut(512 * 2);
+  for (int r = 0; r < 512; ++r) {
+    tlut[static_cast<size_t>(r) * 2 + 0] = static_cast<float>((r % 17) - 8) * 0.25f;
+    tlut[static_cast<size_t>(r) * 2 + 1] = static_cast<float>((r % 13) - 6) * 0.125f;
+  }
+  for (const auto& c : cases) {
+    const int mb = c.m / 16, nb = c.n / 16, tiles = mb * nb;
+    std::vector<float> su(static_cast<size_t>(c.n)), sv(static_cast<size_t>(c.m));
+    auto sign_of = [](int i, int mul) {
+      const int v = ((i * mul) % 251) - 125;
+      return v == 0 ? 1 : v;
+    };
+    for (int i = 0; i < c.m; ++i) sv[static_cast<size_t>(i)] = static_cast<float>(sign_of(i, 53));
+    for (int i = 0; i < c.n; ++i) su[static_cast<size_t>(i)] = static_cast<float>(sign_of(i, 37));
+
+    std::vector<uint16_t> states;
+    states.reserve(static_cast<size_t>(tiles) * 128);
+    for (int t = 0; t < tiles; ++t) {
+      std::vector<uint16_t> tape(64);
+      for (int i = 0; i < 64; ++i) {
+        tape[static_cast<size_t>(i)] = static_cast<uint16_t>(((t * 64 + i) * 0x9E37 + 0x1234) & 0xFFFF);
+      }
+      const auto st = vt::mach2::TrellisStates(tape.data(), tape.size(), 8, 128);
+      states.insert(states.end(), st.begin(), st.end());
+    }
+    std::vector<uint16_t> st16(states.begin(), states.end());
+    std::vector<float> out(static_cast<size_t>(c.m) * static_cast<size_t>(c.n), 0.0f);
+    std::vector<std::int32_t> su_i(static_cast<size_t>(c.n)), sv_i(static_cast<size_t>(c.m));
+    for (int i = 0; i < c.n; ++i) su_i[static_cast<size_t>(i)] = sign_of(i, 37);
+    for (int i = 0; i < c.m; ++i) sv_i[static_cast<size_t>(i)] = sign_of(i, 53);
+    vt::mach2::DecodeNeTensor(st16.data(), static_cast<std::int64_t>(st16.size()), tlut.data(), mb, nb,
+                              1.75f, su_i.data(), sv_i.data(), 2.5f, 3.5f, out.data());
+    for (int i = 0; i < 6; ++i) {
+      CHECK(out[static_cast<size_t>(i)] == doctest::Approx(c.row0[i]).epsilon(1e-6));
+    }
+    float peak = 0.0f;
+    for (const float v : out) peak = std::max(peak, v < 0.0f ? -v : v);
+    CHECK(peak == doctest::Approx(c.absmax).epsilon(1e-6));
+  }
+}
