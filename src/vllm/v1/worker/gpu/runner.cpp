@@ -4575,6 +4575,43 @@ void GPUModelRunner::propose_drafts_dflash(
         if (!dflash_direct_arm_) {
           vllm::v1::RefuseDflash1ArgmaxOnDflash2Block(*weights);
         }
+        // W9 bisect: the drafter's OWN block logits at the first proposes.
+        // Garbage/zero here means the drafter's forward died on itself (the
+        // non-tile geometry disease, self-inflicted — the drafter is the first
+        // forward that runs at a non-tile-multiple T). Clean logits with a
+        // degenerate verify stream mean the drafter's ops poison the pool the
+        // verify's allocations then receive. Host numbers only: the argmax
+        // below already consumed these bytes.
+        if (std::getenv("VT_TT_GDN_SPEC_DEBUG") != nullptr) {
+          static std::atomic<int> seen{0};
+          if (seen.fetch_add(1, std::memory_order_relaxed) < 4) {
+            double acc = 0.0;
+            uint64_t nan = 0, inf = 0, zero = 0;
+            for (float v : block_logits) {
+              if (std::isnan(v)) {
+                ++nan;
+                continue;
+              }
+              if (std::isinf(v)) {
+                ++inf;
+                continue;
+              }
+              if (v == 0.0f) {
+                ++zero;
+              }
+              acc += v > 0.0f ? v : -v;
+            }
+            std::fprintf(stderr,
+                         "[DRAFT_LOGITS] call=%d n=%zu asum=%.6g nan=%llu "
+                         "inf=%llu zero=%llu first=%.6g\n",
+                         seen.load(), block_logits.size(), acc,
+                         static_cast<unsigned long long>(nan),
+                         static_cast<unsigned long long>(inf),
+                         static_cast<unsigned long long>(zero),
+                         block_logits.empty() ? 0.0f : block_logits.front());
+            std::fflush(stderr);
+          }
+        }
         return SampleDflashBlockDrafts(block_logits, P, k, draft_vocab);
       });
 }

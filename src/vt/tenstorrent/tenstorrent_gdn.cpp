@@ -49,6 +49,27 @@ void GdnPostConvKernel(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
 
   MeshDevice& device = SharedMeshDevice();
   ttnn::Tensor dev_conv = DeviceRows(conv, t, conv_dim, device);
+  // VT_TT_GDN_SPEC_DEBUG: the conv stream AS THE POST-CONV READS IT — pairs
+  // with the conv-spec kernel's y readback to attribute a NaN/zero q/v to the
+  // conv's commit vs this kernel's read.
+  if (const char* dbg = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+      dbg != nullptr && dbg[0] != '\0' && !tt_capture_active()) {
+    std::vector<float> cv = dev_conv.to_vector<float>();
+    double c_acc = 0.0;
+    uint64_t c_nan = 0, c_zero = 0;
+    for (float f : cv) {
+      c_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++c_nan;
+      if (f == 0.0f) ++c_zero;
+    }
+    std::fprintf(stderr,
+                 "[POSTCONV-IN] T=%u conv_dim=%u conv_asum=%.6g nan=%llu "
+                 "zero=%llu/%zu conv_dt=%d\n",
+                 t, conv_dim, c_acc, static_cast<unsigned long long>(c_nan),
+                 static_cast<unsigned long long>(c_zero), cv.size(),
+                 static_cast<int>(conv.dtype));
+    std::fflush(stderr);
+  }
   ttnn::Tensor q2 = ttnn::slice(dev_conv, ttsl::SmallVector<uint32_t>{0, 0},
                                 ttsl::SmallVector<uint32_t>{t, key_dim},
                                 ttsl::SmallVector<uint32_t>{1, 1});
@@ -69,9 +90,26 @@ void GdnPostConvKernel(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
     ttnn::Tensor inv = ttnn::rsqrt(denom);
     return ttnn::multiply(rows, inv);
   };
-  CommitDeviceLogical2D(q_out, l2(q2), t * hk, dk);
-  CommitDeviceLogical2D(k_out, l2(k2), t * hk, dk);
-  CommitDeviceLogical2D(v_out, ttnn::reshape(v2, ttnn::Shape({t * hv, dv})), t * hv, dv);
+  ttnn::Tensor q_dev = l2(q2), k_dev = l2(k2), v_dev = ttnn::reshape(v2, ttnn::Shape({t * hv, dv}));
+  CommitDeviceLogical2D(q_out, q_dev, t * hk, dk);
+  CommitDeviceLogical2D(k_out, k_dev, t * hk, dk);
+  CommitDeviceLogical2D(v_out, std::move(v_dev), t * hv, dv);
+  // VT_TT_GDN_SPEC_DEBUG: the q this kernel committed — pairs with the
+  // GdnSpecDecode serve's q_asum (a zero there with a nonzero here is a
+  // serve-side miss, not a producer defect).
+  if (const char* dbg = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+      dbg != nullptr && dbg[0] != '\0' && !tt_capture_active()) {
+    std::vector<float> qv = q_dev.to_vector<float>();
+    double q_acc = 0.0;
+    uint64_t q_nan = 0;
+    for (float f : qv) {
+      q_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++q_nan;
+    }
+    std::fprintf(stderr, "[POSTCONV-OUT] T=%u q_asum=%.6g q_nan=%llu\n", t,
+                 q_acc, static_cast<unsigned long long>(q_nan));
+    std::fflush(stderr);
+  }
 
   // g/beta in f32 (the row's "f32 intermediates" doctrine: softplus(x) with
   // threshold 20, exp(a_log) and sigmoid must not round their inputs).
@@ -1342,6 +1380,45 @@ void RmsNormGatedKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& gate
   ttnn::Tensor dev_g;
   if (ServeDeviceShadowRaw(gate, rows, d, dev_g) ||
       ServeDeviceWindow(gate, rows, d, dev_g)) {
+    // W20: the decisive instrument's SERVE side for the z gate. The
+    // read-only trusted dual-read of the SERVED shadow + both addresses,
+    // BEFORE the normalize (the bytes the gate arithmetic will consume).
+    // Pairs with the commit-side [TRUST-SLOT] qkvz-z read: commit clean +
+    // serve garbage = the alias; both garbage = the commit.
+    if (std::getenv("VT_DUMP_TRUST") != nullptr && !tt_capture_active()) {
+      static std::atomic<int64_t> gs_seq{0};
+      if (gs_seq.fetch_add(1, std::memory_order_relaxed) < 96) {
+        std::vector<float> p1 = dev_g.to_vector<float>();
+        std::vector<float> p2 = dev_g.to_vector<float>();
+        const bool agree = (p1 == p2);
+        double acc = 0.0;
+        uint64_t nan = 0, inf = 0;
+        for (float f : p1) {
+          if (std::isnan(f)) {
+            ++nan;
+            continue;
+          }
+          if (std::isinf(f)) {
+            ++inf;
+            continue;
+          }
+          acc += f > 0.0f ? f : -f;
+        }
+        auto os = DebugSlotStateOf(gate);
+        std::fprintf(stderr,
+                     "[GSERVE-TRUST] agree=%d n=%zu asum=%.6g nan=%llu "
+                     "inf=%llu serve_addr=%llx owner_addr=%llx owndc=%d "
+                     "ownhc=%d\n",
+                     agree ? 1 : 0, p1.size(), acc,
+                     static_cast<unsigned long long>(nan),
+                     static_cast<unsigned long long>(inf),
+                     static_cast<unsigned long long>(
+                         dev_g.mesh_buffer().address()),
+                     static_cast<unsigned long long>(os.dev_buf_addr),
+                     os.device_current ? 1 : 0, os.host_current ? 1 : 0);
+        std::fflush(stderr);
+      }
+    }
     dev_g = NormalizeDevF32Tile(std::move(dev_g), rows, d);
   } else {
     VT_CHECK(!tt_capture_active(),
@@ -1377,6 +1454,33 @@ void RmsNormGatedKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& gate
     const auto target_shape = ttnn::Shape({rows, d});
     if (act.logical_shape() != target_shape) {
       act = CaptureSafeReshape(act, target_shape);
+    }
+  }
+  // VT_TT_GDN_SPEC_DEBUG: the gated norm's own operands, read back at the
+  // exact tensors the compute consumes. The model-side taps read the slot
+  // shadows; if those are clean while these are poisoned, the serve handed a
+  // different tensor than the slot holds.
+  if (const char* dbg = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+      dbg != nullptr && dbg[0] != '\0' && !tt_capture_active()) {
+    static std::atomic<int64_t> rng_seq{0};
+    const int64_t call = rng_seq.fetch_add(1, std::memory_order_relaxed);
+    if (call < 400) {
+      auto probe = [](const char* tag, const ttnn::Tensor& t) {
+        std::vector<float> v = t.to_vector<float>();
+        double acc = 0.0;
+        uint64_t nan = 0, inf = 0;
+        for (float f : v) {
+          if (std::isnan(f)) ++nan;
+          else if (std::isinf(f)) ++inf;
+          else acc += f > 0.0f ? f : -f;
+        }
+        std::fprintf(stderr, "[RNG-IN] %s n=%zu asum=%.6g nan=%llu inf=%llu\n",
+                     tag, v.size(), acc, static_cast<unsigned long long>(nan),
+                     static_cast<unsigned long long>(inf));
+      };
+      probe("x", dev_x);
+      probe("g", dev_g);
+      std::fflush(stderr);
     }
   }
   if (std::getenv("VT_TT_SLOT_TRACE") != nullptr) {
@@ -2538,7 +2642,7 @@ std::map<std::array<uint64_t, 5>, ConvSpecIdxEntry>& ConvSpecIdxMap() {
   return *c;
 }
 
-void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& w,
+void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tensor& x, const Tensor& w,
                                   const Tensor* bias, Tensor& conv_state,
                                   const Tensor& conv_state_indices,
                                   const Tensor& num_accepted_tokens,
@@ -2643,6 +2747,17 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
       n.zeros_ts = ttnn::zeros(tt::tt_metal::Shape({utok * uslots, uc}),
                                ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR,
                                std::ref(device));
+      // VT_TT_GDN_SPEC_DEBUG W7: the scatter base's resident DRAM address —
+      // the aliasing check against the DENSE-LAYER probe's slot addresses.
+      if (std::getenv("VT_TT_GDN_SPEC_DEBUG") != nullptr)
+        std::fprintf(stderr,
+                     "[CONV-SPEC-ENTRY] zeros_ts %ux%u addr=%llx "
+                     "x_scatter=%u rows\n",
+                     static_cast<unsigned>(utok * uslots),
+                     static_cast<unsigned>(uc),
+                     static_cast<unsigned long long>(
+                         n.zeros_ts.mesh_buffer().address()),
+                     static_cast<unsigned>(utok));
       // MAC stream rows: token t (request i, position p = t - lo_i), tap j:
       //   p + j < width ? p + j (the state window part)
       //     : width + (lo_i + p + j - width) = t + j (the x part)
@@ -2749,9 +2864,87 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
   ttnn::Tensor T = T0;
   // ---- x into slot-ordered rows [T, R] ------------------------------------
   ttnn::Tensor xT;
+  bool x_from_shadow = false;  // VT_TT_GDN_SPEC_DEBUG: which serve the x took
+  // VT_TT_GDN_SPEC_DEBUG stage probe: read back EACH scatter-chain stage
+  // (as-served shadow -> post-to_layout -> post-indexed_fill) and NaN-count
+  // it. One run attributes the NaN to the serve, the layout conversion, or
+  // the fill itself. Gated to the first 48 calls (step 1 covers the NaN
+  // onset and the frozen-x onset); each readback is a blocking D2H, so this
+  // is a diagnostic-only lane.
+  static std::atomic<int64_t> conv_spec_probe_seq{0};
+  static const bool conv_spec_dbg_on = [] {
+    const char* d = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+    return d != nullptr && d[0] != '\0';
+  }();
+  const bool conv_spec_probe =
+      conv_spec_dbg_on && !tt_capture_active() &&
+      conv_spec_probe_seq.fetch_add(1, std::memory_order_relaxed) < 48;
+  auto probe_stage = [conv_spec_probe](const char* tag,
+                                       const ttnn::Tensor& t) {
+    if (!conv_spec_probe) return;
+    std::vector<float> v = t.to_vector<float>();
+    double acc = 0.0;
+    uint64_t nan = 0;
+    for (float f : v) {
+      if (std::isnan(f)) {
+        ++nan;
+        continue;
+      }
+      acc += f > 0.0f ? f : -f;
+    }
+    const auto ls = t.logical_shape();
+    std::fprintf(stderr,
+                 "[CONV-SPEC-STAGE] %s n=%zu asum=%.6g nan=%llu shape=%ux%u "
+                 "dt=%d layout=%d\n",
+                 tag, v.size(), acc, static_cast<unsigned long long>(nan),
+                 static_cast<unsigned>(ls[0]), static_cast<unsigned>(ls[1]),
+                 static_cast<int>(t.dtype()), static_cast<int>(t.layout()));
+    std::fflush(stderr);
+  };
   {
     ttnn::Tensor x_raw;
-    if (ServeDeviceShadowRaw(x, utok, uc, x_raw)) {
+    if ((x_from_shadow = ServeDeviceShadowRaw(x, utok, uc, x_raw))) {
+      probe_stage("serve", x_raw);
+      // W20: the decisive instrument's SERVE side for x (the qkvz mixed
+      // output as this kernel consumes it). The read-only trusted dual-read
+      // of the SERVED shadow + both addresses: if the served buffer's DRAM
+      // address differs from the owner slot's, the serve handed a different
+      // buffer than the commit wrote (the alias); if the two passes disagree,
+      // the residency state changed under the read.
+      if (conv_spec_dbg_on && !tt_capture_active()) {
+        static std::atomic<int64_t> xs_seq{0};
+        if (xs_seq.fetch_add(1, std::memory_order_relaxed) < 48) {
+          std::vector<float> p1 = x_raw.to_vector<float>();
+          std::vector<float> p2 = x_raw.to_vector<float>();
+          const bool agree = (p1 == p2);
+          double acc = 0.0;
+          uint64_t nan = 0, inf = 0;
+          for (float f : p1) {
+            if (std::isnan(f)) {
+              ++nan;
+              continue;
+            }
+            if (std::isinf(f)) {
+              ++inf;
+              continue;
+            }
+            acc += f > 0.0f ? f : -f;
+          }
+          auto os = vt::tenstorrent::DebugSlotStateOf(x);
+          std::fprintf(stderr,
+                       "[XSERVE-TRUST] agree=%d n=%zu asum=%.6g nan=%llu "
+                       "inf=%llu serve_addr=%llx owner_addr=%llx "
+                       "owndc=%d ownhc=%d\n",
+                       agree ? 1 : 0, p1.size(), acc,
+                       static_cast<unsigned long long>(nan),
+                       static_cast<unsigned long long>(inf),
+                       static_cast<unsigned long long>(
+                           x_raw.mesh_buffer().address()),
+                       static_cast<unsigned long long>(os.dev_buf_addr),
+                       os.device_current ? 1 : 0, os.host_current ? 1 : 0);
+          std::fflush(stderr);
+        }
+      }
       ttnn::Tensor x_f32 = x_raw.dtype() == ttnn::DataType::FLOAT32
                                ? x_raw
                                : ttnn::typecast(x_raw, ttnn::DataType::FLOAT32);
@@ -2760,17 +2953,37 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
                    ? t
                    : ttnn::to_layout(t, ttnn::Layout::ROW_MAJOR);
       };
+      ttnn::Tensor x_rm = to_rm(x_f32);
+      probe_stage("rm", x_rm);
+      // W7b: the fill's BASE and the scatter INDICES, read at fill time. The
+      // filled output = zeros_ts.clone() with x's rows written at the scatter
+      // positions, so garbage in the non-written region IS the base's live
+      // content — this read separates "the cached base was stomped" from
+      // "the clone never copied it". The indices print raw: an out-of-range
+      // batch_id makes the fill write out of bounds (the stomp candidate).
+      if (conv_spec_probe) {
+        probe_stage("base", e.zeros_ts);
+        std::vector<uint32_t> sv = e.x_scatter.to_vector<uint32_t>();
+        std::fprintf(stderr, "[CONV-SPEC-STAGE] scatter n=%zu:", sv.size());
+        for (size_t i = 0; i < sv.size() && i < 12; ++i)
+          std::fprintf(stderr, " %u", sv[i]);
+        std::fprintf(stderr, "\n");
+        std::fflush(stderr);
+      }
       ttnn::Tensor filled = ttnn::indexed_fill(
           e.x_scatter,
           ttnn::experimental::view(e.zeros_ts,
                                    ttnn::Shape({utok * uslots, 1, 1, uc})),
-          ttnn::experimental::view(to_rm(x_f32),
+          ttnn::experimental::view(x_rm,
                                    ttnn::Shape({utok, 1, 1, uc})),
           std::nullopt, /*dim=*/0);
+      probe_stage("filled", ttnn::experimental::view(
+                                filled, ttnn::Shape({utok, R})));
       xT = ttnn::to_layout(
           ttnn::experimental::view(std::move(filled),
                                    ttnn::Shape({utok, R})),
           ttnn::Layout::TILE);
+      probe_stage("tile", xT);
     } else {
       VT_CHECK(!tt_capture_active(),
                "tenstorrent causal_conv1d_spec_update: x arrived without a "
@@ -2905,19 +3118,95 @@ void CausalConv1dSpecUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Te
       dbg != nullptr && dbg[0] != '\0' && !tt_capture_active()) {
     std::vector<float> yv = y.to_vector<float>();
     double y_acc = 0.0;
-    for (float f : yv) y_acc += f > 0.0f ? f : -f;
+    uint64_t y_nan = 0;
+    for (float f : yv) {
+      y_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++y_nan;
+    }
     std::vector<float> xv = xT.to_vector<float>();
     double x_acc = 0.0;
-    for (float f : xv) x_acc += f > 0.0f ? f : -f;
+    uint64_t x_nan = 0;
+    for (float f : xv) {
+      x_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++x_nan;
+    }
     std::vector<float> tv_ = T.to_vector<float>();
     double t_acc = 0.0;
     for (float f : tv_) t_acc += f > 0.0f ? f : -f;
     std::fprintf(stderr,
                  "[CONV-SPEC] T=%lld nreq=%lld conv_state=%p y_n=%zu "
-                 "y_asum=%.6g x_asum=%.6g T_asum=%.6g\n",
+                 "y_asum=%.6g x_asum=%.6g T_asum=%.6g x_nan=%llu y_nan=%llu "
+                 "x_shadow=%d x_dt=%d x_ptr=%p\n",
                  static_cast<long long>(tokens),
                  static_cast<long long>(num_reqs), conv_state.data, yv.size(),
-                 y_acc, x_acc, t_acc);
+                 y_acc, x_acc, t_acc,
+                 static_cast<unsigned long long>(x_nan),
+                 static_cast<unsigned long long>(y_nan),
+                 x_from_shadow ? 1 : 0, static_cast<int>(x.dtype),
+                 static_cast<const void*>(x.data));
+    // The NaN positions (row, col) of xT and y — one line per call while any
+    // NaN is present; the row maps to the token, the col to slot/channel.
+    if (x_nan > 0 || y_nan > 0) {
+      std::string xp, yp;
+      int shown = 0;
+      for (size_t i = 0; i < xv.size() && shown < 6; ++i)
+        if (std::isnan(xv[i])) {
+          xp += " [" + std::to_string(i / R) + "," + std::to_string(i % R) + "]";
+          ++shown;
+        }
+      shown = 0;
+      for (size_t i = 0; i < yv.size() && shown < 6; ++i)
+        if (std::isnan(yv[i])) {
+          yp += " [" + std::to_string(i / R) + "," + std::to_string(i % R) + "]";
+          ++shown;
+        }
+      std::fprintf(stderr, "[CONV-SPEC-NAN] xT:%s y:%s\n", xp.c_str(),
+                   yp.c_str());
+      // The three-way comparison: the SCATTERED xT vs the RAW served shadow
+      // (pre-scatter) vs a direct EnsureDevice2D readback of x — attributes
+      // the NaN to the serve, the shadow, or the scatter itself.
+      {
+        uint64_t raw_nan = 0;
+        double raw_acc = 0.0;
+        {
+          std::lock_guard<std::mutex> g(SlotMutex());
+          BufferSlot* s = FindSlot(x.data);
+          if (s != nullptr && s->device_current && !s->host_current &&
+              s->device.has_value()) {
+            std::fprintf(stderr,
+                         "[CONV-SPEC-NAN-SLOT] ptr=%p dev=%ux%u bytes=%zu "
+                         "dt=%d reserved=%d persist=%d\n",
+                         static_cast<const void*>(x.data), s->dev_rows,
+                         s->dev_cols, s->bytes,
+                         static_cast<int>(s->device->dtype()),
+                         s->device_reserved ? 1 : 0,
+                         s->persistent.has_value() ? 1 : 0);
+            std::vector<float> rv = s->device->to_vector<float>();
+            for (float f : rv) {
+              raw_acc += f > 0.0f ? f : -f;
+              if (std::isnan(f)) ++raw_nan;
+            }
+            std::fprintf(stderr,
+                         "[CONV-SPEC-NAN-RAW] raw_n=%zu raw_nan=%llu "
+                         "raw_asum=%.6g\n",
+                         rv.size(), static_cast<unsigned long long>(raw_nan),
+                         raw_acc);
+          }
+        }
+        std::vector<float> xv2 =
+            vt::tenstorrent::DebugDeviceReadbackF32(q_unused_probe, x);
+        double x2_acc = 0.0;
+        uint64_t x2_nan = 0;
+        for (float f : xv2) {
+          x2_acc += f > 0.0f ? f : -f;
+          if (std::isnan(f)) ++x2_nan;
+        }
+        std::fprintf(stderr,
+                     "[CONV-SPEC-NAN-X2] x2_n=%zu x2_nan=%llu x2_asum=%.6g\n",
+                     xv2.size(), static_cast<unsigned long long>(x2_nan),
+                     x2_acc);
+      }
+    }
     std::fflush(stderr);
   }
   // ---- the out select ------------------------------------------------------
@@ -3237,20 +3526,30 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
     for (float f : sv) s_acc += f > 0.0f ? f : -f;
     std::vector<float> qv = q_exp.to_vector<float>();
     double q_acc = 0.0;
-    for (float f : qv) q_acc += f > 0.0f ? f : -f;
+    uint64_t q_nan = 0;
+    for (float f : qv) {
+      q_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++q_nan;
+    }
     std::vector<float> vv = v2d.to_vector<float>();
     double v_acc = 0.0;
-    for (float f : vv) v_acc += f > 0.0f ? f : -f;
+    uint64_t v_nan = 0;
+    for (float f : vv) {
+      v_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++v_nan;
+    }
     std::fprintf(stderr,
                  "[GDN-SPEC] T=%lld nreq=%lld nc=%lld nat0=%d init0=%d "
                  "slots=%lld cache=%p out_n=%zu fnv=%016llx asum=%a "
-                 "s_asum=%.6g q_asum=%.6g v_asum=%.6g\n",
+                 "s_asum=%.6g q_asum=%.6g v_asum=%.6g q_nan=%llu v_nan=%llu\n",
                  static_cast<long long>(T), static_cast<long long>(num_reqs),
                  static_cast<long long>(num_cols),
                  num_reqs > 0 ? natp[0] : -1,
                  num_reqs > 0 ? init[static_cast<size_t>(num_reqs - 1)] : -1,
                  static_cast<long long>(slots), state.data, ov.size(),
-                 static_cast<unsigned long long>(fnv), acc, s_acc, q_acc, v_acc);
+                 static_cast<unsigned long long>(fnv), acc, s_acc, q_acc, v_acc,
+                 static_cast<unsigned long long>(q_nan),
+                 static_cast<unsigned long long>(v_nan));
     std::fflush(stderr);
   }
   CommitDeviceLogical2D(

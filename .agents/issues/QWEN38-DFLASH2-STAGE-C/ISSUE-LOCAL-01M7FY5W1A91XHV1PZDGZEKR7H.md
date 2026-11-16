@@ -17,3 +17,95 @@ With kGdnSpecDecode (id 12) and kGreedyRejectionSample (id 107) both ported, the
 ## Resolution
 
 -
+
+## W6-W13 bisect (2026-11-15 evening — the follow-on session's record)
+
+The W4 "collapses at GDN layer 8" framing is WRONG in one respect and right in
+a sharper one: the collapse is NOT op-fixed — its onset layer MOVES with the
+staging arm (w7 device-res: l=10; w8/w9 forced-host-residual: l=4, the first
+full-attn layer; w12 host-free-off: l=1). The poison is POOL-STATE dependent.
+What stays true: the poison is live in the FIRST spec step (T=9 — the only
+non-tile-multiple geometry in the workload), and the verify's logits collapse
+to argmax-0 (the all-zero accepted stream).
+
+New evidence (all in docs/bench-evidence/qwen38-dflash2-stage-c-w3-20261115/,
+README.md's W6-W13 section carries the full record):
+- `[DRAFT_LOGITS]` (w13): propose #1 CLEAN (asum 4.94e6, 0 NaN); proposes #2-3
+  read 100% NaN. The drafter is a VICTIM (it reads the verify's poisoned aux
+  taps), not the poisoner.
+- `[SPEC-OUT]`/`[RNG-IN]` (w11): the z gate reads asum 3.62e40 + 109 Infs at
+  the spec step's 8th GDN layer (l=9) from CLEAN h (22227); from l=10 the gate
+  reads ALL-ZEROS for the rest of the run. `[QKVZ-OUT]` mixed reads garbage
+  (8.67e40+) from call 51 (l=4) while `[QKVZ-IN]` h reads clean — in BOTH
+  staging arms. The poison sits between the qkvz GEMM's clean input and its
+  garbage-read output.
+- `[CONV-SPEC-STAGE]` (w7b): the conv-spec fill's cached zeros base reads
+  ZEROS at fill time while the fill's output reads recycled garbage (identical
+  bytes asum=1.34712e40 + 36 NaNs at every first-GDN-after-FA call). tt-metal
+  indexed_fill = out-of-place clone + row writes (indexed_fill.hpp:11-15), so
+  the output garbage is NOT the base's content.
+- `[TT-SLOT-ALIAS]` census scan (w10): ZERO duplicate device addresses across
+  all slots — no double-hand.
+
+Op-level exonerations (standalone tests, GREEN at the engine geometry,
+47/47 assertions): `kCausalConv1dSpecUpdate` sweep F (C=10240, widened
+state_len=11, T=9, slots=9, nat=1, NaN-seeded out: max_abs 2.98e-08,
+nonfinite=0) and sweep G (shifted-address second call: the call-1 buffers
+held alive so call 2 lands elsewhere — max_abs 2.98e-08). The stale-address
+replay hypothesis is dead for this op. `GdnSpecDecodeKernel` checksums clean
+at every T=9 call. EnsureDevice2D REFUSES row-strided views outright
+(residency.cpp:930) — a new test pins that contract.
+
+## W20 (2026-11-16): the trusted dual-read — the alias theory FALSIFIED
+
+The decisive instrument ran (README.md's W20 section carries the full
+record). Verdicts:
+
+- **The stale-download/serve-alias hypothesis is FALSIFIED.** The read-only
+  trusted dual-read at the qkvz COMMIT side reads the same garbage the
+  serve reads (asum 3.75443e+40, 113 Infs at the first spec step's l=9,
+  call 55). The matmul's own output reads garbage PRE-commit
+  ([ZGEMM-PRECOMMIT]) with BOTH operands dual-read clean and stable at the
+  same site ([MMBT9]: h asum 22227.6, the staged weight byte-identical
+  across steps).
+- **The block-recycle alias is falsified by intervention.** A 3-deep output
+  keep-alive in MatmulBTKernel (the current output's block can never be a
+  recent recycle) MOVED the poison (onset later, bigger: ~9e42, ~2500 Infs)
+  instead of removing it. The recycled-block content is not the mechanism.
+  The keep-alive stays (harmless; onset later; first token 220→23066) but
+  the stream stays degenerate (e171d6b1).
+- **Three isolated reproductions at the exact engine geometry are ALL
+  GREEN** (tests/vt/test_tenstorrent_backend.cpp, w20-bfp8-{m9,warm,unsynced}
+  .log): the bfp8-staged weight at M=9/M=32 vs the f32 oracle (max_rel
+  0.75 percent), 200 warm program-cache-hit calls, 50 unsynced-staging
+  lifecycle reps. The W3 scope claim that the target's GDN weights never
+  route through EnsureMatmulWeightDevice is WRONG (they do; bfp8 degrades
+  them since W3) but the bfp8 matmul itself is numerically fine at the spec
+  geometry.
+- The dead agent's qkvz commit-side TrustDump calls were unreachable dead
+  code (after `return out;` in both ProjectGdnQkvzRaw arms) — why waves
+  w14-w19 captured no qkvz commit. Fixed.
+
+## Next instrument
+
+**SHARPENED: the recurrence's core output is ~ZERO at the spec calls**
+(asum 120 → 1.2 → 0.9, exactly 4 of 9 rows zero, later NaN) with CLEAN
+q/k/v (the pc_q/pc_v trusted dumps have no zero rows pre-collapse). The
+recurrence's UNPROBED inputs are the next probes: the INITIAL-STATE gather
+(column num_accepted-1 — the prefill's committed state as the ENGINE holds
+it) and the BA outputs (araw/braw → g/beta; the sba_* dumps cover only the
+prefill). The core ~0 explains the degenerate stream on its own; the z
+GEMM's 1e40 read at c55 is a second anomaly (it collapses h at l=10).
+
+Beyond that, the poison needs the engine's INTERLEAVED op mix: the conv-spec fill's
+indexed_fill (the cached-zeros-base/clone anomaly stands), the GDN
+recurrence's gathers/scatters, and the paged attention, all sharing the
+tt-metal program cache and the DRAM allocator with the matmuls. Strongest
+hypothesis: a tt-metal-pin program-cache/runtime-arg staleness under
+interleaved programs (the kernel writing a previous call's buffer while the
+current output reads uninitialized recycled bytes — fits the keep-alive
+intervention moving the poison, the identical-bytes periodicity, and the
+staging-arm-dependent onset). Next step: the interleaved-op focused case
+(matmul + indexed_fill + gather through the SHARED program cache in one
+harness) — the first reproduction that varies the op MIX, not the op — plus
+the state-gather/BA trusted reads at the spec calls.

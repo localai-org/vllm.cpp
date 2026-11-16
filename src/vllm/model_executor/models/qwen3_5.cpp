@@ -4394,9 +4394,12 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
       Tensor packed = out.packed_owner->t();
       out.mixed = packed.Slice(1, 0, conv_dim);
       out.z = packed.Slice(1, conv_dim, conv_dim + value_dim);
+      // W20: the dump rides BEFORE the return — the previous placement was
+      // unreachable dead code (after `return out;`), so the merged arm's
+      // commit-side trusted read never fired.
+      if (const char* td = std::getenv("VT_DUMP_TRUST"))
+        vt::tenstorrent::TrustDump(d.q, td, "packed", packed);
       return out;
-    if (const char* td = std::getenv("VT_DUMP_TRUST"))
-      vt::tenstorrent::TrustDump(d.q, td, "packed", packed);
     }
     Tensor qkv_weight = packed_weight.Slice(0, 0, conv_dim);
     Tensor z_weight = packed_weight.Slice(0, conv_dim, conv_dim + value_dim);
@@ -4404,11 +4407,22 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
     out.z_owner.emplace(MatmulBTRawD(d, h, z_weight, outdt));
     out.mixed = out.mixed_owner->t();
     out.z = out.z_owner->t();
-    return out;
-    if (const char* td = std::getenv("VT_DUMP_TRUST")) {
-      vt::tenstorrent::TrustDump(d.q, td, "mixed", out.mixed);
-      vt::tenstorrent::TrustDump(d.q, td, "z", out.z);
+    // W20: the decisive instrument's COMMIT side. The read-only trusted
+    // dual-read of both committed shadows (no slot mutation — the consumer's
+    // serve path stays pristine), gated to the calls around the first spec
+    // step. The previous placement was unreachable dead code (after
+    // `return out;`), which is why waves w14-w19 captured no qkvz commit.
+    if (vt::tenstorrent::TraceCaptureActive() == false) {
+      static std::atomic<int64_t> qkvz_trust_seq{0};
+      const int64_t tc = qkvz_trust_seq.fetch_add(1, std::memory_order_relaxed);
+      if (std::getenv("VT_DUMP_TRUST") != nullptr && tc >= 0 && tc < 96) {
+        vt::tenstorrent::DebugSlotTrustRead(
+            out.mixed, (std::string("qkvz-mixed-c") + std::to_string(tc)).c_str());
+        vt::tenstorrent::DebugSlotTrustRead(
+            out.z, (std::string("qkvz-z-c") + std::to_string(tc)).c_str());
+      }
     }
+    return out;
   }
   // PERF-FP8-ALPHA-FOLD / #417 — the output dtype of the merged fp8 in_proj leaf.
   // vLLM's ModelOpt fp8 linear emits the model dtype (bf16); ours hardcoded f32,
@@ -4536,6 +4550,22 @@ GdnQkvzOutput ProjectGdnQkvzRaw(Dev d, const GdnLayerWeights& w,
         MatmulBTRawD(d, h, ResidentWeight(d, w.in_proj_z), DType::kBF16));
     out.mixed = out.mixed_owner->t();
     out.z = out.z_owner->t();
+    // W20: the decisive instrument's COMMIT side — the arm the Q4_K GGUF
+    // actually takes (the block-encoded in_proj_qkv/in_proj_z owners). The
+    // read-only trusted dual-read of both committed shadows, gated to the
+    // calls around the first spec step.
+    if (!vt::tenstorrent::TraceCaptureActive()) {
+      static std::atomic<int64_t> qkvz_bq_trust_seq{0};
+      const int64_t tc =
+          qkvz_bq_trust_seq.fetch_add(1, std::memory_order_relaxed);
+      if (std::getenv("VT_DUMP_TRUST") != nullptr && tc >= 0 && tc < 96) {
+        vt::tenstorrent::DebugSlotTrustRead(
+            out.mixed,
+            (std::string("qkvz-mixed-c") + std::to_string(tc)).c_str());
+        vt::tenstorrent::DebugSlotTrustRead(
+            out.z, (std::string("qkvz-z-c") + std::to_string(tc)).c_str());
+      }
+    }
     return out;
   }
   out.mixed_owner.emplace(
@@ -4572,8 +4602,137 @@ GdnQkvzOutput ProjectGdnQkvz(Dev d, const GdnLayerWeights& w, const Tensor& h,
                              int64_t conv_dim, int64_t value_dim, DType indt,
                              DType outdt, const Tensor* h_fp8,
                              int64_t value_heads) {
+  // VT_TT_GDN_SPEC_DEBUG: the GDN block's INPUT h and the projection's
+  // committed output, both read back the way the consuming kernel serves
+  // them (EnsureDevice2D). Separates "h arrived NaN/poisoned" (an upstream
+  // staging defect) from "the GEMM emitted NaN" (a weight/staging defect).
+  static const bool qkvz_in_dbg = [] {
+    const char* e = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+    return e != nullptr && e[0] != '\0';
+  }();
+  static std::atomic<int64_t> qkvz_dbg_seq{0};
+  const int64_t qkvz_call =
+      qkvz_in_dbg ? qkvz_dbg_seq.fetch_add(1, std::memory_order_relaxed) : -1;
+  if (qkvz_in_dbg && qkvz_call >= 0 && qkvz_call < 512 &&
+      !vt::tenstorrent::TraceCaptureActive()) {
+    std::vector<float> hv_ = vt::tenstorrent::DebugDeviceReadbackF32(d.q, h);
+    double h_acc = 0.0;
+    uint64_t h_nan = 0;
+    for (float f : hv_) {
+      h_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++h_nan;
+    }
+    auto hs7 = vt::tenstorrent::DebugSlotStateOf(h);
+    std::fprintf(stderr,
+                 "[QKVZ-IN] call=%lld T=%lld h_asum=%.6g h_nan=%llu slot "
+                 "tr=%d %ux%u hc=%d dc=%d rs=%d dt=%d addr=%llx\n",
+                 static_cast<long long>(qkvz_call),
+                 static_cast<long long>(h.shape[0]), h_acc,
+                 static_cast<unsigned long long>(h_nan), hs7.tracked ? 1 : 0,
+                 hs7.dev_rows, hs7.dev_cols, hs7.host_current ? 1 : 0,
+                 hs7.device_current ? 1 : 0, hs7.reserved ? 1 : 0,
+                 hs7.dev_dtype,
+                 static_cast<unsigned long long>(hs7.dev_buf_addr));
+    std::fflush(stderr);
+  }
   GdnQkvzOutput out =
       ProjectGdnQkvzRaw(d, w, h, conv_dim, value_dim, indt, outdt, h_fp8);
+  // W20: the decisive instrument's COMMIT side — arm-independent (the
+  // wrapper sees every arm's output). The read-only trusted dual-read of
+  // both committed shadows, gated to the calls around the first spec step.
+  if (qkvz_in_dbg && qkvz_call >= 0 && qkvz_call < 96 &&
+      !vt::tenstorrent::TraceCaptureActive() &&
+      std::getenv("VT_DUMP_TRUST") != nullptr) {
+    vt::tenstorrent::DebugSlotTrustRead(
+        out.mixed,
+        (std::string("qkvz-mixed-c") + std::to_string(qkvz_call)).c_str());
+    vt::tenstorrent::DebugSlotTrustRead(
+        out.z, (std::string("qkvz-z-c") + std::to_string(qkvz_call)).c_str());
+  }
+  if (qkvz_in_dbg && qkvz_call >= 0 && qkvz_call < 512 &&
+      !vt::tenstorrent::TraceCaptureActive()) {
+    std::vector<float> mv_ =
+        vt::tenstorrent::DebugDeviceReadbackF32(d.q, out.mixed);
+    double m_acc = 0.0;
+    uint64_t m_nan = 0;
+    for (float f : mv_) {
+      m_acc += f > 0.0f ? f : -f;
+      if (std::isnan(f)) ++m_nan;
+    }
+    std::fprintf(stderr,
+                 "[QKVZ-OUT] call=%lld mixed_asum=%.6g mixed_nan=%llu\n",
+                 static_cast<long long>(qkvz_call), m_acc,
+                 static_cast<unsigned long long>(m_nan));
+    // The z gate too: the gated norm's gate leg. +Inf here is the stream
+    // death (the gated norm multiplies rmsnorm(core) by silu/sigmoid(z)).
+    if (out.z.rank == 2 && out.z.IsContiguous()) {
+      std::vector<float> zv_ =
+          vt::tenstorrent::DebugDeviceReadbackF32(d.q, out.z);
+      double z_acc = 0.0;
+      uint64_t z_nan = 0, z_inf = 0, z_max = 0;
+      for (float f : zv_) {
+        if (std::isnan(f)) {
+          ++z_nan;
+          continue;
+        }
+        if (std::isinf(f)) {
+          ++z_inf;
+          continue;
+        }
+        z_acc += f > 0.0f ? f : -f;
+        if (f > z_max) z_max = f;
+      }
+      std::fprintf(stderr,
+                   "[QKVZ-Z] call=%lld z_asum=%.6g z_nan=%llu z_inf=%llu "
+                   "z_maxabs=%.6g\n",
+                   static_cast<long long>(qkvz_call), z_acc,
+                   static_cast<unsigned long long>(z_nan),
+                   static_cast<unsigned long long>(z_inf),
+                   static_cast<double>(z_max));
+    }
+    // The WEIGHT shadows: the packed i32 words the keep-quant GEMM decodes.
+    // A hash per call, printed on change — pins WHICH call's weight staging
+    // diverged from the prefill's.
+    for (const auto& [wtag, wt] :
+         {std::pair{"qkvw", &w.in_proj_qkv}, std::pair{"zw", &w.in_proj_z}}) {
+      if (wt->Empty()) continue;
+      const void* host = wt->bytes.data();
+      const bool rowp = vt::tenstorrent::KeepQuantRowWordsPresentForTest(host);
+      const bool legacy =
+          vt::tenstorrent::KeepQuantWordShadowPresentForTest(host);
+      uint64_t h = 1469598103934665603ull;
+      size_t wn = 0;
+      if (rowp) {
+        auto v = vt::tenstorrent::KeepQuantRowWordsReadBackForTest(host);
+        wn = v.size();
+        for (int32_t x : v) {
+          h = (h ^ static_cast<uint64_t>(static_cast<uint32_t>(x))) *
+              1099511628211ull;
+        }
+      } else if (legacy) {
+        auto v = vt::tenstorrent::KeepQuantWordReadBackForTest(host);
+        wn = v.size();
+        for (int32_t x : v) {
+          h = (h ^ static_cast<uint64_t>(static_cast<uint32_t>(x))) *
+              1099511628211ull;
+        }
+      }
+      static std::map<const void*, std::pair<uint64_t, size_t>> seen;
+      auto it = seen.find(host);
+      if (it == seen.end() || it->second.first != h ||
+          it->second.second != wn) {
+        std::fprintf(stderr,
+                     "[QKVZ-W] call=%lld %s host=%p rowp=%d legacy=%d words=%zu "
+                     "hash=%016llx%s\n",
+                     static_cast<long long>(qkvz_call), wtag, host, rowp ? 1 : 0,
+                     legacy ? 1 : 0, wn,
+                     static_cast<unsigned long long>(h),
+                     it == seen.end() ? " first" : " CHANGED");
+      }
+      seen[host] = {h, wn};
+    }
+    std::fflush(stderr);
+  }
   if (w.v_head_perm_key_heads == 0) return out;
   out.mixed_perm_owner =
       PermuteVHeadsIfDeferred(d, w, out.mixed, value_heads,
@@ -5205,6 +5364,35 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
                       dbeta.t(), ssm_cache, sdi.gdn_spec_qsl.t(), spec_idx_2d,
                       sdi.gdn_num_accepted.t(), vt::GdnArgs{scale});
     vt::IndexCopy(d.q, dcore.t(), dcore_spec.t(), spec_tok);  // :1570
+    // W9: the spec-token scatter's verdict. spec_tok names which rows of
+    // dcore receive dcore_spec's rows; a duplicate/stale entry collides
+    // (last-writer-wins) and leaves the unnamed rows ZERO — the 4-zero-rows
+    // signature the MIXER-OUT probe saw at the spec step's first GDN layers.
+    if (const char* dbg = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+        dbg != nullptr && dbg[0] != '\0' && !vt::tenstorrent::TraceCaptureActive()) {
+      static std::atomic<int64_t> ic_seq{0};
+      if (ic_seq.fetch_add(1, std::memory_order_relaxed) < 64) {
+        // spec_tok is host-current: IndexCopyKernel ran EnsureHost(idx) above.
+        const int32_t* sp = spec_tok.Ptr<int32_t>();
+        std::fprintf(stderr, "[SPEC-TOK] n=%lld:", static_cast<long long>(spec_tok.Numel()));
+        for (int64_t i = 0; i < spec_tok.Numel() && i < 12; ++i)
+          std::fprintf(stderr, " %d", sp[i]);
+        std::vector<float> dv_ =
+            vt::tenstorrent::DebugDeviceReadbackF32(d.q, dcore.t());
+        double a = 0.0;
+        uint64_t z = 0, nn = 0;
+        for (float f : dv_) {
+          if (std::isnan(f)) { ++nn; continue; }
+          if (f == 0.0f) ++z;
+          a += f > 0.0f ? f : -f;
+        }
+        std::fprintf(stderr,
+                     " | dcore asum=%.6g nan=%llu zero=%llu/%zu\n", a,
+                     static_cast<unsigned long long>(nn),
+                     static_cast<unsigned long long>(z), dv_.size());
+        std::fflush(stderr);
+      }
+    }
   }
 
   // ── 4.2 non-spec prefill recurrence (chunk_gated_delta_rule, :1504-1532):
@@ -5493,6 +5681,11 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
                                conv_cache, sdi.gdn_spec_conv_state_idx.t(),
                                sdi.gdn_num_accepted.t(), sdi.gdn_spec_qsl.t(),
                                vt::CausalConv1dArgs{true});
+    // W17: the spec conv's output — the only unexamined stage. The pc_q/v
+    // dumps downstream read zero rows (tokens 4-7, then spreading); this dump
+    // splits "the conv emitted zeros" from "the post-conv/L2 norm zeroed them".
+    if (const char* td = std::getenv("VT_DUMP_TRUST"))
+      vt::tenstorrent::TrustDump(d.q, td, "spec_conv", dconv.t());
   } else if (np > 0) {
     // Any prefill: conv over the WHOLE non-spec stream (decodes lead, each with
     // has_initial_state=1). qwen_gdn_linear_attn.py:1360-1375.
@@ -5647,6 +5840,46 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       vt::GdnSpecDecode(d.q, dcore.t(), dql2.t(), dkl2.t(), vf.t(), dg.t(),
                         dbeta.t(), ssm_cache, sdi.gdn_spec_qsl.t(), spec_idx_2d,
                         sdi.gdn_num_accepted.t(), vt::GdnArgs{scale});
+      // VT_TT_GDN_SPEC_DEBUG: the recurrence's OUTPUT (core) and the z gate,
+      // read back the way the gated norm serves them (device shadows) — the
+      // kernel's own asum debug reads host bytes a device-only commit leaves
+      // stale, so a NaN out is invisible there. Pairs with the gated dump.
+      if (vt::tenstorrent::DeviceAvailable()) {
+        static const bool core_dbg = [] {
+          const char* e = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+          return e != nullptr && e[0] != '\0';
+        }();
+        if (core_dbg && !vt::tenstorrent::TraceCaptureActive()) {
+          for (const auto& [tag, t] :
+               {std::pair{"core", Reshape(dcore.t(), {T * Hv, Dv})},
+                std::pair{"z", z}}) {
+            if (t.rank != 2 || !t.IsContiguous()) {
+              std::fprintf(stderr, "[SPEC-OUT] %s skipped (rank=%d cont=%d)\n",
+                           tag, static_cast<int>(t.rank),
+                           t.IsContiguous() ? 1 : 0);
+              continue;
+            }
+            std::vector<float> dv =
+                vt::tenstorrent::DebugDeviceReadbackF32(d.q, t);
+            double acc = 0.0;
+            uint64_t nan = 0, zero = 0;
+            for (float f : dv) {
+              if (std::isnan(f)) {
+                ++nan;
+                continue;
+              }
+              acc += f > 0.0f ? f : -f;
+              if (f == 0.0f) ++zero;
+            }
+            std::fprintf(stderr,
+                         "[SPEC-OUT] %s n=%zu asum=%.6g nan=%llu zero=%llu\n",
+                         tag, dv.size(), acc,
+                         static_cast<unsigned long long>(nan),
+                         static_cast<unsigned long long>(zero));
+          }
+          std::fflush(stderr);
+        }
+      }
     } else {
     // Recurrence — decode segment first (leading nd_tok tokens), then prefill.
     if (nd > 0) {
@@ -8244,6 +8477,56 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
 
   Tensor dw_in = ResidentWeight(d, layer.input_layernorm, {H});
   DBuf dhn(d, ActDType(d), {T, H});
+  // VT_TT_GDN_SPEC_DEBUG W7: the residual pair's per-layer state. The spec
+  // step's GDN layers 8+ read h (the fused add+norm's output) as ALL ZEROS,
+  // which pins the zero to the pair this probe prints: the accumulator `res`,
+  // the delta `hidden`, or the norm's own commit. The slot states carry the
+  // resident DRAM addresses — two tensors reporting one address are aliased.
+  static const bool resid_dbg = [] {
+    const char* e = std::getenv("VT_TT_GDN_SPEC_DEBUG");
+    return e != nullptr && e[0] != '\0';
+  }();
+  static std::atomic<int64_t> resid_seq{0};
+  if (resid_dbg && !vt::tenstorrent::TraceCaptureActive() &&
+      resid_seq.fetch_add(1, std::memory_order_relaxed) < 128) {
+    auto asum_of = [&](const Tensor& t) {
+      std::vector<float> v = vt::tenstorrent::DebugDeviceReadbackF32(d.q, t);
+      double a = 0.0;
+      uint64_t nan = 0;
+      for (float f : v) {
+        if (std::isnan(f)) {
+          ++nan;
+          continue;
+        }
+        a += f > 0.0f ? f : -f;
+      }
+      return std::pair<double, uint64_t>{a, nan};
+    };
+    auto [hid_a, hid_nan] = asum_of(hidden.t());
+    auto [res_a, res_nan] = asum_of(res.t());
+    auto hs = vt::tenstorrent::DebugSlotStateOf(hidden.t());
+    auto rs = vt::tenstorrent::DebugSlotStateOf(res.t());
+    std::fprintf(stderr,
+                 "[DENSE-LAYER] l=%lld T=%lld hidden_asum=%.6g hnan=%llu "
+                 "res_asum=%.6g rnan=%llu | hidden ptr=%p slot tr=%d %ux%u "
+                 "hc=%d dc=%d rs=%d dt=%d addr=%llx | res ptr=%p slot tr=%d "
+                 "%ux%u hc=%d dc=%d rs=%d dt=%d addr=%llx\n",
+                 static_cast<long long>(layer_index),
+                 static_cast<long long>(T), hid_a,
+                 static_cast<unsigned long long>(hid_nan), res_a,
+                 static_cast<unsigned long long>(res_nan),
+                 static_cast<const void*>(hidden.t().data),
+                 hs.tracked ? 1 : 0,
+                 hs.dev_rows, hs.dev_cols, hs.host_current ? 1 : 0,
+                 hs.device_current ? 1 : 0, hs.reserved ? 1 : 0, hs.dev_dtype,
+                 static_cast<unsigned long long>(hs.dev_buf_addr),
+                 static_cast<const void*>(res.t().data),
+                 rs.tracked ? 1 : 0, rs.dev_rows, rs.dev_cols,
+                 rs.host_current ? 1 : 0, rs.device_current ? 1 : 0,
+                 rs.reserved ? 1 : 0, rs.dev_dtype,
+                 static_cast<unsigned long long>(rs.dev_buf_addr));
+    std::fflush(stderr);
+  }
   vt::RmsNorm(d.q, dhn.t(), hidden.t(), dw_in, vt::RmsNormArgs{eps, true}, &res.t());
   DumpStage("post_input_norm", dhn);
   if (dump_sub_dir != nullptr) {
@@ -8272,6 +8555,53 @@ void RunDenseLayerPaged(Dev d, const Qwen3_5DenseLayerWeights& layer,
     return FullAttnBlockPaged(d, layer.attn, cfg, dhn.t(), sdi, attn_meta,
                               *attn_kv, T);
   }();
+  // W7c: the mixer output — the FA layers are the poison suspects (the w8
+  // host-residual leg moved the onset to l=3, the first full-attn layer).
+  // asum + NaN + Inf counts split "softmax overflow" (Inf) from "garbage
+  // bytes" (NaN/huge) from "zeroed commit" (asum 0).
+  static std::atomic<int64_t> attn_seq{0};
+  if (resid_dbg && !vt::tenstorrent::TraceCaptureActive() &&
+      attn_seq.fetch_add(1, std::memory_order_relaxed) < 128) {
+    std::vector<float> av = vt::tenstorrent::DebugDeviceReadbackF32(d.q, attn.t());
+    double a_acc = 0.0;
+    uint64_t a_nan = 0, a_inf = 0, a_zero = 0;
+    for (float f : av) {
+      if (std::isnan(f)) {
+        ++a_nan;
+        continue;
+      }
+      if (std::isinf(f)) {
+        ++a_inf;
+        continue;
+      }
+      if (f == 0.0f) ++a_zero;
+      a_acc += f > 0.0f ? f : -f;
+    }
+    auto as = vt::tenstorrent::DebugSlotStateOf(attn.t());
+    // W17: the TRUSTED dual-read of the SAME tensor the probe just read.
+    // The probes' reads go through EnsureDevice2D (whose reservation arm
+    // serves the previous tenant's buffer); TrustDump goes through
+    // EnsureHostBytes + two verified raw copies. If the trusted dump reads
+    // clean where the probe reads garbage, the probe path is the artifact;
+    // if it also reads garbage, the mixer's commit is the convict.
+    if (const char* td = std::getenv("VT_DUMP_TRUST"))
+      vt::tenstorrent::TrustDump(d.q, td, "attn", attn.t());
+    std::fprintf(stderr,
+                 "[MIXER-OUT] l=%lld T=%llu fa=%d asum=%.6g nan=%llu inf=%llu "
+                 "zero=%llu/%zu slot tr=%d %ux%u hc=%d dc=%d rs=%d dt=%d "
+                 "addr=%llx\n",
+                 static_cast<long long>(layer_index),
+                 static_cast<unsigned long long>(T),
+                 layer.is_linear_attention ? 0 : 1, a_acc,
+                 static_cast<unsigned long long>(a_nan),
+                 static_cast<unsigned long long>(a_inf),
+                 static_cast<unsigned long long>(a_zero), av.size(),
+                 as.tracked ? 1 : 0, as.dev_rows, as.dev_cols,
+                 as.host_current ? 1 : 0, as.device_current ? 1 : 0,
+                 as.reserved ? 1 : 0, as.dev_dtype,
+                 static_cast<unsigned long long>(as.dev_buf_addr));
+    std::fflush(stderr);
+  }
   DumpStage("block_out", attn);
 
   if (dump_sub_dir != nullptr) {

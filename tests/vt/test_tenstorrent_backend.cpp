@@ -4057,13 +4057,16 @@ TEST_CASE("kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (wide
 
   // One spec step on a given starting conv_state (host bytes in `st`).
   // `seqlens` gives each request's token count (sum == rows of x); `nat` and
-  // `idx` are per request. Returns out; `st` is updated.
+  // `idx` are per request. Returns out; `st` is updated. `c_dim` is the conv
+  // channel width the TENSORS carry (default 64 = the sweep C); the vectors
+  // are sized by the caller and must agree with it.
   auto step = [&](Backend& b, DeviceType dt, int64_t state_len, bool silu,
                   bool bf16_state, std::vector<float>& st,
                   const std::vector<float>& x, const std::vector<float>& w,
                   const std::vector<float>& bias, const std::vector<int32_t>& idx,
                   const std::vector<int32_t>& nat, const std::vector<int32_t>& cs,
-                  std::vector<float>& out) {
+                  std::vector<float>& out, int64_t c_dim = 64,
+                  std::vector<void*>* defer_free = nullptr) {
     const int64_t T = cs.back();
     const int64_t nreq = static_cast<int64_t>(idx.size());
     void* mx = b.Alloc(x.size() * sizeof(float));
@@ -4093,12 +4096,12 @@ TEST_CASE("kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (wide
     b.Copy(q, mn, nat.data(), nat.size() * sizeof(int32_t));
     b.Copy(q, mq, cs.data(), cs.size() * sizeof(int32_t));
     // x is fed as a PADDED-row view (the merged qkvz slice the contract
-    // admits): outer stride C+8, garbage in the pad.
-    const int64_t x_row = C, pad = 8;
+    // admits): outer stride c_dim+8, garbage in the pad.
+    const int64_t x_row = c_dim, pad = 8;
     std::vector<float> xp(static_cast<size_t>(T * (x_row + pad)), 0.0f);
     for (int64_t i = 0; i < T; ++i)
-      for (int64_t c = 0; c < C; ++c)
-        xp[static_cast<size_t>(i * (x_row + pad) + c)] = x[static_cast<size_t>(i * C + c)];
+      for (int64_t c = 0; c < c_dim; ++c)
+        xp[static_cast<size_t>(i * (x_row + pad) + c)] = x[static_cast<size_t>(i * c_dim + c)];
     void* mxp = b.Alloc(xp.size() * sizeof(float));
     b.Copy(q, mxp, xp.data(), xp.size() * sizeof(float));
     Tensor tx{};
@@ -4107,20 +4110,20 @@ TEST_CASE("kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (wide
     tx.device = Device{dt, 0};
     tx.rank = 2;
     tx.shape[0] = T;
-    tx.shape[1] = C;
+    tx.shape[1] = c_dim;
     tx.stride[0] = x_row + pad;
     tx.stride[1] = 1;
-    Tensor tw = Tensor::Contiguous(mw, vt::DType::kF32, Device{dt, 0}, {C, K});
+    Tensor tw = Tensor::Contiguous(mw, vt::DType::kF32, Device{dt, 0}, {c_dim, K});
     Tensor tb{};
-    if (mb != nullptr) tb = Tensor::Contiguous(mb, vt::DType::kF32, Device{dt, 0}, {C});
-    const int64_t slots = st.size() / static_cast<size_t>(C * state_len);
+    if (mb != nullptr) tb = Tensor::Contiguous(mb, vt::DType::kF32, Device{dt, 0}, {c_dim});
+    const int64_t slots = st.size() / static_cast<size_t>(c_dim * state_len);
     Tensor ts = Tensor::Contiguous(ms, bf16_state ? vt::DType::kBF16 : vt::DType::kF32,
-                                   Device{dt, 0}, {slots, C, state_len});
+                                   Device{dt, 0}, {slots, c_dim, state_len});
     Tensor ti = Tensor::Contiguous(mi, vt::DType::kI32, Device{dt, 0}, {nreq});
     Tensor tn = Tensor::Contiguous(mn, vt::DType::kI32, Device{dt, 0}, {nreq});
     Tensor tq = Tensor::Contiguous(mq, vt::DType::kI32, Device{dt, 0},
                                    {static_cast<int64_t>(cs.size())});
-    Tensor to = Tensor::Contiguous(mo, vt::DType::kF32, Device{dt, 0}, {T, C});
+    Tensor to = Tensor::Contiguous(mo, vt::DType::kF32, Device{dt, 0}, {T, c_dim});
     vt::CausalConv1dArgs args;
     args.silu_activation = silu;
     vt::CausalConv1dSpecUpdate(q, to, tx, tw, mb != nullptr ? &tb : nullptr, ts, ti,
@@ -4134,6 +4137,15 @@ TEST_CASE("kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (wide
       for (size_t i = 0; i < st.size(); ++i) st[i] = vt::BF16ToF32(got_bits[i]);
     } else {
       b.Copy(q, st.data(), ms, st.size() * sizeof(float));
+    }
+    // Sweep G's shifted-address discipline: when defer_free is given, the
+    // buffers stay allocated and their pointers land there, so a SECOND
+    // step's buffers are handed DIFFERENT addresses (both sets alive at
+    // once — the engine's ping-pong DBuf shape). The caller frees them.
+    if (defer_free != nullptr) {
+      *defer_free = {mx, mw, ms, mo, mi, mn, mq, mxp};
+      if (mb != nullptr) defer_free->push_back(mb);
+      return;
     }
     b.Free(mx);
     b.Free(mw);
@@ -4343,6 +4355,177 @@ TEST_CASE("kTENSTORRENT kCausalConv1dSpecUpdate matches the CPU f32 oracle (wide
     CHECK(std::isfinite(ds.max_abs));
     CHECK(ds.within);
   }
+
+  // --- Sweep F: the ENGINE's spec-step geometry (Qwen3.8-27B DFlash2: conv
+  // dim 10240, the 9-token draft block, 9 spec slots, the WIDENED state
+  // width (K-1)+k = 11 (qwen3_5.cpp:5608), num_accepted = 1 — the first spec
+  // step's acceptance). Every prior sweep ran C=64: a 256-byte indexed_fill
+  // page; the engine's page is 40960 B — 160x — and the W7 engine trail pins
+  // the fill's base clone never reaching the output at this geometry (the
+  // filled output carries recycled memory: asum 1.34712e40 + 36 NaNs at every
+  // first-GDN-after-FA call, while the cached base reads zeros at fill time).
+  // The out buffers seed NaN: an unwritten region reads NaN (max_abs=nan
+  // screams "never written") where a zero seed would silently pass a zeroed
+  // commit.
+  {
+    const int64_t state_len = (K - 1) + 8, T = 9, slots = 9;
+    const int64_t Cg = 10240;
+    uint32_t s = 63500u;
+    std::vector<float> w(static_cast<size_t>(Cg * K));
+    for (float& v : w) v = 0.4f * GdnLcg(s);
+    std::vector<float> st(static_cast<size_t>(slots * Cg * state_len));
+    for (float& v : st) v = GdnLcg(s);
+    std::vector<float> x(static_cast<size_t>(T * Cg));
+    for (float& v : x) v = 2.0f * GdnLcg(s);
+    const std::vector<int32_t> idx{0};
+    const std::vector<int32_t> nat{1};
+    const std::vector<int32_t> cs{0, static_cast<int32_t>(T)};
+    std::vector<float> st_cpu = st, st_tt = st;
+    const float nan_seed = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> out_cpu(static_cast<size_t>(T * Cg), nan_seed);
+    std::vector<float> out_tt = out_cpu;
+    step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu, x, w, {}, idx, nat,
+         cs, out_cpu, Cg);
+    step(*vt::TryGetBackend(DeviceType::kTENSTORRENT), DeviceType::kTENSTORRENT,
+         state_len, true, false, st_tt, x, w, {}, idx, nat, cs, out_tt, Cg);
+    GdnDiffStats d = CompareVsOracle(out_tt, out_cpu, 1e-4f, 1e-5f);
+    // The non-finite census: `within` goes false on ANY non-finite got while
+    // max_abs/max_rel stay finite (std::max drops NaN) — count them and name
+    // the rows so the MESSAGE says how much of `out` was never written.
+    size_t nf = 0;
+    int64_t first_nf_row = -1, first_nf_col = -1;
+    for (int64_t i = 0; i < static_cast<int64_t>(out_tt.size()); ++i) {
+      if (std::isfinite(out_tt[static_cast<size_t>(i)])) continue;
+      ++nf;
+      if (first_nf_row < 0) {
+        first_nf_row = i / Cg;
+        first_nf_col = i % Cg;
+      }
+    }
+    MESSAGE("kCausalConv1dSpecUpdate engine-geometry: out max_abs=", d.max_abs,
+            " max_rel=", d.max_rel, " nonfinite=", nf,
+            " first=[", first_nf_row, ",", first_nf_col, "]");
+    CHECK(std::isfinite(d.max_abs));
+    CHECK(d.within);
+    GdnDiffStats ds = CompareVsOracle(st_tt, st_cpu, 1e-4f, 1e-5f);
+    MESSAGE("kConvSpecUpdate engine-geometry: conv_state max_abs=", ds.max_abs,
+            " max_rel=", ds.max_rel);
+    CHECK(std::isfinite(ds.max_abs));
+    CHECK(ds.within);
+  }
+
+  // --- Sweep G: the SHIFTED-ADDRESS second call. The engine's fill defect
+  // needs shifting buffer addresses: the engine's ping-pong DBufs and fresh
+  // op outputs move between calls, while this test's serial alloc/free
+  // recycles the SAME addresses (the stale-address replay is invisible when
+  // the addresses repeat). Keep call 1's buffers alive while call 2 runs so
+  // call 2's buffers are handed DIFFERENT addresses; call 2 must still match
+  // the oracle. RED here = the cached program replays call 1's buffer
+  // addresses (the W6/W7 engine trail: the filled output carries recycled
+  // memory, the stale write lands in the recycled victim = the res/hidden
+  // poison).
+  {
+    const int64_t state_len = (K - 1) + 8, T = 9, slots = 9;
+    const int64_t Cg = 10240;
+    uint32_t s = 63600u;
+    std::vector<float> w(static_cast<size_t>(Cg * K));
+    for (float& v : w) v = 0.4f * GdnLcg(s);
+    std::vector<float> st1(static_cast<size_t>(slots * Cg * state_len));
+    for (float& v : st1) v = GdnLcg(s);
+    std::vector<float> x1(static_cast<size_t>(T * Cg));
+    for (float& v : x1) v = 2.0f * GdnLcg(s);
+    const std::vector<int32_t> idx{0};
+    const std::vector<int32_t> nat{1};
+    const std::vector<int32_t> cs{0, static_cast<int32_t>(T)};
+    Backend& tt = *vt::TryGetBackend(DeviceType::kTENSTORRENT);
+    std::vector<float> st_cpu = st1, st_tt1 = st1;
+    std::vector<float> out_cpu(static_cast<size_t>(T * Cg), 0.0f),
+        out_tt1(static_cast<size_t>(T * Cg), 0.0f);
+    step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu, x1, w, {}, idx,
+         nat, cs, out_cpu, Cg);
+    std::vector<void*> keep1;
+    step(tt, DeviceType::kTENSTORRENT, state_len, true, false, st_tt1, x1, w, {},
+         idx, nat, cs, out_tt1, Cg, &keep1);
+    // Call 2: same geometry, same content, DIFFERENT buffer addresses (call
+    // 1's blocks are still held). Both sides advance one more step: the CPU
+    // oracle from st_cpu, the TT arm from the same post-call-1 state.
+    std::vector<float> st_cpu2 = st_cpu, st_tt2 = st_cpu;
+    std::vector<float> out_cpu2(static_cast<size_t>(T * Cg), 0.0f),
+        out_tt2(static_cast<size_t>(T * Cg), 0.0f);
+    step(cpu, DeviceType::kCPU, state_len, true, false, st_cpu2, x1, w, {}, idx,
+         nat, cs, out_cpu2, Cg);
+    std::vector<void*> keep2;
+    step(tt, DeviceType::kTENSTORRENT, state_len, true, false, st_tt2, x1, w, {},
+         idx, nat, cs, out_tt2, Cg, &keep2);
+    GdnDiffStats d2 = CompareVsOracle(out_tt2, out_cpu2, 1e-4f, 1e-5f);
+    size_t nf2 = 0;
+    for (float f : out_tt2) nf2 += std::isfinite(f) ? 0 : 1;
+    MESSAGE("kCausalConv1dSpecUpdate shifted-address call2: out max_abs=",
+            d2.max_abs, " max_rel=", d2.max_rel, " nonfinite=", nf2);
+    CHECK(std::isfinite(d2.max_abs));
+    CHECK(d2.within);
+    GdnDiffStats ds2 = CompareVsOracle(st_tt2, st_cpu2, 1e-4f, 1e-5f);
+    MESSAGE("kCausalConv1dSpecUpdate shifted-address call2: conv_state max_abs=",
+            ds2.max_abs, " max_rel=", ds2.max_rel);
+    CHECK(std::isfinite(ds2.max_abs));
+    CHECK(ds2.within);
+    for (void* p : keep1) tt.Free(p);
+    for (void* p : keep2) tt.Free(p);
+  }
+}
+
+// The qkvz z-gate slice's device upload. The merged qkvz GEMM output is
+// [T, conv_dim + value_dim]; z is its SUFFIX — a row-strided view (outer
+// stride conv_dim+value_dim). The staging path's bf16 bulk upload
+// (UploadRowsBf16) reads the window as DENSE row-packed bytes ignoring that
+// stride, so the device z holds misaligned garbage; the gated norm multiplies
+// the GDN core by act(z-garbage) and the spec step's stream dies (the engine
+// trail: z reads inf then all-zeros across the GDN layers; the verify's
+// logits collapse to argmax-0 = the all-zero accepted stream).
+TEST_CASE("kTENSTORRENT EnsureDevice2D uploads a row-strided bf16 view (the qkvz z slice) byte-exactly") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& tt = *vt::TryGetBackend(DeviceType::kTENSTORRENT);
+  constexpr int64_t T = 9, Cc = 10240, Z = 6144;  // conv dim / z dim (27B)
+  const int64_t row = Cc + Z;
+  Queue q = tt.CreateQueue();
+  std::vector<uint16_t> host(static_cast<size_t>(T * row));
+  uint32_t s = 63700u;
+  for (auto& v : host) v = vt::F32ToBF16(2.0f * GdnLcg(s));
+  void* mh = tt.Alloc(host.size() * sizeof(uint16_t));
+  tt.Copy(q, mh, host.data(), host.size() * sizeof(uint16_t));
+
+  Tensor tz{};
+  tz.data = static_cast<char*>(mh) + Cc * 2;  // the suffix columns
+  tz.dtype = vt::DType::kBF16;
+  tz.device = Device{DeviceType::kTENSTORRENT, 0};
+  tz.rank = 2;
+  tz.shape[0] = T;
+  tz.shape[1] = Z;
+  tz.stride[0] = row;  // THE STRIDE the bulk upload must honor
+  tz.stride[1] = 1;
+  vt::tenstorrent::EnsureDevice2DForTest(tz);
+  std::vector<float> got = vt::tenstorrent::DebugDeviceReadbackF32(q, tz);
+  size_t bad = 0;
+  double max_abs = 0.0;
+  int64_t first_bad = -1;
+  for (int64_t i = 0; i < T * Z; ++i) {
+    const float ref =
+        vt::BF16ToF32(host[static_cast<size_t>((i / Z) * row + Cc + (i % Z))]);
+    const float g = got[static_cast<size_t>(i)];
+    const double a = std::fabs(static_cast<double>(g) - static_cast<double>(ref));
+    if (a > 1e-3) {
+      ++bad;
+      if (first_bad < 0) first_bad = i;
+    }
+    max_abs = std::max(max_abs, a);
+  }
+  MESSAGE("row-strided z upload: bad=", bad, "/", T * Z,
+          " max_abs=", max_abs, " first_bad=", first_bad);
+  CHECK(bad == 0);
+  tt.Free(mh);
 }
 
 TEST_CASE("kTENSTORRENT kGdnDecode matches the CPU f32 oracle (rank-1 step, both state_idx forms, NULL slot)") {
@@ -14585,6 +14768,7 @@ TEST_CASE("kTENSTORRENT Q8_K keep-quant composite matmul matches the CPU "
   MESSAGE("Q8_K composite matmul: matches the CPU dequant oracle");
 }
 
+<<<<<<< HEAD
 // ===========================================================================
 // TT-PA-SMALL-WINDOW (W1 characterization). The stage-C W22 discriminator
 // (67d041d76 on row/QWEN38-DFLASH2-STAGE-C) isolated the compute class: ONE
@@ -14871,10 +15055,123 @@ void PaSmallWindowReport(const char* arm, const std::vector<PaSeqRow>& rows) {
 }  // namespace
 
 TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded PA decode seq sweep 1..64 (the focused red)") {
+=======
+// ── W20 (QWEN38-DFLASH2-STAGE-C, ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H) ────
+// The engine's z GEMM committed garbage (asum 3.75e40, 113 Infs) at the first
+// spec step's l=9 with VERIFIED-CLEAN inputs — the only staging difference
+// from the clean prefill calls is VT_TT_WEIGHT_RESIDENCY=bfp8: the lever
+// stages the TARGET's bf16 GDN in_proj weights as BFLOAT8_B too (the W3
+// scope claim — "the GDN layers stage via EnsureDevice2D directly" — is
+// wrong: MatmulBTKernel routes EVERY weight through EnsureMatmulWeightDevice).
+// This case runs the engine's exact z geometry (M=9 partial tile, K=5120,
+// N=6144, bf16 activation, bf16 weight, bf16 out) with the lever ON, against
+// the f32-accumulate CPU reference, with M=32 (one full tile, the prefill
+// geometry) as the in-case control. RED = non-finite or huge output on the
+// bfp8 arm at M=9.
+TEST_CASE("kTENSTORRENT kMatmulBT bf16 weight staged BFP8 at the spec geometry") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
     return;
   }
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+
+  // The residency lever is read per call inside EnsureMatmulWeightDevice.
+  const int saved = 0;
+  (void)saved;
+  setenv("VT_TT_WEIGHT_RESIDENCY", "bfp8", 1);
+
+  constexpr int64_t K = 5120, N = 6144;
+  Queue q = backend.CreateQueue();
+  // Seeded deterministic weights/activations at engine magnitudes
+  // (|h| ~ 0.5 avg, |w| ~ 0.1 avg — the observed [QKVZ-IN]/[MMBT9] bands).
+  auto lcg = [x = 12345u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0) - 0.5f;
+  };
+  for (int64_t M : {int64_t(9), int64_t(32)}) {
+    std::vector<float> host_a(M * K), host_b(N * K);
+    for (auto& v : host_a) v = lcg() * 2.0f;
+    for (auto& v : host_b) v = lcg() * 0.4f;
+
+    void* mem_a = backend.Alloc(host_a.size() * sizeof(float));
+    void* mem_b = backend.Alloc(host_b.size() * sizeof(float));
+    backend.Copy(q, mem_a, host_a.data(), host_a.size() * sizeof(float));
+    backend.Copy(q, mem_b, host_b.data(), host_b.size() * sizeof(float));
+
+    // The ENGINE's dtypes: bf16 activation, bf16 weight, bf16 out.
+    std::vector<uint16_t> a_bf(M * K), b_bf(N * K);
+    for (size_t i = 0; i < host_a.size(); ++i)
+      a_bf[i] = vt::F32ToBF16(host_a[i]);
+    for (size_t i = 0; i < host_b.size(); ++i)
+      b_bf[i] = vt::F32ToBF16(host_b[i]);
+    backend.Free(mem_a);
+    backend.Free(mem_b);
+    void* mem_ab = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+    void* mem_bb = backend.Alloc(b_bf.size() * sizeof(uint16_t));
+    void* mem_ob = backend.Alloc(M * N * sizeof(uint16_t));
+    backend.Copy(q, mem_ab, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, mem_bb, b_bf.data(), b_bf.size() * sizeof(uint16_t));
+
+    Tensor a = Tensor::Contiguous(mem_ab, vt::DType::kBF16,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {M, K});
+    Tensor b = Tensor::Contiguous(mem_bb, vt::DType::kBF16,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {N, K});
+    Tensor out = Tensor::Contiguous(mem_ob, vt::DType::kBF16,
+                                    Device{DeviceType::kTENSTORRENT, 0}, {M, N});
+    auto matmul_bt = reinterpret_cast<vt::MatmulFn>(
+        vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+    matmul_bt(q, out, a, b);
+
+    std::vector<uint16_t> ob(M * N);
+    backend.Copy(q, ob.data(), mem_ob, ob.size() * sizeof(uint16_t));
+    backend.Free(mem_ab);
+    backend.Free(mem_bb);
+    backend.Free(mem_ob);
+
+    // The CPU reference on the bf16-rounded operands, f32 accumulate.
+    uint64_t nonfinite = 0;
+    double max_rel = 0.0;
+    for (int64_t i = 0; i < M; ++i) {
+      for (int64_t j = 0; j < N; ++j) {
+        float acc = 0.0f;
+        for (int64_t k = 0; k < K; ++k)
+          acc += host_a[i * K + k] * host_b[j * K + k];
+        float got = vt::BF16ToF32(ob[i * N + j]);
+        if (!std::isfinite(got)) {
+          ++nonfinite;
+          continue;
+        }
+        const double rel = std::fabs(static_cast<double>(got) - acc) /
+                           (std::fabs(acc) + 1.0);
+        if (rel > max_rel) max_rel = rel;
+      }
+    }
+    // BFP8's 8-bit shared mantissa bounds the per-product error far below
+    // this envelope; the engine's failure mode (asum 1e40+, thousands of
+    // Infs) is orders of magnitude outside it.
+    CHECK(nonfinite == 0);
+    CHECK(max_rel < 0.05);
+    MESSAGE("M=" << M << " bfp8-staged: nonfinite=" << nonfinite
+                 << " max_rel=" << max_rel);
+  }
+  unsetenv("VT_TT_WEIGHT_RESIDENCY");
+}
+
+// W20b: the ENGINE's failure needs the WARM state the isolated call lacks —
+// the program-cache HIT path and the allocator's free-list recycling across
+// ~100 calls of the same geometry. This case runs the exact M=9 bfp8-staged
+// z matmul 200 times (fresh output allocation per call, like the engine's
+// DBuf cycle) and checks EVERY output against the same CPU reference. RED at
+// iteration k with clean iterations before it = the warm-state defect, and k
+// names the cycle length (the engine's "every 3rd fill" periodicity).
+TEST_CASE("kTENSTORRENT kMatmulBT bf16 BFP8 M=9 repeated warm calls") {
+>>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+<<<<<<< HEAD
   Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
   Queue q = backend.CreateQueue();
   auto lcg = [x = 31337u]() mutable {
@@ -15026,10 +15323,93 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: payload tracking at the garbage s
 }
 
 TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: fresh cache per seq (intrinsic-to-cur_pos vs process state)") {
+=======
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  setenv("VT_TT_WEIGHT_RESIDENCY", "bfp8", 1);
+
+  constexpr int64_t M = 9, K = 5120, N = 6144;
+  constexpr int kReps = 200;
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 12345u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0) - 0.5f;
+  };
+  std::vector<float> host_a(M * K), host_b(N * K);
+  for (auto& v : host_a) v = lcg() * 2.0f;
+  for (auto& v : host_b) v = lcg() * 0.4f;
+  std::vector<uint16_t> a_bf(M * K), b_bf(N * K);
+  for (size_t i = 0; i < host_a.size(); ++i) a_bf[i] = vt::F32ToBF16(host_a[i]);
+  for (size_t i = 0; i < host_b.size(); ++i) b_bf[i] = vt::F32ToBF16(host_b[i]);
+
+  void* mem_ab = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+  void* mem_bb = backend.Alloc(b_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_ab, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_bb, b_bf.data(), b_bf.size() * sizeof(uint16_t));
+  Tensor a = Tensor::Contiguous(mem_ab, vt::DType::kBF16,
+                                Device{DeviceType::kTENSTORRENT, 0}, {M, K});
+  Tensor b = Tensor::Contiguous(mem_bb, vt::DType::kBF16,
+                                Device{DeviceType::kTENSTORRENT, 0}, {N, K});
+  auto matmul_bt = reinterpret_cast<vt::MatmulFn>(
+      vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+
+  int bad_reps = 0;
+  for (int rep = 0; rep < kReps; ++rep) {
+    void* mem_ob = backend.Alloc(M * N * sizeof(uint16_t));
+    Tensor out = Tensor::Contiguous(mem_ob, vt::DType::kBF16,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {M, N});
+    matmul_bt(q, out, a, b);
+    std::vector<uint16_t> ob(M * N);
+    backend.Copy(q, ob.data(), mem_ob, ob.size() * sizeof(uint16_t));
+    backend.Free(mem_ob);
+    uint64_t nonfinite = 0;
+    double max_rel = 0.0;
+    for (int64_t i = 0; i < M; ++i) {
+      for (int64_t j = 0; j < N; ++j) {
+        float acc = 0.0f;
+        for (int64_t k = 0; k < K; ++k)
+          acc += host_a[i * K + k] * host_b[j * K + k];
+        float got = vt::BF16ToF32(ob[i * N + j]);
+        if (!std::isfinite(got)) {
+          ++nonfinite;
+          continue;
+        }
+        const double rel = std::fabs(static_cast<double>(got) - acc) /
+                           (std::fabs(acc) + 1.0);
+        if (rel > max_rel) max_rel = rel;
+      }
+    }
+    if (nonfinite != 0 || max_rel >= 0.05) {
+      ++bad_reps;
+      MESSAGE("REP " << rep << ": nonfinite=" << nonfinite
+                     << " max_rel=" << max_rel);
+    }
+  }
+  backend.Free(mem_ab);
+  backend.Free(mem_bb);
+  unsetenv("VT_TT_WEIGHT_RESIDENCY");
+  CHECK(bad_reps == 0);
+  MESSAGE("warm repeated M=9 bfp8: bad_reps=" << bad_reps << "/" << kReps);
+}
+
+// W20c: the ENGINE's staging lifecycle — a large temporary (the BFP8
+// staging's bf16_dev, ~33 MB at the z weight) is created, typedcast on
+// device (an ASYNC write), and FREED WITH NO SYNC — the block returns to
+// the allocator while the typecast's write may still be pending — and the
+// next allocation (the engine's z GEMM output) can receive that block.
+// This case replays exactly that: per rep, a throwaway bf16 staging
+// (from_span + typecast, dropped with no sync), then the M=9 bfp8 matmul
+// into a fresh output, sync + check at the END of each rep. RED = the
+// matmul's output reads bytes the staging pipeline wrote after it — the
+// free-without-sync reuse hazard, the engine's poison class.
+TEST_CASE("kTENSTORRENT kMatmulBT M=9 bfp8 with unsynced staging temporary") {
+>>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
     return;
   }
+<<<<<<< HEAD
   Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
   Queue q = backend.CreateQueue();
   auto lcg = [x = 31337u]() mutable {
@@ -15129,4 +15509,87 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program
   for (const auto& r : rows)
     CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
                   "nocache-sweep seq=" << r.seq << " max_abs=" << r.max_abs);
+=======
+  REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  setenv("VT_TT_WEIGHT_RESIDENCY", "bfp8", 1);
+
+  constexpr int64_t M = 9, K = 5120, N = 6144;
+  constexpr int kReps = 50;
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 777u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0) - 0.5f;
+  };
+  std::vector<float> host_a(M * K), host_b(N * K);
+  for (auto& v : host_a) v = lcg() * 2.0f;
+  for (auto& v : host_b) v = lcg() * 0.4f;
+  std::vector<uint16_t> a_bf(M * K), b_bf(N * K);
+  for (size_t i = 0; i < host_a.size(); ++i) a_bf[i] = vt::F32ToBF16(host_a[i]);
+  for (size_t i = 0; i < host_b.size(); ++i) b_bf[i] = vt::F32ToBF16(host_b[i]);
+  void* mem_ab = backend.Alloc(a_bf.size() * sizeof(uint16_t));
+  void* mem_bb = backend.Alloc(b_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_ab, a_bf.data(), a_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_bb, b_bf.data(), b_bf.size() * sizeof(uint16_t));
+  Tensor a = Tensor::Contiguous(mem_ab, vt::DType::kBF16,
+                                Device{DeviceType::kTENSTORRENT, 0}, {M, K});
+  Tensor b = Tensor::Contiguous(mem_bb, vt::DType::kBF16,
+                                Device{DeviceType::kTENSTORRENT, 0}, {N, K});
+  auto matmul_bt = reinterpret_cast<vt::MatmulFn>(
+      vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+
+  int bad_reps = 0;
+  for (int rep = 0; rep < kReps; ++rep) {
+    // The staging temporary: created, typedcast (async), DROPPED UNSYNCED —
+    // a different weight each rep so the staging cannot hit any cache.
+    {
+      std::vector<uint16_t> junk_bf(N * K);
+      for (auto& v : junk_bf) v = vt::F32ToBF16(lcg() * 8.0f);
+      void* mem_j = backend.Alloc(junk_bf.size() * sizeof(uint16_t));
+      backend.Copy(q, mem_j, junk_bf.data(), junk_bf.size() * sizeof(uint16_t));
+      Tensor j = Tensor::Contiguous(mem_j, vt::DType::kBF16,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {N, K});
+      // The EXACT engine cold path (from_span + device typecast + cache
+      // install, the temporary dropped with NO sync) via the test surface.
+      vt::tenstorrent::Bfp8StageForTest(j);
+      backend.Free(mem_j);
+    }
+    void* mem_ob = backend.Alloc(M * N * sizeof(uint16_t));
+    Tensor out = Tensor::Contiguous(mem_ob, vt::DType::kBF16,
+                                    Device{DeviceType::kTENSTORRENT, 0},
+                                    {M, N});
+    matmul_bt(q, out, a, b);
+    std::vector<uint16_t> ob(M * N);
+    backend.Copy(q, ob.data(), mem_ob, ob.size() * sizeof(uint16_t));
+    backend.Free(mem_ob);
+    uint64_t nonfinite = 0;
+    double max_rel = 0.0;
+    for (int64_t i = 0; i < M; ++i) {
+      for (int64_t j = 0; j < N; ++j) {
+        float acc = 0.0f;
+        for (int64_t k = 0; k < K; ++k)
+          acc += host_a[i * K + k] * host_b[j * K + k];
+        float got = vt::BF16ToF32(ob[i * N + j]);
+        if (!std::isfinite(got)) {
+          ++nonfinite;
+          continue;
+        }
+        const double rel = std::fabs(static_cast<double>(got) - acc) /
+                           (std::fabs(acc) + 1.0);
+        if (rel > max_rel) max_rel = rel;
+      }
+    }
+    if (nonfinite != 0 || max_rel >= 0.05) {
+      ++bad_reps;
+      MESSAGE("REP " << rep << ": nonfinite=" << nonfinite
+                     << " max_rel=" << max_rel);
+    }
+  }
+  backend.Free(mem_ab);
+  backend.Free(mem_bb);
+  unsetenv("VT_TT_WEIGHT_RESIDENCY");
+  CHECK(bad_reps == 0);
+  MESSAGE("unsynced-staging M=9 bfp8: bad_reps=" << bad_reps << "/" << kReps);
+>>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
 }
