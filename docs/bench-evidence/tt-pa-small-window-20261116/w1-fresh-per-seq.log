@@ -1,0 +1,61 @@
+2026-11-16 17:45:36.206 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 17:45:36.206 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 17:45:36.207 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 17:45:36.207 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 17:45:59.458 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 17:45:59.458 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 17:45:59.487 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 17:45:59.487 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 17:45:59.487 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 17:45:59.487 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 17:45:59.488 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 17:45:59.574 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 17:45:59.618 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 17:45:59.618 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 17:45:59.618 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 17:45:59.618 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 17:45:59.618 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 17:46:00.424 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:14080:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: fresh cache per seq (intrinsic-to-cur_pos vs process state)
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=1: max_abs=0.1248851
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=2: max_abs=1.49071e+111h3 e114 got=-1.490711e+11 bits=d20ad550 first4=ffffffff ffffffff ffffffff ffffffff
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=3: max_abs=0.04488891
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=4: max_abs=0.0257551
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=5: max_abs=1.32906e+111h3 e122 got=-1.329065e+11 bits=d1f78ec0 first4=bcad0000 bc980000 bceb0000 bbd80000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=6: max_abs=0.457331
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=7: max_abs=0.01967851
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=8: max_abs=0.01725571
+
+./tests/vt/test_tenstorrent_backend.cpp:13919: MESSAGE: 1: garbage seqs = [2 5 ] / 8 swept
+
+./tests/vt/test_tenstorrent_backend.cpp:14157: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.49071e+11 <  0.5 )
+  logged: fresh-per-seq seq=2 max_abs=1.49071e+11
+
+./tests/vt/test_tenstorrent_backend.cpp:14157: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.32906e+11 <  0.5 )
+  logged: fresh-per-seq seq=5 max_abs=1.32906e+11
+
+===============================================================================
+[doctest] test cases: 1 | 0 passed | 1 failed | 121 skipped
+[doctest] assertions: 8 | 6 passed | 2 failed |
+[doctest] Status: FAILURE!
+2026-11-16 17:46:00.449 | info     |    BuildKernels | JIT cache stats: 20/20 hits (100.0%) [20 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 17:46:00.449 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 17:46:00.490 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 17:46:00.490 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 17:46:00.574 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 17:46:00.574 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 17:46:00.574 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

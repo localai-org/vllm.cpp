@@ -371,12 +371,18 @@ void WarmPagedKvShadow(void* k_cache_data, void* v_cache_data,
 // a focused case can verify what the captured RAC replay wrote without going
 // through the stale host master.
 bool ReadPagedKvShadowForTest(const void* k_cache_data, float* dst, int64_t n);
+// TEST-ONLY (TT-PA-SMALL-WINDOW W1): toggle the MeshDevice program cache so a
+// focused case can run the same op sequence with the cache-hit path removed.
+// tt-metal's ProgramCache is enabled by default (program_cache.hpp
+// is_enabled_ = true), so the OFF arm is the non-default state.
+void ProgramCacheToggleForTest(bool enable);
 #else
 inline void WarmPagedKvShadow(void*, void*, int64_t, int64_t, int64_t, int64_t,
                               int64_t) {}
 inline bool ReadPagedKvShadowForTest(const void*, float*, int64_t) {
   return false;
 }
+inline void ProgramCacheToggleForTest(bool) {}
 #endif
 
 // GDN conv-state shadow serveability (decode side): true when the transposed

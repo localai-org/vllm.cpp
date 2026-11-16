@@ -69,4 +69,13 @@ MeshDevice& SharedMeshDevice() {
   return **device;
 }
 
+void ProgramCacheToggleForTest(bool enable) {
+  MeshDevice& device = SharedMeshDevice();
+  if (enable) {
+    device.enable_program_cache();
+  } else {
+    device.disable_and_clear_program_cache();
+  }
+}
+
 }  // namespace vt::tenstorrent

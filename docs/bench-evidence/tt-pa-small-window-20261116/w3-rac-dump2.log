@@ -1,0 +1,1181 @@
+2026-11-16 18:05:22.526 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 18:05:22.526 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 18:05:22.526 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 18:05:22.526 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 18:05:47.306 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 18:05:47.307 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 18:05:47.336 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 18:05:47.336 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 18:05:47.336 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 18:05:47.336 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 18:05:47.337 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 18:05:47.422 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 18:05:47.468 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 18:05:47.468 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 18:05:47.468 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 18:05:47.468 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 18:05:47.468 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 18:05:48.263 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+[TT-PA-DUMP] call=1 seq_lens0=1 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=1 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=2 seq_lens0=2 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=2 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=3 seq_lens0=3 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=3 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=4 seq_lens0=4 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=4 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=5 seq_lens0=5 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=5 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=6 seq_lens0=6 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=6 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=7 seq_lens0=7 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=7 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=8 seq_lens0=8 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=8 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=9 seq_lens0=9 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=9 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=10 seq_lens0=10 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=10 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=11 seq_lens0=11 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=11 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=12 seq_lens0=12 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=12 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=13 seq_lens0=13 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=13 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=14 seq_lens0=14 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=14 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=15 seq_lens0=15 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=15 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=16 seq_lens0=16 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=16 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=17 seq_lens0=17 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=17 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=18 seq_lens0=18 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=18 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=19 seq_lens0=19 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=19 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=20 seq_lens0=20 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=20 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=21 seq_lens0=21 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=21 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=22 seq_lens0=22 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=22 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=23 seq_lens0=23 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=23 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=24 seq_lens0=24 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=24 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=25 seq_lens0=25 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=25 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=26 seq_lens0=26 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=26 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=27 seq_lens0=27 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=27 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=28 seq_lens0=28 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=28 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=29 seq_lens0=29 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=29 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=30 seq_lens0=30 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=30 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=31 seq_lens0=31 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=31 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=32 seq_lens0=32 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=32 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=33 seq_lens0=33 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=33 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=34 seq_lens0=34 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=34 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=35 seq_lens0=35 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=35 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=36 seq_lens0=36 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=36 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=37 seq_lens0=37 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=37 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=38 seq_lens0=38 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=38 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=39 seq_lens0=39 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=39 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=40 seq_lens0=40 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=40 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=41 seq_lens0=41 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=41 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=42 seq_lens0=42 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=42 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=43 seq_lens0=43 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=43 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=44 seq_lens0=44 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=44 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=45 seq_lens0=45 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=45 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=46 seq_lens0=46 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=46 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=47 seq_lens0=47 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=47 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=48 seq_lens0=48 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=48 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=49 seq_lens0=49 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=49 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=50 seq_lens0=50 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=50 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=51 seq_lens0=51 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=51 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=52 seq_lens0=52 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=52 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=53 seq_lens0=53 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=53 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=54 seq_lens0=54 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=54 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=55 seq_lens0=55 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=55 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=56 seq_lens0=56 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=56 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=57 seq_lens0=57 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=57 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=58 seq_lens0=58 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=58 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=59 seq_lens0=59 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=59 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=60 seq_lens0=60 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=60 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=61 seq_lens0=61 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=61 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=62 seq_lens0=62 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=62 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=63 seq_lens0=63 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=63 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=64 seq_lens0=64 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=64 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:13925:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded PA decode seq sweep 1..64 (the focused red)
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=1: max_abs=1.43305e+381h3 e11 got=-1.433045e+38 bits=fed79ee3 first4=5041a783 00001737 fff70713 00e787b3
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=2: max_abs=0.1436741
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=3: max_abs=1.67959e+071h3 e126 got=-1.679594e+07 bits=cb802490 first4=bdd10000 bd880000 bcdb0000 bd090000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=4: max_abs=1.74776e+071h3 e114 got=-1.74776e+07 bits=cb8557f0 first4=bdfc0000 bdeb0000 bde00000 bd3d0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=5: max_abs=1.74776e+071h3 e114 got=-1.74776e+07 bits=cb8557f0 first4=bdfc0000 bdeb0000 bde00000 bd3d0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=6: max_abs=1.74776e+071h3 e114 got=-1.74776e+07 bits=cb8557f0 first4=bdfc0000 bdeb0000 bde00000 bd3d0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=7: max_abs=1.74776e+071h3 e106 got=-1.74776e+07 bits=cb8557f0 first4=bd4f0000 bd820000 bce10000 bdd80000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=8: max_abs=1.74837e+071h3 e112 got=-1.748374e+07 bits=cb8563f0 first4=bd6a0000 bd200000 bde60000 bdbe0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=9: max_abs=1.74837e+071h3 e92 got=-1.748374e+07 bits=cb8563f0 first4=bde40000 bdaf0000 bddd0000 bd730000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=10: max_abs=1.74837e+071h3 e92 got=-1.748374e+07 bits=cb8563f0 first4=bde40000 bdaf0000 bddd0000 bd730000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=11: max_abs=1.7624e+071h3 e126 got=-1.7624e+07 bits=cb8675e0 first4=bcdf0000 bdec0000 bd170000 bda10000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=12: max_abs=1.76358e+071h3 e122 got=-1.763581e+07 bits=cb868cf0 first4=bdc10000 bdd70000 bdeb0000 bde00000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=13: max_abs=1.76358e+071h3 e110 got=-1.763581e+07 bits=cb868cf0 first4=bdc00000 bdae0000 bdf70000 bd130000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=14: max_abs=1.76358e+071h3 e110 got=-1.763581e+07 bits=cb868cf0 first4=bdc00000 bdae0000 bdf70000 bd130000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=15: max_abs=1.76358e+071h3 e110 got=-1.763581e+07 bits=cb868cf0 first4=bdc00000 bdae0000 bdf70000 bd130000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=16: max_abs=1.76603e+071h3 e114 got=-1.766026e+07 bits=cb86bcb0 first4=00000000 00000000 000055b1 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=17: max_abs=1.76669e+071h3 e114 got=-1.766688e+07 bits=cb86c9a0 first4=bce10000 bd280000 bc4e0000 bd170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=18: max_abs=1.76669e+071h3 e114 got=-1.766688e+07 bits=cb86c9a0 first4=bce10000 bd280000 bc4e0000 bd170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=19: max_abs=1.76669e+071h3 e114 got=-1.766688e+07 bits=cb86c9a0 first4=bce10000 bd280000 bc4e0000 bd170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=20: max_abs=1.76669e+071h3 e114 got=-1.766688e+07 bits=cb86c9a0 first4=bce10000 bd280000 bc4e0000 bd170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=21: max_abs=1.76669e+071h3 e114 got=-1.766688e+07 bits=cb86c9a0 first4=bce10000 bd280000 bc4e0000 bd170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=22: max_abs=1.76669e+071h3 e102 got=-1.766688e+07 bits=cb86c9a0 first4=8dd50968 0000fffd cb8557f0 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=23: max_abs=1.76669e+071h3 e102 got=-1.766688e+07 bits=cb86c9a0 first4=8dd50968 0000fffd cb8557f0 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=24: max_abs=1.7719e+071h3 e114 got=-1.771904e+07 bits=cb872f80 first4=bc550000 bc950000 bc610000 bc170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=25: max_abs=1.77297e+071h3 e114 got=-1.772973e+07 bits=cb874460 first4=3ce7bdc1 3eaf3e32 3e6bbdbe bdd23e8e
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=26: max_abs=1.77297e+071h3 e102 got=-1.772973e+07 bits=cb874460 first4=ffffffff ffffffff 00000b21 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=27: max_abs=1.77297e+071h3 e102 got=-1.772973e+07 bits=cb874460 first4=ffffffff ffffffff 00000b21 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=28: max_abs=1.77297e+071h3 e102 got=-1.772973e+07 bits=cb874460 first4=ffffffff ffffffff 00000b21 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=29: max_abs=1.77546e+071h3 e114 got=-1.775459e+07 bits=cb8774f0 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=30: max_abs=1.77612e+071h3 e114 got=-1.776122e+07 bits=cb8781e0 first4=bbcc0000 bc0f0000 bbd70000 bb910000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=31: max_abs=1.77612e+071h3 e94 got=-1.776122e+07 bits=cb8781e0 first4=bbbf0000 bc060000 bbc90000 bb870000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=32: max_abs=1.77612e+071h3 e94 got=-1.776122e+07 bits=cb8781e0 first4=bbbf0000 bc060000 bbc90000 bb870000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=33: max_abs=1.77612e+071h3 e74 got=-1.776122e+07 bits=cb8781e0 first4=8dd50968 0000fffd cb872f80 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=34: max_abs=1.77612e+071h3 e74 got=-1.776122e+07 bits=cb8781e0 first4=8dd50968 0000fffd cb872f80 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=35: max_abs=1.77931e+071h3 e114 got=-1.779309e+07 bits=cb87c020 first4=8dd50968 0000fffd cb874460 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=36: max_abs=1.79058e+071h3 e120 got=-1.790579e+07 bits=cb889c40 first4=bb770000 bbb90000 bae20000 bba50000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=37: max_abs=1.79058e+071h3 e100 got=-1.790579e+07 bits=cb889c40 first4=ffffffff ffffffff 00001b11 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=38: max_abs=1.79058e+071h3 e92 got=-1.790579e+07 bits=cb889c40 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=39: max_abs=1.79058e+071h3 e72 got=-1.790579e+07 bits=cb889c40 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=40: max_abs=1.79058e+071h3 e64 got=-1.790579e+07 bits=cb889c40 first4=bb550000 bb950000 bb610000 bb170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=41: max_abs=1.79058e+071h3 e64 got=-1.790579e+07 bits=cb889c40 first4=bb550000 bb950000 bb610000 bb170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=42: max_abs=1.79058e+071h3 e64 got=-1.790579e+07 bits=cb889c40 first4=bb550000 bb950000 bb610000 bb170000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=43: max_abs=1.79058e+071h3 e44 got=-1.790579e+07 bits=cb889c40 first4=3ce7bdc1 3eaf3e32 3e6bbdbe bdd23e8e
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=44: max_abs=1.79058e+071h3 e24 got=-1.790579e+07 bits=cb889c40 first4=bb410000 bb870000 bb4c0000 bb090000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=45: max_abs=1.79058e+071h3 e24 got=-1.790579e+07 bits=cb889c40 first4=bb410000 bb870000 bb4c0000 bb090000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=46: max_abs=1.79058e+071h3 e24 got=-1.790579e+07 bits=cb889c40 first4=bb410000 bb870000 bb4c0000 bb090000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=47: max_abs=1.79058e+071h3 e16 got=-1.790579e+07 bits=cb889c40 first4=8dd50968 0000fffd cb87c020 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=48: max_abs=1.79058e+071h2 e124 got=-1.790579e+07 bits=cb889c40 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=49: max_abs=1.79058e+071h2 e116 got=-1.790579e+07 bits=cb889c40 first4=bb810000 bbb40000 bb880000 bb360000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=50: max_abs=1.79058e+071h2 e116 got=-1.790579e+07 bits=cb889c40 first4=bb810000 bbb40000 bb880000 bb360000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=51: max_abs=1.79136e+071h3 e114 got=-1.791363e+07 bits=cb88ab90 first4=8dd50fb8 0000fffd 8dd50fb8 0000fffd
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=52: max_abs=1.79236e+071h3 e114 got=-1.792365e+07 bits=cb88bf20 first4=bb230000 bb650000 bb2c0000 bae70000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=53: max_abs=0.4106111
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=54: max_abs=0.4105931
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=55: max_abs=0.4105761
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=56: max_abs=1.79492e+071h3 e114 got=-1.794915e+07 bits=cb88f0f0 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=57: max_abs=1.7956e+071h3 e114 got=-1.795603e+07 bits=cb88fe60 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=58: max_abs=1.7956e+071h3 e94 got=-1.795603e+07 bits=cb88fe60 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=59: max_abs=1.79678e+071h3 e122 got=-1.796781e+07 bits=cb891560 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=60: max_abs=1.79773e+071h3 e126 got=-1.797734e+07 bits=cb892800 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=61: max_abs=1.79847e+071h3 e114 got=-1.798467e+07 bits=cb893650 first4=3dfd3d21 3df63da8 3dee3d66 bd193e1a
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=62: max_abs=1.79847e+071h3 e102 got=-1.798467e+07 bits=cb893650 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=63: max_abs=1.79847e+071h3 e102 got=-1.798467e+07 bits=cb893650 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=64: max_abs=1.80038e+071h3 e126 got=-1.800384e+07 bits=cb895bc0 first4=bac5bb18 baf1baf5 ba8fba25 bb22babd
+
+./tests/vt/test_tenstorrent_backend.cpp:13919: MESSAGE: 1: garbage seqs = [1 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 56 57 58 59 60 61 62 63 64 ] / 64 swept
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.43305e+38 <  0.5 )
+  logged: rac-sweep seq=1 max_abs=1.43305e+38
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.67959e+07 <  0.5 )
+  logged: rac-sweep seq=3 max_abs=1.67959e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74776e+07 <  0.5 )
+  logged: rac-sweep seq=4 max_abs=1.74776e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74776e+07 <  0.5 )
+  logged: rac-sweep seq=5 max_abs=1.74776e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74776e+07 <  0.5 )
+  logged: rac-sweep seq=6 max_abs=1.74776e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74776e+07 <  0.5 )
+  logged: rac-sweep seq=7 max_abs=1.74776e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74837e+07 <  0.5 )
+  logged: rac-sweep seq=8 max_abs=1.74837e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74837e+07 <  0.5 )
+  logged: rac-sweep seq=9 max_abs=1.74837e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74837e+07 <  0.5 )
+  logged: rac-sweep seq=10 max_abs=1.74837e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.7624e+07 <  0.5 )
+  logged: rac-sweep seq=11 max_abs=1.7624e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76358e+07 <  0.5 )
+  logged: rac-sweep seq=12 max_abs=1.76358e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76358e+07 <  0.5 )
+  logged: rac-sweep seq=13 max_abs=1.76358e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76358e+07 <  0.5 )
+  logged: rac-sweep seq=14 max_abs=1.76358e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76358e+07 <  0.5 )
+  logged: rac-sweep seq=15 max_abs=1.76358e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76603e+07 <  0.5 )
+  logged: rac-sweep seq=16 max_abs=1.76603e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=17 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=18 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=19 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=20 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=21 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=22 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.76669e+07 <  0.5 )
+  logged: rac-sweep seq=23 max_abs=1.76669e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.7719e+07 <  0.5 )
+  logged: rac-sweep seq=24 max_abs=1.7719e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77297e+07 <  0.5 )
+  logged: rac-sweep seq=25 max_abs=1.77297e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77297e+07 <  0.5 )
+  logged: rac-sweep seq=26 max_abs=1.77297e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77297e+07 <  0.5 )
+  logged: rac-sweep seq=27 max_abs=1.77297e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77297e+07 <  0.5 )
+  logged: rac-sweep seq=28 max_abs=1.77297e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77546e+07 <  0.5 )
+  logged: rac-sweep seq=29 max_abs=1.77546e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77612e+07 <  0.5 )
+  logged: rac-sweep seq=30 max_abs=1.77612e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77612e+07 <  0.5 )
+  logged: rac-sweep seq=31 max_abs=1.77612e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77612e+07 <  0.5 )
+  logged: rac-sweep seq=32 max_abs=1.77612e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77612e+07 <  0.5 )
+  logged: rac-sweep seq=33 max_abs=1.77612e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77612e+07 <  0.5 )
+  logged: rac-sweep seq=34 max_abs=1.77612e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.77931e+07 <  0.5 )
+  logged: rac-sweep seq=35 max_abs=1.77931e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=36 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=37 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=38 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=39 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=40 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=41 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=42 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=43 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=44 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=45 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=46 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=47 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=48 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=49 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79058e+07 <  0.5 )
+  logged: rac-sweep seq=50 max_abs=1.79058e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79136e+07 <  0.5 )
+  logged: rac-sweep seq=51 max_abs=1.79136e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79236e+07 <  0.5 )
+  logged: rac-sweep seq=52 max_abs=1.79236e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79492e+07 <  0.5 )
+  logged: rac-sweep seq=56 max_abs=1.79492e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.7956e+07 <  0.5 )
+  logged: rac-sweep seq=57 max_abs=1.7956e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.7956e+07 <  0.5 )
+  logged: rac-sweep seq=58 max_abs=1.7956e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79678e+07 <  0.5 )
+  logged: rac-sweep seq=59 max_abs=1.79678e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79773e+07 <  0.5 )
+  logged: rac-sweep seq=60 max_abs=1.79773e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79847e+07 <  0.5 )
+  logged: rac-sweep seq=61 max_abs=1.79847e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79847e+07 <  0.5 )
+  logged: rac-sweep seq=62 max_abs=1.79847e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.79847e+07 <  0.5 )
+  logged: rac-sweep seq=63 max_abs=1.79847e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:13944: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.80038e+07 <  0.5 )
+  logged: rac-sweep seq=64 max_abs=1.80038e+07
+
+2026-11-16 18:05:48.304 | info     |           Metal | Disabling and clearing program cache on MeshDevice 1 (mesh_device.cpp:1203)
+[TT-PA-DUMP] call=65 seq_lens0=1 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=65 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=66 seq_lens0=2 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=66 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=67 seq_lens0=3 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=67 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=68 seq_lens0=4 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=68 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=69 seq_lens0=5 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=69 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=70 seq_lens0=6 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=70 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=71 seq_lens0=7 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=71 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+[TT-PA-DUMP] call=72 seq_lens0=8 dev_out=[1,1,4,128]
+[TT-PA-DUMP]   h0 all-bf16
+[TT-PA-DUMP]   h1 all-bf16
+[TT-PA-DUMP]   h2 all-bf16
+[TT-PA-DUMP]   h3 all-bf16
+[TT-PA-DUMP] flat call=72 logical=[1,512,0,0] padded=[32,512,0,0]
+[TT-PA-DUMP]   flat h0 all-bf16
+[TT-PA-DUMP]   flat h1 all-bf16
+[TT-PA-DUMP]   flat h2 all-bf16
+[TT-PA-DUMP]   flat h3 all-bf16
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:14161:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program cache disabled (cache-hit run-args class)
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=1: max_abs=1.74272e+071h2 e84 got=-1.74272e+07 bits=cb84f580 first4=00000001 00000000 00000481 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=2: max_abs=3.1195e+081h3 e116 got=-3.119498e+08 bits=cd94bfd0 first4=0000000a 00000000 00000002 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=3: max_abs=3.1195e+081h3 e116 got=-3.119498e+08 bits=cd94bfd0 first4=0000000a 00000000 00000002 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=4: max_abs=3.1195e+081h3 e116 got=-3.119498e+08 bits=cd94bfd0 first4=0000000a 00000000 00000002 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=5: max_abs=3.1195e+081h3 e108 got=-3.119498e+08 bits=cd94bfd0 first4=8dd50b78 0000fffd 8dd50b78 0000fffd
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=6: max_abs=1.7469e+071h2 e42 got=-1.746902e+07 bits=cb854730 first4=00000430 00000000 00000020 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=7: max_abs=1.66313e+221h3 e126 got=1.663131e+22 bits=64616572 first4=00000001 00000000 000001a1 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=8: max_abs=1.7457e+071h3 e90 got=-1.745702e+07 bits=cb852fc0 first4=cb804640 0000aaaa cb804670 0000aaaa
+
+./tests/vt/test_tenstorrent_backend.cpp:13919: MESSAGE: 1: garbage seqs = [1 2 3 4 5 6 7 8 ] / 8 swept
+
+2026-11-16 18:05:48.331 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.74272e+07 <  0.5 )
+  logged: nocache-sweep seq=1 max_abs=1.74272e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 3.1195e+08 <  0.5 )
+  logged: nocache-sweep seq=2 max_abs=3.1195e+08
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 3.1195e+08 <  0.5 )
+  logged: nocache-sweep seq=3 max_abs=3.1195e+08
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 3.1195e+08 <  0.5 )
+  logged: nocache-sweep seq=4 max_abs=3.1195e+08
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 3.1195e+08 <  0.5 )
+  logged: nocache-sweep seq=5 max_abs=3.1195e+08
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.7469e+07 <  0.5 )
+  logged: nocache-sweep seq=6 max_abs=1.7469e+07
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.66313e+22 <  0.5 )
+  logged: nocache-sweep seq=7 max_abs=1.66313e+22
+
+./tests/vt/test_tenstorrent_backend.cpp:14182: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.7457e+07 <  0.5 )
+  logged: nocache-sweep seq=8 max_abs=1.7457e+07
+
+===============================================================================
+[doctest] test cases:  2 | 0 passed |  2 failed | 120 skipped
+[doctest] assertions: 72 | 4 passed | 68 failed |
+[doctest] Status: FAILURE!
+2026-11-16 18:05:48.331 | info     |    BuildKernels | JIT cache stats: 20/20 hits (100.0%) [20 cached, 64 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 18:05:48.331 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 18:05:48.373 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 18:05:48.373 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 18:05:48.423 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 18:05:48.423 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 18:05:48.423 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

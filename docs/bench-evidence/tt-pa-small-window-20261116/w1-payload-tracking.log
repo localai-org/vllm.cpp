@@ -1,0 +1,83 @@
+2026-11-16 17:44:52.253 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 17:44:52.253 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 17:44:52.253 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 17:44:52.253 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 17:45:17.442 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 17:45:17.442 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 17:45:17.471 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 17:45:17.471 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 17:45:17.471 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 17:45:17.471 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 17:45:17.472 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 17:45:17.557 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 17:45:17.604 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 17:45:17.604 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 17:45:17.604 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 17:45:17.604 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 17:45:17.604 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 17:45:18.400 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:13971:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: payload tracking at the garbage seqs (stale-read vs live-read)
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=1: max_abs=0.1248851
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=2: max_abs=0.1105021
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=3: max_abs=0.03396091
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=4: max_abs=0.03094181
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=5: max_abs=0.03757941
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=6: max_abs=0.02289271
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=7: max_abs=0.01967851
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=8: max_abs=0.01300521
+
+./tests/vt/test_tenstorrent_backend.cpp:13919: MESSAGE: 1: garbage seqs = [] / 8 swept
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=1: max_abs=1.52879e+351h3 e88 got=-1.528791e+35 bits=f9eb8c30 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=2: max_abs=1.52879e+351h3 e88 got=-1.528791e+35 bits=f9eb8c30 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=3: max_abs=0.09468251
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=4: max_abs=0.09138491
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=5: max_abs=0.04543621
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=6: max_abs=0.04151561
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=7: max_abs=0.03226021
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=8: max_abs=1.53245e+351h3 e116 got=-1.53245e+35 bits=f9ec1c80 first4=00000000 00000000 00000000 00000000
+
+./tests/vt/test_tenstorrent_backend.cpp:13919: MESSAGE: 1: garbage seqs = [1 2 8 ] / 8 swept
+
+./tests/vt/test_tenstorrent_backend.cpp:14069: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.52879e+35 <  0.5 )
+  logged: track-B seq=1 max_abs=1.52879e+35
+
+./tests/vt/test_tenstorrent_backend.cpp:14069: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.52879e+35 <  0.5 )
+  logged: track-B seq=2 max_abs=1.52879e+35
+
+./tests/vt/test_tenstorrent_backend.cpp:14069: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.53245e+35 <  0.5 )
+  logged: track-B seq=8 max_abs=1.53245e+35
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed | 1 failed | 121 skipped
+[doctest] assertions: 16 | 13 passed | 3 failed |
+[doctest] Status: FAILURE!
+2026-11-16 17:45:18.422 | info     |    BuildKernels | JIT cache stats: 22/22 hits (100.0%) [22 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 17:45:18.422 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 17:45:18.463 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 17:45:18.463 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 17:45:18.558 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 17:45:18.558 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 17:45:18.558 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

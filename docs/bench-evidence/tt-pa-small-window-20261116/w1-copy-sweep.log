@@ -1,0 +1,289 @@
+2026-11-16 17:44:10.629 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 17:44:10.630 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 17:44:10.630 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 17:44:10.630 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 17:44:35.405 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 17:44:35.405 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 17:44:35.434 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 17:44:35.434 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 17:44:35.434 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 17:44:35.434 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 17:44:35.435 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 17:44:35.519 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 17:44:35.564 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 17:44:35.564 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 17:44:35.564 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 17:44:35.564 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 17:44:35.564 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 17:44:36.363 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:13948:
+TEST CASE:  kTENSTORRENT TT-PA-SMALL-WINDOW W1: Copy-seeded PA decode seq sweep 1..64 (coherence discriminator)
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=1: max_abs=1.05801e+241h2 e116 got=1.058007e+24 bits=67600aa8 first4=00000002 00000000 00000005 3ff00002
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=2: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bdc60000 bde60000 bddb0000 bdfa0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=3: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bd090000 bd720000 bd830000 bd530000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=4: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bd090000 bd720000 bd830000 bd530000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=5: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bd090000 bd720000 bd830000 bd530000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=6: max_abs=0.02292681
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=7: max_abs=0.01970961
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=8: max_abs=0.0159181
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=9: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bc430000 bc220000 bbc40000 bbe40000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=10: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bc430000 bc220000 bbc40000 bbe40000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=11: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bbe40000 bc4a0000 bc5a0000 bc300000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=12: max_abs=0.01158281
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=13: max_abs=0.009989241
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=14: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bc050000 bc190000 bc130000 bc270000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=15: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bc050000 bc190000 bc130000 bc270000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=16: max_abs=0.008171411
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=17: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bbd80000 bbfb0000 bbf00000 bc080000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=18: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bb870000 bbef0000 bc010000 bbd00000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=19: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bbad0000 bb900000 bb2e0000 bb4a0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=20: max_abs=0.006978771
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=21: max_abs=0.006267221
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=22: max_abs=0.005971721
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=23: max_abs=0.005729631
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=24: max_abs=0.005483781
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=25: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bb400000 bba90000 bbb70000 bb940000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=26: max_abs=0.005376071
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=27: max_abs=0.004892721
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=28: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bb800000 bb940000 bb8e0000 bba20000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=29: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bb800000 bb940000 bb8e0000 bba20000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=30: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bb590000 bb350000 bada0000 bafd0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=31: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bb510000 bb2d0000 bad20000 baf40000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=32: max_abs=0.00412931
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=33: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bb430000 bb220000 bac40000 bae40000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=34: max_abs=0.00411581
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=35: max_abs=0.003998631
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=36: max_abs=0.003887941
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=37: max_abs=0.003783221
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=38: max_abs=0.003484331
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=39: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bb370000 bb540000 bb4b0000 bb670000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=40: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=baea0000 bb4f0000 bb600000 bb340000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=41: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=baea0000 bb4f0000 bb600000 bb340000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=42: max_abs=0.003160421
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=43: max_abs=0.003256881
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=44: max_abs=0.003017281
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=45: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bb1e0000 bb380000 bb300000 bb480000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=46: max_abs=0.002885961
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=47: max_abs=0.002823641
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=48: max_abs=0.002768341
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=49: max_abs=0.002708431
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=50: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bb000000 bad40000 ba810000 ba950000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=51: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bab70000 bb220000 bb300000 bb0e0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=52: max_abs=1.05798e+241h3 e124 got=1.057984e+24 bits=67600968 first4=bab70000 bb220000 bb300000 bb0e0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=53: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=baf20000 bac90000 ba730000 ba8d0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=54: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=baf20000 bac90000 ba730000 ba8d0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=55: max_abs=0.002414531
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=56: max_abs=1.05798e+241h3 e112 got=1.057984e+24 bits=67600968 first4=bafd0000 bb120000 bb0c0000 bb200000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=57: max_abs=0.002330131
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=58: max_abs=0.002290691
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=59: max_abs=1.05798e+241h3 e120 got=1.057984e+24 bits=67600968 first4=bad90000 bab50000 ba5a0000 ba7d0000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=60: max_abs=1.05804e+241h3 e124 got=1.058037e+24 bits=67600c48 first4=baf10000 bb0b0000 bb050000 bb180000
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=61: max_abs=0.002174691
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=62: max_abs=0.002145431
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=63: max_abs=0.002106131
+
+./tests/vt/test_tenstorrent_backend.cpp:13915: MESSAGE: 1 seq=64: max_abs=0.002079621
+
+./tests/vt/test_tenstorrent_backend.cpp:13919: MESSAGE: 1: garbage seqs = [1 2 3 4 5 9 10 11 14 15 17 18 19 25 28 29 30 31 33 39 40 41 45 50 51 52 53 54 56 59 60 ] / 64 swept
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05801e+24 <  0.5 )
+  logged: copy-sweep seq=1 max_abs=1.05801e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=2 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=3 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=4 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=5 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=9 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=10 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=11 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=14 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=15 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=17 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=18 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=19 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=25 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=28 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=29 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=30 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=31 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=33 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=39 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=40 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=41 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=45 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=50 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=51 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=52 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=53 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=54 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=56 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05798e+24 <  0.5 )
+  logged: copy-sweep seq=59 max_abs=1.05798e+24
+
+./tests/vt/test_tenstorrent_backend.cpp:13967: ERROR: CHECK( r.max_abs < kPaSweepGarbage ) is NOT correct!
+  values: CHECK( 1.05804e+24 <  0.5 )
+  logged: copy-sweep seq=60 max_abs=1.05804e+24
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed |  1 failed | 121 skipped
+[doctest] assertions: 64 | 33 passed | 31 failed |
+[doctest] Status: FAILURE!
+2026-11-16 17:44:36.396 | info     |    BuildKernels | JIT cache stats: 20/20 hits (100.0%) [20 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 17:44:36.396 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 17:44:36.438 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 17:44:36.438 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 17:44:36.520 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 17:44:36.520 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 17:44:36.520 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)
