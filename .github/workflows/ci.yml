@@ -608,6 +608,7 @@ jobs:
           python3 tests/scripts/test_qwen3_capture_outputs.py
           python3 tests/scripts/test_rocm_quant_gather_compare.py
           python3 tests/scripts/test_ltx25_render_compare.py && python3 tests/scripts/test_ltx25_absolute_reference.py
+          python3 tests/scripts/test_glm4_path_determinism.py
           # The prompt-adherence half of the same tool (#2295, owning #1854's
           # first sub-question). 42 of its 47 cases need numpy only; the five
           # that need the pinned CLIP checkpoint skip themselves individually,
