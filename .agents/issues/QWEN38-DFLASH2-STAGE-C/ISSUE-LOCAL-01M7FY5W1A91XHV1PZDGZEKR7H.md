@@ -7,12 +7,12 @@ GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-15
-Updated: 2026-11-15
+Updated: 2026-11-16
 Closed: -
 
 ## Problem
 
-With kGdnSpecDecode (id 12) and kGreedyRejectionSample (id 107) both ported, the w4-on-probe leg (Q4_K_M KV 64, drafter-ON, direct arm, bfp8, eager) runs the loop to completion for the first time — exit 0, 24 tokens, acceptance telemetry live (0.75) — and the emitted token stream is [220, 0, 0, ...] vs the recorded greedy stream [220, 16, 23066, ...] (d49c53d2...): the W4 greedy token-identity gate FAILS (the spec's STOP condition). Probe evidence (VT_TT_GDN_SPEC_DEBUG, w4-diag-spec.stderr.log): (1) the conv-spec kernel's x stream — the spec tokens' qkvz projection — has NaN at the FIRST call (step 0, GDN layer 0: x_asum=nan) and collapses to a frozen ~43.3553 sum at GDN layer 8+ in EVERY step (steps 0-3), while the state-window reads stay real (T_asum ~6-15k) — so the degeneracy is UPSTREAM of both spec kernels (the projection GEMM or the residual it reads); (2) the GDN spec kernel's gathered state is real (s_asum ~0.6-9.5k) and its received activations are EXACTLY zero (q_asum=0, v_asum=0) for the collapsed layers — the zero outs are a downstream consequence, not the cause; (3) the acceptance telemetry (24/32 proposed accepted, num_sampled live through finalize) plus the all-zero ids fit BOTH argmaxes degenerating to token 0 — the classic NaN-argmax signature (NaN comparisons false -> best stays 0) — i.e. the verify's block logits AND the draft's block logits are NaN-poisoned. The GDN spec kernel and the sampler are exonerated: their focused gates are bit-exact vs the CPU oracle, the metadata (nat0/init0/slots) is sane every call, and the first NaN precedes any GdnSpecDecode call. Owed: bisect the NaN injection point in the verify forward's spec rows (the embed of the draft's proposals -> the qkvz projection GEMM -> the conv-spec x), with the bfp8 weight-staging lever as the prime suspect (the draft trunk stages BFP8_B; the no-bfp8 A/B is capacity-blocked at KV 32 on this base — the draft's bf16 trunk OOMs at the same 178257920 B ffn_down allocation).
+With kGdnSpecDecode (id 12) and kGreedyRejectionSample (id 107) ported, the drafter-ON leg runs to completion and the emitted stream degenerates. W21 (2026-11-16): two mechanisms found and fixed in-engine — (1) ttnn::indexed_fill miswrites multi-replacement scatters (the k-th replacement row lands at id[k]+k; survives a program-cache bust) — the conv-spec x scatter replaced with a bit-exact broadcast-mask multiply; (2) ttnn::copy into the resident state shadow does not land — the spec state commit installs the committed tensor directly (eager-only path). Validated: the conv output's zero rows gone, the state persists across verify steps (the gathered state == the expected snapshot byte-exact). The recurrence, the gather, and the BA outputs are proven faithful (CPU reference max_abs 4.5e-07). The stream is still degenerate [220,0,0,...]: the remaining poison is the GDN block output garbage at l>=1 (mixer asum 2e40) with clean gated-norm operands, plus the z GEMM 1e40 at c54+ — the out-of-place op WRITE path misaddresses under the engine's allocator/program-cache state. Next: the shared-cache harness extended with the norm multiply + the recycle pattern.
 
 ## Resolution
 
@@ -109,3 +109,95 @@ staging-arm-dependent onset). Next step: the interleaved-op focused case
 (matmul + indexed_fill + gather through the SHARED program cache in one
 harness) — the first reproduction that varies the op MIX, not the op — plus
 the state-gather/BA trusted reads at the spec calls.
+
+## W21 (2026-11-16): the probes ran — two real defects found, fixed, and the write-path class named
+
+The raw-f32 dump instrumentation (VT_TT_SPEC_DUMP, this wave; the w21-specdump
+/ w21-mask / w21-bust / w21-fix / w21-fix2 / w21-snap / w21-iscat dump dirs)
+answered both probes and found the poison's first two CONCRETE mechanisms.
+
+**PROBE 2 (the BA outputs): CLEAN.** At the first spec call (l=0), the
+committed g/beta match the composed CPU math
+(-exp(a_log)·softplus(a+dt_bias), sigmoid(b)) to max_abs 3.0e-07 / 1.3e-07
+over all 432 (token, head) pairs; g ∈ [-8.31, -8.7e-07], beta ∈
+[0.028, 0.998]. The a/b raws, the projections, and the GdnPostConv gate chain
+are exonerated.
+
+**PROBE 1 (the initial-state gather): the GATHER IS FAITHFUL — the STATE
+PERSISTENCE was the defect.** The gathered S_all is byte-identical to a direct
+shadow read of the same slot (gs1_S_all == gs1_slot0_direct), and the
+recurrence run on the dumped inputs reproduces the TT output to max_abs
+4.5e-07 (the CPU composed reference, threaded per head). But the state the
+gather reads is NOT the state the previous step's recurrence produced: the
+expected post-token-0 snapshot (asum 11550.9, computed from the dumped inputs)
+vs the gathered 301.568 — and the cache shadow read DIRECTLY after the commit
+copy equals its PRE-copy content (gs0_cache_post == the init state, asum
+11984.7, while the scatter's own source rows carry the snapshots, asum
+102778). **ttnn::copy into the resident shadow does not land in the engine.**
+
+**THE CONV-SPEC FILL'S MISWRITE (the W7 anomaly, now resolved to a law):** the
+dumped fill output shows the k-th replacement row landing at id[k]+k — ids
+[0,9,18,27,36,45,54,63,72] wrote x[0..8] at blocks
+[0,10,20,30,40,50,60,70,72]. The displaced writes zero out the conv outputs at
+tokens 4-7 (the whole conv window reads the never-written base) — the exact
+"4 of 9 rows zero" the [SPEC-OUT] core series showed, at EVERY layer, from the
+FIRST spec call. The served x (the qkvz mixed) is clean at the same calls
+(commit-side trust read zero=0; the serve probe agrees). **ttnn::indexed_fill
+miswrites multi-replacement scatters in the engine, and the miswrite SURVIVES
+a full program-cache bust** (the w21-bust arm: a fresh zeros base + a fresh
+ids tensor with a unique shape per call — a guaranteed program miss — same
+displacement). Single-replacement fills (the decode conv, every isolated
+test) are fine; the strided-id multi-replacement form breaks.
+
+**The two fixes (this wave, both validated bit-exact):**
+1. The conv-spec x scatter is a broadcast-mask multiply:
+   xT[t, s·C+c] = x[t, c] · (s == slot(t)) — exact f32 elementwise, the same
+   traffic class as the fill, no indexed_fill. Validated: the conv output's
+   zero rows are GONE (the w21-mask dumps: the slot-0 blocks == x for all 9
+   tokens; the out zero rows = []), and the first spec call's core went from
+   asum 120 with 24576 zeros to 305 with 0 zeros.
+2. The spec state commit installs the committed tensor as the slot's shadow
+   directly (CommitDeviceLogical2D replaces s->device) instead of
+   ttnn::copy into the resident shadow — legal because the spec kernel is
+   eager-only (the capture refusal at its head). Validated: the l=0 state now
+   persists across verify steps (step 2's gather = 11550.9 = the EXACT
+   expected post-token-0 snapshot; steps 3-4 = 11603 / 11464.8, evolving).
+
+Also corrected: the W20 record's "no zero rows in any [9x16] dump before seq
+795" is WRONG — the spec pc_q/pc_v/spec_conv dumps carry exact-zero rows at
+tokens 5,6,7 in 192/192 dumps from the first spec call (they were the conv
+fill's displaced writes, downstream). And the small ssm states at layers >= 1
+(asum ~300-460 vs 11984.7 at l=0) are the model's TRUE behavior — the
+drafter-OFF legs' byte-identical stream proves the prefill states, so the
+small spec cores at l>=1 (asum 3.9, the true math on the true state) are not
+themselves the degeneracy.
+
+**Where the hunt stands:** the stream is STILL degenerate [220, 0, 0, ...]
+(the w21-fix sha daa113b5 — the original W4 signature, not the keep-alive
+variant). The remaining poison shows as the GDN block's output garbage at
+l >= 1 (the [MIXER-OUT] l=1 asum 2.00072e+40, no NaN/Inf/zeros — the
+bit-reinterpretation signature) with CLEAN gated-norm operands ([RNG-IN] x =
+the core's bytes, g = the z's bytes, both clean), and as the z GEMM's 1e40
+commit at c54+ (the W20 record). The gated norm's output and the out_proj are
+the next unprobed stage. The class is now NAMED: **the out-of-place op WRITE
+path misaddresses under the engine's allocator/program-cache state** — the
+fill (displaced), the copy (no-land), and the mixer garbage are three
+symptoms. The next instrument is the shared-cache harness (matmul +
+indexed_fill + gather through ONE program cache in one process, the W20
+disposition's named case) extended with the norm's multiply and the
+engine's alloc/free recycle pattern.
+**W21 gates + the harness (2026-11-16, same wave):** the drafter-OFF
+byte-identity gate holds at 6/6 (Q4_K_M d49c53d2 ×3 at TPOT 6626.89-6627.43
+vs the recorded 6607; UD-Q6_K_XL b36bc61a ×3 at 5325.97-5331.21) — the two
+fixes are inert off the spec path. The drafter-ON token identity STILL FAILS
+(3/3 degenerate; the degenerate stream's exact bytes follow the
+instrumentation's timing — e171d6b1 probe-free vs daa113b5 probed — the
+degeneracy is the stable fact), so **the acceptance multiple remains
+UNMEASURABLE**. The UD-Q6_K_XL drafter-ON leg stays capacity-blocked (the KV-8
+pool + the draft trunk; the standing W3/W4 blocker). The W20 disposition's
+shared-cache harness RAN and is GREEN (40 reps of matmul + multi-replacement
+indexed_fill + gather through one shared program cache with the recycle
+churn, 0 bad) — the engine-only nature of the poison stands; the harness
+needs the richer engine state (the bfp8 staging lifecycle, the embed, the
+paged attention, the DBuf pool pattern) and the gated norm's output + the
+out_proj are the next unprobed engine stages.

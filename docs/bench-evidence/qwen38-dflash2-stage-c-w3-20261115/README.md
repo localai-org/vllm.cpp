@@ -562,3 +562,121 @@ the w20-trust2/ dump dir, the three focused logs above. New instrumentation
 (all env-gated, default-off): DebugSlotTrustRead, [XSERVE-TRUST],
 [GSERVE-TRUST], [MMBT9], [ZGEMM-PRECOMMIT], [TT-COMMIT], [I8DOT-OUT], the
 dead-code TrustDump placements fixed, the 3-deep GEMM output keep-alive.
+
+## W21 the write-path wave (2026-11-16 — the raw-f32 dumps: two mechanisms found and fixed)
+
+All legs Q4_K_M KV64, seed 0. Instrumentation: `VT_TT_SPEC_DUMP=<dir>` (new,
+env-gated, default-off) — raw f32 dumps of the conv-spec scatter chain (x
+served, filled, masked, statG, acc, y, out), the recurrence's inputs/outputs
+(S_all, g, beta, q, k, v, o, the snapshot rows, the post-commit cache, the
+direct slot read), and the BA commit side (a, b, g, beta) at the first spec
+calls. Runners: `run-w21-specdump.sh` (+ the -bust/-mask/-fix/-fix2/-snap/
+-iscat/-loop variants), the dump dirs beside them.
+
+### Probe 2 — the BA outputs: CLEAN
+
+At the first spec call (l=0), the committed g/beta match the composed CPU
+math to max_abs 3.0e-07 (g = -exp(a_log)·softplus(a+dt_bias)) and 1.3e-07
+(beta = sigmoid(b)) over all 432 (token, head) pairs; g ∈ [-8.31, -8.7e-07],
+beta ∈ [0.028, 0.998]. The a/b projections and the gate chain are exonerated.
+
+### Probe 1 — the initial-state gather: the gather is faithful; the state COMMIT was the defect
+
+- The gathered S_all is byte-identical to a direct shadow read of the same
+  slot (`gs1_S_all == gs1_slot0_direct`) — GatherRowsExact exonerated.
+- The recurrence run on the dumped inputs reproduces the TT output to max_abs
+  4.5e-07 (the CPU composed reference, threaded per head, both probed calls).
+- BUT the state is not what the previous step's recurrence produced: expected
+  post-token-0 snapshot asum 11550.9 vs gathered 301.568; and the cache read
+  DIRECTLY after the commit copy equals its PRE-copy content (asum 11984.7 =
+  the init state) while the scatter's own source rows carry the snapshots
+  (asum 102778). **ttnn::copy into the resident shadow does not land in the
+  engine.**
+
+### The conv-spec fill's miswrite, resolved to a law
+
+The dumped fill output shows the k-th replacement row landing at `id[k]+k`:
+ids `[0,9,18,27,36,45,54,63,72]` wrote x[0..8] at blocks
+`[0,10,20,30,40,50,60,70,72]`. The displaced writes zero the conv outputs at
+tokens 4-7 — the exact "4 of 9 rows zero" the [SPEC-OUT] core series showed,
+at every layer, from the FIRST spec call (the W20 record's "no zero rows
+before seq 795" is corrected: the spec pc_q/pc_v/spec_conv dumps carry
+exact-zero rows at tokens 5,6,7 in 192/192 dumps from the first call). The
+served x is clean at the same calls. **The miswrite SURVIVES a full
+program-cache bust** (`VT_TT_CONV_SPEC_FILL_BUST=1`: a fresh zeros base + a
+fresh ids tensor with a unique shape per call — a guaranteed program miss —
+same displacement, w21-bust). Single-replacement fills (the decode conv, all
+isolated tests) are fine.
+
+### The two fixes (bit-exact, validated in-engine)
+
+1. **The conv-spec x scatter = a broadcast-mask multiply**
+   (`VT_TT_CONV_SPEC_FILL_MASK=0` rolls back): xT[t, s·C+c] = x[t, c] ·
+   (s == slot(t)) — exact f32 elementwise, the fill's traffic class, no
+   indexed_fill. Validated: the conv output's zero rows GONE (the slot-0
+   blocks == x for all 9 tokens), the first spec call's core 120 → 305 with
+   0 zero rows.
+2. **The spec state commit installs the committed tensor as the slot's
+   shadow directly** (CommitDeviceLogical2D replaces s->device) instead of
+   the ttnn::copy — legal because the spec kernel is eager-only (the capture
+   refusal at its head). Validated: the l=0 state persists across verify
+   steps (step 2's gather = 11550.9 = the EXACT expected snapshot; steps 3-4
+   evolve).
+
+Also corrected: the small ssm states at layers >= 1 (asum ~300-460 vs 11984.7
+at l=0) are the model's TRUE behavior — the drafter-OFF byte-identical stream
+proves the prefill states — so the small spec cores at l >= 1 are the true
+math on the true state, not the degeneracy.
+
+### Where the hunt stands
+
+The stream is STILL degenerate `[220, 0, 0, ...]` (the w21-fix sha
+`daa113b5` — the original W4 signature). The remaining poison: the GDN
+block's output garbage at l >= 1 ([MIXER-OUT] l=1 asum 2.00072e+40, no
+NaN/Inf/zeros) with CLEAN gated-norm operands ([RNG-IN] x and g both clean),
+plus the z GEMM's 1e40 commit at c54+ (the W20 record). The gated norm's
+output and the out_proj are the next unprobed stage. The class is now named:
+**the out-of-place op WRITE path misaddresses under the engine's
+allocator/program-cache state** — the fill (displaced), the copy (no-land),
+and the mixer garbage are three symptoms of it. Next instrument: the
+shared-cache harness (matmul + indexed_fill + gather through ONE program
+cache in one process) extended with the norm's multiply and the engine's
+alloc/free recycle pattern.
+
+### W21 gates + the harness disposition
+
+`run-w21-gate.sh` (the W4 discipline; the OFF legs at the recorded 200-token
+length, no env overrides; the ON legs at 24 with the W3 disposition env):
+
+- **(c) drafter-OFF byte-identity: 6/6** — Q4_K_M KV-64 ×3: token-ids sha256
+  `d49c53d2…` BYTE-IDENTICAL, TPOT 6627.43 / 6626.89 / 6626.99 ms vs the
+  recorded 6607 (+0.30%, the established rerun band); UD-Q6_K_XL KV-8 ×3:
+  `b36bc61a…` BYTE-IDENTICAL, TPOT 5326.55 / 5331.21 / 5325.97 ms (the
+  recorded eager 5341.31 / the embed row's captured band).
+- **(a) Q4_K_M drafter-ON ×3: the token identity FAILS** — all three reps
+  degenerate (`e171d6b1…` — the keep-alive-variant signature under the
+  probe-free env; the probed runs' `daa113b5` shows the degenerate stream's
+  exact bytes follow the instrumentation's timing, the degeneracy itself is
+  the stable fact). TPOT 9926.88 / 9925.23 / 9924.80 ms is the DEGENERATE
+  loop's number, not a result — **THE ACCEPTANCE MULTIPLE REMAINS
+  UNMEASURABLE** (the W4 rule: a degenerate loop's TPOT is not a number).
+- **(b) UD-Q6_K_XL drafter-ON: capacity-blocked** — the KV-8 pool + the draft
+  trunk cannot fit ("Cannot auto-fit max_model_len", w21-q6kl-on-1.log) — the
+  standing named blocker from W3/W4, unchanged by this wave.
+
+**The shared-cache harness (the W20 disposition's named instrument) is GREEN:**
+the new focused case (`kTENSTORRENT W21 interleaved op mix`, in
+tests/vt/test_tenstorrent_backend.cpp, run behind
+`ConvSpecFillForTest`/`GatherRowsForTest` — the engine's exact fill and
+gather forms as test surfaces) runs 40 reps of the op mix — the recycle churn
+(the 28 MB / 3.3 MB / 110 KB alloc-free pattern), the M=9 matmul, the
+multi-replacement indexed_fill at the conv-spec geometry, and the
+GatherRowsExact-form gather, all through ONE shared program cache in one
+process — **0 bad reps on every op** (w21-harness2.log). The engine-only
+nature of the poison STANDS, now with the write-path law (the fill's
+id[k]+k displacement; the copy's no-land) + the harness-green data point: the
+scoped harness does NOT reproduce, so the engine state the poison needs is
+richer than the op mix alone (the bfp8 staging lifecycle, the embed, the
+paged attention, the DBuf pool's persistent-buffer pattern are the next
+harness ingredients), and the gated norm's output + the out_proj remain the
+next unprobed ENGINE stages.

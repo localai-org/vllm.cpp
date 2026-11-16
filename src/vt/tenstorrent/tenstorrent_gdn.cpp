@@ -200,6 +200,28 @@ void GdnPostConvKernel(Queue& q, Tensor& q_out, Tensor& k_out, Tensor& v_out,
   ttnn::Tensor beta = ttnn::sigmoid(dev_b);
   CommitDeviceLogical2D(g_out, std::move(g), t, hv);
   CommitDeviceLogical2D(beta_out, std::move(beta), t, hv);
+  // W21 (PROBE 2): the committed g/beta at the SPEC geometry (T == 9 — the
+  // prefill runs T=32), first two spec calls, as raw f32. Pairs with the
+  // GdnSpecDecode serve-side dumps (gs*_g/gs*_beta).
+  if (const char* sd = std::getenv("VT_TT_SPEC_DUMP"); sd != nullptr && sd[0] != '\0') {
+    static std::atomic<int64_t> gb_seq{0};
+    if (t == 9) {
+      const int64_t dc = gb_seq.fetch_add(1, std::memory_order_relaxed);
+      if (dc < 2) {
+        auto dump1 = [&](const char* name, const Tensor& tt) {
+          auto v = vt::tenstorrent::DebugDeviceReadbackF32(q, tt);
+          std::FILE* f = std::fopen(
+              (std::string(sd) + "/gb" + std::to_string(dc) + "_" + name +
+               ".f32").c_str(), "wb");
+          if (f) { std::fwrite(v.data(), 4, v.size(), f); std::fclose(f); }
+        };
+        dump1("g", g_out);
+        dump1("beta", beta_out);
+        if (araw.rank == 2 && araw.IsContiguous()) dump1("a", araw);
+        if (braw.rank == 2 && braw.IsContiguous()) dump1("b", braw);
+      }
+    }
+  }
   if (const char* td = std::getenv("VT_DUMP_TRUST")) {
     // Kernel-side trusted captures at the COMMIT SITE: same tensor objects,
     // same TU — removes every cross-function identity assumption.
@@ -1713,6 +1735,12 @@ ttnn::Tensor ScatterRowsExact(const ttnn::Tensor& cache2d,
     for (int64_t j = 0; j < factor; ++j)
       blocks.push_back(s * static_cast<uint32_t>(factor) + static_cast<uint32_t>(j));
   const uint32_t unb = static_cast<uint32_t>(blocks.size());
+  // W21: the CONV-SPEC fill's miswrite (the k-th replacement row lands at
+  // id[k]+k) was measured at STRIDED ids [0,9,...,72]; the consecutive-id
+  // scatters (the state commits, [0..F)) are the form the decode path has
+  // always run and the W21 concat-side dumps confirm faithful (out == src ++
+  // tail). The identity fast path was tried here and broke the scatter test's
+  // volume contract — reverted; the fill stays for this form.
   ttnn::Tensor bid_dev = UploadIdxU32(
       std::move(blocks), ttnn::Shape({unb}), ttnn::Layout::ROW_MAJOR, device);
   // indexed_fill wants rank-4 on dim 0, and the rank change must stay a
@@ -2631,6 +2659,9 @@ struct ConvSpecIdxEntry {
                             // keep masks for the state commit
   ttnn::Tensor zeros_blk;   // [sl-width+1, R] f32 TILE — SRC's out-of-range
                             // zeros (the oracle's `src < state_len` guard)
+  ttnn::Tensor x_mask;      // [T, slots] f32 TILE — W21: the broadcast-mask
+                            // form of the x scatter (the indexed_fill
+                            // replacement): mask[t,s] = (s == slot(t))
 };
 std::mutex& ConvSpecIdxMutex() {
   static std::mutex* m = new std::mutex();  // never destroyed (#1486)
@@ -2846,6 +2877,26 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
                           ttnn::DataType::FLOAT32, ttnn::Layout::TILE, device);
       n.mk = UploadTensor(std::move(mk), ttnn::Shape({1, R}),
                           ttnn::DataType::FLOAT32, ttnn::Layout::TILE, device);
+      // W21: the x scatter's broadcast mask — mask[t, s] = (s == slot(t)).
+      // Exact 0/1 f32; content-keyed with the rest of the entry.
+      {
+        std::vector<float> xm(static_cast<size_t>(tokens) * uslots, 0.0f);
+        for (int64_t t = 0; t < tokens; ++t) {
+          int64_t req = num_reqs - 1;
+          for (int64_t i = 0; i < num_reqs; ++i) {
+            if (t >= csv[static_cast<size_t>(i)] && t < csv[static_cast<size_t>(i + 1)]) {
+              req = i;
+              break;
+            }
+          }
+          const int32_t s = idxv[static_cast<size_t>(req)];
+          if (s >= 0)
+            xm[static_cast<size_t>(t) * uslots + s] = 1.0f;
+        }
+        n.x_mask = UploadTensor(std::move(xm), ttnn::Shape({utok, uslots}),
+                                ttnn::DataType::FLOAT32, ttnn::Layout::TILE,
+                                device);
+      }
       // SRC's out-of-range zeros: the oracle's `src < state_len ? srow[src] :
       // 0` guard — the roll's state part can read past the row when a short
       // request's keep exceeds the window; those reads land in this block.
@@ -2879,6 +2930,25 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
   const bool conv_spec_probe =
       conv_spec_dbg_on && !tt_capture_active() &&
       conv_spec_probe_seq.fetch_add(1, std::memory_order_relaxed) < 48;
+  // W21 (the conv-spec zero-row probe): raw f32 dumps of the scatter-chain
+  // stages at the first spec calls. The W20 dump forensics showed the
+  // conv-spec OUTPUT carries exact-zero token rows at every spec call while
+  // the served x reads clean — these dumps split which stage introduces the
+  // zeros (the fill's clone, the window gather, the MAC, or the out select).
+  static const char* spec_dump_dir = std::getenv("VT_TT_SPEC_DUMP");
+  static std::atomic<int64_t> spec_dump_seq{0};
+  const bool spec_dump_on =
+      spec_dump_dir != nullptr && spec_dump_dir[0] != '\0' && !tt_capture_active();
+  const int64_t spec_dump_call =
+      spec_dump_on ? spec_dump_seq.fetch_add(1, std::memory_order_relaxed) : -1;
+  auto spec_dump = [&](const char* name, const ttnn::Tensor& t) {
+    if (!spec_dump_on || spec_dump_call >= 2) return;
+    auto v = t.to_vector<float>();
+    std::FILE* f = std::fopen(
+        (std::string(spec_dump_dir) + "/cs" + std::to_string(spec_dump_call) +
+         "_" + name + ".f32").c_str(), "wb");
+    if (f) { std::fwrite(v.data(), 4, v.size(), f); std::fclose(f); }
+  };
   auto probe_stage = [conv_spec_probe](const char* tag,
                                        const ttnn::Tensor& t) {
     if (!conv_spec_probe) return;
@@ -2955,6 +3025,7 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
       };
       ttnn::Tensor x_rm = to_rm(x_f32);
       probe_stage("rm", x_rm);
+      spec_dump("x_served", x_rm);
       // W7b: the fill's BASE and the scatter INDICES, read at fill time. The
       // filled output = zeros_ts.clone() with x's rows written at the scatter
       // positions, so garbage in the non-written region IS the base's live
@@ -2970,20 +3041,93 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
         std::fprintf(stderr, "\n");
         std::fflush(stderr);
       }
+      // W21 Experiment C (MASK): build xT as a broadcast multiply —
+      // xT[t, s*C+c] = x[t, c] * (s == slot(t)) — instead of the indexed_fill
+      // scatter. Exact f32 elementwise (bit-exact vs the oracle's row write);
+      // bypasses the fill whose k-th replacement row lands at id[k]+k in the
+      // engine (the W21 finding). Same traffic class as the fill (one [T,R]
+      // materialization).
+      static const bool fill_mask = [] {
+        const char* v = std::getenv("VT_TT_CONV_SPEC_FILL_MASK");
+        return v == nullptr || v[0] != '0';  // default ON
+      }();
+      if (fill_mask) {
+        ttnn::Tensor xb = ttnn::reshape(
+            x_f32, ttnn::Shape({utok, 1u, uc}));  // [T,1,C] broadcast source
+        ttnn::Tensor xm = ttnn::reshape(
+            e.x_mask, ttnn::Shape({utok, uslots, 1u}));  // [T,slots,1]
+        ttnn::Tensor xsc = ttnn::multiply(xb, xm);       // [T,slots,C] exact
+        xT = ttnn::to_layout(
+            ttnn::reshape(std::move(xsc), ttnn::Shape({utok, R})),
+            ttnn::Layout::TILE);
+        probe_stage("masked", xT);
+        spec_dump("masked", xT);
+      } else {
+        ttnn::Tensor fill_base = e.zeros_ts;
+        ttnn::Tensor fill_ids = e.x_scatter;
+      // W21 Experiment A (FRESH): rebuild the base + ids tensors per call —
+      // fresh device tensors, same values. Distinguishes a stale TENSOR
+      // binding on the program-cache-hit path from a stale RUN-ARGS path.
+      static const bool fill_fresh = [] {
+        const char* v = std::getenv("VT_TT_CONV_SPEC_FILL_FRESH");
+        return v != nullptr && v[0] == '1';
+      }();
+      // W21 Experiment B (BUST): a UNIQUE batch-ids shape per call (extra ids
+      // pointing at a harmless non-slot-0 block, x padded to match) — every
+      // call is a program-cache MISS, so a cache-hit run-args/binding
+      // staleness (the d1be4cf5b layernorm class) cannot serve.
+      static const bool fill_bust = [] {
+        const char* v = std::getenv("VT_TT_CONV_SPEC_FILL_BUST");
+        return v != nullptr && v[0] == '1';
+      }();
+      static std::atomic<int64_t> fill_bust_seq{0};
+      const int64_t bust_ix = fill_bust ? fill_bust_seq.fetch_add(1) : 0;
+      uint32_t base_rows = utok * uslots;
+      if (fill_fresh || fill_bust) {
+        fill_base = ttnn::zeros(tt::tt_metal::Shape({base_rows, uc}),
+                                ttnn::DataType::FLOAT32, ttnn::Layout::ROW_MAJOR,
+                                std::ref(device));
+      }
+      if (fill_fresh) {
+        fill_ids = UploadIdxU32(e.x_scatter.to_vector<uint32_t>(),
+                                ttnn::Shape({utok}), ttnn::Layout::ROW_MAJOR,
+                                device);
+      }
+      if (fill_bust) {
+        const uint32_t extra = static_cast<uint32_t>(bust_ix % 7) + 1;
+        std::vector<uint32_t> ids = e.x_scatter.to_vector<uint32_t>();
+        for (uint32_t j = 0; j < extra; ++j) ids.push_back(1u);  // harmless block
+        fill_ids = UploadIdxU32(std::move(ids),
+                                ttnn::Shape({utok + extra}),
+                                ttnn::Layout::ROW_MAJOR, device);
+        std::vector<float> xp(x_rm.to_vector<float>());
+        xp.resize(static_cast<size_t>(utok + extra) * uc, 0.0f);
+        x_rm = ttnn::Tensor::from_vector<float>(
+            std::move(xp),
+            tt::tt_metal::TensorSpec(
+                tt::tt_metal::Shape({utok + extra, uc}),
+                tt::tt_metal::TensorLayout(
+                    ttnn::DataType::FLOAT32, tt::tt_metal::PageConfig(ttnn::Layout::ROW_MAJOR),
+                    tt::tt_metal::MemoryConfig{})),
+            &device);
+      }
       ttnn::Tensor filled = ttnn::indexed_fill(
-          e.x_scatter,
-          ttnn::experimental::view(e.zeros_ts,
-                                   ttnn::Shape({utok * uslots, 1, 1, uc})),
+          fill_ids,
+          ttnn::experimental::view(fill_base,
+                                   ttnn::Shape({base_rows, 1, 1, uc})),
           ttnn::experimental::view(x_rm,
-                                   ttnn::Shape({utok, 1, 1, uc})),
+                                   ttnn::Shape({x_rm.logical_shape()[0], 1, 1, uc})),
           std::nullopt, /*dim=*/0);
       probe_stage("filled", ttnn::experimental::view(
                                 filled, ttnn::Shape({utok, R})));
+      spec_dump("filled", ttnn::experimental::view(
+                              filled, ttnn::Shape({utok, R})));
       xT = ttnn::to_layout(
           ttnn::experimental::view(std::move(filled),
                                    ttnn::Shape({utok, R})),
           ttnn::Layout::TILE);
       probe_stage("tile", xT);
+      }
     } else {
       VT_CHECK(!tt_capture_active(),
                "tenstorrent causal_conv1d_spec_update: x arrived without a "
@@ -3060,6 +3204,7 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
   }
   ttnn::Tensor statG =
       ttnn::gather(T, /*dim=*/0, stat_idx, /*sparse_grad=*/false, std::nullopt);
+  spec_dump("statG", statG);
   // ---- the stream + the MAC ----------------------------------------------
   // xT stays alive: the state commit's SRC concat reads it again below (the
   // handles are refcounted — pass it by value here).
@@ -3110,7 +3255,9 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
         ttsl::SmallVector<uint32_t>{1u, 1u});  // [1, R]
     acc = ttnn::add(std::move(acc), ttnn::multiply(std::move(src_j), std::move(wj)));
   }
+  spec_dump("acc", acc);
   ttnn::Tensor y = args.silu_activation ? ttnn::silu(acc) : acc;  // [T, R]
+  spec_dump("y", y);
   // VT_TT_GDN_SPEC_DEBUG (the GdnSpecDecode probe's twin): the conv spec
   // step's x stream + MAC result checksums — distinguishes a zero x stream
   // from a zero state window from a zero MAC.
@@ -3218,7 +3365,15 @@ void CausalConv1dSpecUpdateKernel(Queue& q_unused_probe, Tensor& out, const Tens
     ttnn::Tensor sel = ttnn::gather(yT, /*dim=*/0, e.osel_idx,
                                     /*sparse_grad=*/false, std::nullopt);
     ttnn::Tensor o = ttnn::transpose(sel, 0, 1);  // [T, C]
+    spec_dump("o_precommit", o);
     CommitDeviceLogical2D(out, std::move(o), utok, uc);
+    if (spec_dump_on && spec_dump_call < 2) {
+      auto ov = vt::tenstorrent::DebugDeviceReadbackF32(q_unused_probe, out);
+      std::FILE* f = std::fopen(
+          (std::string(spec_dump_dir) + "/cs" +
+           std::to_string(spec_dump_call) + "_out.f32").c_str(), "wb");
+      if (f) { std::fwrite(ov.data(), 4, ov.size(), f); std::fclose(f); }
+    }
   } else {
     // Eager-only (NULL rows never capture): the oracle leaves a NULL
     // request's out rows untouched, so the select runs on the host against
@@ -3439,6 +3594,37 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
       GatherRowsExact(cache2d, init_blocks, blk, device);
   S_all = CaptureSafeReshape(
       S_all, ttnn::Shape({static_cast<uint32_t>(init.size() * hv), udv, udk}));
+  // W21 (PROBE 1 + 2): the recurrence's unprobed inputs as raw f32 — the
+  // gathered initial state (S_all) and the served g/beta (the BA outputs).
+  // The composed CPU reference consumes exactly these files.
+  static const char* spec_dump_dir2 = std::getenv("VT_TT_SPEC_DUMP");
+  static std::atomic<int64_t> spec_dump_seq2{0};
+  if (spec_dump_dir2 != nullptr && spec_dump_dir2[0] != '\0' &&
+      !tt_capture_active()) {
+    const int64_t dc = spec_dump_seq2.fetch_add(1, std::memory_order_relaxed);
+    if (dc < 2) {
+      auto dump1 = [&](const char* name, const ttnn::Tensor& t) {
+        auto v = t.to_vector<float>();
+        std::FILE* f = std::fopen(
+            (std::string(spec_dump_dir2) + "/gs" + std::to_string(dc) + "_" +
+             name + ".f32").c_str(), "wb");
+        if (f) { std::fwrite(v.data(), 4, v.size(), f); std::fclose(f); }
+      };
+      dump1("S_all", S_all);
+      dump1("g", g2d);
+      dump1("beta", b2d);
+      dump1("q", q_exp);
+      dump1("k", k_exp);
+      dump1("v", v2d);
+      // The cache shadow's slot-0 split rows, read DIRECTLY (no gather) —
+      // splits "the scatter/commit wrote wrong" from "the gather read wrong".
+      dump1("slot0_direct", ttnn::slice(
+          cache2d, ttsl::SmallVector<uint32_t>{0u, 0u},
+          ttsl::SmallVector<uint32_t>{static_cast<uint32_t>(sf),
+                                      static_cast<uint32_t>(blk)},
+          ttsl::SmallVector<uint32_t>{1u, 1u}));
+    }
+  }
 
   // The recurrence: per request, T sequential composed steps over that
   // request's [Hv, Dv, Dk] state block; per-timestep activations are
@@ -3504,6 +3690,19 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
   // sum) — one concat, then the logical-2D commit the decode kernel uses.
   ttnn::Tensor o_all = o_parts.size() == 1 ? std::move(o_parts[0])
                                            : ttnn::concat(o_parts, /*dim=*/0);
+  // W21: the recurrence's OUTPUT as raw f32 (the [GDN-SPEC] asum's bytes).
+  if (spec_dump_dir2 != nullptr && spec_dump_dir2[0] != '\0' &&
+      !tt_capture_active()) {
+    static std::atomic<int64_t> o_seq{0};
+    const int64_t dc = o_seq.fetch_add(1, std::memory_order_relaxed);
+    if (dc < 2) {
+      auto v = o_all.to_vector<float>();
+      std::FILE* f = std::fopen(
+          (std::string(spec_dump_dir2) + "/gs" + std::to_string(dc) + "_o.f32")
+              .c_str(), "wb");
+      if (f) { std::fwrite(v.data(), 4, v.size(), f); std::fclose(f); }
+    }
+  }
   // VT_TT_GDN_SPEC_DEBUG: the spec step's metadata + result checksums, one
   // line per call (eager only — a download is the read the trace refuses).
   // The frozen-recurrence signature is the GDN-STATE-PROBE's: one IDENTICAL
@@ -3550,6 +3749,28 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
                  static_cast<unsigned long long>(fnv), acc, s_acc, q_acc, v_acc,
                  static_cast<unsigned long long>(q_nan),
                  static_cast<unsigned long long>(v_nan));
+    // W21: the shadow's residency state for the state tensor — the fast path
+    // (a resident f32 shadow) vs the cold path (a fresh upload of the host
+    // bytes). A cold path per call with a changing host pointer = the state
+    // never persists in the shadow registry.
+    {
+      std::lock_guard<std::mutex> g(SlotMutex());
+      BufferSlot* s = FindSlot(state.data);
+      std::fprintf(stderr,
+                   "[GDN-SPEC-SLOT] ptr=%p found=%d devc=%d hostc=%d "
+                   "dev=%ux%u persist=%d addr=%llx\n",
+                   state.data, s != nullptr ? 1 : 0,
+                   s != nullptr && s->device_current ? 1 : 0,
+                   s != nullptr && s->host_current ? 1 : 0,
+                   s != nullptr ? s->dev_rows : 0u,
+                   s != nullptr ? s->dev_cols : 0u,
+                   s != nullptr && s->persistent.has_value() ? 1 : 0,
+                   s != nullptr && s->device.has_value()
+                       ? static_cast<unsigned long long>(
+                             s->device->mesh_buffer().address())
+                       : 0ULL);
+      std::fflush(stderr);
+    }
     std::fflush(stderr);
   }
   CommitDeviceLogical2D(
@@ -3573,10 +3794,60 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
                                 ttnn::DataType::FLOAT32);
     }
     const uint32_t unb = static_cast<uint32_t>(snap_bids.size());
-    ttnn::Tensor bid_dev = UploadIdxU32(std::move(snap_bids), ttnn::Shape({unb}),
-                                        ttnn::Layout::ROW_MAJOR, device);
+    // W21 IDENTITY FAST PATH: the snapshots' block ids are the identity
+    // permutation in the gated configuration (the per-timestep slots are the
+    // request's consecutive [base, base+k] range, expanded by the split
+    // factor) — the scatter is then a pure copy of rows_all, and the fill
+    // (whose multi-replacement miswrite is the W21 finding) is bypassed.
+    bool snap_identity = unb > 0;
+    for (uint32_t i = 0; i < unb && snap_identity; ++i)
+      if (snap_bids[static_cast<size_t>(i)] != i) snap_identity = false;
+    const uint32_t total_block_rows = static_cast<uint32_t>(slots) * sf;
     ttnn::Tensor next =
-        ScatterRowsDevice(cache2d, bid_dev, rows_all, slots, row_elems, sf);
+        snap_identity && unb == total_block_rows
+            ? (rows_all.dtype() == cache2d.dtype() &&
+                       rows_all.layout() == cache2d.layout()
+                   ? rows_all
+                   : ttnn::typecast(std::move(rows_all), cache2d.dtype()))
+            : snap_identity
+                  ? [&] {
+                      // Partial identity (the leading block rows): the rows
+                      // land at cache rows [0, unb) and the tail keeps its
+                      // bytes — one exact concat (the W21 concat-side dumps
+                      // pin it faithful), no fill.
+                      ttnn::Tensor tail = ttnn::slice(
+                          cache2d, ttsl::SmallVector<uint32_t>{unb, 0u},
+                          ttsl::SmallVector<uint32_t>{total_block_rows,
+                                                      static_cast<uint32_t>(row_elems / sf)},
+                          ttsl::SmallVector<uint32_t>{1u, 1u});
+                      return ttnn::concat(
+                          std::vector<ttnn::Tensor>{rows_all, tail}, /*dim=*/0);
+                    }()
+                  : [&] {
+                      ttnn::Tensor bid_dev =
+                          UploadIdxU32(std::move(snap_bids), ttnn::Shape({unb}),
+                                       ttnn::Layout::ROW_MAJOR, device);
+                      return ScatterRowsDevice(cache2d, bid_dev, rows_all, slots,
+                                               row_elems, sf);
+                    }();
+    // W21: the scatter's two sides at the first calls — the snapshot rows as
+    // produced, and the cache shadow AFTER the commit copy.
+    if (spec_dump_dir2 != nullptr && spec_dump_dir2[0] != '\0' &&
+        !tt_capture_active()) {
+      static std::atomic<int64_t> sc_seq{0};
+      const int64_t dc = sc_seq.fetch_add(1, std::memory_order_relaxed);
+      if (dc < 2) {
+        auto rv = next.to_vector<float>();
+        std::FILE* f = std::fopen(
+            (std::string(spec_dump_dir2) + "/gs" + std::to_string(dc) +
+             "_snap_next.f32").c_str(), "wb");
+        if (f) { std::fwrite(rv.data(), 4, rv.size(), f); std::fclose(f); }
+        auto cv = cache2d.to_vector<float>();
+        f = std::fopen((std::string(spec_dump_dir2) + "/gs" +
+                        std::to_string(dc) + "_cache_post.f32").c_str(), "wb");
+        if (f) { std::fwrite(cv.data(), 4, cv.size(), f); std::fclose(f); }
+      }
+    }
     // TT-GDN-REGION-REPLAY: commit INTO the persistent shadow (ttnn::copy —
     // the capture-safe preallocated-destination write) so the next step's
     // gather reads the advanced slots at the SAME address.
@@ -3589,8 +3860,14 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
       return true;
     };
     if (same_spec(next, cache2d)) {
-      ttnn::copy(next, cache2d);
-      CommitDeviceLogical2D(state, std::move(cache2d),
+      // W21: the spec kernel is EAGER-ONLY (the capture refusal above), so the
+      // TT-GDN-REGION-REPLAY in-place copy is not required here — and the W21
+      // evidence shows the copy DOES NOT LAND in the engine (the cache shadow
+      // reads its pre-copy content after ttnn::copy; the snapshots' bytes are
+      // lost). Install the committed tensor as the slot's shadow directly:
+      // CommitDeviceLogical2D replaces s->device, so the next call's
+      // EnsureGdnCacheDevice fast path serves exactly these bytes.
+      CommitDeviceLogical2D(state, std::move(next),
                             static_cast<uint32_t>(slots),
                             static_cast<uint32_t>(row_elems));
     } else {
@@ -3602,5 +3879,84 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
 }
 
 
+
+// W21 (the interleaved-op harness): the engine's EXACT multi-replacement
+// indexed_fill form (the conv-spec x scatter's geometry) as a test surface —
+// the caller passes the base, the values, and the ids; the fill runs with the
+// same rank-4 views / dim-0 / RM discipline the kernel uses, and the flat
+// result comes back for byte comparison. Defined in the TT-gated gdn TU,
+// inline no-op otherwise (tenstorrent_device.h).
+std::vector<float> ConvSpecFillForTest(const std::vector<float>& base,
+                                       const std::vector<float>& vals,
+                                       const std::vector<uint32_t>& ids,
+                                       int64_t base_rows, int64_t cols) {
+  MeshDevice& device = SharedMeshDevice();
+  const uint32_t rows_b = static_cast<uint32_t>(base_rows);
+  const uint32_t uc = static_cast<uint32_t>(cols);
+  const uint32_t nv = static_cast<uint32_t>(vals.size() / cols);
+  ttnn::Tensor tb = ttnn::Tensor::from_vector<float>(
+      base, tt::tt_metal::TensorSpec(
+                tt::tt_metal::Shape({rows_b, uc}),
+                tt::tt_metal::TensorLayout(
+                    ttnn::DataType::FLOAT32,
+                    tt::tt_metal::PageConfig(ttnn::Layout::ROW_MAJOR),
+                    tt::tt_metal::MemoryConfig{})),
+      &device);
+  ttnn::Tensor tv = ttnn::Tensor::from_vector<float>(
+      vals, tt::tt_metal::TensorSpec(
+                tt::tt_metal::Shape({nv, uc}),
+                tt::tt_metal::TensorLayout(
+                    ttnn::DataType::FLOAT32,
+                    tt::tt_metal::PageConfig(ttnn::Layout::ROW_MAJOR),
+                    tt::tt_metal::MemoryConfig{})),
+      &device);
+  ttnn::Tensor ti = ttnn::Tensor::from_vector<uint32_t>(
+      ids, tt::tt_metal::TensorSpec(
+               tt::tt_metal::Shape({nv}),
+               tt::tt_metal::TensorLayout(
+                   ttnn::DataType::UINT32,
+                   tt::tt_metal::PageConfig(ttnn::Layout::ROW_MAJOR),
+                   tt::tt_metal::MemoryConfig{})),
+      &device);
+  ttnn::Tensor filled = ttnn::indexed_fill(
+      ti,
+      ttnn::experimental::view(tb, tt::tt_metal::Shape({rows_b, 1, 1, uc})),
+      ttnn::experimental::view(tv, tt::tt_metal::Shape({nv, 1, 1, uc})),
+      std::nullopt, /*dim=*/0);
+  return filled.to_vector<float>();
+}
+
+// W21: the exact GatherRowsExact form (the ttnn::gather with the [rows, cols]
+// TILE index) as a test surface.
+std::vector<float> GatherRowsForTest(const std::vector<float>& cache,
+                                     const std::vector<uint32_t>& row_ids,
+                                     int64_t cache_rows, int64_t cols) {
+  MeshDevice& device = SharedMeshDevice();
+  const uint32_t rows_c = static_cast<uint32_t>(cache_rows);
+  const uint32_t uc = static_cast<uint32_t>(cols);
+  const uint32_t npick = static_cast<uint32_t>(row_ids.size());
+  ttnn::Tensor tc = ttnn::Tensor::from_vector<float>(
+      cache, tt::tt_metal::TensorSpec(
+                 tt::tt_metal::Shape({rows_c, uc}),
+                 tt::tt_metal::TensorLayout(
+                     ttnn::DataType::FLOAT32,
+                     tt::tt_metal::PageConfig(ttnn::Layout::TILE),
+                     tt::tt_metal::MemoryConfig{})),
+      &device);
+  std::vector<uint32_t> flat(static_cast<size_t>(npick) * cols);
+  for (uint32_t r = 0; r < npick; ++r)
+    for (int64_t c = 0; c < cols; ++c) flat[r * cols + c] = row_ids[r];
+  ttnn::Tensor tidx = ttnn::Tensor::from_vector<uint32_t>(
+      flat, tt::tt_metal::TensorSpec(
+                tt::tt_metal::Shape({npick, uc}),
+                tt::tt_metal::TensorLayout(
+                    ttnn::DataType::UINT32,
+                    tt::tt_metal::PageConfig(ttnn::Layout::TILE),
+                    tt::tt_metal::MemoryConfig{})),
+      &device);
+  ttnn::Tensor out = ttnn::gather(tc, /*dim=*/0, tidx, /*sparse_grad=*/false,
+                                  std::nullopt);
+  return out.to_vector<float>();
+}
 
 }  // namespace vt::tenstorrent
