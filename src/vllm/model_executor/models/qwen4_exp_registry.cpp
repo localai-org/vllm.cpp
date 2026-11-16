@@ -1033,6 +1033,12 @@ ForwardLogits ForwardQwen4ExpForConditionalGeneration(
                  dense_attn::ResidentWeight(d, head, {p.vocab_size, p.hidden_size}));
   }
 
+  // The head's output is the model's answer, and the `LayerFp` tap stops at
+  // `out`, so this is the only observation of the `lm_head` decode. A no-op
+  // unless `VT_Q4EXP_LOGITS` is set, and it reads through the same Copy +
+  // Synchronize pair the layer tap uses, so both arms are read the same way.
+  detail::Qwen4ExpLogitsTap(d, logits.t());
+
   ForwardLogits r;
   r.rows = R;
   r.vocab = p.vocab_size;
