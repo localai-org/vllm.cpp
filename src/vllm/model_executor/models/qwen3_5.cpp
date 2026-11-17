@@ -12557,7 +12557,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         const uint32_t half = ab[static_cast<size_t>(t * aux_h)];
         const uint32_t fbits = half << 16;
         float first_f;
-        __builtin_memcpy(&first_f, &fbits, sizeof first_f);
+        std::memcpy(&first_f, &fbits, sizeof first_f);
         std::fprintf(stderr,
                      "[GDN-TAP] kind=%s step=%lld TAP tap=%lld rows=%lld h=%lld "
                      "fnv=%016llx first=%a\n",
