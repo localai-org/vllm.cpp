@@ -3987,6 +3987,46 @@ TEST_CASE("qwen4_exp: VT_Q4EXP_LAYER_FP taps every layer of ModelRegistry::Forwa
   }
   CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 2);
 
+  // ─── THE INSTRUMENT MUST BE AN OBSERVER. `Qwen4ExpLogitsTap` copies the whole
+  // logits buffer to the host and synchronises the queue MID-FORWARD, which is
+  // exactly the shape of instrument that can perturb the thing it measures: a
+  // copy through the wrong queue, a missing sync, or a write-back bug would move
+  // the numbers the gate then compares. A gate whose instrument changes its own
+  // measurement is worth nothing, so the same fixed-seed forward must produce
+  // BIT-IDENTICAL logits armed and unarmed.
+  ::unsetenv("VT_Q4EXP_LOGITS");
+  ::unsetenv("VT_Q4EXP_LOGITS_STEPS");
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  vllm::ForwardLogits unarmed;
+  REQUIRE_NOTHROW(unarmed = vllm::ModelRegistry::Forward(*model, in));
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 0);
+
+  ::setenv("VT_Q4EXP_LOGITS", "4", 1);
+  ::setenv("VT_Q4EXP_LOGITS_STEPS", "1", 1);
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  vllm::ForwardLogits armed;
+  REQUIRE_NOTHROW(armed = vllm::ModelRegistry::Forward(*model, in));
+  // The tap actually ran, so the comparison below is not vacuous: an unarmed
+  // "armed" arm would pass this check trivially and prove nothing.
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 1);
+
+  {
+    REQUIRE(unarmed.device_tensor.dtype == armed.device_tensor.dtype);
+    REQUIRE(unarmed.device_tensor.rank == armed.device_tensor.rank);
+    size_t elems = 1;
+    for (int r = 0; r < unarmed.device_tensor.rank; ++r) {
+      REQUIRE(unarmed.device_tensor.shape[r] == armed.device_tensor.shape[r]);
+      elems *= static_cast<size_t>(unarmed.device_tensor.shape[r]);
+    }
+    REQUIRE(elems > 0);
+    const auto* a = static_cast<const unsigned char*>(unarmed.device_tensor.data);
+    const auto* b = static_cast<const unsigned char*>(armed.device_tensor.data);
+    const size_t bytes = elems * vt::SizeOf(unarmed.device_tensor.dtype);
+    // Byte equality, not an epsilon: the two arms are the SAME binary running the
+    // SAME kernels on the SAME inputs, so the only permitted difference is none.
+    CHECK(std::memcmp(a, b, bytes) == 0);
+  }
+
   ::unsetenv("VT_Q4EXP_LOGITS");
   ::unsetenv("VT_Q4EXP_LOGITS_STEPS");
   vllm::detail::Qwen4ExpLogitsTapResetForTest();
