@@ -26,6 +26,9 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <fstream>
+#include <map>
+#include <nlohmann/json.hpp>
 
 #include "vt/backend.h"
 #include "vt/ops.h"
@@ -93,6 +96,46 @@ Slot& At(OpId op, DeviceType device) {
   VT_CHECK(o < kOpCount, "invalid op id");
   VT_CHECK(d < kNumDeviceTypes, "invalid device type");
   return Table()[o * kNumDeviceTypes + d];
+}
+
+// JSONL records count provider LOOKUPS, not registrations or completed kernels.
+// The environment is sampled once, before the first lookup. No file is opened
+// on the default path. Names are JSON-escaped (provider names are extensible).
+bool TraceEnabled() {
+  static const bool enabled = [] {
+    const char* path = std::getenv("VT_OP_PROVIDER_TRACE");
+    return path != nullptr && *path != '\0';
+  }();
+  return enabled;
+}
+
+struct Trace {
+    std::mutex mutex;
+    std::ofstream file{std::getenv("VT_OP_PROVIDER_TRACE"), std::ios::app};
+    unsigned long long sequence = 0;
+    unsigned long long reference_hits = 0;
+    std::map<std::string, unsigned long long> counts;
+};
+Trace& TraceState() {
+  static Trace trace;
+  return trace;
+}
+void TraceSelection(OpId op, DeviceType device, const char* provider, const char* event) {
+  if (!TraceEnabled()) return;
+  auto& trace = TraceState();
+  std::lock_guard<std::mutex> lock(trace.mutex);
+  VT_CHECK(trace.file.is_open(), "cannot open VT_OP_PROVIDER_TRACE");
+  const bool reference = std::strcmp(provider, kReferenceProviderName) == 0;
+  if (reference) ++trace.reference_hits;
+  const std::string key = std::string(OpName(op)) + "/" + DeviceTypeName(device) + "/" + provider;
+  const nlohmann::json row = {
+      {"event", event}, {"op", OpName(op)}, {"device", DeviceTypeName(device)},
+      {"provider", provider}, {"cpu_reference", reference},
+      {"sequence", ++trace.sequence}, {"provider_selections", ++trace.counts[key]},
+      {"reference_tier_hits", trace.reference_hits}, {"count_kind", "selection"}};
+  trace.file << row.dump() << '\n';
+  trace.file.flush();
+  VT_CHECK(trace.file.good(), "cannot write VT_OP_PROVIDER_TRACE");
 }
 
 // --- device capability records ---------------------------------------------
@@ -302,6 +345,16 @@ const char* OpNameImpl(OpId op) {
   switch (op) {
     case OpId::kMatmul:
       return "Matmul";
+    case OpId::kMatmulGptq4W4A16:
+      return "MatmulGptq4W4A16";
+    case OpId::kMatmulDenseF16:
+      return "MatmulDenseF16";
+    case OpId::kVisionPosEmbedInterpolate:
+      return "VisionPosEmbedInterpolate";
+    case OpId::kVisionRopeGrid:
+      return "VisionRopeGrid";
+    case OpId::kVisionRopeApply:
+      return "VisionRopeApply";
     case OpId::kRmsNorm:
       return "RmsNorm";
     case OpId::kResidualRmsNorm:
@@ -332,6 +385,8 @@ const char* OpNameImpl(OpId op) {
       return "RmsNormGated";
     case OpId::kGdnPrefill:
       return "GdnPrefill";
+    case OpId::kGdnPrefillRawGate:
+      return "GdnPrefillRawGate";
     case OpId::kGdnDecode:
       return "GdnDecode";
     case OpId::kGdnSpecDecode:
@@ -390,6 +445,8 @@ const char* OpNameImpl(OpId op) {
       return "ApplyTemperature";
     case OpId::kGreedyArgmax:
       return "GreedyArgmax";
+    case OpId::kMappedGreedyArgmax:
+      return "MappedGreedyArgmax";
     case OpId::kApplyTopKTopP:
       return "ApplyTopKTopP";
     case OpId::kComputeProbs:
@@ -619,6 +676,10 @@ const char* OpNameImpl(OpId op) {
       return "Exl3HadR128";
     case OpId::kExl3Gemm:
       return "Exl3Gemm";
+    case OpId::kExl3GroupedLinear:
+      return "Exl3GroupedLinear";
+    case OpId::kExl3GroupedW8A8:
+      return "Exl3GroupedW8A8";
     case OpId::kExl3ReconstructGemm:
       return "Exl3ReconstructGemm";
     case OpId::kExl3MoeMlp:
@@ -627,6 +688,8 @@ const char* OpNameImpl(OpId op) {
       return "KeepQuantDecode";
     case OpId::kCount:
       break;
+    case OpId::kCopy:
+      return "Copy";
   }
   return "unknown";
 }
@@ -661,7 +724,6 @@ void* Resolve(OpId op, DeviceType device, Slot& slot) {
   // (op, device) so "this backend ran op X on the portable tier" is never silent.
   if (std::strcmp(chosen->name, kReferenceProviderName) == 0) {
     slot.ref_selected.store(true, std::memory_order_relaxed);
-    RefTierHits().fetch_add(1, std::memory_order_relaxed);
     if (!slot.ref_announced.exchange(true, std::memory_order_relaxed)) {
       // NOT "correct but slow". Those three words asserted a property instead of
       // naming it, and #844 / docs/USAGE.md both quote them as what misled a
@@ -756,6 +818,25 @@ uint64_t OpDispatchCount() {
   return DispatchCounter().load(std::memory_order_relaxed);
 }
 
+void TraceOpTensors(OpId op, const Queue& q, std::initializer_list<const Tensor*> tensors) {
+  if (!TraceEnabled()) return;
+  nlohmann::json args = nlohmann::json::array();
+  for (const auto* t : tensors) {
+    if (!t) { args.push_back(nullptr); continue; }
+    args.push_back({{"dtype", Name(t->dtype)}, {"shape", std::vector<int64_t>(t->shape, t->shape + t->rank)},
+                    {"stride", std::vector<int64_t>(t->stride, t->stride + t->rank)}});
+  }
+  const nlohmann::json row = {{"event", "tensor_arguments"}, {"op", OpName(op)},
+      {"device", DeviceTypeName(q.device.type)}, {"device_index", q.device.index},
+      {"queue_id", q.id}, {"tensors", args}};
+  auto& trace = TraceState();
+  std::lock_guard<std::mutex> lock(trace.mutex);
+  VT_CHECK(trace.file.is_open(), "cannot open VT_OP_PROVIDER_TRACE");
+  trace.file << row.dump() << '\n';
+  trace.file.flush();
+  VT_CHECK(trace.file.good(), "cannot write VT_OP_PROVIDER_TRACE");
+}
+
 void* GetOp(OpId op, DeviceType device) {
   Slot& slot = At(op, device);
   void* fn = slot.selected.load(std::memory_order_relaxed);
@@ -766,16 +847,18 @@ void* GetOp(OpId op, DeviceType device) {
   // runs, or the CPU reads bytes the GPU has not written yet. No-op on every
   // eagerly-submitting backend, and skipped entirely on the common path.
   if (slot.ref_selected.load(std::memory_order_relaxed)) {
+    RefTierHits().fetch_add(1, std::memory_order_relaxed);
     Backend* b = TryGetBackend(device);
     if (b != nullptr) b->FlushPending();
   }
-  if (CallStatsFlag().load(std::memory_order_relaxed)) {
+  if (CallStatsFlag().load(std::memory_order_relaxed) || TraceEnabled()) {
     slot.selections.fetch_add(1, std::memory_order_relaxed);
   }
   // QWEN38-DFLASH2-STAGE-A (VT_TT_STEP_PHASES): one resolved dispatch = one host
   // touch on the eager arm. Counted AFTER Resolve, so a miss counted once is a
   // dispatch that actually returned a kernel.
   if (DispatchCountEnabled()) DispatchCounter().fetch_add(1, std::memory_order_relaxed);
+  TraceSelection(op, device, slot.last_selected.load(std::memory_order_relaxed), "selection");
   return fn;
 }
 
@@ -824,9 +907,11 @@ void* ResolveFallback(OpId op, DeviceType device, const char* declining_provider
   // buffers) hands the host kernel bytes the device has not written yet, and it
   // does so SILENTLY.
   if (std::strcmp(next->name, kReferenceProviderName) == 0) {
+    if (count) RefTierHits().fetch_add(1, std::memory_order_relaxed);
     Backend* b = TryGetBackend(device);
     if (b != nullptr) b->FlushPending();
   }
+  if (count) TraceSelection(op, device, next->name, "fallback_selection");
   return next->fn;
 }
 

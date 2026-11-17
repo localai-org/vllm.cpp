@@ -44,6 +44,7 @@
 #include "vllm/transformers_utils/hf_config.h"
 #include "vllm/v1/attention/backend.h"  // CommonAttentionMetadata
 #include "vt/backend.h"
+#include "vt/exl3_grouped.h"
 #include "vt/ops.h"
 #include "vt/recipes.h"
 
@@ -169,10 +170,17 @@ inline bool MergedQkvEnabled() { return Qwen3QkvMergeEnabled(); }
 // `vllm::dense_attn`, so every consumer resolves them exactly as before.
 
 inline std::vector<float> WeightF32(const OwnedTensor& w) {
-  const auto* src = reinterpret_cast<const uint16_t*>(w.bytes.data());
+  VT_CHECK(w.dtype == DType::kBF16 || w.dtype == DType::kF16,
+           "dense attention norm upcast requires BF16 or FP16 storage");
+  const auto* src = w.bytes.data();
   const int64_t n = w.Numel();
   std::vector<float> out(static_cast<size_t>(n));
-  for (int64_t i = 0; i < n; ++i) out[static_cast<size_t>(i)] = vt::BF16ToF32(src[i]);
+  for (int64_t i = 0; i < n; ++i) {
+    uint16_t bits;
+    std::memcpy(&bits, src + i * 2, sizeof(bits));
+    out[static_cast<size_t>(i)] = w.dtype == DType::kF16
+        ? vt::F16ToF32(bits) : vt::BF16ToF32(bits);
+  }
   return out;
 }
 
@@ -329,7 +337,55 @@ inline Tensor ResidentWeight(Dev d, const OwnedTensor& w, std::vector<int64_t> s
 // The OUTPUT dtype is never inherited from the kernel: `Exl3Gemm` writes f16 or
 // f32, so an f16 or f32 request is written straight and a bf16 request is
 // written f32 and cast ONCE. That is the polarity AGENTS.md §"Inherit vLLM
-// defaults" requires, and the one a token gate cannot check for you.
+// defaults" requires, and the one a token gate cannot check for you. Native XPU
+// folds these casts into the Hadamard kernels while retaining both FP16 input
+// rounding steps and the single final BF16 store. Different suh projections
+// still receive their own transformed activation.
+// Model-owned packed group. Materialize/upload once, retaining neither an
+// additional whole-model host copy nor separate source GPU residents. The
+// first-upload wait protects staging lifetime; steady-state calls reuse all
+// four resident tensors (the VT metadata check still has its own wait).
+inline DBuf Exl3GroupedMatmulD(Dev d, const vt::Tensor& x,
+                               const Exl3GroupedWeight& w) {
+  const int64_t M = x.shape[0], K = w.suh.shape[1], N = w.svh.shape[0];
+  VT_CHECK(d.q.device.type == vt::DeviceType::kXPU &&
+               d.activation_dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16 &&
+               x.rank == 2 && x.shape[1] == K && w.codebook == 2,
+           "exl3 grouped model: requires scoped XPU FP16 and matching K/mul1");
+  const int bits = static_cast<int>(w.trellis.shape[2] / 32);
+  // Validate arithmetic/extent before uploading weights. Large prefills use
+  // the independent signed INT8 producer route, without dense reconstruction.
+  const int panel_columns = M > 128 ? vt::Exl3W8A8ModelPanelColumns() : 128;
+  if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, w.suh.shape[0], bits, panel_columns);
+  else (void)vt::PlanExl3SmallM(M, K, N, bits);
+  const bool upload = !w.trellis.d_dev || !w.suh.d_dev || !w.svh.d_dev || !w.source_map.d_dev;
+  auto trellis = ResidentWeight(d, w.trellis);
+  auto suh = ResidentWeight(d, w.suh);
+  auto svh = ResidentWeight(d, w.svh);
+  auto map = ResidentWeight(d, w.source_map);
+  if (upload) {
+    d.b.Synchronize(d.q);
+    w.trellis.ReleaseHost();
+    w.suh.ReleaseHost();
+    w.svh.ReleaseHost();
+    w.source_map.ReleaseHost();
+  }
+  DBuf out(d, vt::DType::kF16, {M, N});
+  if (M > 128) {
+    vt::detail::Exl3GroupedW8A8Model(d.q, out.t(), x, trellis, suh, svh, map,
+        {bits, w.codebook, w.name.c_str(), panel_columns}, w.source_map.d_dev, w.w8a8_model_map);
+    // One backend-owned completion lease replaces per-projection DBuf scratch.
+    return out;
+  }
+  const auto plan = vt::PlanExl3SmallM(M, K, N, bits);
+  DBuf had(d, vt::DType::kF16, {w.suh.shape[0], K / 16, plan.padded_rows, 16});
+  DBuf parts(d, vt::DType::kF32, {plan.splits, M, N});
+  vt::detail::Exl3GroupedLinearModel(d.q, out.t(), x, trellis, suh, svh, map,
+      had.t(), parts.t(), {bits, w.codebook, w.name.c_str()},
+      w.source_map.d_dev, w.w8a8_model_map);
+  return out;
+}
+
 inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
                         vt::DType out_dtype) {
   const int64_t M = x.shape[0];
@@ -343,9 +399,51 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
                out_dtype == vt::DType::kF16,
            "exl3 linear: out_dtype must be f32, bf16 or f16");
 
+  // Scoped XPU FP16 model projections use the pinned producer's arithmetic.
+  // A single checkpoint projection is one source group. Grouped QKV/QKVZ/
+  // gate-up storage will use the same VT seam; legacy callers remain below.
+  if (d.q.device.type == vt::DeviceType::kXPU &&
+      d.activation_dtype == vt::DType::kF16 && x.dtype == vt::DType::kF16 &&
+      out_dtype == vt::DType::kF16 && w.codebook == 2 &&
+      (w.Bits() == 4 || w.Bits() == 6)) {
+    const int panel_columns = M > 128 ? vt::Exl3W8A8ModelPanelColumns() : 128;
+    if (M > 128) (void)vt::PlanExl3W8A8(M, K, N, 1, w.Bits(), panel_columns);
+    else (void)vt::PlanExl3SmallM(M, K, N, w.Bits());
+    auto trellis = ResidentWeight(d, w.trellis);
+    auto suh = Reshape(ResidentWeight(d, w.suh), {1, K});
+    auto svh = ResidentWeight(d, w.svh);
+    if (w.single_source_map.rank == 0) {
+      w.single_source_map.dtype = vt::DType::kI32;
+      w.single_source_map.rank = 1;
+      w.single_source_map.shape[0] = N / 128;
+    }
+    Tensor shard = ResidentWeight(d, w.single_source_map, {}, [&](Tensor& t) {
+      d.b.Memset(d.q, t.data, 0, t.Bytes());
+    });
+    DBuf out(d, vt::DType::kF16, {M, N});
+    if (M > 128) {
+      vt::detail::Exl3GroupedW8A8Model(d.q, out.t(), x, trellis, suh, svh, shard,
+          {w.Bits(), w.codebook, w.name.c_str(), panel_columns},
+          w.single_source_map.d_dev, w.w8a8_model_map);
+      return out;
+    }
+    const auto plan = vt::PlanExl3SmallM(M, K, N, w.Bits());
+    DBuf had(d, vt::DType::kF16, {1, K / 16, plan.padded_rows, 16});
+    DBuf parts(d, vt::DType::kF32, {plan.splits, M, N});
+    vt::detail::Exl3GroupedLinearModel(d.q, out.t(), x, trellis, suh, svh, shard,
+        had.t(), parts.t(), {w.Bits(), w.codebook, w.name.c_str()},
+        w.single_source_map.d_dev, w.w8a8_model_map);
+    return out;
+  }
+
+  static const bool xpu_cast_fusion = [] {
+    const char* setting = std::getenv("VT_XPU_EXL3_CAST_FUSION");
+    return setting == nullptr || std::string(setting) != "0";
+  }();
+  const bool fuse_casts = d.q.device.type == vt::DeviceType::kXPU && xpu_cast_fusion;
   DBuf a_owned;
   vt::Tensor a = x;
-  if (x.dtype != vt::DType::kF16) {
+  if (x.dtype != vt::DType::kF16 && !fuse_casts) {
     a_owned = DBuf(d, vt::DType::kF16, {M, K});
     vt::CastF16(d.q, a_owned.t(), x);
     a = a_owned.t();
@@ -387,6 +485,8 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
   vt::Exl3GemmArgs args;
   args.bits = w.Bits();
   args.codebook = w.codebook;
+  args.fuse_casts = fuse_casts;
+  args.debug_name = w.name.c_str();
 
   auto run_gemm = [&](vt::Tensor& out) {
     if (use_reconstruct) {
@@ -396,8 +496,8 @@ inline DBuf Exl3MatmulD(Dev d, const vt::Tensor& x, const Exl3Weight& w,
     }
   };
 
-  if (out_dtype == vt::DType::kF16) {
-    DBuf c(d, vt::DType::kF16, {M, N});
+  if (out_dtype == vt::DType::kF16 || fuse_casts) {
+    DBuf c(d, out_dtype, {M, N});
     run_gemm(c.t());
     return c;
   }

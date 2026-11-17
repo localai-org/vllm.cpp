@@ -850,6 +850,58 @@ TEST_CASE("mm forward: two image requests on one server both answer, and share n
   }
 }
 
+TEST_CASE("mm streaming: expanded image request uses live SSE and matches ordinary output") {
+  const HfConfig c = MakeConfig();
+  const auto w = MakeVlWeights(c);
+  auto model = vllm::BorrowQwen3VLLoadedModel(w);
+  vt::Queue q = Q();
+  vllm::ModelRegistry::Prepare(*model,c,q);
+  const TempModelDir model_dir;
+  MmServerHarness h(c,*model,Fixture());
+  std::ostringstream log;
+  REQUIRE(h.install_multimodal_seam(kQwen3VLArch,true,model_dir,log) ==
+          oai::MultiModalChatInstall::kInstalled);
+  const auto ordinary = h.server.handle_chat_completions(ChatBodyWithImage(3));
+  REQUIRE(ordinary.status == 200);
+  json body = json::parse(ChatBodyWithImage(3));
+  body["stream"] = true;
+  body["stream_options"] = {{"include_usage",true}};
+  const auto streamed = h.server.handle_chat_completions(body.dump());
+  INFO(streamed.body);
+  REQUIRE(streamed.status == 200);
+  REQUIRE(streamed.sse_stream);
+  std::string chunk,text;
+  json usage;
+  int roles=0,finishes=0,done=0;
+  while (streamed.sse_stream->next(chunk)) {
+    if (chunk == "data: [DONE]\n\n") { ++done; continue; }
+    if (!chunk.starts_with("data: ")) continue;
+    const auto value=json::parse(chunk.substr(6));
+    if (value.contains("usage") && !value["usage"].is_null()) usage=value["usage"];
+    for (const auto& choice : value.at("choices")) {
+      const auto& delta=choice.at("delta");
+      if (delta.contains("role") && !delta["role"].is_null()) {
+        CHECK(delta["role"] == "assistant"); ++roles;
+      }
+      if (delta.contains("content") && !delta["content"].is_null())
+        text+=delta["content"].get<std::string>();
+      if (!choice.at("finish_reason").is_null()) {
+        CHECK(choice["finish_reason"] == "length"); ++finishes;
+      }
+    }
+  }
+  CHECK(roles == 1);
+  CHECK(finishes == 1);
+  CHECK(done == 1);
+  CHECK(text == CompletionText(ordinary));
+  CHECK(usage == json::parse(ordinary.body).at("usage"));
+  CHECK(usage.at("prompt_tokens") == 3+kExpectedImageTokens);
+  CHECK(usage.at("completion_tokens") == 3);
+  const auto after=h.server.handle_chat_completions(ChatBodyWithImage(1,1));
+  REQUIRE(after.status == 200);
+  CHECK(json::parse(after.body).at("usage").at("completion_tokens") == 1);
+}
+
 // ---------------------------------------------------------------------------
 // 4. THE TOWER'S OUTPUT REACHES THE FORWARD — two DIFFERENT images, one prompt,
 //    two different answers.
@@ -1089,4 +1141,389 @@ TEST_CASE("mm chat registry: a registered factory that returns an EMPTY seam ref
   // also serves text is a 200 with no error at all.
   CHECK(r.body.find("requires multimodal inputs (ModelForwardInput.mm)") ==
         std::string::npos);
+}
+
+TEST_CASE("native image request options: production seam forwards tools and template kwargs") {
+  const HfConfig c = MakeConfig();
+  const auto w = MakeVlWeights(c);
+  auto model = vllm::BorrowQwen3VLLoadedModel(w);
+  auto q = Q();
+  vllm::ModelRegistry::Prepare(*model, c, q);
+  const TempModelDir model_dir;
+  std::vector<json> observed;
+  MmServerHarness h(c, *model, Fixture());
+  oai::MultiModalChatContext ctx;
+  ctx.architecture = kQwen3VLArch;
+  ctx.model_dir = model_dir.dir();
+  ctx.config_path = model_dir.config_path();
+  ctx.served_model_name = "tiny-qwen3-vl";
+  ctx.tokenizer = &Fixture();
+  ctx.mm_config = &h.mm_cfg;
+  ctx.codec = RawRgbCodec();
+  ctx.prompt_fn = [&](const std::vector<ChatMessage>& messages, bool generation,
+                      const std::vector<oai::ChatCompletionToolsParam>& tools,
+                      const nlohmann::ordered_json& kwargs) {
+    observed.push_back(json{{"kwargs", kwargs}, {"tools", tools.size()}, {"generation", generation}});
+    auto prompt = ConcatChatPrompt(messages, generation, tools, kwargs);
+    if (kwargs.value("enable_thinking", true)) prompt += "hello";
+    return prompt;
+  };
+  std::ostringstream log;
+  REQUIRE(oai::InstallMultiModalChatSeam(h.chat, true, ctx, log) == oai::MultiModalChatInstall::kInstalled);
+  for (bool thinking : {false, true}) {
+    auto body = json::parse(ChatBodyWithImage(1));
+    body["chat_template_kwargs"] = {{"enable_thinking", thinking}, {"vision_test_tag", "per-request"}};
+    body["tools"] = json::array({{{"type", "function"}, {"function", {{"name", "describe"}, {"parameters", {{"type", "object"}}}}}}});
+    body["tool_choice"] = thinking ? "none" : "auto";
+    observed.clear();
+    const auto response = h.server.handle_chat_completions(body.dump());
+    INFO(response.body);
+    REQUIRE(response.status == 200);
+    REQUIRE(observed.size() == 1);
+    CHECK(observed[0]["kwargs"] == body["chat_template_kwargs"]);
+    CHECK(observed[0]["tools"] == (thinking ? 0 : 1));
+    CHECK(observed[0]["generation"] == true);
+    const auto usage = json::parse(response.body).at("usage");
+    // The actual scheduled prompt reflects the request option, so observing
+    // a callback alone cannot make this check green while kwargs are dropped.
+    CHECK(usage.at("prompt_tokens") == (thinking ? 8 : 7));
+    CHECK(usage.at("completion_tokens") == 1);
+  }
+}
+
+// This CPU/BF16 fixture cannot execute the native EXL3 XPU tower. It proves
+// unsupported setup is rejected on public HTTP before entering that tower.
+TEST_CASE("qwen35 vision public path: unsupported CPU setup refuses before execution") {
+  const HfConfig c = MakeConfig();
+  const auto w = MakeVlWeights(c);
+  auto model = vllm::BorrowQwen3VLLoadedModel(w);
+  vt::Queue q = Q();
+  vllm::ModelRegistry::Prepare(*model, c, q);
+  const TempModelDir model_dir;
+  MmServerHarness h(c, *model, Fixture());
+  oai::MultiModalChatContext ctx;
+  ctx.architecture = "Qwen3_5ForConditionalGeneration";
+  ctx.model_dir = model_dir.dir();
+  ctx.config_path = model_dir.config_path();
+  ctx.served_model_name = "tiny-qwen35-chat";
+  ctx.tokenizer = &Fixture();
+  ctx.prompt_fn = &ConcatChatPrompt;
+  ctx.codec = oai::DefaultImageCodec();
+  ctx.mm_config = &h.mm_cfg;
+  ctx.config = &c;
+  ctx.device = q.device;
+  std::ostringstream log;
+  REQUIRE(oai::InstallMultiModalChatSeam(h.chat, true, ctx, log) ==
+          oai::MultiModalChatInstall::kRefusing);
+  const auto r = h.server.handle_chat_completions(ChatBodyWithImage(3));
+  INFO(r.body);
+  REQUIRE(r.status == 400);
+  CHECK(r.body.find("EXL3 XPU model") != std::string::npos);
+  // The existing tiny Qwen3-VL fixture has no text-only forward. Reinstall its
+  // actual processor and schedule an image to prove the refusal left it alive.
+  ctx.architecture = kQwen3VLArch;
+  ctx.codec = RawRgbCodec();
+  REQUIRE(oai::InstallMultiModalChatSeam(h.chat,true,ctx,log) ==
+          oai::MultiModalChatInstall::kInstalled);
+  const auto after = h.server.handle_chat_completions(ChatBodyWithImage(1));
+  INFO(after.body);
+  REQUIRE(after.status == 200);
+  CHECK(json::parse(after.body).at("usage").at("completion_tokens") == 1);
+}
+
+// Uses the actual registration/processor/PNG codec, but only CPU preprocessing.
+// An XPU device descriptor is supplied to qualify installation, not GPU execution.
+// Actual Qwen3.5 HTTP image generation is a separate same-checkpoint GPU gate.
+TEST_CASE("qwen35 vision chat seam: real PNG becomes direct FP16 patches with request options") {
+  HfConfig config = MakeConfig();
+  config.architectures = {"Qwen3_5ForConditionalGeneration"};
+  config.raw["quantization_config"] = {{"quant_method","exl3"}};
+  const TempModelDir model_dir;
+  vllm::MultiModalConfig mm_config;
+  oai::MultiModalChatContext ctx;
+  ctx.architecture = config.architectures[0];
+  ctx.model_dir = model_dir.dir();
+  ctx.config_path = model_dir.config_path();
+  ctx.served_model_name = "tiny-qwen35-chat";
+  ctx.tokenizer = &Fixture();
+  ctx.codec = oai::DefaultImageCodec();
+  ctx.mm_config = &mm_config;
+  ctx.config = &config;
+  ctx.device = vt::Device{vt::DeviceType::kXPU,0};
+  std::vector<json> observed;
+  ctx.prompt_fn = [&](const std::vector<ChatMessage>& messages, bool generation,
+                      const std::vector<oai::ChatCompletionToolsParam>& tools,
+                      const nlohmann::ordered_json& kwargs) {
+    observed.push_back(json{{"kwargs",kwargs},{"tools",tools.size()},{"generation",generation}});
+    return ConcatChatPrompt(messages,generation,tools,kwargs);
+  };
+  REQUIRE(oai::MultiModalChatRegistry::Find(ctx.architecture) != nullptr);
+  CHECK(oai::MultiModalChatRegistry::Find("Qwen3_5ForCausalLM") == nullptr);
+  auto seam = oai::MultiModalChatRegistry::MakeSeam(ctx);
+  REQUIRE(seam.request_chat_fn);
+  CHECK(seam.allowed_limits.at("image") == 2);
+  CHECK(seam.detail.find("max_pixels=4194304") != std::string::npos);
+  json body = json::parse(ChatBodyWithImage(3));
+  body["messages"][0]["content"][0]["image_url"]["url"] =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeUlEQVR4nO3PQQkAMAzAwIqof2UTMxF7HINABFzm7H7dcEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFj12qxUDxeFqrFAAAAABJRU5ErkJggg==";
+  body["tools"] = json::array({{{"type","function"},{"function",{{"name","describe"},{"parameters",{{"type","object"}}}}}}});
+  const auto request = body.get<oai::ChatCompletionRequest>();
+  const nlohmann::ordered_json kwargs = {{"enable_thinking",false},{"tag","image-options"}};
+  REQUIRE(request.tools);
+  auto input = seam.request_chat_fn(request.messages,*request.tools,kwargs);
+  REQUIRE(input);
+  REQUIRE(input->mm_features.size() == 1);
+  const auto& feature = input->mm_features[0];
+  REQUIRE(feature.data);
+  CHECK(feature.length == kExpectedImageTokens);
+  CHECK(input->prompt_token_ids.size() == 3 + kExpectedImageTokens);
+  CHECK(feature.data->pixel_dtype == vllm::multimodal::ImagePixelDType::kF16);
+  CHECK(feature.data->pixel_values_f16.size() == 16 * 1536);
+  CHECK(feature.data->pixel_values_bf16.empty());
+  CHECK(feature.data->pixel_values_f32.empty());
+  REQUIRE(observed.size() == 1);
+  CHECK(observed[0]["kwargs"] == kwargs);
+  CHECK(observed[0]["tools"] == 1);
+  CHECK(observed[0]["generation"] == true);
+  auto two = request.messages;
+  two.push_back(request.messages[0]);
+  auto three = two;
+  three.push_back(request.messages[0]);
+  CHECK_THROWS_AS(seam.request_chat_fn(three,{},kwargs),vllm::v1::InputValidationError);
+  CHECK(observed.size() == 1); // limit refusal precedes decode/render
+  mm_config.language_model_only = true;
+  CHECK_THROWS_AS(seam.request_chat_fn(request.messages,{},kwargs),vllm::v1::InputValidationError);
+  CHECK(observed.size() == 1);
+  ctx.device = vt::Device{vt::DeviceType::kCPU,0};
+  CHECK_THROWS_WITH(oai::MultiModalChatRegistry::MakeSeam(ctx),
+      "Qwen3.5 native vision chat requires a resolved EXL3 XPU model");
+}
+
+TEST_CASE("qwen35 two-image chat: ordered owners across messages and interleaved text") {
+  HfConfig config = MakeConfig();
+  config.raw["quantization_config"] = {{"quant_method", "exl3"}};
+  const TempModelDir model_dir;
+  vllm::MultiModalConfig mm;
+  oai::MultiModalChatContext ctx;
+  ctx.architecture = "Qwen3_5ForConditionalGeneration";
+  ctx.model_dir = model_dir.dir(); ctx.config_path = model_dir.config_path();
+  ctx.served_model_name = "two-image-test"; ctx.tokenizer = &Fixture();
+  ctx.mm_config = &mm; ctx.config = &config;
+  ctx.device = vt::Device{vt::DeviceType::kXPU, 0};
+  int decoded = 0, rendered = 0;
+  ctx.codec = [&](const oai::DecodedMedia& media) {
+    ++decoded;
+    return RawRgbCodec()(media);
+  };
+  ctx.prompt_fn = [&](const auto& messages, bool generation, const auto& tools,
+                      const auto& kwargs) {
+    ++rendered;
+    return ConcatChatPrompt(messages, generation, tools, kwargs);
+  };
+  auto seam = oai::MultiModalChatRegistry::MakeSeam(ctx);
+  REQUIRE(seam.allowed_limits.at("image") == 2);
+  CHECK(seam.allowed_limits.at("video") == 0);
+  const std::string a = ImageDataUri(0);
+  const std::vector<uint8_t> larger(96 * 96 * 3, 73);
+  const std::string b = "data:image/x-raw-rgb;base64," + EncodeBase64(larger);
+  const auto image = [](const std::string& uri) {
+    return json{{"type", "image_url"}, {"image_url", {{"url", uri}}}};
+  };
+  const auto text = [](const std::string& value) {
+    return json{{"type", "text"}, {"text", value}};
+  };
+  const auto process = [&](const json& messages) {
+    const auto request = json{{"model", "test-model"}, {"messages", messages}}
+                             .get<oai::ChatCompletionRequest>();
+    auto input = seam.request_chat_fn(request.messages, {}, nlohmann::ordered_json::object());
+    REQUIRE(input);
+    return *input;
+  };
+  const auto single_a = process(json::array({{{"role", "user"},
+      {"content", json::array({image(a), text("hello")})}}}));
+  const auto single_b = process(json::array({{{"role", "user"},
+      {"content", json::array({image(b), text("world")})}}}));
+  const auto ab_messages = json::array({
+      {{"role", "user"}, {"content", json::array({image(a), text("hello")})}},
+      {{"role", "assistant"}, {"content", ""}},
+      {{"role", "user"}, {"content", json::array({image(b), text("world")})}}});
+  const auto check_owner = [&](const auto& actual, const auto& expected) {
+    REQUIRE(actual.data);
+    REQUIRE(expected.data);
+    CHECK(actual.mm_hash == expected.mm_hash);
+    CHECK(actual.data->image_grid_thw == expected.data->image_grid_thw);
+    CHECK(actual.data->pixel_dtype == vllm::multimodal::ImagePixelDType::kF16);
+    CHECK(actual.data->pixel_values_f16 == expected.data->pixel_values_f16);
+    CHECK(actual.data->pixel_values_f32.empty());
+    CHECK(actual.data->pixel_values_bf16.empty());
+  };
+  const auto ab = process(ab_messages);
+  REQUIRE(ab.mm_features.size() == 2);
+  check_owner(ab.mm_features[0], single_a.mm_features[0]);
+  check_owner(ab.mm_features[1], single_b.mm_features[0]);
+  CHECK(ab.mm_features[0].offset == 1);
+  CHECK(ab.mm_features[0].length == 4);
+  CHECK(ab.mm_features[1].offset == 8);
+  CHECK(ab.mm_features[1].length == 9);
+  auto joined = single_a.prompt_token_ids;
+  joined.insert(joined.end(), single_b.prompt_token_ids.begin(), single_b.prompt_token_ids.end());
+  CHECK(ab.prompt_token_ids == joined);
+  const auto together = process(json::array({{{"role", "user"},
+      {"content", json::array({image(a), text("hello"), image(b), text("world")})}}}));
+  REQUIRE(together.mm_features.size() == 2);
+  CHECK(together.prompt_token_ids == ab.prompt_token_ids);
+  check_owner(together.mm_features[0], single_a.mm_features[0]);
+  check_owner(together.mm_features[1], single_b.mm_features[0]);
+  const auto ba = process(json::array({{{"role", "user"},
+      {"content", json::array({image(b), text("hello"), image(a), text("world")})}}}));
+  REQUIRE(ba.mm_features.size() == 2);
+  check_owner(ba.mm_features[0], single_b.mm_features[0]);
+  check_owner(ba.mm_features[1], single_a.mm_features[0]);
+  CHECK(ba.mm_features[0].offset == 1);
+  CHECK(ba.mm_features[0].length == 9);
+  CHECK(ba.mm_features[1].offset == 13);
+  CHECK(ba.mm_features[1].length == 4);
+  const auto aa = process(json::array({{{"role", "user"},
+      {"content", json::array({image(a), text("hello"), image(a), text("world")})}}}));
+  REQUIRE(aa.mm_features.size() == 2);
+  check_owner(aa.mm_features[0], single_a.mm_features[0]);
+  check_owner(aa.mm_features[1], single_a.mm_features[0]);
+  CHECK(aa.mm_features[0].data.get() != aa.mm_features[1].data.get());
+  const int before_decode = decoded, before_render = rendered;
+  auto overlimit = ab_messages;
+  overlimit.push_back(ab_messages[0]);
+  CHECK_THROWS_AS(process(overlimit), vllm::v1::InputValidationError);
+  CHECK(decoded == before_decode);
+  CHECK(rendered == before_render);
+  mm.limit_per_prompt["image"] = 1;
+  CHECK_THROWS_AS(process(ab_messages), vllm::v1::InputValidationError);
+  CHECK(decoded == before_decode);
+  CHECK(rendered == before_render);
+  mm.language_model_only = true;
+  CHECK_THROWS_AS(process(json::array({ab_messages[0]})), vllm::v1::InputValidationError);
+  CHECK(decoded == before_decode);
+  CHECK(rendered == before_render);
+}
+
+TEST_CASE("qwen35 vision cache: effective processor identity reaches encoder and prefix keys") {
+  HfConfig config=MakeConfig();
+  config.raw["quantization_config"]={{"quant_method","exl3"}};
+  const TempModelDir model_dir;
+  vllm::MultiModalConfig mm_config;
+  oai::MultiModalChatContext ctx;
+  ctx.architecture="Qwen3_5ForConditionalGeneration";
+  ctx.model_dir=model_dir.dir(); ctx.config_path=model_dir.config_path();
+  ctx.served_model_name="same-alias"; ctx.tokenizer=&Fixture();
+  ctx.prompt_fn=&ConcatChatPrompt; ctx.codec=RawRgbCodec();
+  ctx.mm_config=&mm_config; ctx.config=&config;
+  ctx.device=vt::Device{vt::DeviceType::kXPU,0};
+  const auto messages=json::parse(ChatBodyWithImage(1)).get<oai::ChatCompletionRequest>().messages;
+  auto process=[&](const std::vector<ChatMessage>& input) {
+    auto seam=oai::MultiModalChatRegistry::MakeSeam(ctx);
+    auto result=seam.request_chat_fn(input,{},nlohmann::ordered_json::object());
+    REQUIRE(result); REQUIRE(result->mm_features.size()==1);
+    return *result;
+  };
+  auto prefix=[](const vllm::multimodal::MultiModalInputs& input) {
+    (void)MmServerHarness::Hasher(); // initialize the ordinary hash seed
+    vllm::v1::Request req("cache-probe",input.prompt_token_ids,vllm::SamplingParams{},0.0);
+    req.mm_features=input.mm_features;
+    return get_request_block_hasher(4,sha256_cbor)(req);
+  };
+  const auto baseline=process(messages);
+  const auto stable=process(messages);
+  const auto base_hash=baseline.mm_features[0].mm_hash;
+  CHECK(base_hash==stable.mm_features[0].mm_hash);
+  const auto base_prefix=prefix(baseline);
+  REQUIRE(base_prefix.size()==1);
+  CHECK(base_prefix==prefix(stable));
+  const auto pp_path=model_dir.path/"preprocessor_config.json";
+  auto write_pp=[&](const json& pp) { std::ofstream(pp_path)<<pp.dump(); };
+  auto expect_changed=[&] {
+    const auto changed=process(messages);
+    CHECK(changed.prompt_token_ids==baseline.prompt_token_ids);
+    CHECK(changed.mm_features[0].mm_hash!=base_hash);
+    CHECK(prefix(changed)!=base_prefix);
+  };
+  auto pp=Qwen3VLPreprocessorJson();
+  pp["image_mean"]=json::array({0.5,0.5,0.5});
+  pp["size"]["longest_edge"]=8388608;
+  write_pp(pp);
+  // Scalar/channel normalization and an already capped upper limit are the
+  // SAME effective processor. The namespace must not depend on spelling.
+  CHECK(process(messages).mm_features[0].mm_hash==base_hash);
+  pp["image_mean"]=json::array({0.4,0.5,0.6});write_pp(pp);expect_changed();
+  pp=Qwen3VLPreprocessorJson();pp["image_std"]=0.4;write_pp(pp);expect_changed();
+  pp=Qwen3VLPreprocessorJson();pp["rescale_factor"]=1.0/256.0;write_pp(pp);expect_changed();
+  pp=Qwen3VLPreprocessorJson();pp["size"]["shortest_edge"]=2048;write_pp(pp);expect_changed();
+  pp=Qwen3VLPreprocessorJson();pp["temporal_patch_size"]=1;
+  config.raw["vision_config"]={{"temporal_patch_size",1}};
+  write_pp(pp);expect_changed();
+  config.raw.erase("vision_config");
+  write_pp(Qwen3VLPreprocessorJson());
+  config.raw["_commit_hash"]="another-declared-revision";expect_changed();
+  config.raw.erase("_commit_hash");
+  const auto original_dir=ctx.model_dir;
+  const TempModelDir second_checkpoint;
+  ctx.model_dir=second_checkpoint.dir();expect_changed();
+  ctx.model_dir=original_dir;
+  const auto other_messages=json::parse(ChatBodyWithImage(1,1)).get<oai::ChatCompletionRequest>().messages;
+  const auto other=process(other_messages);
+  CHECK(other.prompt_token_ids==baseline.prompt_token_ids);
+  CHECK(other.mm_features[0].mm_hash!=base_hash);
+  CHECK(prefix(other)!=base_prefix);
+  // Position/order is a target-prefix distinction, independent of whether
+  // an encoder output can be shared by the same pixels.
+  auto shifted=baseline; ++shifted.mm_features[0].offset;
+  CHECK(shifted.mm_features[0].mm_hash==base_hash);
+  CHECK(prefix(shifted)!=base_prefix);
+  // A smaller family tower cannot use the specialized 1152/16x72 workspace.
+  // Refuse at installation, before such a request can stop the engine loop.
+  config.raw["vision_config"]={{"hidden_size",768},{"num_heads",12}};
+  CHECK_THROWS_WITH(oai::MultiModalChatRegistry::MakeSeam(ctx),
+      "Qwen3.5 native vision chat: unsupported tower geometry or mismatched processor");
+  config.raw.erase("vision_config");
+  pp=Qwen3VLPreprocessorJson();pp["patch_size"]=32;write_pp(pp);
+  CHECK_THROWS_WITH(oai::MultiModalChatRegistry::MakeSeam(ctx),
+      "Qwen3.5 native vision chat: unsupported tower geometry or mismatched processor");
+}
+
+TEST_CASE("native image public path: bad media is HTTP 400 and leaves serving usable") {
+  const HfConfig c = MakeConfig();
+  const vllm::Qwen3VLWeights w = MakeVlWeights(c);
+  auto model = vllm::BorrowQwen3VLLoadedModel(w);
+  vt::Queue q = Q();
+  vllm::ModelRegistry::Prepare(*model, c, q);
+  const TempModelDir model_dir;
+  MmServerHarness h(c, *model, Fixture());
+  oai::MultiModalChatContext ctx;
+  ctx.architecture = kQwen3VLArch;
+  ctx.model_dir = model_dir.dir();
+  ctx.config_path = model_dir.config_path();
+  ctx.served_model_name = "tiny-qwen3-vl";
+  ctx.tokenizer = &Fixture();
+  ctx.prompt_fn = &ConcatChatPrompt;
+  ctx.codec = oai::DefaultImageCodec();
+  ctx.mm_config = &h.mm_cfg;
+  std::ostringstream log;
+  REQUIRE(oai::InstallMultiModalChatSeam(h.chat, true, ctx, log) ==
+          oai::MultiModalChatInstall::kInstalled);
+  // Valid RGB PNG (3201x16) is within codec admission, but its >200 aspect
+  // ratio is refused by the processor. Exercise its client-error mapping too.
+  const std::string thin_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAADIEAAAAQCAIAAAC04hkmAAAArElEQVR42u3BMQEAAADCoPVPbQ0PoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAVwNYXgAB+7V2TgAAAABJRU5ErkJggg==";
+  for (const std::string& url : {std::string("data:image/png;base64,AQID"),
+                               std::string("data:image/png;base64,TWF"), thin_png}) {
+    json body = json::parse(ChatBodyWithImage(1));
+    body["messages"][0]["content"][0]["image_url"]["url"] = url;
+    const auto response = h.server.handle_chat_completions(body.dump());
+    INFO(response.body);
+    CHECK(response.status == 400);
+    CHECK(json::parse(response.body).at("error").at("type") == "BadRequestError");
+  }
+  // A real scheduled follow-up exercises the existing tower/forward instead
+  // of a canned response, and proves the invalid input did not stop AsyncLLM.
+  const auto after = h.server.handle_chat_completions(ChatBodyWithImage(1));
+  INFO(after.body);
+  REQUIRE(after.status == 200);
+  CHECK(json::parse(after.body).at("usage").at("completion_tokens") == 1);
 }

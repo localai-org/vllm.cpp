@@ -1,6 +1,8 @@
 // Ported from: vllm/v1/core/sched/scheduler.py @ e24d1b24
 // See include/vllm/v1/core/sched/scheduler.h for the T0 scope + deferred list.
 #include "vllm/v1/core/sched/scheduler.h"
+#include "vllm/v1/core/sched/recurrent_prefix_policy.h"
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 
 #include "vllm/multimodal/utils.h"  // GetMmFeaturesInWindow (P2, #2379)
 
@@ -244,6 +246,12 @@ Scheduler::Scheduler(SchedulerConfig scheduler_config,
       scheduler_reserve_full_isl_(
           scheduler_config.scheduler_reserve_full_isl),
       block_size_(block_size) {
+  // Auto avoids splitting prompts that fit the configured nominal chunk.
+  // Force/1 keeps the prior default, while off/0 preserves original geometry.
+  recurrent_prefix_alignment_mode_ = ParseRecurrentPrefixAlignmentMode(
+      std::getenv("VT_RECURRENT_PREFIX_ALIGN"));
+  align_recurrent_prefix_publication_ =
+      recurrent_prefix_alignment_mode_ != RecurrentPrefixAlignmentMode::kOff;
   // num_lookahead_tokens (scheduler.py:275-292): 0 when no speculator is
   // configured (the default — every spec-decode path stays inert), else derived
   // from the SpeculativeConfig (k for MTP). Threaded into allocate_slots below.
@@ -279,6 +287,7 @@ Scheduler::Scheduler(SchedulerConfig scheduler_config,
   // A hard-coded equality cannot express a model whose groups page smaller.
   const int resolved_hash_block_size =
       hash_block_size > 0 ? hash_block_size : block_size;
+  align_recurrent_prefix_publication_ &= resolved_hash_block_size == block_size_;
 
   // log_stats is ON: upstream's `disable_log_stats` defaults False, and the
   // benchmark protocol VOIDS any caching arm that cannot report queries/hits.
@@ -650,7 +659,41 @@ SchedulerOutput Scheduler::schedule() {
   int encoder_compute_budget = max_num_encoder_input_tokens_;
   int token_budget = max_num_scheduled_tokens;
 
+  last_prefill_kv_computed_tokens_ = 0;
   kv_cache_manager->new_step_starts();
+
+  const auto clamp_recurrent_prefill = [&](const Request& request,
+                                           int computed, int candidate) {
+    const auto& config = kv_cache_config_;
+    if (!align_recurrent_prefix_publication_ ||
+        !ShouldAlignRecurrentPrefix(recurrent_prefix_alignment_mode_,
+                                   request.num_prompt_tokens,
+                                   max_num_scheduled_tokens) ||
+        !enable_chunked_prefill_ ||
+        !kv_cache_manager->enable_caching || !config.recurrent_prefix_snapshots ||
+        !request.mm_features.empty() || kv_connector_ != nullptr ||
+        config.recurrent_prefix_snapshots->block_tokens() != block_size_)
+      return candidate;
+    // This policy is for aligned full-attention + recurrent storage only.
+    // Other cache topologies keep their existing scheduling behavior.
+    bool aligned_recurrent_group = false;
+    for (const auto& group : config.kv_cache_groups) {
+      if (group.kv_cache_spec->block_size != block_size_ ||
+          (group.kv_cache_spec->kind() != KVCacheSpecKind::kFullAttention &&
+           group.kv_cache_spec->kind() != KVCacheSpecKind::kMamba) ||
+          group.is_eagle_group)
+        return candidate;
+      if (group.kv_cache_spec->kind() == KVCacheSpecKind::kMamba) {
+        const auto* mamba = dynamic_cast<const MambaSpec*>(group.kv_cache_spec.get());
+        if (!mamba || mamba->mamba_cache_mode != "align") return candidate;
+        aligned_recurrent_group = true;
+      }
+    }
+    if (!aligned_recurrent_group) return candidate;
+    return ClampRecurrentPrefixPublication(
+        request.num_prompt_tokens, computed, candidate, block_size_,
+        config.mtp_draft_shares_target_pages);
+  };
 
   // Whether the priority policy is in effect (else FCFS). Chosen once per step
   // (mirrors scheduler.py reading self.policy inside schedule()).
@@ -731,6 +774,9 @@ SchedulerOutput Scheduler::schedule() {
       req_index += 1;
       continue;
     }
+
+    num_new_tokens = clamp_recurrent_prefill(
+        *request, request->num_computed_tokens, num_new_tokens);
 
     // Schedule the KV blocks, preempting on OOM until the request fits.
     std::optional<KVCacheBlocks> new_blocks;
@@ -945,6 +991,8 @@ SchedulerOutput Scheduler::schedule() {
         }
       }
 
+      num_new_tokens = clamp_recurrent_prefill(
+          *request, num_computed_tokens, num_new_tokens);
       std::optional<KVCacheBlocks> new_blocks = kv_cache_manager->allocate_slots(
           *request, num_new_tokens, num_new_local_computed_tokens,
           new_computed_blocks, /*num_lookahead_tokens=*/num_lookahead_tokens_,
@@ -1178,6 +1226,7 @@ std::optional<GrammarOutput> Scheduler::get_grammar_bitmask(
 EngineCoreOutputs Scheduler::update_from_output(
     const SchedulerOutput& scheduler_output,
     const ModelRunnerOutput& model_runner_output) {
+  last_prefill_kv_computed_tokens_ = 0;
   const std::vector<std::vector<int32_t>>& sampled_token_ids =
       model_runner_output.sampled_token_ids;
   const std::map<std::string, int>& num_scheduled_tokens =
@@ -1215,6 +1264,26 @@ EngineCoreOutputs Scheduler::update_from_output(
     Request* request = it->second.get();
 
     const int req_index = model_runner_output.req_id_to_index.at(req_id);
+    if (request->async_tokens_to_discard == 0) {
+      // Use this completed frame's immutable PRE-step position. The live
+      // request position may already include a later asynchronous schedule.
+      // A cache hit/external load is already in the pre-step count and never
+      // becomes computed prompt work here. No measurement at schedule time.
+      std::optional<int> computed_before;
+      for (const auto& data : scheduler_output.scheduled_new_reqs) {
+        if (data.req_id == req_id) { computed_before = data.num_computed_tokens; break; }
+      }
+      if (!computed_before) {
+        const auto& data = scheduler_output.scheduled_cached_reqs;
+        for (size_t i = 0; i < data.req_ids.size(); ++i) {
+          if (data.req_ids[i] == req_id) { computed_before = data.num_computed_tokens.at(i); break; }
+        }
+      }
+      if (computed_before) {
+        last_prefill_kv_computed_tokens_ += std::min(num_tokens_scheduled,
+            std::max(0, request->num_prompt_tokens - *computed_before));
+      }
+    }
     // sampled_token_ids[req_index] if sampled_token_ids else []. A request still
     // being prefilled gets an empty list from the runner.
     std::vector<int32_t> new_token_ids =
@@ -1602,12 +1671,12 @@ void Scheduler::update_draft_token_ids(const DraftTokenIds& draft_token_ids) {
       continue;
     }
 
-    // Add the newly generated spec token ids to the request. A structured-output
-    // request first validates them against its grammar (should_advance); deferred
-    // here (no per-request grammar validate_tokens seam yet) — the manager gates
-    // it so a non-structured request is unaffected. When wired, this drops draft
-    // tokens that do not conform to the schema (upstream scheduler.py:1953-1956).
     request->spec_token_ids = draft_token_ids.draft_token_ids[i];
+    if (structured_output_manager_ != nullptr &&
+        structured_output_manager_->should_advance(*request)) {
+      request->spec_token_ids = request->structured_output_request->grammar
+                                   ->validate_tokens(request->spec_token_ids);
+    }
     static const bool spec_trace = std::getenv("VT_SPEC_TRACE") != nullptr;
     if (spec_trace) {
       std::fprintf(stderr, "[spec-install] req=%s installed=%zu lookahead=%d\n",
@@ -1623,10 +1692,7 @@ void Scheduler::update_draft_token_ids_in_output(
   // variant: under async scheduling the request state carries only -1
   // placeholders, so the drafts are rewritten INTO the SchedulerOutput the
   // deferred (structured-output) sampling path is about to consume. The
-  // grammar validate_tokens arm (:2096-2098) is deferred exactly as in
-  // update_draft_token_ids above (no per-request validate seam yet); the -1
-  // pad stays REACHABLE without it, because a worker can deliver fewer drafts
-  // than were scheduled.
+  // Validate the draft prefix before padding back to the scheduled row count.
   std::map<std::string, int> num_invalid_spec_tokens;
   std::map<std::string, std::vector<int32_t>>& sched_spec_tokens =
       scheduler_output.scheduled_spec_decode_tokens;
@@ -1647,6 +1713,11 @@ void Scheduler::update_draft_token_ids_in_output(
     if (spec_token_ids.size() > orig_num_spec_tokens) {
       // Trim to the scheduled count (the chunked-prefill case, :2091-2094).
       spec_token_ids.resize(orig_num_spec_tokens);
+    }
+    if (structured_output_manager_ != nullptr &&
+        structured_output_manager_->should_advance(*req_it->second)) {
+      spec_token_ids = req_it->second->structured_output_request->grammar
+                           ->validate_tokens(spec_token_ids);
     }
     if (spec_token_ids.size() < orig_num_spec_tokens) {
       // Pad back to the scheduled count with -1 and record the invalid tail;
@@ -1682,6 +1753,7 @@ SchedulerStats Scheduler::make_stats() const {
   // connector/spec/cudagraph/perf stats, kv_cache_eviction_events) are deferred
   // with their config-gated metric families.
   SchedulerStats stats;
+  stats.num_prefill_kv_computed_tokens = last_prefill_kv_computed_tokens_;
   stats.num_running_reqs = static_cast<int64_t>(running.size());
   stats.num_waiting_reqs = static_cast<int64_t>(waiting->size());
   stats.kv_cache_usage = kv_cache_manager->usage();

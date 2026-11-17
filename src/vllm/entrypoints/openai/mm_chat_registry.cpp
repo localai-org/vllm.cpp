@@ -118,7 +118,7 @@ MultiModalChatSeam MultiModalChatRegistry::MakeSeam(
   // `MakeSeam` and not only to the install, and routes the failure into the
   // same `catch` a throwing factory already takes. The outcome is therefore
   // `kRefusing`, the existing third outcome, and not a fourth one.
-  if (!seam.chat_fn) {
+  if (!seam.chat_fn && !seam.request_chat_fn) {
     throw std::runtime_error(
         "architecture '" + std::string(ctx.architecture) +
         "' has a registered multimodal chat factory, but that factory produced "
@@ -127,6 +127,8 @@ MultiModalChatSeam MultiModalChatRegistry::MakeSeam(
         "chat_fn, or throw from the factory naming what is missing. "
         "ENG-MM-INPUT-PIPELINE (#2475)");
   }
+  if (seam.chat_fn && seam.request_chat_fn)
+    throw std::runtime_error("multimodal chat factory returned both legacy and request-aware callbacks; choose one");
   return seam;
 }
 
@@ -190,7 +192,10 @@ MultiModalChatInstall InstallMultiModalChatSeam(
     return MultiModalChatInstall::kRefusing;
   }
 
-  chat.set_multimodal_chat_fn(seam.chat_fn);
+  if (seam.request_chat_fn)
+    chat.set_request_multimodal_chat_fn(std::move(seam.request_chat_fn));
+  else
+    chat.set_multimodal_chat_fn(std::move(seam.chat_fn));
   for (const auto& [modality, limit] : seam.allowed_limits) {
     log << "server: multimodal limit " << modality << "=" << limit
         << " (over the request limit for this seam)\n";

@@ -71,6 +71,54 @@ std::vector<std::string> Split(const std::string& s, char sep) {
 
 }  // namespace
 
+TEST_CASE("actdump: selected ordinal preserves refusal and restores nested selection") {
+  using namespace vllm::actdump;
+  CHECK(StepSelected(0));
+  CHECK_FALSE(StepSelected(-1));
+  {
+    const StepSelectionScope selected(29);
+    CHECK_FALSE(StepSelected(28));
+    CHECK(StepSelected(29));
+    CHECK_FALSE(StepSelected(30));
+    g_blobs_step.store(0);
+    g_stream_blobs_step.store(0);
+    CHECK_NOTHROW(EndStep(28, 130, 1));
+    CHECK_THROWS_AS(EndStep(29, 130, 1), std::runtime_error);
+    {
+      const StepSelectionScope nested(11);
+      CHECK(StepSelected(11));
+      CHECK_FALSE(StepSelected(29));
+    }
+    CHECK(StepSelected(29));
+    CHECK_THROWS_AS(StepSelectionScope(-2), std::runtime_error);
+    CHECK(SelectedStep() == 29);
+  }
+  CHECK(SelectedStep() == -1);
+  CHECK(StepSelected(30));
+}
+
+TEST_CASE("actdump: substage layer selection restores and does not filter stream ordinals") {
+  using namespace vllm::actdump;
+  CHECK(StageLayerSelected(0));
+  {
+    const StageLayerSelectionScope selected(0);
+    CHECK(StageLayerSelected(0));
+    CHECK_FALSE(StageLayerSelected(1));
+    CHECK_FALSE(StageLayerSelected(-1));
+    CHECK(StepSelected(1));
+    {
+      const StageLayerSelectionScope nested(1);
+      CHECK(StageLayerSelected(1));
+      CHECK_FALSE(StageLayerSelected(0));
+    }
+    CHECK(StageLayerSelected(0));
+    CHECK_THROWS_AS(StageLayerSelectionScope(-2), std::runtime_error);
+    CHECK(SelectedStageLayer() == 0);
+  }
+  CHECK(SelectedStageLayer() == -1);
+  CHECK(StageLayerSelected(1));
+}
+
 TEST_CASE("actdump: a blob and its manifest row describe the same thing") {
   const std::string dir = MakeTempDir();
   const std::vector<uint16_t> payload = {0x3F80, 0x4000, 0xC000, 0x0000,

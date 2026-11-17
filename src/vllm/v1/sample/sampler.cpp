@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <vector>
 
 #include "vllm/v1/sample/device_scratch.h"
@@ -18,17 +20,18 @@
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#include "vt/sample_common.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu.h"
+#include "vt/xpu_argmax_plan.h"
+#include "vt/xpu_memory_policy.h"
+#include "vt/xpu_sampling.h"
+#include "vt/xpu_logsoftmax_policy.h"
+#endif
 
 namespace vllm::v1 {
 
 namespace {
-
-// Batch-default RNG seed for rows without a per-request generator override.
-// Upstream uses a shared default torch.Generator; our RandomSample hashes
-// (seed, row, vocab_index) so a constant default still gives independent per-row
-// draws (the row index enters the hash). Exact torch-Philox parity is the
-// documented M1.7 T1 carry.
-constexpr uint64_t kDefaultSeed = 0;
 
 // Owns a device-side output buffer of the given shape and downloads it to host.
 // Mirrors the DeviceScratch materialization (unified vs discrete) but for OUTPUT
@@ -233,10 +236,22 @@ struct Sampler::GreedyArgmaxScratch {
   void* device_ids = nullptr;  // capacity int64 elements on `device`
   int64_t* pinned_host = nullptr;
   int64_t capacity = 0;
+#ifdef VLLM_CPP_XPU
+  void* tiled_partials = nullptr;
+  size_t tiled_bytes = 0;
+  void* compact_device = nullptr;
+  vt::xpu::SelectedLogprobRecord* compact_host = nullptr;
+  size_t compact_bytes = 0;
+#endif
 
   ~GreedyArgmaxScratch() {
     if (pinned_host != nullptr) backend->FreePinned(pinned_host);
     if (device_ids != nullptr) vt::Free(device, device_ids);
+#ifdef VLLM_CPP_XPU
+    if (tiled_partials != nullptr) vt::Free(device, tiled_partials);
+    if (compact_device != nullptr) vt::Free(device, compact_device);
+    if (compact_host != nullptr) backend->FreePinned(compact_host);
+#endif
   }
   // Ensure the buffers hold at least `n` int64 ids on `dev` (grow-only).
   void Ensure(vt::Device dev, int64_t n) {
@@ -252,22 +267,121 @@ struct Sampler::GreedyArgmaxScratch {
     pinned_host = static_cast<int64_t*>(backend->AllocPinned(bytes));
     capacity = n;
   }
+#ifdef VLLM_CPP_XPU
+  bool EnsureCompact(int64_t n) {
+    VT_CHECK(n > 0 && uint64_t(n) <= std::numeric_limits<size_t>::max() /
+                 sizeof(vt::xpu::SelectedLogprobRecord), "compact logprobs payload bytes overflow");
+    const auto bytes = size_t(n) * sizeof(vt::xpu::SelectedLogprobRecord);
+    if (bytes <= compact_bytes) return true;
+    const auto memory = vt::xpu::GetMemoryInfo(device.index);
+    if (!vt::XpuDeviceAllocationFits(memory.budget_bytes, memory.allocated_bytes,
+                                     memory.graph_device_bytes, bytes)) return false;
+    void* replacement = vt::Alloc(device, bytes);
+    vt::xpu::SelectedLogprobRecord* host = nullptr;
+    try {
+      host = static_cast<vt::xpu::SelectedLogprobRecord*>(backend->AllocPinned(bytes));
+    } catch (...) {
+      vt::Free(device, replacement);
+      throw;
+    }
+    // Every previous sampler call completed its terminal copy/sync. No graph
+    // borrows these pointers. Allocate both replacements before retiring either.
+    auto* old_device = compact_device;
+    auto* old_host = compact_host;
+    compact_device = replacement; compact_host = host; compact_bytes = bytes;
+    if (old_host) backend->FreePinned(old_host);
+    if (old_device) vt::Free(device, old_device);
+    return true;
+  }
+  bool EnsureTiled(size_t bytes) {
+    if (bytes <= tiled_bytes) return true;
+    const auto memory = vt::xpu::GetMemoryInfo(device.index);
+    if (!vt::XpuDeviceAllocationFits(memory.budget_bytes, memory.allocated_bytes,
+                                     memory.graph_device_bytes, bytes)) return false;
+    // Only greedy_argmax_host calls this owner. Its existing terminal copy and
+    // sync complete every previous use; no captured graph borrows this storage.
+    // Cold growth allocates before retirement, so allocation refusal leaves the
+    // prior owner intact. Warm calls do not allocate, free or wait here.
+    void* replacement = vt::Alloc(device, bytes);
+    try {
+      if (tiled_partials) vt::Free(device, tiled_partials);
+    } catch (...) {
+      try { vt::Free(device, replacement); } catch (...) { /* backend retains failed drains */ }
+      throw;
+    }
+    tiled_partials = replacement;
+    tiled_bytes = bytes;
+    return true;
+  }
+#endif
 };
 
-Sampler::Sampler(LogprobsMode logprobs_mode) : logprobs_mode_(logprobs_mode) {}
+Sampler::Sampler(LogprobsMode logprobs_mode) : logprobs_mode_(logprobs_mode) {
+  std::random_device entropy;
+  default_seed_ = (uint64_t(entropy()) << 32) ^ uint64_t(entropy());
+}
 Sampler::~Sampler() = default;
 
 std::vector<int64_t> Sampler::greedy_argmax_host(vt::Queue& q,
                                                  const vt::Tensor& logits,
-                                                 int64_t n) const {
+                                                 int64_t n,
+                                                 const vt::Tensor* raw_logprobs,
+                                                 std::optional<LogprobsTensors>* compact_out) const {
+  if (compact_out) compact_out->reset();
   if (greedy_scratch_ == nullptr) {
     greedy_scratch_ = std::make_unique<GreedyArgmaxScratch>();
   }
   greedy_scratch_->Ensure(logits.device, n < 1 ? 1 : n);
   vt::Tensor ids = vt::Tensor::Contiguous(greedy_scratch_->device_ids,
                                           vt::DType::kI64, logits.device, {n});
+#ifdef VLLM_CPP_XPU
+  // The separate device-output/no-logprobs asynchronous fast path retains the
+  // original op until its own output owner can also retain comparison scratch.
+  const int tile = logits.device.type == vt::DeviceType::kXPU
+      ? vt::XpuTargetArgmaxTile(n, logits.shape[1]) : 0;
+  const size_t bytes = tile ? vt::XpuTiledArgmaxWorkspaceBytes(n, logits.shape[1], tile) : 0;
+  const size_t rank_bytes = raw_logprobs && compact_out ?
+      vt::XpuCompactLogprobsWorkspaceBytes(n, logits.shape[1]) : 0;
+  const bool compact = rank_bytes && greedy_scratch_->EnsureTiled(std::max(bytes,rank_bytes)) &&
+      greedy_scratch_->EnsureCompact(n);
+  if (tile && greedy_scratch_->EnsureTiled(bytes)) {
+    auto scratch = vt::Tensor::Contiguous(greedy_scratch_->tiled_partials,
+        vt::DType::kI8, logits.device, {int64_t(greedy_scratch_->tiled_bytes)});
+    vt::xpu::TiledGreedyArgmax(q, ids, logits, scratch, tile);
+  } else
+#endif
   vt::GreedyArgmax(q, ids, logits);
   vt::Backend& b = vt::GetBackend(logits.device.type);
+#ifdef VLLM_CPP_XPU
+  if (compact) {
+    auto output = vt::Tensor::Contiguous(greedy_scratch_->compact_device, vt::DType::kI8,
+        logits.device, {int64_t(size_t(n) * sizeof(vt::xpu::SelectedLogprobRecord))});
+    auto scratch = vt::Tensor::Contiguous(greedy_scratch_->tiled_partials, vt::DType::kI8,
+        logits.device, {int64_t(rank_bytes)});
+    // Same in-order queue: target merge finishes before rank reuses partials.
+    vt::xpu::CompactRawLogprobs0(q, output, *raw_logprobs, ids, scratch);
+    b.Copy(q, greedy_scratch_->compact_host, output.data, output.Bytes());
+    b.Synchronize(q); // Existing terminal sampler wait, after the compact copy.
+    std::vector<int64_t> sampled(size_t(n),0);
+    LogprobsTensors lp;
+    lp.num_positions = static_cast<int>(n); lp.num_tokens_per_position = 1;
+    lp.logprob_token_ids.resize(size_t(n)); lp.logprobs.resize(size_t(n));
+    lp.selected_token_ranks.resize(size_t(n));
+    for (int64_t row = 0; row < n; ++row) {
+      const auto& record = greedy_scratch_->compact_host[row];
+      VT_CHECK(record.token_id >= 0 && record.token_id < logits.shape[1] && record.rank >= 0,
+               "compact logprobs received an invalid selected ID");
+      sampled[size_t(row)] = record.token_id;
+      lp.logprob_token_ids[size_t(row)] = static_cast<int32_t>(record.token_id);
+      std::memcpy(&lp.logprobs[size_t(row)], &record.logprob, sizeof(float));
+      lp.selected_token_ranks[size_t(row)] = record.rank;
+    }
+    *compact_out = std::move(lp);
+    return sampled;
+  }
+#else
+  (void)raw_logprobs;
+#endif
   if (n != 0) {
     b.Copy(q, greedy_scratch_->pinned_host, greedy_scratch_->device_ids,
            static_cast<size_t>(n) * sizeof(int64_t));
@@ -344,11 +458,20 @@ std::vector<int64_t> Sampler::sample(vt::Queue& q, vt::Tensor& logits,
   DeviceBuffer probs(logits.device, q, vt::DType::kF32, {n, vocab});
   vt::ComputeProbs(q, probs.tensor(), logits);
 
-  std::vector<int64_t> seeds(static_cast<size_t>(n), static_cast<int64_t>(kDefaultSeed));
+  // Unseeded draws advance the sampler's stream. Explicit seeds instead use
+  // accepted output positions, so replay/resume and batch permutations agree.
+  // This remains VT's SplitMix64 stream, not torch Philox token parity.
+  VT_CHECK(sm.output_token_positions.empty() || sm.output_token_positions.size() == size_t(n),
+           "sampler: output token positions must have num_reqs rows");
+  const auto batch_seed = vt::sample::SplitMix64(default_seed_ + random_step_++);
+  std::vector<int64_t> seeds(static_cast<size_t>(n), static_cast<int64_t>(batch_seed));
   for (const auto& [i, seed] : sm.generators) {
     VT_CHECK(i >= 0 && static_cast<int64_t>(i) < n,
              "sampler: generator request index out of range");
-    seeds[static_cast<size_t>(i)] = static_cast<int64_t>(seed);
+    const auto position = sm.output_token_positions.empty() ? 0 : sm.output_token_positions[size_t(i)];
+    // Cancel RandomSample's row salt only for explicit per-request generators.
+    seeds[size_t(i)] = static_cast<int64_t>(vt::sample::SplitMix64(seed + position) -
+                                          0x9E3779B97F4A7C15ULL * uint64_t(i));
   }
   std::vector<int64_t> random_sampled(static_cast<size_t>(n));
   {
@@ -401,8 +524,34 @@ SamplerOutput Sampler::forward(vt::Queue& q, vt::Tensor& logits,
   const bool processed_mode = logprobs_mode_ == LogprobsMode::kProcessedLogprobs ||
                               logprobs_mode_ == LogprobsMode::kProcessedLogits;
   std::vector<float> raw_logprobs;  // host [n*vocab] when want_logprobs
+  bool compact_raw = false;
+#ifdef VLLM_CPP_XPU
+  compact_raw = logits.device.type == vt::DeviceType::kXPU && sm.all_greedy && !sm.all_random &&
+      num_logprobs.has_value() && *num_logprobs == 0 && !want_token_ids &&
+      logprobs_mode_ == LogprobsMode::kRawLogprobs && vt::XpuCompactLogprobs0Enabled(n,vocab);
+#endif
+  const auto compute_raw_snapshot = [&](vt::Tensor& destination) {
+#ifdef VLLM_CPP_XPU
+    if (logits.device.type == vt::DeviceType::kXPU && sm.all_greedy && !sm.all_random &&
+        num_logprobs.has_value() && *num_logprobs == 0 && !want_token_ids &&
+        logprobs_mode_ == LogprobsMode::kRawLogprobs && vt::XpuRawLogsoftmaxSplit(n,vocab)) {
+      if (!greedy_scratch_) greedy_scratch_ = std::make_unique<GreedyArgmaxScratch>();
+      greedy_scratch_->Ensure(logits.device,1);
+      // Borrow the EXISTING eight-byte ID owner before selection. All four
+      // snapshot kernels precede processors/argmax on this same ordered queue;
+      // the existing terminal copy/sync also completes this borrow. No additional
+      // persistent state, release fence, graph borrower or per-token allocation.
+      auto state = vt::Tensor::Contiguous(greedy_scratch_->device_ids,
+          vt::DType::kF32,logits.device,{2});
+      vt::xpu::SplitRawLogprobsM1(q,destination,logits,state);
+      return;
+    }
+#endif
+    vt::ComputeLogprobs(q,destination,logits);
+  };
+  std::optional<DeviceBuffer> raw_snapshot;
   if (want_logprobs && !processed_mode) {
-    raw_logprobs.resize(static_cast<size_t>(n) * static_cast<size_t>(vocab));
+    if (!compact_raw) raw_logprobs.resize(static_cast<size_t>(n) * static_cast<size_t>(vocab));
     if (logprobs_mode_ == LogprobsMode::kRawLogits) {
       // raw_logits (sampler.py:90-93): the logits THEMSELVES, no log_softmax.
       // They are already f32 (checked above), so upstream's `.clone()` /
@@ -412,9 +561,12 @@ SamplerOutput Sampler::forward(vt::Queue& q, vt::Tensor& logits,
       b.Copy(q, raw_logprobs.data(), logits.data,
              raw_logprobs.size() * sizeof(float));
       b.Synchronize(q);
+    } else if (compact_raw) {
+      raw_snapshot.emplace(logits.device,q,vt::DType::kF32,std::initializer_list<int64_t>{n,vocab});
+      compute_raw_snapshot(raw_snapshot->tensor());
     } else {
       DeviceBuffer rlp(logits.device, q, vt::DType::kF32, {n, vocab});
-      vt::ComputeLogprobs(q, rlp.tensor(), logits);
+      compute_raw_snapshot(rlp.tensor());
       rlp.download(raw_logprobs.data());
     }
   }
@@ -463,8 +615,16 @@ SamplerOutput Sampler::forward(vt::Queue& q, vt::Tensor& logits,
   // they are named for have happened; it then replaces the (empty) raw one, as
   // upstream's `if processed_logprobs is not None` does (:104-106).
   std::vector<float> processed;
-  const std::vector<int64_t> sampled = sample(
-      q, logits, sm, (want_logprobs && processed_mode) ? &processed : nullptr);
+  std::optional<LogprobsTensors> compact_logprobs;
+  const std::vector<int64_t> sampled = raw_snapshot ?
+      greedy_argmax_host(q,logits,n,&raw_snapshot->tensor(),&compact_logprobs) :
+      sample(q, logits, sm, (want_logprobs && processed_mode) ? &processed : nullptr);
+  if (raw_snapshot && !compact_logprobs) {
+    // Checked cold admission can refuse the compact owner. The retained
+    // pre-processor snapshot still supplies the unchanged full-row fallback.
+    raw_logprobs.resize(static_cast<size_t>(n) * static_cast<size_t>(vocab));
+    raw_snapshot->download(raw_logprobs.data());
+  }
   if (!processed.empty()) raw_logprobs = std::move(processed);
   // Async path fallback (random rows or logprobs requested): the host `sample()`
   // above already materialized the ids, so mirror them into the device out-tensor
@@ -487,7 +647,9 @@ SamplerOutput Sampler::forward(vt::Queue& q, vt::Tensor& logits,
   }
 
   std::optional<LogprobsTensors> logprobs_tensors;
-  if (!num_logprobs.has_value()) {
+  if (compact_logprobs) {
+    logprobs_tensors = std::move(compact_logprobs);
+  } else if (!num_logprobs.has_value()) {
     // sampler.py:120-121: no count requested, so the explicit-id gather is the
     // whole answer (or nothing, when neither was requested).
     logprobs_tensors = std::move(token_ids_tensors);

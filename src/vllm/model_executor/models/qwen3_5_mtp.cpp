@@ -4,11 +4,14 @@
 // vllm/model_executor/models/qwen3_5.py and qwen3_next.py at that pin.
 #include "vllm/model_executor/models/qwen3_5_mtp.h"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -16,6 +19,13 @@
 #include "vt/dtype.h"
 
 namespace vllm {
+void Qwen3_5MTPHiddenStates::WaitReady(vt::Queue& consumer_queue) const {
+  if (producer_ready_event && producer_ready_event->handle != nullptr) {
+    vt::GetBackend(producer_ready_event->device.type)
+        .QueueWaitEvent(consumer_queue, *producer_ready_event);
+  }
+}
+
 namespace {
 
 using TensorExists = std::function<bool(const std::string&)>;
@@ -46,6 +56,12 @@ OwnedTensor LoadBf16Direct(const TensorResolver& get,
            "qwen3_5 MTP: byte-size mismatch for " + name);
   std::memcpy(out.bytes.data(), tensor.data, tensor.nbytes);
   return out;
+}
+
+OwnedTensor LoadNorm(const TensorResolver& get, const std::string& name,
+                     vt::DType dtype) {
+  return dtype == vt::DType::kF16 ? dense_loaders::LoadF16Direct(get, name)
+                                 : LoadBf16Direct(get, name);
 }
 
 // Keep a torch Linear [N=out,K=in] raw and select vt::MatmulBT. This mirrors
@@ -89,7 +105,8 @@ OwnedTensor CopyRawNK(const StTensor& source, int64_t offset, int64_t n,
 
 FullAttnLayerWeights LoadFullAttention(const TensorResolver& get,
                                        const TensorExists& has,
-                                       const std::string& base) {
+                                       const std::string& base,
+                                       vt::DType norm_dtype) {
   const std::string attn = base + "self_attn.";
   FullAttnLayerWeights out;
   // MODEL-QWEN35-EXL3-HEAD (#2495 item 5): the EXL3 rung, FIRST and exclusive,
@@ -103,8 +120,8 @@ FullAttnLayerWeights LoadFullAttention(const TensorResolver& get,
     out.k_proj_exl3 = dense_loaders::LoadExl3(get, has, attn + "k_proj");
     out.v_proj_exl3 = dense_loaders::LoadExl3(get, has, attn + "v_proj");
     out.o_proj_exl3 = dense_loaders::LoadExl3(get, has, attn + "o_proj");
-    out.q_norm = LoadBf16Direct(get, attn + "q_norm.weight");
-    out.k_norm = LoadBf16Direct(get, attn + "k_norm.weight");
+    out.q_norm = LoadNorm(get, attn + "q_norm.weight", norm_dtype);
+    out.k_norm = LoadNorm(get, attn + "k_norm.weight", norm_dtype);
     return out;
   }
   out.q_proj = LoadBf16RawNK(get, attn + "q_proj.weight");
@@ -350,10 +367,113 @@ int64_t Qwen3_5MTPWeights::NumLayers() const {
              : static_cast<int64_t>(moe_layers.size());
 }
 
+Exl3DraftHead BuildExl3DraftHead(const Exl3Weight& target_head,
+                                const nlohmann::json& subset,
+                                int64_t target_vocab) {
+  constexpr int64_t block_size = 128, block_count = 512;
+  constexpr int64_t compact_vocab = block_size * block_count;
+  VT_CHECK(!target_head.Empty() && target_head.codebook == 2 &&
+               target_head.trellis.dtype == vt::DType::kI8 &&
+               target_head.Bits() == 6,
+           "EXL3 draft: expected packed 6-bpw mul1 target head");
+  const int64_t k = target_head.InFeatures(), n = target_head.OutFeatures();
+  VT_CHECK(k > 0 && k % 128 == 0 && n > 0 && n % 128 == 0 &&
+               target_vocab > 0 && target_vocab <= n &&
+               target_vocab <= std::numeric_limits<int32_t>::max(),
+           "EXL3 draft: invalid target head geometry/vocabulary");
+  const size_t tile_bytes = static_cast<size_t>(target_head.trellis.shape[2]);
+  const size_t input_tiles = static_cast<size_t>(k / 16);
+  const size_t output_tiles = static_cast<size_t>(n / 16);
+  VT_CHECK(input_tiles <= SIZE_MAX / output_tiles / tile_bytes &&
+               target_head.trellis.bytes.size() == input_tiles * output_tiles * tile_bytes &&
+               target_head.suh.dtype == vt::DType::kF16 &&
+               target_head.suh.rank == 1 && target_head.suh.shape[0] == k &&
+               target_head.suh.bytes.size() == static_cast<size_t>(k) * 2 &&
+               target_head.svh.dtype == vt::DType::kF16 &&
+               target_head.svh.rank == 1 && target_head.svh.shape[0] == n &&
+               target_head.svh.bytes.size() == static_cast<size_t>(n) * 2,
+           "EXL3 draft: target packed bytes/sign vectors unavailable or inconsistent");
+  VT_CHECK(subset.is_object() && subset.contains("blocks") &&
+               subset.at("blocks").is_array() &&
+               subset.at("blocks").size() == block_count,
+           "EXL3 draft: requires exactly 512 complete 128-token blocks");
+  for (const auto& [key, expected] :
+       std::initializer_list<std::pair<const char*, int64_t>>{
+           {"block_size", block_size}, {"n_blocks", block_count}, {"tokens", compact_vocab}}) {
+    VT_CHECK(subset.contains(key) && subset.at(key).is_number_integer() &&
+                 subset.at(key) == expected,
+             std::string("EXL3 draft: invalid subset ") + key);
+  }
+  std::vector<int64_t> blocks;
+  std::unordered_set<int64_t> seen;
+  for (const auto& entry : subset.at("blocks")) {
+    VT_CHECK(entry.is_number_integer(), "EXL3 draft: noninteger block ID");
+    // Compare before conversion, including unsigned JSON integers beyond I64.
+    VT_CHECK(entry >= 0 && entry < target_vocab / block_size,
+             "EXL3 draft: block outside complete target vocabulary");
+    const int64_t block = entry.get<int64_t>();
+    VT_CHECK(seen.insert(block).second, "EXL3 draft: duplicate block ID");
+    blocks.push_back(block);
+  }
+  Exl3DraftHead out;
+  out.target_vocab = target_vocab;
+  out.weight.name = target_head.name + ".mtp_compact";
+  out.weight.codebook = target_head.codebook;
+  out.weight.trellis = MakeOwned(vt::DType::kI8,
+      {k / 16, compact_vocab / 16, static_cast<int64_t>(tile_bytes)});
+  // Only the small input sign vector is copied; no target trellis/dense head.
+  out.weight.suh = MakeOwned(vt::DType::kF16, {k});
+  std::memcpy(out.weight.suh.bytes.data(), target_head.suh.bytes.data(), k * 2);
+  out.weight.svh = MakeOwned(vt::DType::kF16, {compact_vocab});
+  out.token_ids = MakeOwned(vt::DType::kI32, {compact_vocab});
+  const size_t packed_block_bytes = 8 * tile_bytes;
+  for (size_t compact_block = 0; compact_block < blocks.size(); ++compact_block) {
+    const size_t source_block = static_cast<size_t>(blocks[compact_block]);
+    for (size_t row = 0; row < input_tiles; ++row) {
+      const size_t src = row * output_tiles * tile_bytes + source_block * packed_block_bytes;
+      const size_t dst = (row * block_count + compact_block) * packed_block_bytes;
+      std::memcpy(out.weight.trellis.bytes.data() + dst,
+                  target_head.trellis.bytes.data() + src, packed_block_bytes);
+    }
+    std::memcpy(out.weight.svh.bytes.data() + compact_block * block_size * 2,
+                target_head.svh.bytes.data() + source_block * block_size * 2,
+                block_size * 2);
+    for (int32_t lane = 0; lane < block_size; ++lane) {
+      const int32_t id = static_cast<int32_t>(source_block * block_size) + lane;
+      std::memcpy(out.token_ids.bytes.data() + (compact_block * block_size + lane) * 4,
+                  &id, sizeof(id));
+    }
+  }
+  return out;
+}
+
+Exl3DraftHead LoadExl3DraftHead(const std::vector<SafetensorsFile>& shards,
+                               const nlohmann::json& subset,
+                               int64_t target_vocab) {
+  const auto has = [&shards](const std::string& name) {
+    for (const auto& shard : shards)
+      if (std::find(shard.Names().begin(), shard.Names().end(), name) != shard.Names().end())
+        return true;
+    return false;
+  };
+  const TensorResolver get = [&shards](const std::string& name) -> const StTensor& {
+    const StTensor* found = nullptr;
+    for (const auto& shard : shards) {
+      if (std::find(shard.Names().begin(), shard.Names().end(), name) == shard.Names().end()) continue;
+      VT_CHECK(found == nullptr, "EXL3 draft: duplicate head tensor " + name);
+      found = &shard.Get(name);
+    }
+    VT_CHECK(found != nullptr, "EXL3 draft: missing head tensor " + name);
+    return *found;
+  };
+  return BuildExl3DraftHead(dense_loaders::LoadExl3(get, has, "lm_head"), subset, target_vocab);
+}
+
 Qwen3_5MTPWeights LoadQwen3_5MTP(const TensorResolver& get,
                                  const std::function<bool(const std::string&)>& has,
                                  const HfConfig& config,
-                                 Qwen3_5MTPKind kind) {
+                                 Qwen3_5MTPKind kind,
+                                 vt::DeviceType execution_device) {
   VT_CHECK(config.hidden_size > 0, "qwen3_5 MTP: hidden_size must be > 0");
   VT_CHECK(!UsesDedicatedEmbeddings(config),
            "qwen3_5 MTP: dedicated embeddings are not supported by M-mtp-0");
@@ -372,11 +492,15 @@ Qwen3_5MTPWeights LoadQwen3_5MTP(const TensorResolver& get,
   } else {
     out.fc = LoadBf16RawNK(get, "mtp.fc.weight");
   }
+  const vt::DType norm_dtype =
+      execution_device == vt::DeviceType::kXPU &&
+              kind == Qwen3_5MTPKind::kDense && out.IsExl3()
+          ? vt::DType::kF16 : vt::DType::kBF16;
   out.pre_fc_norm_embedding =
-      LoadBf16Direct(get, "mtp.pre_fc_norm_embedding.weight");
+      LoadNorm(get, "mtp.pre_fc_norm_embedding.weight", norm_dtype);
   out.pre_fc_norm_hidden =
-      LoadBf16Direct(get, "mtp.pre_fc_norm_hidden.weight");
-  out.final_norm = LoadBf16Direct(get, "mtp.norm.weight");
+      LoadNorm(get, "mtp.pre_fc_norm_hidden.weight", norm_dtype);
+  out.final_norm = LoadNorm(get, "mtp.norm.weight", norm_dtype);
 
   for (int64_t layer_index = 0; layer_index < num_layers; ++layer_index) {
     const std::string base =
@@ -385,10 +509,10 @@ Qwen3_5MTPWeights LoadQwen3_5MTP(const TensorResolver& get,
       Qwen3_5DenseLayerWeights layer;
       layer.is_linear_attention = false;
       layer.input_layernorm =
-          LoadBf16Direct(get, base + "input_layernorm.weight");
+          LoadNorm(get, base + "input_layernorm.weight", norm_dtype);
       layer.post_attention_layernorm =
-          LoadBf16Direct(get, base + "post_attention_layernorm.weight");
-      layer.attn = LoadFullAttention(get, has, base);
+          LoadNorm(get, base + "post_attention_layernorm.weight", norm_dtype);
+      layer.attn = LoadFullAttention(get, has, base, norm_dtype);
       layer.mlp = LoadDenseMlp(get, has, base);
       out.dense_layers.push_back(std::move(layer));
     } else {
@@ -398,7 +522,7 @@ Qwen3_5MTPWeights LoadQwen3_5MTP(const TensorResolver& get,
           LoadBf16Direct(get, base + "input_layernorm.weight");
       layer.post_attention_layernorm =
           LoadBf16Direct(get, base + "post_attention_layernorm.weight");
-      layer.attn = LoadFullAttention(get, has, base);
+      layer.attn = LoadFullAttention(get, has, base, norm_dtype);
       layer.moe = LoadMoe(get, base, config);
       out.moe_layers.push_back(std::move(layer));
     }
@@ -434,7 +558,7 @@ Qwen3_5MTPWeights LoadQwen3_5MTP(const TensorResolver& get,
 
 Qwen3_5MTPWeights LoadQwen3_5MTP(
     const std::vector<SafetensorsFile>& shards, const HfConfig& config,
-    Qwen3_5MTPKind kind) {
+    Qwen3_5MTPKind kind, vt::DeviceType execution_device) {
   std::unordered_map<std::string, const SafetensorsFile*> where;
   for (const SafetensorsFile& shard : shards) {
     for (const std::string& name : shard.Names()) where[name] = &shard;
@@ -448,7 +572,56 @@ Qwen3_5MTPWeights LoadQwen3_5MTP(
   };
   const std::function<bool(const std::string&)> has =
       [&where](const std::string& name) { return where.count(name) != 0; };
-  return LoadQwen3_5MTP(get, has, config, kind);
+  return LoadQwen3_5MTP(get, has, config, kind, execution_device);
+}
+
+void PackQwen3_5MTPGptqDraft(Qwen3_5MTPWeights& weights,
+                             const StTensor& target_head) {
+  VT_CHECK(weights.kind == Qwen3_5MTPKind::kDense && !weights.IsExl3() &&
+               !weights.IsGptq4Draft() && weights.fc.rank == 2 &&
+               weights.fc.nk && weights.fc.dtype == vt::DType::kBF16,
+           "qwen3_5 MTP: GPTQ draft packing requires dense BF16 source linears");
+  const auto view = [](const OwnedTensor& owned) {
+    VT_CHECK(owned.rank == 2 && owned.nk &&
+                 owned.dtype == vt::DType::kBF16 && !owned.bytes.empty(),
+             "qwen3_5 MTP: expected BF16 raw-NK draft Linear");
+    StTensor source;
+    source.dtype = "BF16";
+    source.shape = {owned.shape[0], owned.shape[1]};
+    source.data = owned.bytes.data();
+    source.nbytes = owned.bytes.size();
+    return source;
+  };
+  const int64_t hidden = weights.fc.shape[0];
+  VT_CHECK(weights.fc.shape[1] == 2 * hidden,
+           "qwen3_5 MTP: draft FC must be [H,2H]");
+  weights.fc_gptq4 = QuantizeGptq4Weight(view(weights.fc), 2 * hidden);
+  weights.fc = OwnedTensor{};
+  for (Qwen3_5DenseLayerWeights& layer : weights.dense_layers) {
+    VT_CHECK(!layer.attn.IsExl3() && !layer.mlp.IsExl3() &&
+                 layer.gptq4.Empty(),
+             "qwen3_5 MTP: draft GPTQ packing cannot replace another quantized arm");
+    layer.gptq4.attn_qkv = QuantizeMergedGptq4Weight(
+        {view(layer.attn.q_proj), view(layer.attn.k_proj),
+         view(layer.attn.v_proj)}, hidden);
+    layer.attn.q_proj = OwnedTensor{};
+    layer.attn.k_proj = OwnedTensor{};
+    layer.attn.v_proj = OwnedTensor{};
+    layer.gptq4.attn_out = QuantizeGptq4Weight(
+        view(layer.attn.o_proj), layer.attn.o_proj.shape[1]);
+    layer.attn.o_proj = OwnedTensor{};
+    layer.gptq4.mlp_gate_up = QuantizeMergedGptq4Weight(
+        {view(layer.mlp.gate_proj), view(layer.mlp.up_proj)}, hidden);
+    layer.mlp.gate_proj = OwnedTensor{};
+    layer.mlp.up_proj = OwnedTensor{};
+    layer.gptq4.mlp_down = QuantizeGptq4Weight(
+        view(layer.mlp.down_proj), layer.mlp.down_proj.shape[1]);
+    layer.mlp.down_proj = OwnedTensor{};
+  }
+  VT_CHECK(target_head.dtype == "F16" && target_head.shape.size() == 2 &&
+               target_head.shape[1] == hidden,
+           "qwen3_5 MTP: GPTQ draft head must come from target FP16 [vocab,H]");
+  weights.draft_lm_head_gptq4 = QuantizeGptq4Weight(target_head, hidden);
 }
 
 }  // namespace vllm

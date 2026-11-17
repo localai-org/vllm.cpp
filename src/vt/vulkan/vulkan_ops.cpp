@@ -1870,7 +1870,7 @@ void CausalConv1dUpdateKernel(Queue&, Tensor& out, const Tensor& x, const Tensor
 void GdnPostConvKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, Tensor& g_out,
                        Tensor& beta_out, const Tensor& conv, const Tensor& araw,
                        const Tensor& braw, const Tensor& a_log, const Tensor& dt_bias,
-                       const L2NormArgs& args) {
+                       const GdnPostConvArgs& args) {
   const int64_t t = conv.shape[0];
   const int64_t hk = q_out.shape[1], dk = q_out.shape[2];
   const int64_t hv = v_out.shape[1], dv = v_out.shape[2];

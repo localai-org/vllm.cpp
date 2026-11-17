@@ -960,6 +960,22 @@ TEST_CASE("llm_engine: live per-step stats populate the Prometheus registry") {
   CHECK(HistogramCount(t, "vllm:request_generation_tokens") == 2);
 }
 
+TEST_CASE("llm_engine: computed prompt metric includes every tokenless chunk") {
+  const auto c = MakeConfig();
+  const auto w = MakeWeights(c);
+  Harness h(c, w, Fixture(), 8, /*max_num_batched_tokens=*/2);
+  PrometheusStatLogger logger("m", kMaxModelLen);
+  h.engine.set_stat_logger(&logger);
+  h.engine.add_request("computed", std::vector<int32_t>(7, 1), Greedy(2));
+  const std::string metric = std::string("vllm:prefill_kv_computed_tokens_total") + kL;
+  for (const int completed : {2, 4, 6, 7}) {
+    h.engine.step();
+    CHECK(MetricValue(logger.Expose(), metric) == completed);
+  }
+  while (h.engine.has_unfinished_requests()) h.engine.step();
+  CHECK(MetricValue(logger.Expose(), metric) == 7);
+}
+
 // ─── 7. Per-request queue/prefill/inference timing from EngineCoreEvents ──────
 // The scheduler records QUEUED (add_request), SCHEDULED (batch admission) and
 // PREEMPTED events per request; the OutputProcessor folds them into the

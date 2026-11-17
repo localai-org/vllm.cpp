@@ -5,12 +5,17 @@
 #include "vllm/v1/spec_decode/rejection_sampler.h"
 
 #include <cstddef>
+#include <limits>
 #include <utility>
 
 #include "vllm/v1/sample/device_scratch.h"
 #include "vt/backend.h"
 #include "vt/dtype.h"
 #include "vt/ops.h"
+#ifdef VLLM_CPP_XPU
+#include "vt/xpu_argmax_plan.h"
+#include "vt/xpu_sampling.h"
+#endif
 
 namespace vllm::v1 {
 
@@ -152,10 +157,30 @@ RejectionSamplerDeviceOutput RejectionSampler::verify(
 
   const vt::Device dev = logits.device;
   vt::Backend& backend = vt::GetBackend(dev.type);
+  VT_CHECK(num_logits >= 0 && uint64_t(num_logits) <=
+               std::numeric_limits<size_t>::max() / sizeof(int32_t),
+           "rejection_sampler: argmax allocation bytes overflow");
+  size_t argmax_bytes = static_cast<size_t>(num_logits) * sizeof(int32_t);
+#ifdef VLLM_CPP_XPU
+  const int tile = dev.type == vt::DeviceType::kXPU ?
+      vt::XpuRejectionArgmaxTile(num_logits, logits.shape[1]) : 0;
+  size_t scratch_offset = 0, scratch_bytes = 0;
+  if (tile) {
+    // Same I32-ID-prefix/aligned-partial layout as mapped selection. This is
+    // still this verification's private allocation, never a growing global.
+    const auto layout = vt::XpuMappedSelectionBuffers(num_logits, logits.shape[1], tile);
+    argmax_bytes = layout.total_bytes;
+    scratch_offset = layout.scratch_offset;
+    scratch_bytes = layout.scratch_bytes;
+  }
+#endif
   dev_out.backend_ = &backend;
   dev_out.device_ = dev;
   dev_out.num_reqs_ = num_reqs;
   dev_out.width_ = width;
+  // Staging copies can already be queued if a later allocation throws. Retain
+  // the existing completion-before-free guarantee on that unwind path too.
+  dev_out.verify_q_ = &q;
   dev_out.draft_ = std::make_unique<DeviceScratch>(dev, q, draft_sampled.data(),
                                                    vt::DType::kI32,
                                                    std::initializer_list<int64_t>{num_logits});
@@ -174,7 +199,7 @@ RejectionSamplerDeviceOutput RejectionSampler::verify(
   // per-step allocation is not a new cost class either — the two lines above
   // already allocate per call.
   dev_out.target_argmax_ =
-      backend.Alloc(static_cast<size_t>(num_logits) * sizeof(int32_t));
+      backend.Alloc(argmax_bytes);
 
   vt::Tensor sampled_t = vt::Tensor::Contiguous(dev_out.sampled_, vt::DType::kI32,
                                                 dev, {num_reqs, width});
@@ -182,7 +207,15 @@ RejectionSamplerDeviceOutput RejectionSampler::verify(
       vt::Tensor::Contiguous(dev_out.num_sampled_, vt::DType::kI32, dev, {num_reqs});
   vt::Tensor target_argmax_t =
       vt::Tensor::Contiguous(dev_out.target_argmax_, vt::DType::kI32, dev, {num_logits});
-  dev_out.verify_q_ = &q;
+#ifdef VLLM_CPP_XPU
+  if (tile) {
+    auto scratch = vt::Tensor::Contiguous(
+        static_cast<unsigned char*>(dev_out.target_argmax_) + scratch_offset,
+        vt::DType::kI8, dev, {static_cast<int64_t>(scratch_bytes)});
+    vt::xpu::TiledGreedyRejectionSample(q, sampled_t, num_sampled_t, target_argmax_t,
+        logits, dev_out.draft_->tensor(), dev_out.cu_->tensor(), scratch, tile);
+  } else
+#endif
   vt::GreedyRejectionSample(q, sampled_t, num_sampled_t, target_argmax_t, logits,
                             dev_out.draft_->tensor(), dev_out.cu_->tensor());
   // NOTHING is copied and NO queue is waited on here. That is the whole split,

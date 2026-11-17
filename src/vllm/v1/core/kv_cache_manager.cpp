@@ -1,9 +1,12 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/core/kv_cache_manager.py @ e24d1b24
 // See include/vllm/v1/core/kv_cache_manager.h for scope + deviations.
 
 #include "vllm/v1/core/kv_cache_manager.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -136,6 +139,22 @@ std::pair<KVCacheBlocks, int> KVCacheManager::get_computed_blocks(
   auto [computed_blocks, num_new_computed_tokens] =
       coordinator->find_longest_cache_hit(request.block_hashes,
                                           max_cache_hit_length);
+
+  if (auto index = kv_cache_config.recurrent_prefix_snapshots) {
+    const int boundary = num_new_computed_tokens / index->block_tokens();
+    const bool eligible = num_new_computed_tokens % index->block_tokens() == 0 &&
+        boundary > 0 && size_t(boundary) <= request.block_hashes.size();
+    const bool pinned = eligible &&
+        index->Pin(request.request_id, request.block_hashes[size_t(boundary - 1)]);
+    if (std::getenv("VT_PREFIX_SNAPSHOT_TRACE"))
+      std::fprintf(stderr, "PREFIX_PIN tokens=%d eligible=%d success=%d\n",
+                   num_new_computed_tokens, int(eligible), int(pinned));
+    if (!pinned) {
+      computed_blocks = empty_kv_cache_blocks.blocks;
+      num_new_computed_tokens = 0;
+      index->Release(request.request_id);
+    }
+  }
 
   // kv_cache_manager.py:262-280. Under the non-default report mode "full", the
   // blocks this request REUSED from the prefix cache are re-reported as
@@ -293,6 +312,7 @@ std::optional<KVCacheBlocks> KVCacheManager::allocate_slots(
 }
 
 void KVCacheManager::free(const Request& request) {
+  if (auto index = kv_cache_config.recurrent_prefix_snapshots) index->Release(request.request_id);
   coordinator->free(request.request_id);
 }
 
@@ -305,6 +325,7 @@ void KVCacheManager::remove_skipped_blocks(
 
 std::vector<KVCacheBlock*> KVCacheManager::pop_blocks_for_free(
     const Request& request) {
+  if (auto index = kv_cache_config.recurrent_prefix_snapshots) index->Release(request.request_id);
   return coordinator->pop_blocks_for_free(request.request_id);
 }
 
@@ -313,7 +334,9 @@ void KVCacheManager::evict_blocks(const std::set<int>& block_ids) {
 }
 
 bool KVCacheManager::reset_prefix_cache() {
-  if (!block_pool.reset_prefix_cache()) {
+  const auto index = kv_cache_config.recurrent_prefix_snapshots;
+  const auto reset_pages = [&] { return block_pool.reset_prefix_cache(); };
+  if (!(index ? index->Reset(reset_pages) : reset_pages())) {
     return false;
   }
   // Upstream vllm/v1/core/kv_cache_manager.py:522-524: flag the RESET so the

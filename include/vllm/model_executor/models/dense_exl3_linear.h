@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "vllm/model_executor/models/dense_device_glue.h"  // Dev, DBuf
 #include "vllm/model_executor/models/qwen3_5_weights.h"    // Exl3Weight, OwnedTensor
@@ -39,12 +40,25 @@ dense_attn::DBuf Linear(dense_attn::Dev d, const vt::Tensor& x,
                         const OwnedTensor& bf16_w, const Exl3Weight& exl3_w,
                         vt::DType out_dtype);
 
+// Scoped XPU FP16 SmallM/W8A8; model-owned cache is bound to these immutable
+// sources for its entire lifetime. Returns one [M,sum(N)] contiguous owner.
+dense_attn::DBuf GroupedLinear(dense_attn::Dev d, const vt::Tensor& x,
+                               const std::vector<const Exl3Weight*>& sources,
+                               Exl3GroupedWeight& grouped);
+
+// Narrow shared EXL3 MLP producer seam. Returns no value for an unsupported
+// format/device. An admitted producer refusal reuses gate/up and the output
+// owner for the original materialized SiLU+down route (no recomputation).
+std::optional<dense_attn::DBuf> PreparedSiluMlp(dense_attn::Dev d,
+    const vt::Tensor& x, const Exl3Weight& gate, const Exl3Weight& up,
+    const Exl3Weight& down, Exl3GroupedWeight& grouped);
+
 // `layers::MakeMlpGateUpMethod(bf16_gate_up, gate, up, intermediate)->Apply(d, x)`.
-// Returns the bf16 [M, I] SwiGLU activation, which is what the shared
-// `MlpGateUpMethodBase` contract produces on every arm.
+// The EXL3 arm returns [M, I] in d.activation_dtype, or BF16 when unspecified.
 dense_attn::DBuf GateUp(dense_attn::Dev d, const vt::Tensor& x,
                         const OwnedTensor& bf16_gate_up, const Exl3Weight& gate,
-                        const Exl3Weight& up, int64_t intermediate);
+                        const Exl3Weight& up, int64_t intermediate,
+                        Exl3GroupedWeight* grouped = nullptr);
 
 }  // namespace dense_exl3
 }  // namespace vllm

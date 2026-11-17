@@ -1,0 +1,413 @@
+{
+  "status": "PASS_BOUNDED_RESULTING_PR_PRODUCT",
+  "tested_product_head": "5bb81a30b7862aa978f1ad7b24b89296e631c6ed",
+  "upstream_main": "5ce71e490d8e6b9615540f1244ec1b4c35f31f59",
+  "prior_published_text_head": "43d415db95906683ba0fdcaab869fb11a45476e8",
+  "vision_source_head": "959e13c5add169ccd25a3aff2a9f69078b33ecd6",
+  "selected_paths": 442,
+  "selection_sha256": "d28baf60a972726f3fb7d1fefe908d76602044f1f53706941fdfb42a2c4e027d",
+  "upstream_preserved_merged_paths": [
+    "CMakeLists.txt",
+    "src/capi/vllm_c.cpp",
+    "tests/CMakeLists.txt"
+  ],
+  "native_binaries": {
+    "examples/vllm-server": "8838e9aeb9459c473629f2f00615b9b0f72d2bec0bb57ecf9587d0e05d0364c1",
+    "tests/native-vision-serving-profile": "194e8cf382bd4e4e4618bf4db033202658a3145257a012b4d876d40a55588230",
+    "tests/test_xpu_vision_ops": "5c0e02b67fde17c0ebb86d48eaae3d471e056f3043cc96fc48c2e5aec25ea082",
+    "tests/test_xpu_vision_tower": "185245012071bef7da8b3145d9a7829d616a44afd9e8a8eaa43cc24f9677c9df",
+    "tests/test_xpu_gdn_fp16_variable": "170e841d620d1c4ec5c3e228fae5f97333521ce6755d7e29795264d3a4c64b70",
+    "tests/test_xpu_qwen_exl3_fp16": "d4355e9ded1b1ef438e86aa0181fb6b859242095596d88ec12b232476ea810b7",
+    "tests/test_xpu_attention_fast": "65773515b00de7dcb7520b726f6ee3da2e0240903d76569cb3e8c16113707f5e"
+  },
+  "toolchain": {
+    "compiler": "oneAPI2026.1.1",
+    "oneDNN": "3.13.0",
+    "native_builder_image": "sha256:ae6950731b3c031f812a95c0eb615a572239426440bf67fd1b3c9c9cbfce9eca",
+    "device": "Intel Arc Pro B70",
+    "model_config_sha256": "dab9abc478e1b1b928ef354f27a26fc90e8191a4a3ce5f3d19aa21558216b267"
+  },
+  "actual_checks": {
+    "pre_vision_main_text_base": {
+      "status": "PASS",
+      "source_head": "80bce0c438cdb52f497505e789b9c5e2dfc36416",
+      "lease_cases": 4,
+      "lease_assertions": 28,
+      "text": "Actual P4096/O32 MTP3 public prefix equals frozen pre-vision output"
+    },
+    "operators": [
+      {
+        "target": "test_xpu_vision_ops",
+        "exit_code": 0,
+        "source_head": "5bb81a30b7862aa978f1ad7b24b89296e631c6ed",
+        "binary_sha256": "5c0e02b67fde17c0ebb86d48eaae3d471e056f3043cc96fc48c2e5aec25ea082",
+        "command_sha256": "579bc346776d180d58b11513b1621387a02a4f9bab5c29e44f2cb327cf58f946",
+        "log_sha256": "7aaa5aaf2e014c7cc7f2a0e408801bff2c070e5afcbc6a30da18b2c8c9d79306"
+      },
+      {
+        "target": "test_xpu_vision_tower",
+        "exit_code": 0,
+        "source_head": "5bb81a30b7862aa978f1ad7b24b89296e631c6ed",
+        "binary_sha256": "185245012071bef7da8b3145d9a7829d616a44afd9e8a8eaa43cc24f9677c9df",
+        "command_sha256": "6530aab4310c61cd4e3f3660dd70de0fc38542d7c4e7d03611ebfc41fb24fa04",
+        "log_sha256": "21777b178292b3b4cc461948781f1d8f825f7258fdc0429d154e33d1df6d5bc5"
+      },
+      {
+        "target": "test_xpu_gdn_fp16_variable",
+        "exit_code": 0,
+        "source_head": "5bb81a30b7862aa978f1ad7b24b89296e631c6ed",
+        "binary_sha256": "170e841d620d1c4ec5c3e228fae5f97333521ce6755d7e29795264d3a4c64b70",
+        "command_sha256": "f9720fa05a6bfde710cf80469267c1e422f2af54ed68e324332d7e6272b7ebb5",
+        "log_sha256": "999c45bf1ad43ca8532824bc464a0843f7f5a118bbfdd0751942b416f7aa6560"
+      },
+      {
+        "target": "test_xpu_qwen_exl3_fp16",
+        "exit_code": 0,
+        "source_head": "5bb81a30b7862aa978f1ad7b24b89296e631c6ed",
+        "binary_sha256": "d4355e9ded1b1ef438e86aa0181fb6b859242095596d88ec12b232476ea810b7",
+        "command_sha256": "1111f3db8211c00741aed351fb8acc75e147d463bddeca245d639e30ffab0875",
+        "log_sha256": "0bb97de90d0992ea646dc6b7414e62cdec4603ef0904fa847637b27e13ebc7f0"
+      },
+      {
+        "target": "test_xpu_attention_fast",
+        "exit_code": 0,
+        "source_head": "5bb81a30b7862aa978f1ad7b24b89296e631c6ed",
+        "binary_sha256": "65773515b00de7dcb7520b726f6ee3da2e0240903d76569cb3e8c16113707f5e",
+        "command_sha256": "8acc4bb5314237e1c73e3b7980f4aae4bdd2275528230b63147196bc1a6103ef",
+        "log_sha256": "9fc2567106f61077aa832a84ca1b8a9db9c479caa66a68e7f0f4ac3de3da09b3"
+      }
+    ],
+    "public_images": {
+      "status": "PASS",
+      "target_requests": 7,
+      "target_actual_draft_tokens": 0,
+      "mtp3_requests": 7,
+      "mtp3_actual_draft_tokens": 300.0,
+      "scope": "Four PNG/JPEG fixtures plus SSE repeat plus two ordered images ordinary/SSE in each arm; strict usage and drained gauges."
+    },
+    "public_c_abi": {
+      "status": "PASS",
+      "requests": 6,
+      "proposed_drafts": 144,
+      "graph_count_after_engine_free": 0,
+      "live_pool_blocks_after_engine_free": 0,
+      "scope": "Actual exported load/chat calls in native serving-profile tool; six same-shape backup-dialog facts and teardown, retained contexts/free pools separated."
+    },
+    "text": {
+      "status": "PASS",
+      "scope": "One actual resulting-head P4096/O32 MTP3 public text-prefix, usage and token representations compare to frozen pre-vision baseline. Not a timing/full-state test."
+    },
+    "observer_tests": {
+      "status": "PASS",
+      "tests": 11,
+      "receipt": "n5-observer-units-v1-result.json"
+    }
+  },
+  "retained_pre_transfer_qualification": {
+    "source_head": "959e13c5add169ccd25a3aff2a9f69078b33ecd6",
+    "native_product_head": "4ea01a1643b58302e44a4b3997faa1d06c76ebe1",
+    "scope": "Original four full-tower geometries, known/held-out mixed cases and actual selected states, cache/max sequences/cancellation and paired4096/256 timing ran in N4. They are not claimed rerun in N5."
+  },
+  "approval": {
+    "batch_contract": "Developer-approved plan section6.1; exact supported same-geometry state isolation and actual MTP target retention, no cross-shape greedy identity requirement",
+    "tower_replacement_policy": null,
+    "tower_limits_unchanged": true,
+    "transfer_explicitly_authorized_after_n4": true,
+    "draft_ready_or_merge_authorized": false
+  },
+  "external_receipts": [
+    {
+      "file": "n5-base-text-smoke-v1-command.json",
+      "sha256": "d1f52670d935727e1d4356dcaba3f636318745340e12bf79739dfa0c3c4f0e1e",
+      "bytes": 2589
+    },
+    {
+      "file": "n5-base-text-smoke-v1-exit.json",
+      "sha256": "69913234a517a8e14eb8599d44196ca9a073d2a9d185c26d2f949b88e6381940",
+      "bytes": 2860
+    },
+    {
+      "file": "n5-base-text-smoke-v1-result.json",
+      "sha256": "9613c622f2382d90ea62c03214dde39bd52bcb166242aee08804920a9cbdf0e3",
+      "bytes": 3712
+    },
+    {
+      "file": "n5-base-text-smoke-v1-server.log",
+      "sha256": "9f86c713ffd2a068059665fab5e89b8031f863147ac6c164f3ed1d47f5f33f41",
+      "bytes": 2004
+    },
+    {
+      "file": "n5-build-copy-header-bootstrap-v1.json",
+      "sha256": "3aa5f890adb08c040e81aa7295d9be73099300794e436f6793d7c5b6b704e168",
+      "bytes": 758
+    },
+    {
+      "file": "n5-candidate-text-smoke-v1-command.json",
+      "sha256": "241c81fbb6f1eeda333396a7fce286aa342570ee22a62358beb9829c31a766fc",
+      "bytes": 2591
+    },
+    {
+      "file": "n5-candidate-text-smoke-v1-exit.json",
+      "sha256": "0069aca7dae94e03144c4db98d8c0db3eb3c63f526e93192dd1a979ca68cdde0",
+      "bytes": 2862
+    },
+    {
+      "file": "n5-candidate-text-smoke-v1-result.json",
+      "sha256": "81bea9e419a8ed4a8f9da14ab4c5597e50757bdc979b290d4fec7133bef45f47",
+      "bytes": 3712
+    },
+    {
+      "file": "n5-candidate-text-smoke-v1-server.log",
+      "sha256": "b588704bd2e0b7d42caf5589a27a295c722cfdd8d7192974fdf9c90908f209b4",
+      "bytes": 1649
+    },
+    {
+      "file": "n5-capi-mtp3-memory-v1-command.json",
+      "sha256": "2c63305791005c9e231f022048afbe81507f8aa3fee577a69dccbba593849266",
+      "bytes": 2477
+    },
+    {
+      "file": "n5-capi-mtp3-memory-v1-exit.json",
+      "sha256": "8d198a5a26dac11c795a5f11999462b3e844386ac99153430a8d65ca46b1546a",
+      "bytes": 3790
+    },
+    {
+      "file": "n5-capi-mtp3-memory-v1-result.json",
+      "sha256": "b1954e2d74d2ee6cf5c9aeec6e35c66bc7572e5996babac6b867955dc5dc9f82",
+      "bytes": 12874
+    },
+    {
+      "file": "n5-capi-mtp3-memory-v1.log",
+      "sha256": "c0074f7a3b2193607266492dc31be32540b29b90fefd470fd9488f272f42681d",
+      "bytes": 4153
+    },
+    {
+      "file": "n5-initial-live-pr-v1.json",
+      "sha256": "2c938cd9765fb3d9a4de40705864c0962b159dce12209aca0dc0aff9404b2eea",
+      "bytes": 13028
+    },
+    {
+      "file": "n5-main-identity-v1.json",
+      "sha256": "a7cdb687042146fd723164af8eb3687b4f76478a08ca087c8189d06b95d0720a",
+      "bytes": 4140
+    },
+    {
+      "file": "n5-merge-preserved-CMakeLists.txt.diff",
+      "sha256": "5ff24026ee071297999f2b134c7eddeb7d1b8d6fd6c124ec310e8850ccebd297",
+      "bytes": 2272
+    },
+    {
+      "file": "n5-merge-preserved-src_capi_vllm_c.cpp.diff",
+      "sha256": "90283ef3d5c102fcf3e45ec93527176514eb598815cf5594c1e8bf81eb4ea88b",
+      "bytes": 934
+    },
+    {
+      "file": "n5-merge-preserved-tests_CMakeLists.txt.diff",
+      "sha256": "c9fe25d962cdc20c6cbeb203f0071586485e777837e8d1a96783fd069c67352f",
+      "bytes": 7437
+    },
+    {
+      "file": "n5-observer-units-v1-result.json",
+      "sha256": "605ee8b08ef863ac5cb38da9e0b5371cb91361355d8ea6bc108d40b0706c43d1",
+      "bytes": 1004
+    },
+    {
+      "file": "n5-operator-test_xpu_attention_fast-v1-command.json",
+      "sha256": "8acc4bb5314237e1c73e3b7980f4aae4bdd2275528230b63147196bc1a6103ef",
+      "bytes": 1261
+    },
+    {
+      "file": "n5-operator-test_xpu_attention_fast-v1-exit.json",
+      "sha256": "c97abe3aa0c584a9d5b3d4850376e8a250338500e13aaa4ed735174d559fa55d",
+      "bytes": 380
+    },
+    {
+      "file": "n5-operator-test_xpu_attention_fast-v1.log",
+      "sha256": "9fc2567106f61077aa832a84ca1b8a9db9c479caa66a68e7f0f4ac3de3da09b3",
+      "bytes": 476
+    },
+    {
+      "file": "n5-operator-test_xpu_gdn_fp16_variable-v1-command.json",
+      "sha256": "f9720fa05a6bfde710cf80469267c1e422f2af54ed68e324332d7e6272b7ebb5",
+      "bytes": 1196
+    },
+    {
+      "file": "n5-operator-test_xpu_gdn_fp16_variable-v1-exit.json",
+      "sha256": "bbf1f4cb9a8a743b4b3a5f26fd20a58b4247763d1b6a748f3ca9c039b0706b24",
+      "bytes": 383
+    },
+    {
+      "file": "n5-operator-test_xpu_gdn_fp16_variable-v1.log",
+      "sha256": "999c45bf1ad43ca8532824bc464a0843f7f5a118bbfdd0751942b416f7aa6560",
+      "bytes": 294
+    },
+    {
+      "file": "n5-operator-test_xpu_qwen_exl3_fp16-v1-command.json",
+      "sha256": "1111f3db8211c00741aed351fb8acc75e147d463bddeca245d639e30ffab0875",
+      "bytes": 1205
+    },
+    {
+      "file": "n5-operator-test_xpu_qwen_exl3_fp16-v1-exit.json",
+      "sha256": "aaf9f378a990e1255390e26b4d72dc7025e9d96dfa4fbd7509f677d1cd4c81b5",
+      "bytes": 380
+    },
+    {
+      "file": "n5-operator-test_xpu_qwen_exl3_fp16-v1.log",
+      "sha256": "0bb97de90d0992ea646dc6b7414e62cdec4603ef0904fa847637b27e13ebc7f0",
+      "bytes": 303
+    },
+    {
+      "file": "n5-operator-test_xpu_vision_ops-v1-command.json",
+      "sha256": "579bc346776d180d58b11513b1621387a02a4f9bab5c29e44f2cb327cf58f946",
+      "bytes": 1144
+    },
+    {
+      "file": "n5-operator-test_xpu_vision_ops-v1-exit.json",
+      "sha256": "2787b1b01c902e5267569f3498614b050fb66744078d90944a5f11b411e5d473",
+      "bytes": 376
+    },
+    {
+      "file": "n5-operator-test_xpu_vision_ops-v1.log",
+      "sha256": "7aaa5aaf2e014c7cc7f2a0e408801bff2c070e5afcbc6a30da18b2c8c9d79306",
+      "bytes": 4562
+    },
+    {
+      "file": "n5-operator-test_xpu_vision_tower-v1-command.json",
+      "sha256": "6530aab4310c61cd4e3f3660dd70de0fc38542d7c4e7d03611ebfc41fb24fa04",
+      "bytes": 1191
+    },
+    {
+      "file": "n5-operator-test_xpu_vision_tower-v1-exit.json",
+      "sha256": "6d4825c2cccc3fe733a2c61526abdbba2a5f91a2089942d046e32d22a20c89b5",
+      "bytes": 378
+    },
+    {
+      "file": "n5-operator-test_xpu_vision_tower-v1.log",
+      "sha256": "21777b178292b3b4cc461948781f1d8f825f7258fdc0429d154e33d1df6d5bc5",
+      "bytes": 453
+    },
+    {
+      "file": "n5-operators-v1-summary.json",
+      "sha256": "cdeedce263c0be4d7b186e9c79229f1f37393c7a3a14c658987e9abdb6ba75d8",
+      "bytes": 2164
+    },
+    {
+      "file": "n5-pr-build-v1-command.json",
+      "sha256": "7e2438c9a5fb80a97d43b698f50b2b1a79472f4ba130b50baf64a6a607a24c0a",
+      "bytes": 1089
+    },
+    {
+      "file": "n5-pr-build-v1-exit.json",
+      "sha256": "6d5d728406c9e4971f689e4a332a4ebd574cb65c89977aa69ca3a7d095e16eae",
+      "bytes": 824
+    },
+    {
+      "file": "n5-pr-build-v1.log",
+      "sha256": "d45bd3b7f96d6c59a0dce37b5256064ffeb9f87d4765c717393c643a1b73f36e",
+      "bytes": 45012
+    },
+    {
+      "file": "n5-public-http-mtp0-v1-client.log",
+      "sha256": "15ad4daf3661fd554efc0a8c20447b31873384ca037e42c6a994fec8e1c978e1",
+      "bytes": 2103
+    },
+    {
+      "file": "n5-public-http-mtp0-v1-command.json",
+      "sha256": "50b43009c478e97688081fde272f2d45611482ab5f405dcb3c8ee18ee91038a6",
+      "bytes": 2510
+    },
+    {
+      "file": "n5-public-http-mtp0-v1-exit.json",
+      "sha256": "36571a33171d17dc26bfde1dc4355c80d51f0432c10456c9691ad0b02423d739",
+      "bytes": 2802
+    },
+    {
+      "file": "n5-public-http-mtp0-v1-fixtures-result.json",
+      "sha256": "de133aa170becfbee95a87f9dd23dae0ed2fb80f438c83ab77a678218849b892",
+      "bytes": 90639
+    },
+    {
+      "file": "n5-public-http-mtp0-v1-result.json",
+      "sha256": "55303fe44b1fd5160e3ecfdecae9550f4003b4e7cba6da472e37ee08b6efb425",
+      "bytes": 16739
+    },
+    {
+      "file": "n5-public-http-mtp0-v1-server.log",
+      "sha256": "5bc8da3f6b1b4a7e0073dfdd9b2c461210b37113a6db4094fc3c886d195b2f08",
+      "bytes": 144757
+    },
+    {
+      "file": "n5-public-http-mtp3-v1-client.log",
+      "sha256": "15ad4daf3661fd554efc0a8c20447b31873384ca037e42c6a994fec8e1c978e1",
+      "bytes": 2103
+    },
+    {
+      "file": "n5-public-http-mtp3-v1-command.json",
+      "sha256": "447fd816df7131a7dadd0527d839917719482db6c7fee5aa56034050c7204850",
+      "bytes": 2587
+    },
+    {
+      "file": "n5-public-http-mtp3-v1-exit.json",
+      "sha256": "c17ac9d797876b7340cd5d4f7f7d9c34a062b68df88f5e9013c6f791cd06e633",
+      "bytes": 2879
+    },
+    {
+      "file": "n5-public-http-mtp3-v1-fixtures-result.json",
+      "sha256": "baac006f780e0673d105d1980761ddefdc3567165b4cebb5b441e9c96a6cd226",
+      "bytes": 80336
+    },
+    {
+      "file": "n5-public-http-mtp3-v1-result.json",
+      "sha256": "0a72226a0b3b5cab3aa439b648a2470772380b067c592cdec4f02197faa53cc2",
+      "bytes": 15432
+    },
+    {
+      "file": "n5-public-http-mtp3-v1-server.log",
+      "sha256": "f9f28dd84701ed024bfce6cf80ae7cd6cb640199968def9b959f53e8abbeb3e3",
+      "bytes": 91284
+    },
+    {
+      "file": "n5-source-import-review-v1.json",
+      "sha256": "f6edfb3f526a5016ae71c57e329b78f2c00f3d8b8c2e704e0bd0ffd1276742f5",
+      "bytes": 299
+    },
+    {
+      "file": "n5-text-base-build-v1-command.json",
+      "sha256": "9ad19e98765f8a7d4dc3c1a7f7b5a360cde77594ac645ee7694e262e92dce838",
+      "bytes": 819
+    },
+    {
+      "file": "n5-text-base-build-v1-exit.json",
+      "sha256": "c5238485c4aa047e9a5e74b55b2af6335e47ff19ea34bcbfe8c19947efd52b94",
+      "bytes": 180
+    },
+    {
+      "file": "n5-text-base-build-v1.log",
+      "sha256": "f440b9634c2a44b7ca55f5b3ee83f3fbd5fad302e1b5d572e18eb7a0d9587248",
+      "bytes": 20861
+    },
+    {
+      "file": "n5-text-base-lease-v1-command.json",
+      "sha256": "0b42042acf2f0590988b2e31a452b387910b5ae6dec591c31be71c9f00253754",
+      "bytes": 813
+    },
+    {
+      "file": "n5-text-base-lease-v1-exit.json",
+      "sha256": "2963ee621cb400b31f46cb87e2880f13bf0f0c71b71c3bf4de081849084a1e37",
+      "bytes": 162
+    },
+    {
+      "file": "n5-text-base-lease-v1.log",
+      "sha256": "74f8ad4f3a6133b4e4dd7f60618758985fc2c362625f3a9a53b2654ab40284ff",
+      "bytes": 295
+    }
+  ],
+  "receipt_scope": "Hashes of actual local commands/logs/results; local deployment paths and raw captures are omitted from this public projection. Filtered-out cases are not passes. No full preflight or CI campaign was run.",
+  "limitations": [
+    "B70 bounded still-image target/MTP3 serving only; no complete Python-vision-feature or native/Python tensor/throughput parity.",
+    "Actual full accepted1/2 state controls retain their N3 identities; no fresh full actual accepted3-state proof.",
+    "Video/audio,remote URLs,all devices/codecs/shapes,simultaneous maximum contexts and262K image conversations remain unqualified.",
+    "Inherited broader text-reference/performance and historical automatic publication gates remain open.",
+    "Backend counters exclude untracked driver/library allocation; contexts and free workspaces may remain intentionally resident."
+  ]
+}

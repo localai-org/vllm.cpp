@@ -77,7 +77,8 @@ v1::KVCacheConfig MakeQwen3_5KVCache(const HfConfig& config, int block_size,
 // state per in-flight request (27B: ~144 MiB/request/slot over 48 GDN layers;
 // 35B: ~60 MiB over 30). This is inherent to vLLM's scheme; we mirror it.
 v1::KVCacheConfig MakeQwen3_5KVCacheSpec(const HfConfig& config, int block_size,
-                                         int num_blocks, int num_spec);
+                                         int num_blocks, int num_spec,
+                                         bool share_mtp_pages = false);
 
 // Wraps a host logits vector into a ForwardLogits (rows inferred from vocab).
 ForwardLogits HostLogits(std::vector<float>&& host, int64_t vocab);

@@ -35,6 +35,7 @@
 #include <functional>
 
 #include "vllm/model_executor/layers/quantization/fp8_block_quant.h"
+#include "vllm/model_executor/model_loader/gptq4_weight.h"
 #include "vllm/model_executor/models/qwen3_5_weights.h"  // OwnedTensor, Gdn/FullAttn weights, TensorResolver
 #include "vllm/model_executor/models/qwen3_vl_vision.h"  // MODEL-QWEN35-DENSE-VL-EXL3: the dense arm's tower
 #include "vllm/transformers_utils/hf_config.h"
@@ -42,6 +43,8 @@
 #include "vt/tensor.h"
 
 namespace vllm {
+
+struct ModelForwardInput;
 
 // Dense SwiGLU MLP (replaces the 35B MoE block). Synthetic/legacy projections
 // use Matmul-B [in,out], ordinary BF16 checkpoints use one raw-NK gate/up
@@ -97,14 +100,14 @@ struct DenseMlpWeights {
   mutable std::shared_ptr<void> d_gate_up_alpha;
 
   // QUANT-EXL3 (#2181) / MODEL-QWEN35-EXL3 (#2495 item 3): the exllamav3
-  // trellis arm of the dense SwiGLU MLP. gate and up stay SEPARATE for the
-  // same reason the attention shards do -- a trellis merge on the output dim
-  // interleaves per input tile -- and `layers::Exl3MlpGateUpMethod` is the
-  // shared seam that consumes the pair, so the model never learns which scheme
-  // it bound. Exactly one representation is populated per layer.
+  // trellis arm of the dense SwiGLU MLP. The checkpoint shards remain available
+  // for diagnostics; the scoped XPU FP16 path lazily builds one packed resident
+  // with independent gate/up input transforms. Exactly one representation is
+  // populated per layer.
   Exl3Weight gate_proj_exl3;  // [K=H, N=I]
   Exl3Weight up_proj_exl3;    // [K=H, N=I]
   Exl3Weight down_proj_exl3;  // [K=I, N=H]
+  mutable Exl3GroupedWeight gate_up_exl3;
 
   // `down_proj_exl3`, mirroring `Qwen3DenseMlpWeights::IsExl3` in `qwen3.h`:
   // down is the projection that has no merged twin in any arm, so it is the one
@@ -121,18 +124,81 @@ struct DenseGateUpGlobals {
   float alpha = 0.0F;
 };
 
+// Packed GPTQ text projections only. The unquantized norms, BA, convolution,
+// embedding and head remain separate dense owners. One merged owner is built
+// directly from each checkpoint projection group, so no split packed copy is
+// retained alongside it.
+struct DenseGptq4LayerWeights {
+  Gptq4Weight gdn_qkvz;
+  Gptq4Weight gdn_out;
+  Gptq4Weight attn_qkv;
+  Gptq4Weight attn_out;
+  Gptq4Weight mlp_gate_up;
+  Gptq4Weight mlp_down;
+
+  bool Empty() const { return mlp_down.k == 0; }
+  size_t ResidentBytes() const {
+    return gdn_qkvz.ResidentBytes() + gdn_out.ResidentBytes() +
+           attn_qkv.ResidentBytes() + attn_out.ResidentBytes() +
+           mlp_gate_up.ResidentBytes() + mlp_down.ResidentBytes();
+  }
+  void PrepareResident(vt::Queue& queue) const {
+    const auto stage = [&queue](const Gptq4Weight& weight) {
+      if (weight.k != 0) (void)PrepareGptq4Resident(weight, queue);
+    };
+    stage(gdn_qkvz);
+    stage(gdn_out);
+    stage(attn_qkv);
+    stage(attn_out);
+    stage(mlp_gate_up);
+    stage(mlp_down);
+  }
+};
+
+// Resolved per loaded dense model. KV cache storage remains independently
+// selectable by the runner; `kv_auto` is only the checkpoint's auto default.
+struct DenseExecutionPrecision {
+  vt::DType activation = vt::DType::kBF16;
+  vt::DType dense_weight = vt::DType::kBF16;
+  vt::DType kv_auto = vt::DType::kBF16;
+  vt::DType gdn_conv_state = vt::DType::kBF16;
+  vt::DType gdn_recurrent_state = vt::DType::kF32;
+  vt::DType sampler = vt::DType::kF32;
+};
+
+DenseExecutionPrecision ResolveQwen3_5DensePrecision(const HfConfig& config,
+                                                     bool gptq4_checkpoint,
+                                                     bool exl3_checkpoint = false);
+
 DenseGateUpGlobals MergeDenseGateUpGlobals(const Nvfp4Weight& gate,
                                            const Nvfp4Weight& up);
 
 // One dense decoder layer: input/post norms + one attention variant + dense MLP.
 struct Qwen3_5DenseLayerWeights {
   bool is_linear_attention = false;
-  OwnedTensor input_layernorm;           // bf16 [H]
-  OwnedTensor post_attention_layernorm;  // bf16 [H]
+  OwnedTensor input_layernorm;           // model dtype [H]
+  OwnedTensor post_attention_layernorm;  // model dtype [H]
   GdnLayerWeights gdn;                    // valid iff is_linear_attention
   FullAttnLayerWeights attn;             // valid iff !is_linear_attention
   DenseMlpWeights mlp;                   // every layer has a dense MLP
+  DenseGptq4LayerWeights gptq4;         // packed GPTQ text projection owners
 };
+
+// Load the GPTQ projection portion of one text layer. This keeps the packed
+// owner and merge contract independently testable. FP16 execution follows in
+// GPTQ-03; the loader preserves the dense remainder as FP16 already.
+DenseGptq4LayerWeights LoadQwen3_5DenseGptq4Projections(
+    const TensorResolver& get,
+    const std::function<bool(const std::string&)>& has,
+    const HfConfig& config, int64_t layer_idx,
+    const std::string& backbone_prefix);
+
+// Validate and load all 400 text GPTQ projections without touching vision,
+// MTP, or the unquantized remainder. With a queue, each layer is uploaded and
+// its host staging buffers released before the next layer is read.
+std::vector<DenseGptq4LayerWeights> LoadQwen3_5DenseGptq4TextProjections(
+    const std::vector<SafetensorsFile>& shards, const HfConfig& config,
+    vt::Queue* load_queue = nullptr);
 
 // Whole dense-model text weights. The CHECKPOINT may store the head BF16, FP8
 // (per-channel scale) or ModelOpt NVFP4 — the 27B NVFP4 publishers disagree, and
@@ -140,9 +206,16 @@ struct Qwen3_5DenseLayerWeights {
 // materialized into `lm_head`, NVFP4 stays PACKED in `lm_head_fp4`
 // (PERF-27B-LMHEAD-FP4, issue #213); exactly one is populated.
 struct Qwen3_5DenseWeights {
-  OwnedTensor embed_tokens;  // bf16 [vocab, H]  (NOT transposed; embed lookup)
-  OwnedTensor final_norm;    // bf16 [H]
-  OwnedTensor lm_head;       // bf16 [H, vocab]  (dequantized -> Matmul-B layout)
+  DenseExecutionPrecision precision;
+  // GPTQ owners use FP16 for the unquantized remainder. Execution is enabled
+  // by the scoped FP16 work in GPTQ-03; this flag prevents BF16 fallthrough.
+  bool gptq4_checkpoint = false;
+  // EXL3 storage follows the pinned FP16 text recipe independently of the
+  // export config's BF16 dtype declaration. Recurrent state remains FP32.
+  bool exl3_checkpoint = false;
+  OwnedTensor embed_tokens;  // BF16 normally, GPTQ/EXL3 F16 [vocab,H]
+  OwnedTensor final_norm;    // BF16 normally, GPTQ/EXL3 F16 [H]
+  OwnedTensor lm_head;       // BF16 [H,vocab] normally; GPTQ F16 raw [vocab,H]
   // NVFP4-resident output head [N=vocab, K=H], kept in the on-disk orientation the
   // fp4 GEMMs read. Mirrors Qwen3_5MoeWeights::lm_head_fp4 and vLLM's own decision
   // to leave the head quantized: get_quant_method accepts ParallelLMHead
@@ -183,6 +256,12 @@ struct Qwen3_5DenseWeights {
   // unread because every modality the tower serves was at limit 0. Distinct
   // from a text-only checkpoint, where this and `has_visual` are both false.
   bool vision_skipped = false;
+
+  size_t Gptq4ResidentBytes() const {
+    size_t total = 0;
+    for (const auto& layer : layers) total += layer.gptq4.ResidentBytes();
+    return total;
+  }
 };
 
 // True iff the projection named `name` is a W4A4-quantized Linear in the 27B
@@ -328,7 +407,7 @@ Qwen3_5DenseLayerWeights LoadQwen3_5DenseLayer(
     const TensorResolver& get, const std::function<bool(const std::string&)>& has,
     const std::string& layer_type, int64_t layer_idx,
     const std::string& backbone_prefix,
-    const Fp8BlockQuantConfig& block);
+    const Fp8BlockQuantConfig& block, bool exl3_fp16 = false);
 
 Qwen3_5DenseLayerWeights LoadQwen3_5DenseLayer(
     const TensorResolver& get, const std::function<bool(const std::string&)>& has,
@@ -583,12 +662,14 @@ class Qwen3_5DenseDecodeGraph {
   Qwen3_5DenseDecodeGraph(const Qwen3_5DenseDecodeGraph&) = delete;
   Qwen3_5DenseDecodeGraph& operator=(const Qwen3_5DenseDecodeGraph&) = delete;
 
-  // One PURE-DECODE step. Returns the [B, vocab] f32 logits as a DEVICE-resident
-  // ForwardLogits (the captured graph's output stays on device — a view over the
-  // slot's persistent logits buffer; the eager fallback owns a pool block), fed
-  // straight to the sampler with NO full-logits D2H. Bit-identical to
-  // Qwen3_5DenseModel::Forward for the same inputs/caches. The caller must only
-  // route pure-decode batches here (all query_len==1, no prefill).
+  // One supported uniform decode/verification step, without prefill. Logits
+  // remain device-resident for the sampler. With hidden_out, the normalized
+  // hidden tap and logits share an owning lease and one-shot producer event;
+  // retaining either output prevents reuse of both destinations. A consumer
+  // on another queue must WaitReady and retain its carrier until its queued
+  // reads finish. The graph may retire while those output owners remain live.
+  // Without hidden_out, captured logits and aux taps are slot-local views
+  // valid until that slot is reused; the eager fallback owns its output.
   ForwardLogits Step(const std::vector<int32_t>& token_ids,
                      const std::vector<int32_t>& positions,
                      const v1::CommonAttentionMetadata& attn_meta,
@@ -601,7 +682,12 @@ class Qwen3_5DenseDecodeGraph {
                      // valid until this slot's next replay, the same contract the
                      // returned logits already carry. Null keeps the pure-decode
                      // behavior byte-identical.
-                     Qwen3_5AuxTaps* aux_out = nullptr);
+                     Qwen3_5AuxTaps* aux_out = nullptr,
+                     // MTP normalized [T,H] output with paired ownership above;
+                     // mutually exclusive with aux_out.
+                     Qwen3_5MTPHiddenStates* hidden_out = nullptr,
+                     // Borrowed full MM input; staged into graph-owned buffers.
+                     const ModelForwardInput* multimodal_input = nullptr);
 
   // Diagnostics (A/B + tests): is a graph currently captured, and how many
   // replays have run since the last (re)capture.

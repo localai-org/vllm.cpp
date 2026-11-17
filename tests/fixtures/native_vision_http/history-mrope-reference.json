@@ -1,0 +1,23 @@
+{
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "source_sha256": "22f02a1ee1faba276a93243d23ecada1094484e39e5bde79452d8a44f32238ba",
+  "scope": "executed CPU M-RoPE for a frozen one-image conversation history; no learned-inference quality proof",
+  "encoding": "row-major 3xT signed int32 little-endian, SHA-256",
+  "assistant_text": "The large heading at the top of the image reads \"ORBIT 731\" in bold, black, uppercase letters.\n\nOn the left side of the image, there is a solid red circle.\n\nOn the right side of the image, there is a solid blue square.\n\nBoth shapes are positioned side",
+  "assistant_text_sha256": "dcbdf0cc7323d994dfa2518e45b71a34a572cfee75ae333e5e455cc9b8fb2259",
+  "cases": [
+    {
+      "offset": 1599,
+      "prompt_tokens": 1957,
+      "grid": [
+        1,
+        24,
+        32
+      ],
+      "length": 192,
+      "delta": -176,
+      "tokens_sha256": "8a8e37cef1933985d709b4f11131ade1a5625abe67453e1cdd3536bc393def54",
+      "positions_sha256": "fbdd2e4ff8597df78580ce61204e44ea220da8fad48d8ecf9470066bfaa927d9"
+    }
+  ]
+}

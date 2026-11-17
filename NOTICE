@@ -15,6 +15,23 @@ ports, and/or vendors code from third-party projects, including:
   - Marlin / GPTQ-Marlin mixed-precision kernels (Apache-2.0), as vendored
     by vLLM under src/vt/cuda/marlin/.
   - NVIDIA CUTLASS (BSD-3-Clause) — used for FP4/FP8 GEMM kernels.
+  - 0xSero/exl3xpu (MIT), commit c59d9442aba8610188837e37724600f1517d7335:
+    ESIMD header under third_party/exl3xpu/ and marked native XPU adaptations.
+    Its copyright and full license are retained in that directory.
+  - vllm-project/vllm-xpu-kernels (Apache-2.0 with BSD-3-Clause headers):
+    adapted attention sources from 6d92b1bfbf32767ecda8e819613eb151e70030ad
+    under third_party/b70_xe2_prefill/ and third_party/b70_xe2_verify/;
+    GDN sources from ddf336d86e3c8602888572a3502f951abd51df12 under
+    third_party/b70_gdn_xe2/. Directory licenses and individual Intel/Codeplay
+    BSD notices are retained; the directory license does not replace them.
+  - Intel SYCL-TLA (BSD-3-Clause), commit
+    87f6850680a580654b9ea2c80dbc01aeb36ad231: optional external Xe2 header
+    dependency and copied helpers with their source notices retained.
+    Binary distributions using it must carry its LICENSE.txt.
+  - oneDNN (Apache-2.0): optional shared SYCL dependency, not vendored here.
+    VLLM_CPP_XPU_ONEDNN (or its GPTQ4 compatibility alias) requires 3.13.0.
+    Distributions carrying the library must retain its license and the notices
+    of included third-party components. Source pins are documented in docs/EXL3_XPU.md.
   - xgrammar (Apache-2.0) — C++ grammar core, vendored for structured output.
   - cpp-httplib (MIT) and nlohmann/json (MIT) — header-only dependencies.
   - OpenSSL (Apache-2.0) — a DYNAMIC SYSTEM dependency, not vendored and not
@@ -30,6 +47,20 @@ ports, and/or vendors code from third-party projects, including:
   - google/minja (MIT) - header-only Jinja engine vendored under
     third_party/minja/ (with its LICENSE), used as the chat-template renderer
     in src/vllm/entrypoints/chat_template.cpp.
+  - libpng (PNG Reference Library License) and libjpeg/libjpeg-turbo
+    (IJG License; libjpeg-turbo also retains its BSD/zlib component notices):
+    optional system dependencies for native image decoding. No codec source
+    is vendored. Binary distributors must retain the dependency notices.
+    See docs/EXL3_XPU_VISION_SERVING.md for the tested versions and build option.
+  - PyTorch (BSD-3-Clause), commit cf30153c4c131c8164ee7798e5022d810682e2cb:
+    native CPU uint8 antialiased image-resize adaptation. Its full notice is
+    retained under third_party/pytorch_vision_resize/LICENSE; no Torch runtime
+    is linked by this implementation.
+  - Intel torch-xpu-ops (Apache-2.0), commit
+    bc294243807debb350dca694049ba7a806dfdceb: native XPU LayerNorm reduction
+    and GELU activation adaptations. Copyright 2020-2026 Intel Corporation.
+    The license is retained
+    under third_party/torch_xpu_layer_norm/LICENSE; no Torch runtime is linked.
 
 Each such component remains under its own license; the notices and license
 texts of vendored third-party code are retained in their respective source

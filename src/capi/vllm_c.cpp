@@ -472,6 +472,7 @@ vllm::entrypoints::openai::OpenAIServingChat& EnsureChatServing(
     mm_ctx.codec = vllm::entrypoints::openai::DefaultImageCodec();
     mm_ctx.mm_config = &engine->loaded->mm_config();
     mm_ctx.config = &engine->loaded->config();
+    mm_ctx.device = engine->loaded->runner().device();
     mm_ctx.mmproj_path = engine->mmproj_path;
     mm_ctx.max_model_len = engine->loaded->max_model_len();
     // The install announces every outcome on the stream it is given, exactly as

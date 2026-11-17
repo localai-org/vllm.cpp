@@ -1013,3 +1013,43 @@ TEST_CASE("async_llm: depth-2 batch-queue step folds IterationStats") {
   CHECK(MetricValue(t, std::string("vllm:e2e_request_latency_seconds_sum") +
                            kLabels) > 0.0);
 }
+
+TEST_CASE("async_llm: computed prompt metric includes every tokenless chunk") {
+  InitHash();
+  auto tokenizer = BuildFixture();
+  auto cfg = SchedulerConfig{};
+  cfg.max_num_seqs = 1;
+  cfg.max_num_batched_tokens = 2;
+  cfg.max_model_len = 8192;
+  cfg.enable_chunked_prefill = true;
+  cfg.watermark = 0.0;
+  KVCacheConfig kv;
+  kv.num_blocks = 32;
+  kv.kv_cache_groups.emplace_back(std::vector<std::string>{"layer"},
+      std::make_shared<FullAttentionSpec>(16, 1, 1, DType::kF32));
+  Scheduler scheduler(cfg, kv, 16, true);
+  class ChunkedRunner final : public RunnerStub {
+   public:
+    ModelRunnerOutput sample_tokens(const std::optional<vllm::v1::GrammarOutput>& grammar) override {
+      auto out = RunnerStub::sample_tokens(grammar);
+      if (samples_++ < 3) for (auto& tokens : out.sampled_token_ids) tokens.clear();
+      return out;
+    }
+   private:
+    int samples_ = 0;
+  } runner;
+  Executor executor(runner);
+  const auto config = MakeConfig();
+  InputProcessor input(tokenizer, config);
+  OutputProcessor output(&tokenizer);
+  AsyncLLM engine(input, scheduler, executor, output,
+      get_request_block_hasher(16, sha256_cbor), 0, 1);
+  PrometheusStatLogger logger("m", 8192);
+  engine.set_stat_logger(&logger);
+  const auto request = engine.add_request("computed", std::vector<int32_t>(7, 1),
+      Params(2, RequestOutputKind::kDelta));
+  CHECK(Drain(engine, request) == 2);
+  engine.shutdown();
+  CHECK(MetricValue(logger.Expose(),
+      "vllm:prefill_kv_computed_tokens_total{model_name=\"m\",engine=\"0\"}") == 7);
+}

@@ -1,0 +1,299 @@
+{
+  "image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "torch": "2.13.0+xpu",
+  "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+  "torchvision": "0.28.0+xpu",
+  "transformers": "5.16.1",
+  "torch_cpu_capability": "AVX512",
+  "resize_entrypoint": "torchvision.transforms.v2.functional.resize",
+  "cases": [
+    {
+      "input_hw": [
+        37,
+        53
+      ],
+      "output_hw": [
+        32,
+        64
+      ],
+      "file": "case-0.rgb",
+      "sha256": "91d418c3ae2bd97bbb9ef3be6d5523255468f6e2ef8417f543390b79e97750e5"
+    },
+    {
+      "input_hw": [
+        19,
+        13
+      ],
+      "output_hw": [
+        64,
+        32
+      ],
+      "file": "case-1.rgb",
+      "sha256": "cc3d46b99e2b1e5b78d7ba0ba6ebc497cd6cfed305a8347601cb6f090e026e8c"
+    },
+    {
+      "input_hw": [
+        129,
+        97
+      ],
+      "output_hw": [
+        32,
+        32
+      ],
+      "file": "case-2.rgb",
+      "sha256": "8e8f772196d2ed430f5b0002c90bfddc3bccb10d9e7cc94adef4b9f47c237e55"
+    },
+    {
+      "input_hw": [
+        31,
+        47
+      ],
+      "output_hw": [
+        31,
+        32
+      ],
+      "file": "case-3.rgb",
+      "sha256": "156f2b075de3373c47354f9337a685bae6f9ea332138b18018ae90a6d234ccbb"
+    },
+    {
+      "input_hw": [
+        31,
+        47
+      ],
+      "output_hw": [
+        64,
+        47
+      ],
+      "file": "case-4.rgb",
+      "sha256": "eed820129345fc0a879230a198b541c965e4542470eb854dd2cb2623c46cd67b"
+    },
+    {
+      "input_hw": [
+        32,
+        64
+      ],
+      "output_hw": [
+        32,
+        64
+      ],
+      "file": "case-5.rgb",
+      "sha256": "ed2f2448d422dd6e5ff8dc48d790853e2deb6fadb0019551c1a0ef00d421a529"
+    },
+    {
+      "input_hw": [
+        1,
+        7
+      ],
+      "output_hw": [
+        9,
+        13
+      ],
+      "file": "case-6.rgb",
+      "sha256": "79a533df73e18f6f2e689a3dc8e760a50885f7c8b0f04aad6b75f6f069e36e1f"
+    },
+    {
+      "input_hw": [
+        7,
+        1
+      ],
+      "output_hw": [
+        13,
+        9
+      ],
+      "file": "case-7.rgb",
+      "sha256": "18302c05409b91c1c6413cd5c8655c671b636c650ad9a29fe25deb66acf41421"
+    },
+    {
+      "input_hw": [
+        17,
+        19
+      ],
+      "output_hw": [
+        1,
+        1
+      ],
+      "file": "case-8.rgb",
+      "sha256": "4cf159d42c4f55a4ddc188c4c56f9bc7b3002ff1db9e5358578195f20feb2c08"
+    },
+    {
+      "input_hw": [
+        81,
+        99
+      ],
+      "output_hw": [
+        16,
+        32
+      ],
+      "file": "case-9.rgb",
+      "sha256": "f16f4492a0cc4ed642f8fc3cb55aeb23b6c68c0556f4aca08e7629bd208fffb4"
+    }
+  ],
+  "processor_cases": [
+    {
+      "input_hw": [
+        16,
+        16
+      ],
+      "config_file": "processor-0.json",
+      "patch_shape": [
+        16,
+        96
+      ],
+      "grid": [
+        1,
+        4,
+        4
+      ],
+      "files": {
+        "f32": {
+          "file": "processor-0.f32",
+          "sha256": "e2564da83558367bbdfd67da26210fa21fb93be0269548c971f7793bc649842b"
+        },
+        "f16": {
+          "file": "processor-0.f16",
+          "sha256": "0e4e6199da0b336b5bb4b767370c2d41022ae462a946a53b35001bf3763b2ff1"
+        }
+      }
+    },
+    {
+      "input_hw": [
+        17,
+        23
+      ],
+      "config_file": "processor-1.json",
+      "patch_shape": [
+        24,
+        96
+      ],
+      "grid": [
+        1,
+        4,
+        6
+      ],
+      "files": {
+        "f32": {
+          "file": "processor-1.f32",
+          "sha256": "3232fda9b6b60b9d07f588fefc7882f4ed78735acf483253dbca2611230c5c95"
+        },
+        "f16": {
+          "file": "processor-1.f16",
+          "sha256": "5efa62432a890c2cf46ead9e2f726ab20c3e863d6b1fb69219bd65c459ebdcb9"
+        }
+      }
+    },
+    {
+      "input_hw": [
+        3,
+        5
+      ],
+      "config_file": "processor-2.json",
+      "patch_shape": [
+        8,
+        96
+      ],
+      "grid": [
+        1,
+        2,
+        4
+      ],
+      "files": {
+        "f32": {
+          "file": "processor-2.f32",
+          "sha256": "d8557aad0a2dc4d9ee02a26c43c34aeabdf9b1e2146efc4f7992b84ce82828f1"
+        },
+        "f16": {
+          "file": "processor-2.f16",
+          "sha256": "aa4a6fa7d8e2e50abade2c456545a75780dfd8e12f4ea03c613a300da5981305"
+        }
+      }
+    },
+    {
+      "input_hw": [
+        65,
+        97
+      ],
+      "config_file": "processor-3.json",
+      "patch_shape": [
+        48,
+        96
+      ],
+      "grid": [
+        1,
+        6,
+        8
+      ],
+      "files": {
+        "f32": {
+          "file": "processor-3.f32",
+          "sha256": "a2695805ececbe66cbe2c34cf3a7fdd17b6de9ff53b53293509c795cf8df72d8"
+        },
+        "f16": {
+          "file": "processor-3.f16",
+          "sha256": "537b06237899377af7706266e3d7784571749f3afd7bf9c67f0e995dc4b97554"
+        }
+      }
+    }
+  ],
+  "smart_resize_cases": [
+    {
+      "input_hw": [
+        513,
+        385
+      ],
+      "output_hw": [
+        512,
+        384
+      ]
+    },
+    {
+      "input_hw": [
+        1,
+        199
+      ],
+      "output_hw": [
+        32,
+        3616
+      ]
+    },
+    {
+      "input_hw": [
+        80,
+        112
+      ],
+      "output_hw": [
+        224,
+        320
+      ]
+    },
+    {
+      "input_hw": [
+        1600,
+        3200
+      ],
+      "output_hw": [
+        1440,
+        2880
+      ]
+    },
+    {
+      "input_hw": [
+        384,
+        512
+      ],
+      "output_hw": [
+        384,
+        512
+      ]
+    },
+    {
+      "input_hw": [
+        65,
+        65
+      ],
+      "output_hw": [
+        256,
+        256
+      ]
+    }
+  ]
+}

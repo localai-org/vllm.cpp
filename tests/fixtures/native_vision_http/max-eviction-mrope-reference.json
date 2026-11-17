@@ -1,0 +1,38 @@
+{
+  "scope": "executed CPU reference positions for qualified max/small fixture grids; no learned inference",
+  "reference_image": "sha256:8d0e1dbe1e6a3a31e79b5ddcc1c050589c08721360af9374b9acd01236f97918",
+  "source_sha256": "22f02a1ee1faba276a93243d23ecada1094484e39e5bde79452d8a44f32238ba",
+  "config_sha256": "dab9abc478e1b1b928ef354f27a26fc90e8191a4a3ce5f3d19aa21558216b267",
+  "cases": [
+    {
+      "file": "orbit-max-2048.png",
+      "image_sha256": "ae8fe7c30f4b88f7247c25d6bd20b05e2bf18e96c20db2dafb689c8dd78c8d4d",
+      "offset": 4,
+      "rows": 4096,
+      "grid_thw": [
+        1,
+        128,
+        128
+      ],
+      "prompt_tokens": 4149,
+      "tokens_sha256": "9ca421118dcfd10564c57613583288df6d1c6e9df67e8c754bce462e38f82d91",
+      "positions_sha256": "e05402e750d5488cbdbb8e24204cb036f0b62cdc7095399b245729ee698fcf04",
+      "delta": -4032
+    },
+    {
+      "file": "comet.png",
+      "image_sha256": "0442d568bf10dffce6afdfd557fe471158a9d8ba87e95ba5029249f599418b02",
+      "offset": 4,
+      "rows": 192,
+      "grid_thw": [
+        1,
+        24,
+        32
+      ],
+      "prompt_tokens": 245,
+      "tokens_sha256": "df751a20acee442ff6870d64a35afebf532a3b33b2dd1fae09e44e2dc3fff194",
+      "positions_sha256": "7c858c838efc4a75d3e70fc2159f54ae7d27ee4574512364c964f390d7796c94",
+      "delta": -176
+    }
+  ]
+}

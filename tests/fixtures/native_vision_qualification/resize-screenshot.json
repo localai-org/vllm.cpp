@@ -1,0 +1,46 @@
+{
+  "scope": "derived resize-required screenshot, not an additional held-out task",
+  "source_sha256": "64b9a4d32165f433c348e1ac5f811d4f436dba31436d10b104f86335c605eed3",
+  "generation": {
+    "pillow": "12.3.0",
+    "operation": "RGB bicubic resize of authored 640x480 dialog to 853x641"
+  },
+  "task": {
+    "name": "backup-dialog-resize",
+    "file": "backup-dialog-resize.png",
+    "category": "screenshot/dialog",
+    "held_out": false,
+    "size": [
+      640,
+      480
+    ],
+    "media_type": "image/png",
+    "sha256": "fe17c140c8289a6652144f428bf8e2ea6f39f003a0f3b03c5eb21a3e2664993a",
+    "prompt": "What completion message, saved-file count, and button label are shown in the dialog? Respond only with a JSON object containing these string fields: title, file_count, button. Do not add explanation or other fields.",
+    "expected": {
+      "title": [
+        "Backup completed"
+      ],
+      "file_count": [
+        "18"
+      ],
+      "button": [
+        "Close"
+      ]
+    },
+    "size_wh": [
+      853,
+      641
+    ],
+    "processed_size_wh": [
+      864,
+      640
+    ],
+    "grid_thw": [
+      1,
+      40,
+      54
+    ],
+    "visual_rows": 540
+  }
+}

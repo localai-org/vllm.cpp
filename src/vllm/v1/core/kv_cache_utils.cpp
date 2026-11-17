@@ -1,3 +1,4 @@
+#include "vllm/v1/core/recurrent_prefix_snapshot.h"
 // Ported from: vllm/v1/core/kv_cache_utils.py @ e24d1b24
 // See include/vllm/v1/core/kv_cache_utils.h for scope, the BlockHash/Task 2
 // coordination note, and recorded deviations.
@@ -578,8 +579,9 @@ std::vector<BlockHash> hash_request_tokens(
 }
 
 BlockHasher get_request_block_hasher(int hash_block_size,
-                                     const HashFn& caching_hash_fn) {
-  return [hash_block_size, caching_hash_fn](
+                                     const HashFn& caching_hash_fn,
+                                     bool mtp_shifted_boundary) {
+  return [hash_block_size, caching_hash_fn, mtp_shifted_boundary](
              const Request& request) -> std::vector<BlockHash> {
     int start_token_idx =
         static_cast<int>(request.block_hashes.size()) * hash_block_size;
@@ -612,7 +614,8 @@ BlockHasher get_request_block_hasher(int hash_block_size,
     std::vector<BlockHash> new_block_hashes;
     while (true) {
       const int end_token_idx = start_token_idx + hash_block_size;
-      if (end_token_idx > num_tokens) {
+      if (end_token_idx > num_tokens ||
+          (mtp_shifted_boundary && end_token_idx == num_tokens)) {
         // We only hash full blocks.
         break;
       }
@@ -622,6 +625,11 @@ BlockHasher get_request_block_hasher(int hash_block_size,
       std::pair<ExtraKeys, int> extra = generate_block_hash_extra_keys(
           request, start_token_idx, end_token_idx, curr_mm_idx);
       curr_mm_idx = extra.second;
+      if (mtp_shifted_boundary) {
+        if (!extra.first) extra.first.emplace();
+        extra.first->emplace_back(std::make_pair(
+            std::string("mtp-next-token-v1"), int64_t(all_token_ids[end_token_idx])));
+      }
 
       std::vector<int32_t> block_tokens(all_token_ids.begin() + start_token_idx,
                                         all_token_ids.begin() + end_token_idx);
@@ -966,8 +974,9 @@ int64_t recurrent_state_bytes(const KVCacheConfig& kv_cfg, int max_num_seqs) {
     const int64_t slots_per_seq =
         static_cast<int64_t>(1 + mamba->num_speculative_blocks);
     const int64_t layers = static_cast<int64_t>(group.layer_names.size());
+    const int64_t prefix_slots = kv_cfg.recurrent_prefix_snapshots ? kv_cfg.recurrent_prefix_snapshots->capacity() : 0;
     total += mamba->page_size_bytes() * layers *
-             static_cast<int64_t>(max_num_seqs) * slots_per_seq;
+             (static_cast<int64_t>(max_num_seqs) * slots_per_seq + prefix_slots);
   }
   return total;
 }

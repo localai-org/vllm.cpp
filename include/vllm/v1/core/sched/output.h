@@ -100,6 +100,9 @@ struct NewRequestData {
   // ENG-MM-INPUT-PIPELINE P2 (#2379).
   std::vector<multimodal::MultiModalFeatureSpec> mm_features;
 
+  // Prompt hashes identify immutable recurrent snapshots at completed boundaries.
+  std::vector<std::string> prompt_block_hashes = {};
+
   // from_request: build the full payload from the Request + its allocated
   // per-group block ids. Copies req_id, prompt_token_ids, sampling_params,
   // block_ids, num_computed_tokens, mm_features, and the (optional)
