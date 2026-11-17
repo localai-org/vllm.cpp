@@ -337,6 +337,20 @@ jobs:
         # Standard library only, no artifact and no GPU.
         run: |
           python3 tests/scripts/test_q4exp_layerfp_diff.py
+      - name: The logits comparator keys on ids, refuses incomparable arms, and prints no KL
+        # Registered in TWO places, like the comparator above: here and in the
+        # `SUITES` array of `scripts/agent-preflight.sh`, and pinned in
+        # `REQUIRED_SUITE_REGISTRATIONS` so deleting either one reds
+        # `check-test-registration.py` rather than passing at rc=0 (#1833).
+        #
+        # `VT_Q4EXP_LOGITS` prints a RANKED top-k, so a rank-by-rank differ
+        # measures the sort rather than the model: one token crossing the cut reds
+        # every rank below it. The suite's red is that positional count beside the
+        # union one, and it also pins the KL refusal -- a renormalised top-k "KL"
+        # is EXACTLY 0 at k=1 with a shared argmax. Standard library only, no
+        # artifact and no GPU.
+        run: |
+          python3 tests/scripts/test_q4exp_logits_diff.py
       - name: The docs site's content invariants hold
         # `hugo version` first, deliberately. It is the one line that fails
         # LEGIBLY when the setup step above stopped providing a binary, and it

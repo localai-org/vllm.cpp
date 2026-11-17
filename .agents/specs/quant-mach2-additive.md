@@ -380,7 +380,22 @@ ngram table.
 
 1. **Logits.** Primary: `max |z_A - z_B| / (max z - min z)` per step - scale-free,
    so it does not move when a logit vector is merely shifted. Secondary: top-1
-   agreement, and `KL(p_B || p_A)` over the softmax.
+   agreement and the `top_dmax`/`rel_proj` columns of
+   `scripts/q4logit-diff.py`, which keys on the ID UNION: `pairs=` is a sorted
+   top-k, so a rank-by-rank differ reports every rank below a token that crossed
+   the cut as a difference, k apparent differences for one real move.
+
+   **No KL from this capture, and this row first said otherwise.** The secondary
+   metric here was `KL(p_B || p_A)` over the softmax. `VT_Q4EXP_LOGITS` prints a
+   ranked top-k and cannot support it: renormalised over the union of two cuts the
+   quantity is KL between DIFFERENT measures on a different support, so the tap's
+   own `VT_Q4EXP_LOGITS` budget moves the number a gate would compare; the omitted
+   tail terms are negative where `q_i > p_i`, so the partial sum bounds the true KL
+   on neither side; and at `k = 1` with a shared argmax it is EXACTLY 0 while the
+   arms still differ. The comparator therefore REFUSES `--kl` rather than printing
+   a number wearing that name. An exact KL needs the full row on both arms (an
+   `n`-float line, ~600 KB at `n = 151936`), which is a tap change owing its own
+   spec and red-first test: OWED, not done.
 2. **Per-layer activations.** `VT_Q4EXP_LAYER_FP` on both arms, compared with
    `scripts/q4exp-layerfp-diff.py`. The **`rel_proj` column is the one that
    counts**: `sumabs`/`S|x|` are sign-insensitive and under-report a true

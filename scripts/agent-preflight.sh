@@ -265,6 +265,7 @@ SUITES=(
   # from CI, while the tool it gates had never been run on a real fingerprint.
   # Standard library only, ~1.2 s, no artifact and no GPU.
   test_q4exp_layerfp_diff
+  test_q4exp_logits_diff
 )
 
 failed=()
