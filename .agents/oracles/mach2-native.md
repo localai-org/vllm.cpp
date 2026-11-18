@@ -13,25 +13,60 @@ primary denominator for this format.
 | Base checkpoint | `Qwen/Qwen3.8-Flash-Next` @ `de4b8e4d43b917e7706784d8bb445c9af86a3540` |
 | Text weights | 26.7 GB at 1.70 bits per weight, 125.7B parameters |
 | Alongside | n-gram embedding table at bf16, 102.4 GB; vision 0.9 GB at bf16 |
-| Read on | 2026-11-16 |
-| `gateable` | **no** |
+
+## Pin
+
+```oracle-pin
+id = mach2-native
+role = secondary
+upstream = https://github.com/SyzygyResearch/Mach-2-Additive-Medium
+scope = the Mach-2 additive codec only: a QTIP bitshift trellis whose codewords are D4 lattice integers applied with addition, the fn_packed_v2 packing that stores it, the per-tile wave scales and the radix-12/20 Hadamard rotations, which neither vLLM nor vLLM-Omni implements in any part
+pin = UNPINNED
+pin_label = main, 2026-11-16 (decode.py sha256 e27dbbe5)
+pinned_on = 2026-11-16
+gateable = no
+evidence = #3573
+```
+
+`pin` stays `UNPINNED` and that is a measurement, not a shorthand: the repository
+is not reachable from an authenticated GitHub token on 2026-11-18, so no commit of
+`main` can be resolved and this record will not invent one. What identifies the
+format instead is the file's bytes: `decode.py` read on 2026-11-16 has 17,766 of
+them and sha256 `e27dbbe500250364506f8b7e8afb46b7c86971c782c7e0824e49a851a1158b1e`,
+recorded in the spec. A pin by content is weaker than a pin by revision — it
+cannot be advanced, diffed, or followed — and it is named here rather than dressed
+up as a commit.
 
 ## Why `gateable = no`
 
-An oracle is gateable once it demonstrably builds and runs the model. Nothing has
-been run here: no weight was downloaded, no decoder was executed, and no GPU was
-leased. What is established is the **format**, read from the release decoder's
-own source. [`.agents/specs/quant-mach2-additive.md`](../specs/quant-mach2-additive.md)
-records the analysis.
+An oracle is gateable once it demonstrably builds and runs the model. The model
+has not been run: no weight was downloaded and no GPU was leased. What is
+established is the **format**, read from the release decoder's own source, and
+that decoder's agreement with our fixtures.
+[`.agents/specs/quant-mach2-additive.md`](../specs/quant-mach2-additive.md)
+records both.
 
-Two facts must be measured before this flips to `yes`:
+**The decoder's own runnability is retired, and this record said otherwise.** The
+earlier version of this section carried the mangled indentation of a 2026-11-16
+fetch as an open risk. The file downloads clean at 17,766 bytes with LF endings
+and intact indentation, `python3 -m py_compile decode.py` exits 0, and U1 and U2
+then ran that unmodified file over our fixtures — 51,184/51,200 values bit-identical
+at 160x320 (radix 20) and 4,601/4,608 at 96x48 (radix 12), residual about one ulp.
+The mangling was the fetch.
 
-1. That the published `decode.py` runs (it must `py_compile` and decode a real
-   shard). The text fetched on 2026-11-16 loses leading whitespace in places,
-   which would be an `IndentationError`; whether that is the file or the fetch is
-   **unverified**.
+Two facts about the ARTIFACT are still owed before this flips to `yes`, and
+[#3573](https://github.com/localai-org/vllm.cpp/issues/3573) owes both:
+
+1. That a **real published shard** decodes. Every fixture above is one we
+   generated; no file from the 26.7 GB text-weights release has been downloaded,
+   so the `format = fn_packed_v2` metadata every expert shard is said to carry
+   has never been read from the artifact that carries it.
 2. That a leased host can hold the artifact: ~26.7 GB of weights on a 32 GB GPU
-   plus ~105 GB of n-gram table in host RAM.
+   plus ~102.4 GB of bf16 n-gram table in host RAM.
+
+Until both land, the decode gate rests on a format read from source plus a
+differential measured on synthetic code streams — an oracle that has never seen
+the weights it is supposed to gate.
 
 ## What it is not
 
