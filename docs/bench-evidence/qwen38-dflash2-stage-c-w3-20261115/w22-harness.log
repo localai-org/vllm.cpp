@@ -1,0 +1,90 @@
+2026-11-16 16:02:25.217 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 16:02:25.217 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 16:02:25.217 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 16:02:25.217 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 16:02:49.992 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 16:02:49.992 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 16:02:50.021 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 16:02:50.021 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 16:02:50.021 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 16:02:50.021 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 16:02:50.022 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 16:02:50.107 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 16:02:50.357 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 16:02:50.357 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 16:02:50.357 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 16:02:50.357 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 16:02:50.357 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 16:02:51.156 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:15364:
+TEST CASE:  kTENSTORRENT W22 harness: the engine's poison-site op mix — the GEMM trio on one h (bfp8 weights), embed, RAC+PA, the DBuf hold
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 0 PA h0: max_abs=0.088588 at e25 got=-0.0291433
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 0 PA h1: max_abs=0.0889843 at e54 got=-0.0355813
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 0 PA h2: max_abs=4.7418e+30 at e10 got=4.7418e+30
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 0 PA h3: max_abs=0.124848 at e101 got=0
+
+./tests/vt/test_tenstorrent_backend.cpp:15716: MESSAGE: REP 0 PA: max_abs=4.7418e+30
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 5 PA h0: max_abs=0.0478396 at e113 got=-0.0911818
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 5 PA h1: max_abs=0.0374593 at e35 got=-0.0862994
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 5 PA h2: max_abs=0.104865 at e47 got=0
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 5 PA h3: max_abs=2.24905e+26 at e104 got=-2.24905e+26
+
+./tests/vt/test_tenstorrent_backend.cpp:15716: MESSAGE: REP 5 PA: max_abs=2.24905e+26
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 6 PA h0: max_abs=0.0432176 at e113 got=-0.0887404
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 6 PA h1: max_abs=0.0395341 at e123 got=-0.0799516
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 6 PA h2: max_abs=0.104361 at e20 got=0
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 6 PA h3: max_abs=2.24905e+26 at e112 got=-2.24905e+26
+
+./tests/vt/test_tenstorrent_backend.cpp:15716: MESSAGE: REP 6 PA: max_abs=2.24905e+26
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 31 PA h0: max_abs=0.0226686 at e109 got=-0.086299
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 31 PA h1: max_abs=0.0234388 at e78 got=-0.0838578
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 31 PA h2: max_abs=0.0877821 at e122 got=0
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 31 PA h3: max_abs=2.24905e+26 at e104 got=-2.24905e+26
+
+./tests/vt/test_tenstorrent_backend.cpp:15716: MESSAGE: REP 31 PA: max_abs=2.24905e+26
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 32 PA h0: max_abs=0.0244164 at e109 got=-0.0867873
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 32 PA h1: max_abs=0.0244949 at e78 got=-0.0848343
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 32 PA h2: max_abs=1.5318e+38 at e7 got=-1.5318e+38
+
+./tests/vt/test_tenstorrent_backend.cpp:15712: MESSAGE: REP 32 PA h3: max_abs=0.0888412 at e122 got=0
+
+./tests/vt/test_tenstorrent_backend.cpp:15716: MESSAGE: REP 32 PA: max_abs=1.5318e+38
+
+./tests/vt/test_tenstorrent_backend.cpp:15868: MESSAGE: w22 mix: rac_bad=0 embed_bad=0 pa_bad=5 mixed_bad=0 z_bad=0 outproj_bad=0 fill_bad=0 gather_bad=0 hold_bad=0/40
+
+./tests/vt/test_tenstorrent_backend.cpp:15877: ERROR: CHECK( pa_bad == 0 ) is NOT correct!
+  values: CHECK( 5 == 0 )
+
+===============================================================================
+[doctest] test cases:  1 |  0 passed | 1 failed | 126 skipped
+[doctest] assertions: 51 | 50 passed | 1 failed |
+[doctest] Status: FAILURE!
+2026-11-16 16:03:57.055 | info     |    BuildKernels | JIT cache stats: 89/89 hits (100.0%) [89 cached, 10 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 16:03:57.055 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 16:03:57.097 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 16:03:57.097 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 16:03:57.121 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 16:03:57.121 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 16:03:57.121 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

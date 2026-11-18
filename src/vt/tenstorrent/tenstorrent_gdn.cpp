@@ -1513,7 +1513,87 @@ void RmsNormGatedKernel(Queue&, Tensor& out, const Tensor& x, const Tensor& gate
     std::fflush(stderr);
   }
   ttnn::Tensor dev_y = ttnn::multiply(ttnn::rms_norm(dev_x, args.eps, dev_w), act);
+  // W22 PROBE 3 (ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the gated norm's
+  // OWN write. The W21 record's remaining poison is the GDN block's output
+  // garbage at l >= 1 ([MIXER-OUT] l=1 asum 2.00072e+40) with CLEAN
+  // gated-norm operands ([RNG-IN] x and g both clean) — the norm's commit
+  // and the out_proj's commit are the two unprobed writes between them.
+  // Three reads, the W20/W21 instrument shape: the norm's own output
+  // dual-read PRE-commit ([NORM-PRECOMMIT]), the committed shadow's
+  // dual-read POST-commit (DebugSlotTrustRead), and raw f32 dumps of both
+  // sides plus the operands (x, g, w) for the composed CPU reference.
+  // Eager-only, bounded to the spec geometry (rows == 432 == T=9 x Hv=48,
+  // d == 128), the first 2 spec-geometry calls.
+  const bool norm_probe = rows == 432 && d == 128 &&
+                          std::getenv("VT_DUMP_TRUST") != nullptr &&
+                          !tt_capture_active();
+  static std::atomic<int64_t> nm_seq{0};
+  const int64_t nm_dc =
+      norm_probe ? nm_seq.fetch_add(1, std::memory_order_relaxed) : -1;
+  if (norm_probe && nm_dc < 2) {
+    static const char* nm_dir = std::getenv("VT_TT_SPEC_DUMP");
+    std::vector<float> y1 = dev_y.to_vector<float>();
+    std::vector<float> y2 = dev_y.to_vector<float>();
+    double acc = 0.0;
+    uint64_t nan = 0, inf = 0, zero = 0;
+    for (float f : y1) {
+      if (std::isnan(f)) { ++nan; continue; }
+      if (std::isinf(f)) { ++inf; continue; }
+      if (f == 0.0f) { ++zero; continue; }
+      acc += f > 0.0f ? f : -f;
+    }
+    std::fprintf(stderr,
+                 "[NORM-PRECOMMIT] agree=%d n=%zu asum=%.6g nan=%llu "
+                 "inf=%llu zero=%llu y_addr=%llx\n",
+                 (y1 == y2) ? 1 : 0, y1.size(), acc,
+                 static_cast<unsigned long long>(nan),
+                 static_cast<unsigned long long>(inf),
+                 static_cast<unsigned long long>(zero),
+                 static_cast<unsigned long long>(
+                     dev_y.mesh_buffer().address()));
+    if (nm_dir != nullptr && nm_dir[0] != '\0') {
+      const std::string pfx = std::string(nm_dir) + "/norm" +
+                              std::to_string(nm_dc);
+      auto wr = [&](const std::string& path, const std::vector<float>& v) {
+        std::FILE* f = std::fopen(path.c_str(), "wb");
+        if (f != nullptr) {
+          std::fwrite(v.data(), 4, v.size(), f);
+          std::fclose(f);
+        }
+      };
+      wr(pfx + "_precommit.f32", y1);
+      wr(pfx + "_x.f32", dev_x.to_vector<float>());
+      wr(pfx + "_g.f32", dev_g.to_vector<float>());
+      wr(pfx + "_w.f32", dev_w.to_vector<float>());
+    }
+  }
   CommitDeviceLogical2D(out, std::move(dev_y), rows, d);
+  if (norm_probe && nm_dc < 2) {
+    char tag[64];
+    std::snprintf(tag, sizeof(tag), "norm-commit-%lld",
+                  static_cast<long long>(nm_dc));
+    DebugSlotTrustRead(out, tag);
+    static const char* nm_dir2 = std::getenv("VT_TT_SPEC_DUMP");
+    if (nm_dir2 != nullptr && nm_dir2[0] != '\0') {
+      std::optional<ttnn::Tensor> committed;
+      {
+        std::lock_guard<std::mutex> g(SlotMutex());
+        BufferSlot* s = FindSlot(out.data);
+        if (s != nullptr && s->device_current && s->device.has_value())
+          committed = *s->device;
+      }
+      if (committed.has_value()) {
+        std::vector<float> cv = committed->to_vector<float>();
+        std::FILE* f = std::fopen(
+            (std::string(nm_dir2) + "/norm" + std::to_string(nm_dc) +
+             "_committed.f32").c_str(), "wb");
+        if (f != nullptr) {
+          std::fwrite(cv.data(), 4, cv.size(), f);
+          std::fclose(f);
+        }
+      }
+    }
+  }
 }
 
 // kCausalConv1dFwd: depthwise causal conv over time with the rolling
@@ -1741,6 +1821,36 @@ ttnn::Tensor ScatterRowsExact(const ttnn::Tensor& cache2d,
   // always run and the W21 concat-side dumps confirm faithful (out == src ++
   // tail). The identity fast path was tried here and broke the scatter test's
   // volume contract — reverted; the fill stays for this form.
+  //
+  // W22 residual-risk guard: the multi-replacement STRICTLY-ASCENDING id
+  // form with a gap is the MEASURED miswrite class — in the engine the
+  // k-th replacement row lands at id[k]+k (w21-specdump cs0_filled: ids
+  // [0,9,18,27,36,45,54,63,72] wrote at blocks [0,10,20,30,40,50,60,70,72] —
+  // rows 1-7 displaced to id[k]+k), and the miswrite
+  // survives a program-cache bust. Handing this form to indexed_fill again
+  // would silently corrupt every unnamed slot between the named ones, so it
+  // is refused by name; a caller that needs it must use an exact elementwise
+  // form (the broadcast-mask multiply the conv-spec fill now runs,
+  // tenstorrent_gdn.cpp kCausalConv1dSpecUpdate). Unsorted forms ({4,0,2},
+  // {1,3,0}), duplicate-slot forms ({0,2,2}) and the consecutive [0..F)
+  // state commits are the measured-faithful / test-exercised forms and stay
+  // legal, as does the single-replacement fill.
+  if (bid.size() > 1) {
+    bool ascending = true, gapped = false;
+    for (size_t k = 0; k + 1 < bid.size(); ++k) {
+      if (bid[k + 1] <= bid[k]) { ascending = false; break; }
+      if (bid[k + 1] > bid[k] + 1) gapped = true;
+    }
+    VT_CHECK(!(ascending && gapped),
+             "tenstorrent ScatterRowsExact: refusing the multi-replacement "
+             "strictly-ascending id form with a gap — the W21-measured "
+             "ttnn::indexed_fill miswrite class (the k-th replacement row "
+             "lands at id[k]+k; measured at ids [0,9,...,72] on the P150, "
+             "w21-specdump cs0_filled). Use an exact elementwise form (the "
+             "conv-spec fill's broadcast-mask multiply) or a form the "
+             "scatter is measured faithful on (unsorted, duplicate-slot, "
+             "consecutive [0..F))");
+  }
   ttnn::Tensor bid_dev = UploadIdxU32(
       std::move(blocks), ttnn::Shape({unb}), ttnn::Layout::ROW_MAJOR, device);
   // indexed_fill wants rank-4 on dim 0, and the rank change must stay a
@@ -3848,33 +3958,19 @@ void GdnSpecDecodeKernel(Queue&, Tensor& out, const Tensor& q_in, const Tensor& 
         if (f) { std::fwrite(cv.data(), 4, cv.size(), f); std::fclose(f); }
       }
     }
-    // TT-GDN-REGION-REPLAY: commit INTO the persistent shadow (ttnn::copy —
-    // the capture-safe preallocated-destination write) so the next step's
-    // gather reads the advanced slots at the SAME address.
-    const auto same_spec = [](const ttnn::Tensor& a, const ttnn::Tensor& b) {
-      if (a.dtype() != b.dtype() || a.layout() != b.layout()) return false;
-      const auto sa = a.logical_shape(), sb = b.logical_shape();
-      if (sa.rank() != sb.rank()) return false;
-      for (uint32_t r = 0; r < sa.rank(); ++r)
-        if (sa[r] != sb[r]) return false;
-      return true;
-    };
-    if (same_spec(next, cache2d)) {
-      // W21: the spec kernel is EAGER-ONLY (the capture refusal above), so the
-      // TT-GDN-REGION-REPLAY in-place copy is not required here — and the W21
-      // evidence shows the copy DOES NOT LAND in the engine (the cache shadow
-      // reads its pre-copy content after ttnn::copy; the snapshots' bytes are
-      // lost). Install the committed tensor as the slot's shadow directly:
-      // CommitDeviceLogical2D replaces s->device, so the next call's
-      // EnsureGdnCacheDevice fast path serves exactly these bytes.
-      CommitDeviceLogical2D(state, std::move(next),
-                            static_cast<uint32_t>(slots),
-                            static_cast<uint32_t>(row_elems));
-    } else {
-      CommitDeviceLogical2D(state, std::move(next),
-                            static_cast<uint32_t>(slots),
-                            static_cast<uint32_t>(row_elems));
-    }
+    // W21: the spec kernel is EAGER-ONLY (the capture refusal at this
+    // kernel's head), so the TT-GDN-REGION-REPLAY in-place ttnn::copy is not
+    // required here — and the W21 evidence shows the copy DOES NOT LAND in
+    // the engine (the cache shadow reads its pre-copy content after
+    // ttnn::copy; the snapshots' bytes are lost). Install the committed
+    // tensor as the slot's shadow directly: CommitDeviceLogical2D replaces
+    // s->device, so the next call's EnsureGdnCacheDevice fast path serves
+    // exactly these bytes. The captured-decode path keeps its real
+    // same-geometry ttnn::copy branch at the GdnDecode commit (the kernel
+    // above); this spec arm has no capture to serve.
+    CommitDeviceLogical2D(state, std::move(next),
+                          static_cast<uint32_t>(slots),
+                          static_cast<uint32_t>(row_elems));
   }
 }
 

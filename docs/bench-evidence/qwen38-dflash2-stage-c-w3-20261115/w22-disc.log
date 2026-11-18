@@ -1,0 +1,72 @@
+2026-11-16 16:10:50.586 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:223)
+2026-11-16 16:10:50.587 | info     |             UMD | Cluster constructor started. (cluster.cpp:405)
+2026-11-16 16:10:50.587 | info     |             UMD | Creating TopologyDiscovery for architecture: blackhole (topology_discovery.cpp:131)
+2026-11-16 16:10:50.587 | info     |             UMD | Starting topology discovery. (topology_discovery.cpp:150)
+2026-11-16 16:11:15.374 | info     |             UMD | Established firmware bundle version: 19.15.0 (topology_discovery.cpp:654)
+2026-11-16 16:11:15.375 | info     |             UMD | Completed topology discovery. (topology_discovery.cpp:154)
+2026-11-16 16:11:15.404 | info     |             UMD | Opening local chip ids/PCIe ids: {0}/[0] and remote chip ids {} (cluster.cpp:172)
+2026-11-16 16:11:15.404 | info     |             UMD | IOMMU: enabled (cluster.cpp:146)
+2026-11-16 16:11:15.404 | info     |             UMD | KMD version: 2.11.1 (cluster.cpp:149)
+2026-11-16 16:11:15.404 | info     |             UMD | Cluster constructor completed. (cluster.cpp:719)
+2026-11-16 16:11:15.405 | info     |             UMD | Starting devices in cluster (cluster.cpp:1305)
+2026-11-16 16:11:15.489 | info     |             UMD | Starting devices in cluster completed. (cluster.cpp:1314)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+2026-11-16 16:11:15.535 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:439)
+2026-11-16 16:11:15.535 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:501)
+2026-11-16 16:11:15.535 | warning  |          Always | Unknown motherboard 'AMPONED8-2T/BCM' for chip_id=0 (bus_id=0x1) — falling back to bus_id as tray_id. Add this motherboard and its bus IDs to mobo_to_bus_ids in physical_system_discovery.cpp. (physical_system_discovery.cpp:119)
+2026-11-16 16:11:15.535 | info     |          Fabric | Logical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3190)
+2026-11-16 16:11:15.535 | info     |          Fabric | Physical multi-mesh adjacency: intermesh degree histogram {0:1}; intra-mesh degree histograms mesh0 {0:1} (topology_mapper_utils.cpp:3198)
+2026-11-16 16:11:16.337 | info     |           Metal | Enabling program cache on MeshDevice 1 (mesh_device.cpp:1193)
+===============================================================================
+./tests/vt/test_tenstorrent_backend.cpp:15895:
+TEST CASE:  kTENSTORRENT W22 discriminator: raw RAC write then PA decode at seq=1, no mix
+
+./tests/vt/test_tenstorrent_backend.cpp:15982: MESSAGE: raw RAC->PA seq=1: max_abs=1.43305e+38
+
+./tests/vt/test_tenstorrent_backend.cpp:15983: ERROR: CHECK( max_abs < 0.5f ) is NOT correct!
+  values: CHECK( 1.43305e+38 <  0.5 )
+
+./tests/vt/test_tenstorrent_backend.cpp:16014: MESSAGE: arm a (Copy-seeded, no RAC) seq=1: max_abs=0.121583
+
+./tests/vt/test_tenstorrent_backend.cpp:16071: MESSAGE: arm b (RAC-seeded) seq=64: max_abs=0.0815938
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=1: max_abs=0.123409
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=2: max_abs=4.85609e+33
+
+./tests/vt/test_tenstorrent_backend.cpp:16123: ERROR: CHECK( m4 < 0.5f ) is NOT correct!
+  values: CHECK( 4.85609e+33 <  0.5 )
+  logged: arm c seq window
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=3: max_abs=0.0852496
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=4: max_abs=0.0673921
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=5: max_abs=2.99717e+32
+
+./tests/vt/test_tenstorrent_backend.cpp:16123: ERROR: CHECK( m4 < 0.5f ) is NOT correct!
+  values: CHECK( 2.99717e+32 <  0.5 )
+  logged: arm c seq window
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=6: max_abs=0.0828944
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=7: max_abs=2.99717e+32
+
+./tests/vt/test_tenstorrent_backend.cpp:16123: ERROR: CHECK( m4 < 0.5f ) is NOT correct!
+  values: CHECK( 2.99717e+32 <  0.5 )
+  logged: arm c seq window
+
+./tests/vt/test_tenstorrent_backend.cpp:16122: MESSAGE: arm c (RAC slot0, fresh meta) seq=8: max_abs=0.0405961
+
+===============================================================================
+[doctest] test cases:  1 | 0 passed | 1 failed | 127 skipped
+[doctest] assertions: 11 | 7 passed | 4 failed |
+[doctest] Status: FAILURE!
+2026-11-16 16:11:16.374 | info     |    BuildKernels | JIT cache stats: 29/29 hits (100.0%) [29 cached, 0 build-once dedup, 0 merged artifacts, 0 merged genfiles] (build_cache_telemetry.cpp:268)
+2026-11-16 16:11:16.374 | info     |    BuildKernels | JIT telemetry: 33 registered TelemetryTokens (build_cache_telemetry.cpp:325)
+2026-11-16 16:11:16.416 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:519)
+2026-11-16 16:11:16.416 | info     |             UMD | Closing devices in cluster (cluster.cpp:1319)
+2026-11-16 16:11:16.489 | info     |             UMD | Closing devices in cluster completed. (cluster.cpp:1329)
+2026-11-16 16:11:16.489 | info     |             UMD | Cluster destructor started. (cluster.cpp:1050)
+2026-11-16 16:11:16.489 | info     |             UMD | Cluster destructor completed. (cluster.cpp:1063)

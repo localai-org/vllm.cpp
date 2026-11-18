@@ -1,0 +1,72 @@
+# GDN-suite failing-set baseline — QWEN38-DFLASH2-STAGE-C W22 (2026-11-16)
+
+Run: `tests/test_tenstorrent_backend`, FULL suite (125 cases), on the P150
+(thalia), head `c9c4efdc4` (the W22 wave head; the W21 fixes landed in
+`06f2f4aae`), the run log `w22-gdn-head.log` beside this file. Discipline:
+file mutex, luwen reset + 15 s + /dev/shm cleanup, idle gate, taskset 32-63,
+FROM THE REPO ROOT, INT8DOT=1, durable-libs-first, TT_METAL_RUNTIME_ROOT at
+the pin. Result: 110 passed / **15 failed** / 0 skipped; exit 139 after the
+green-or-not summary (the pre-existing static-teardown segfault, #1486).
+
+## The failing set at the head (the stable set — 15)
+
+1. kTENSTORRENT kAdd matches a host F32 reference (elementwise + bias broadcast)
+2. kTENSTORRENT kRelu matches a host F32 reference
+3. kTENSTORRENT kEmbedding matches a host F32 reference (row gather)
+4. kTENSTORRENT kLayerNorm matches a host F32 reference (affine + plain)
+5. kTENSTORRENT kSiluAndMul matches host F32 within BF16 envelope
+6. kTENSTORRENT kMoeSiluMul matches host F32 within BF16 envelope
+7. kTENSTORRENT kQkvSplit device path matches host within BF16 envelope
+8. kTENSTORRENT kPagedAttention pure-decode matches host within BF16 envelope
+9. kTENSTORRENT batched decode PagedAttention is capture-safe (num_reqs=2)
+10. kTENSTORRENT kL2Norm matches the CPU f32 oracle (GDN q/k row shape)
+11. kTENSTORRENT kRmsNormGated matches the CPU f32 oracle (silu + sigmoid, padded gate stride)
+12. kTENSTORRENT kRmsNormGated serves a [256,6144] committed gate shadow at the batched-prefill [12288,128] geometry
+13. kTENSTORRENT EnsureDevice2D uploads a row-strided bf16 view (the qkvz z slice) byte-exactly
+14. kTENSTORRENT kGdnPostConv matches the CPU f32 oracle (fused split + l2norm + g/beta)
+15. kTENSTORRENT kMatmulBTQuantGrouped matches the CPU grouped provider inside the ratified envelope
+
+Every failure is a garbage-magnitude compare (`9.93e+34 < 0.1`,
+`1.10e+38 < 0.05`, `1.95e+30 < 0.5` — no NaN/Inf counts, no small drift), the
+same bit-reinterpretation/garbage class the engine's degenerate verify shows
+([MIXER-OUT] l=1 asum 2.00072e+40). Pre-existing on this box/pin — the W21
+commit's classification stands; no wave change touches these paths.
+
+## The 15-vs-16 discrepancy, resolved by set comparison
+
+The W21 commit body recorded "109 passed, 15 pre-existing" (124 cases — the
+W21 harness case did not exist yet when that count was taken). The W21
+review's baseline at the immutable head
+(`/tmp/review-w21/baseline-gdn.log`, 2026-11-16 12:49, 125 cases) recorded 16.
+Set comparison over the recorded logs:
+
+- the review's 16th failure is **`kTENSTORRENT batched decode RAC is
+  capture-safe (num_slots=2)`** (V bad `got=inf want=0.0339355`, 126/128
+  token-exact) — it is NOT in this run's set (the case passed here) and not
+  in the W21-era base runs (`/tmp/gdn-base.log` 08:52, `/tmp/gdn-fix2.log`
+  09:12 — both 15, without it);
+- the W21-era runs also show **`kTENSTORRENT kGdnSpecDecode matches the CPU
+  f32 oracle`** failing at 08:30-09:02 (`/tmp/gdn-test.log`,
+  `/tmp/gdn-test2.log`, `/tmp/gdn-fix.log`) and passing here;
+- so the suite's failing set is a STABLE 15 (the list above) plus a small
+  floating membership of capture/device-state-sensitive cases (the RAC
+  capture-safety case, the GDN spec-decode case) that flip with the box's
+  device state across runs — the same suite-context dependence the stage-B
+  record documented for kRmsNormGated (ISSUE-LOCAL-01M6Y0TC5D24YGF74H0TQ2VAN5).
+
+Counts alone cannot see this: 16 vs 15 reads as a regression or a repair
+depending on which run you trust. The SET is the record; a future wave
+compares names, and a name that appears or disappears lands in the floating
+list above before anyone calls it a regression.
+
+## Prior runs compared
+
+| Log | Date/time | Cases | Failed | Floating members present |
+|---|---|---|---|---|
+| /tmp/gdn-test.log | 11-16 08:30 | 124 | 17 | RAC capture-safe, kGdnSpecDecode, PA capture-safe |
+| /tmp/gdn-test2.log | 11-16 08:40 | 124 | 17 | RAC capture-safe, kGdnSpecDecode, PA batched B=2, PA capture-safe |
+| /tmp/gdn-base.log | 11-16 08:52 | 124 | 15 | (the stable 15 exactly) |
+| /tmp/gdn-fix.log | 11-16 09:02 | 124 | 16 | RAC capture-safe, kGdnSpecDecode |
+| /tmp/gdn-fix2.log | 11-16 09:12 | 124 | 15 | (the stable 15 exactly) |
+| /tmp/review-w21/baseline-gdn.log | 11-16 12:49 | 125 | 16 | RAC capture-safe |
+| w22-gdn-head.log (this run) | 11-16 (W22) | 125 | 15 | (the stable 15 exactly) |

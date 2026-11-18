@@ -1,0 +1,18 @@
+[TT-ALLOC] #1 label=matmulbtq/N=8/K=512 banks=8 free_per_bank=4242062848 largest_free=4235162240 alloc_per_bank=30278528 total_free=33936502784 delta=0
+[TT-ALLOC] #2 label=EnsureKeepQuantWords/pre banks=8 free_per_bank=4242062848 largest_free=4235162240 alloc_per_bank=30278528 total_free=33936502784 delta=0
+[TT-ALLOC] #3 label=EnsureKeepQuantWords/post banks=8 free_per_bank=4242062464 largest_free=4235162240 alloc_per_bank=30278912 total_free=33936499712 delta=-3072
+[thalia:51683] *** Process received signal ***
+[thalia:51683] Signal: Segmentation fault (11)
+[thalia:51683] Signal code: Address not mapped (1)
+[thalia:51683] Failing at address: 0x28cd94bfde
+[thalia:51683] [ 0] linux-vdso.so.1(__kernel_rt_sigreturn+0x0) [0xfffc7e980848]
+[thalia:51683] [ 1] /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/libtt_metal.so(_ZNK2tt8tt_metal12GraphTracker10is_enabledEv+0x4c) [0xfffc7bc026f4]
+[thalia:51683] [ 2] /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/_ttnncpp.so(_ZN4ttnn6Tensor15deallocate_implEb+0x24) [0xfffc7e20265c]
+[thalia:51683] [ 3] /home/lu_zero/Sources/tt/tt-metal-pin-durable/lib64/_ttnncpp.so(_ZN4ttnn6TensorD1Ev+0x18) [0xfffc7e20236c]
+[thalia:51683] [ 4] /tmp/build-stagec-w3/tests/test_tenstorrent_backend(+0x21e110) [0xaaae8cece110]
+[thalia:51683] [ 5] /usr/lib64/libc.so.6(+0x401fc) [0xfffc797e01fc]
+[thalia:51683] [ 6] /usr/lib64/libc.so.6(+0x4031c) [0xfffc797e031c]
+[thalia:51683] [ 7] /usr/lib64/libc.so.6(+0x22df8) [0xfffc797c2df8]
+[thalia:51683] [ 8] /usr/lib64/libc.so.6(__libc_start_main+0x98) [0xfffc797c2f38]
+[thalia:51683] [ 9] /tmp/build-stagec-w3/tests/test_tenstorrent_backend(_start+0x30) [0xaaae8cecdf30]
+[thalia:51683] *** End of error message ***
