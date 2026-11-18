@@ -5844,6 +5844,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
       // read back the way the gated norm serves them (device shadows) — the
       // kernel's own asum debug reads host bytes a device-only commit leaves
       // stale, so a NaN out is invisible there. Pairs with the gated dump.
+#ifdef VLLM_CPP_TENSTORRENT
       if (vt::tenstorrent::DeviceAvailable()) {
         static const bool core_dbg = [] {
           const char* e = std::getenv("VT_TT_GDN_SPEC_DEBUG");
@@ -5880,6 +5881,7 @@ DBuf GdnBlockPaged(Dev d, const GdnLayerWeights& w, const HfConfig& cfg,
           std::fflush(stderr);
         }
       }
+#endif
     } else {
     // Recurrence — decode segment first (leading nd_tok tokens), then prefill.
     if (nd > 0) {
@@ -10530,12 +10532,14 @@ static DBuf DenseForwardLayers(Dev d, const Tensor& hidden_in,
     // keep-quant webs; 13 GB of the 27B first pass lands in the spans this
     // pair now brackets (attention, GDN, norms, rolls).
     char tt_lbl[48];
+#ifdef VLLM_CPP_TENSTORRENT
     if (vt::tenstorrent::DeviceAvailable()) {
       std::snprintf(tt_lbl, sizeof tt_lbl, "block/%lld/pre",
                     static_cast<long long>(l));
       vt::tenstorrent::AllocTraceSnapshot(vt::tenstorrent::SharedMeshDevice(),
                                           tt_lbl);
     }
+#endif
 #endif
     RunDenseLayerPaged(d, layer, config, hidden, res, sdi, attn_meta,
                        gdn_meta, kv, gs, T, l);
