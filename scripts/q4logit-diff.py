@@ -382,25 +382,41 @@ def main(argv=None):
             print("REFUSED: step=%d is not in both captures." % args.step, file=sys.stderr)
             return 2
 
-    print("%-6s %-5s %-7s %-8s %-8s %-5s %-6s %-6s %9s %9s %6s %8s %8s"
-          % ("step", "rows", "n", "top1_a", "top1_b", "flip", "shared", "jacc",
-             "top_dmax", "top_dmed", "rank", "dropped", "appeared"))
+    # The column names are the names the docstring and docs/USAGE.md use, spelled
+    # in full: `flip`/`rank` were abbreviations of `top1_flip`/`max_rank_disp`, and a
+    # reader matching the table against the text had to guess the mapping.
+    print("%-6s %-5s %-7s %-8s %-8s %-9s %-6s %-6s %9s %9s %-13s %8s %8s %10s %10s"
+          % ("step", "rows", "n", "top1_a", "top1_b", "top1_flip", "shared", "jacc",
+             "top_dmax", "top_dmed", "max_rank_disp", "dropped", "appeared",
+             "rel_sumabs", "rel_proj"))
     flips = 0
     dz = 0
+    rpz = 0
     worst = (0.0, None)
+    worst_rp = (0.0, None)
     for s in (common if args.top == 0 else common[:args.top]):
         a, b = A[s], B[s]
         u = union_stats(a, b)
+        # The WHOLE-BUFFER pair the docstring, the trailer and KL_REFUSAL all tell a
+        # reader to use. Both functions existed and neither had a caller, so the tool
+        # told a reader to trust a column it never printed.
+        rs = rel_sumabs(a["sumabs"], b["sumabs"])
+        rp = rel_proj(a, b)
         flip = a["top1"] != b["top1"]
         flips += int(flip)
         if u["dmax"] > 0.0:
             dz += 1
+        if rp > 0.0:
+            rpz += 1
         if u["dmax"] > worst[0]:
             worst = (u["dmax"], s)
-        print("%-6d %-5d %-7d %-8d %-8d %-5s %-6d %-6.2f %9.3e %9.3e %6d %8d %8d"
+        if rp > worst_rp[0]:
+            worst_rp = (rp, s)
+        print("%-6d %-5d %-7d %-8d %-8d %-9s %-6d %-6.2f %9.3e %9.3e %-13d %8d %8d "
+              "%10.3e %10.3e"
               % (s, a["rows"], a["n"], a["top1"], b["top1"], "YES" if flip else "-",
                  len(u["shared"]), u["jaccard"], u["dmax"], u["dmed"],
-                 u["max_rank_disp"], len(u["only_a"]), len(u["only_b"])))
+                 u["max_rank_disp"], len(u["only_a"]), len(u["only_b"]), rs, rp))
         if flip:
             print("       top1 flip: base id %d (%.9g) vs other id %d (%.9g); the arm "
                   "that lost it holds %.9g where the other holds %.9g"
@@ -426,6 +442,10 @@ def main(argv=None):
           % dz)
     if worst[1] is not None:
         print("LARGEST top_dmax              : %.6e at step=%d" % worst)
+    print("STEPS WITH rel_proj != 0      : %d   <- sign-SENSITIVE over the whole buffer; these PROVE a difference"
+          % rpz)
+    if worst_rp[1] is not None:
+        print("LARGEST rel_proj              : %.6e at step=%d" % worst_rp)
     print("KL                            : NOT PRINTED. Top-k cannot support an unbiased KL;")
     print("                                `--kl` explains why and exits 2 (see docstring).")
     print()
