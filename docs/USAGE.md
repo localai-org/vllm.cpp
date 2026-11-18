@@ -1670,6 +1670,72 @@ magnitude, and confirm a real divergence with `head_dmax` or the sign-sensitive
 `rel_proj` column. Worked example and evidence:
 [`docs/bench-evidence/qwen4exp-layerfp-2999-20260923.md`](bench-evidence/qwen4exp-layerfp-2999-20260923.md).
 
+## Comparing two logits captures (Qwen4-EXP Q4Logit)
+
+When the layer fingerprints agree but the tokens do not, tap the step's logits
+instead. `VT_Q4EXP_LOGITS=<k>` prints one `q4logit` line per forward (k is capped
+at 64), and `VT_Q4EXP_LOGITS_STEPS` caps how many forwards are tapped (default 8,
+`0` disables). Arm both arms and diff the logs:
+
+```sh
+python3 scripts/q4logit-diff.py A-CPU/server.log B-CUDA/server.log --top 20
+```
+
+Each line carries `step= rows= n= top= top1= vmax= vmin= sumabs= proj=<8>` and
+then `pairs=id:val,...`, the top-k of row 0 by descending logit. `--step N`
+prints one step and `--top 0` prints all of them.
+
+**Compare by id, never by rank.** `pairs=` is a sorted list
+(`std::partial_sort`), so the value at rank r is a different token in the two
+arms as soon as anything crosses the cut, and whenever two logits tie the sort
+settles them differently on each arm. A positional differ reports that as k
+differences where the tensors have one: a single token moving across the cut
+reds every rank below it. This tool keys on the id instead -- the union is the
+ids in either arm's top-k, `shared` the ids in both, `only_a`/`only_b` the rest
+-- and computes every value difference over `shared`, i.e. over ids that are the
+same token in both arms. The dropped and appeared ids are printed separately
+with their values, because that is what a cut boundary looks like: a token
+sitting just above the other arm's k-th value. A positional differ cannot
+express `shared` at all, so it cannot tell a disagreement about a VALUE from a
+disagreement about WHICH TOKENS made the cut.
+
+Columns: `top_dmax` is the largest value difference over shared ids -- non-zero
+PROVES the arms' logits differ, but it samples at most k of n ids, so it is a
+witness and a floor, never a magnitude; zero proves nothing. `top_dmed` is the
+median of the same, so one outlier rank does not set the story. `top1_flip`
+reports whether the arms rank a different token first (with both ids),
+`max_rank_disp` how far the ordering moved for tokens both arms kept, and
+`shared`/`jacc`/`dropped`/`appeared` the cut structure -- agreement there is the
+part a `top_dmax` of zero cannot show. `rel_proj` is the sign-sensitive
+whole-buffer projection of the layer differ above, and is the column to trust:
+the printed `rel_sumabs` is a difference of norms that cancels a zero-mean
+perturbation at `O(sqrt(n))`, and the section above says what a ratio of it is
+worth.
+
+It refuses rather than comparing unlike things (exit 2, with the reason): arms
+that disagree on `n` (a different vocabulary makes an id a different token), on
+`top` (a union over different budgets is not the same cut), or on `rows` (`proj`
+sums the whole buffer while the top-k comes from row 0); a line that declares
+`top=N` and prints fewer pairs, because a truncated capture compares short and
+short reads like agreement; and two captures that share no step, because nothing
+compared is not agreement.
+
+**`--kl` is a refusal, not an option.** It exits 2 and prints the argument.
+Renormalising both arms over the union gives KL between different measures on a
+different support: its value moves with the tap's own k, the omitted tail terms
+are negative wherever q_i > p_i so the partial sum bounds the true KL on neither
+side, and at k=1 with a shared argmax it is EXACTLY 0 -- a green light wired to
+nothing. A full-row `logsumexp` per arm does not rescue it: that supplies the
+normalisers only, while the tail needs both arms' individual tail probabilities.
+An exact KL needs the FULL row for both arms (n floats, about 600 KB per line at
+n=151936), which is a change to the tap with its own spec, test and review; it is
+OWED, not done. Until then gate on `top_dmax`, `top1_flip`, `max_rank_disp` and
+`rel_proj`.
+
+The differ's own docstring carries the full derivation, including the
+union-renormalised KL formula and why it is degenerate; the suite that pins it is
+`tests/scripts/test_q4exp_logits_diff.py`.
+
 ## The Qwen3.8 DFlash2 drafter: the exact weights
 
 The DFlash2 drafter for the Qwen3.8-27B target is a standalone component: the
