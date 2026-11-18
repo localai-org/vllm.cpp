@@ -170,6 +170,22 @@ from it unchanged, and any local repair of it is recorded as ours.
 - `unpack_int5`: a five-byte group expanded to eight values, boundary `-16`.
 - Grouped int4 embed: `mn = mx` degenerate case, and a two-group row.
 - Whole-tensor differential: the U2 fixtures, byte-exact after the bf16 round.
+- `q4logit` comparator columns: `WholeBufferColumns` in
+  `tests/scripts/test_q4exp_logits_diff.py` asserts the per-step row ENDS
+  `rel_sumabs rel_proj`, that each printed value equals the function applied to
+  the parsed fields, and that with identical `sumabs` on a different buffer
+  `rel_sumabs` reads exactly 0 while `rel_proj` reads the true relative
+  difference. That last case is what the gate's advice rests on: a difference of
+  norms cancels a whole-buffer divergence, so the column a reader is told to
+  trust must not.
+- The published section itself: `PublishedUsageSection`, same file, pins
+  `docs/USAGE.md`'s "Comparing two logits captures" section claim by claim
+  against the thing each claim describes - `union_stats` for the three-set
+  rule, the tap source for `std::partial_sort` and the `64`/`8`/`0` knobs, real
+  runs for `exit 2`, the refusal list and the printed columns, and `KL_REFUSAL`
+  for the `n` and the KB cost. Anchors match on whitespace-flattened text, so
+  rewrapping stays green and an edited claim reds; a deleted or retitled heading
+  fails by name, so the surface cannot vanish silently.
 
 ## Gates
 
@@ -197,6 +213,20 @@ from it unchanged, and any local repair of it is recorded as ours.
   and sign-vector machinery is structurally similar and numerically different.
 - No weight was downloaded, no GPU was leased, and no decode was executed. Every
   claim above is read from source text, and this row has no measurement yet.
+- 2026-11-17: the comparator's whole-buffer columns were pinned, and the pin
+  found the lag it exists to catch: `rel_sumabs()` and `rel_proj()` had no
+  caller while the docstring, the run preamble, the trailer and `--kl` all named
+  `rel_proj`, the column the gate's own metrics specify. `WholeBufferColumns` reded
+  on the tree before the repair (4 failures and 1 error in
+  `tests/scripts/test_q4exp_logits_diff.py`); the tool now prints both columns
+  per step plus the `STEPS WITH rel_proj != 0` and `LARGEST rel_proj` summary,
+  and the suite is 32/32 at `50ea29190`.
+  `ISSUE-LOCAL-01M7P9S7RJC7XCHHSYD9BSJ2S6` closes on that run.
+- 2026-11-17: three mutations of that change are caught. `rel_proj` returning
+  `0.0` reds the column cases, `--kl` returning 1 instead of 2 reds the
+  documented-exit-code case, and retitling the USAGE heading reds 8 of the 11
+  `PublishedUsageSection` cases - so neither the columns nor the documented
+  surface can drift from the tool, or be deleted, without a red.
 
 ## Owed
 
