@@ -586,12 +586,26 @@ beta ∈ [0.028, 0.998]. The a/b projections and the gate chain are exonerated.
   slot (`gs1_S_all == gs1_slot0_direct`) — GatherRowsExact exonerated.
 - The recurrence run on the dumped inputs reproduces the TT output to max_abs
   4.5e-07 (the CPU composed reference, threaded per head, both probed calls).
-- BUT the state is not what the previous step's recurrence produced: expected
-  post-token-0 snapshot asum 11550.9 vs gathered 301.568; and the cache read
-  DIRECTLY after the commit copy equals its PRE-copy content (asum 11984.7 =
-  the init state) while the scatter's own source rows carry the snapshots
-  (asum 102778). **ttnn::copy into the resident shadow does not land in the
-  engine.**
+- BUT the state is not what the previous step's recurrence produced, and the
+  four numbers in this paragraph are the VERIFIED pairings (the W22 record
+  correction: an earlier draft of this paragraph paired the expected snapshot
+  with the l=1 step-1 gather — the wrong layer's number):
+  - the step-1 l=0 gather = 11984.7 (`w21-specdump.stderr.log:596`,
+    `gs0_S_all`) — the l=0 PREFILL state, correctly served at step 1;
+  - the step-1 l=1 gather = 301.568 (`w21-specdump.stderr.log:616`,
+    `gs1_S_all`) — the l=1 layer's TRUE small prefill state (the model's own
+    small state at layers >= 1), not a defect;
+  - the step-2 l=0 gather PRE-fix = 10946.6 (`w21-specdump.stderr.log:1754`)
+    — neither the init 11984.7 nor the expected snapshot: the copy's
+    half-landed residue;
+  - the expected post-token-0 snapshot = 11550.9 (the recurrence run on the
+    dumped inputs), and the POST-fix step-2 l=0 gather reads exactly it
+    (`w21-fix.stderr.log:1530`).
+  And the cache read DIRECTLY after the commit copy equals its PRE-copy
+  content (`w21-snap/gs0_cache_post.f32` asum 11984.7 = the init state, vs
+  the scatter's own source rows `gs0_snap_next.f32` asum 102778; gs1 the
+  same shape 301.568 vs 2603.31). **ttnn::copy into the resident shadow does
+  not land in the engine.**
 
 ### The conv-spec fill's miswrite, resolved to a law
 
@@ -619,9 +633,10 @@ isolated tests) are fine.
 2. **The spec state commit installs the committed tensor as the slot's
    shadow directly** (CommitDeviceLogical2D replaces s->device) instead of
    the ttnn::copy — legal because the spec kernel is eager-only (the capture
-   refusal at its head). Validated: the l=0 state persists across verify
-   steps (step 2's gather = 11550.9 = the EXACT expected snapshot; steps 3-4
-   evolve).
+   refusal at its head). Validated: the step-2 l=0 gather = 11550.9
+   (`w21-fix.stderr.log:1530`) = the EXACT expected post-token-0 snapshot
+   (pre-fix it read 10946.6, `w21-specdump.stderr.log:1754`); steps 3-4
+   evolve.
 
 Also corrected: the small ssm states at layers >= 1 (asum ~300-460 vs 11984.7
 at l=0) are the model's TRUE behavior — the drafter-OFF byte-identical stream
@@ -680,3 +695,119 @@ richer than the op mix alone (the bfp8 staging lifecycle, the embed, the
 paged attention, the DBuf pool's persistent-buffer pattern are the next
 harness ingredients), and the gated norm's output + the out_proj remain the
 next unprobed ENGINE stages.
+
+## W22 the probes come back clean; the poison's entry localized to the mixed qkvz GEMM's compute; the harness reproduces the class in isolation (2026-11-16)
+
+All legs Q4_K_M KV64 drafter-ON (the W21 discipline; the runner
+`run-w22-probe.sh`, the dump dir `w22-probe/`, the log `w22-probe.stderr.log`).
+The stream stays degenerate (`e171d6b1…` — the W21 signature) — **the
+acceptance multiple remains UNMEASURABLE**.
+
+### PROBE 3 — the gated norm's own write: CLEAN
+
+`[NORM-PRECOMMIT]` (the norm's own output, dual-read, pre-commit) and
+`[TRUST-SLOT] norm-commit-N` (the committed shadow, dual-read, post-commit)
+at the spec geometry (rows=432, d=128), the first 2 spec-geometry calls:
+
+```
+l=0: NORM-PRECOMMIT asum=284.18    == norm-commit-0 asum=284.18    agree=1 addr=b707800
+l=1: NORM-PRECOMMIT asum=246.648   == norm-commit-1 asum=246.648   agree=1 addr=b744800
+```
+
+The norm's OWN write lands: the committed shadow's bytes are the norm's
+output, byte-stable under the dual read, zero=0 (the W21 "4 of 9 rows
+zero" stays gone — the mask fix holds).
+
+### PROBE 4 — the out_proj's own write: CLEAN
+
+`[OUTPROJ-PRECOMMIT]` + `[TRUST-SLOT] outproj-commit-N` at the out_proj's
+spec geometry (M=9, K=6144, N=5120):
+
+```
+l=0: OUTPROJ-PRECOMMIT asum=775100 == outproj-commit-0 asum=775100 agree=1 addr=35652f00
+l=1: OUTPROJ-PRECOMMIT asum=445293 == outproj-commit-1 asum=445293 agree=1 addr=9e61f00
+```
+
+The out_proj's OWN write lands. Both probes exonerate the two writes
+between the norm's clean operands and the mixer output.
+
+### The poison's entry, localized: the MIXED qkvz GEMM's COMPUTE at call 54 (l=8)
+
+The first garbage in the whole run is `[QKVZ-OUT] call=54 mixed_asum=inf`
+(w22-probe.stderr.log:1022). The full instrument chain at that call:
+
+```
+[QKVZ-IN]        call=54 h_asum=8536.86 h_nan=0 addr=a019f00        (the input h CLEAN)
+[MMBT9]          N=10240 wagree=1 a_agree=1 a_asum=8536.86           (the operands dual-read CLEAN)
+[TT-COMMIT]      rows=9 cols=10240 new_addr=b754800 old_live=0        (the mixed commit)
+[ZGEMM-PRECOMMIT] agree=1 asum=21911.1 nan=0 inf=0                    (the z GEMM, SAME h: CLEAN)
+[TRUST-SLOT]     qkvz-mixed-c54  asum=3.46266e+40 inf=108 addr=b754800 (the mixed commit READS GARBAGE)
+[TRUST-SLOT]     qkvz-z-c54      asum=21911.1  nan=0  inf=0  addr=b76d800 (the z commit CLEAN)
+[XSERVE-TRUST]   agree=1 asum=3.46266e+40 serve=owner=b754800          (the conv's x serve AGREES with the commit)
+```
+
+`[MIXED-PRECOMMIT]` (new — the mixed geometry's pre-commit dual-read) reads
+**the same garbage pre-commit**: asum 3.46266e+40, inf=108, at out_addr
+b754800 — byte-identical to the committed shadow's read. So the WRITE path
+is exonerated (the commit faithfully installed what the matmul produced;
+the serve agrees) and **the COMPUTE is the convict**: the ttnn matmul
+program produced garbage from dual-read-verified-clean operands. The z GEMM
+on the SAME h at the SAME call is clean — the failure is program-state
+dependent, not operand-dependent. This is the W20 z-GEMM class (garbage
+from clean operands) on the mixed arm; the onset moved l=1 → l=8 across the
+W21 fixes (the fixes hold — l=0..7 are clean end to end in this run).
+
+### The GDN block's spec-step series at this head
+
+[MIXER-OUT] T=9: l=0..7 clean (asum 603-1307, zero=0), l=8 garbage (asum
+6.39747e+41), l=9,10 all-zero (46080/46080), l=11 (fa=1) clean 13380,
+l=12-14 zero, l=15 (fa=1) clean 12590 — the FA layers' own compute stays
+correct downstream of the collapse. [SPEC-OUT] core: 305.011 (l=0), then
+4.1 / 4.2 / 2.88 (the small cores at l>=1 — the true math on the true
+state), then NaN-poisoned from l=8's conv (x_nan=864 — the conv consumed
+the poisoned x stream).
+
+### B4 — the shared-cache harness grown toward engine state
+
+`tests/vt/test_tenstorrent_backend.cpp`, the new case after the W21
+harness: the engine's poison-site op mix — **the GEMM trio on ONE h**
+(the mixed N=10240, the split z N=6144, the out_proj N=5120 consuming the
+z's device output), **the weights staged through the real
+EnsureMatmulWeightDevice path at VT_TT_WEIGHT_RESIDENCY=bfp8**, **the
+embed** (kEmbeddingQuant's tied-table row decode, Q8_0), **RAC + paged
+attention** at the engine's KV geometry (D=128, block 32) with the sequence
+advancing one per rep, and **the DBuf pool's persistent-buffer hold**
+(buffers held live across reps while the churn runs) — 40 reps, every
+output against the CPU oracle (`w22-harness.log`).
+
+Result: the trio (mixed/z/outproj) **0 bad in 40 reps**, the embed 0, the
+fill 0, the gather 0, the hold 0 — **the GEMM trio does not reproduce the
+mixed GEMM's garbage even on the bfp8-staged trio at the engine's exact
+geometries.** The PA ingredient is RED — and the red survives stripping the
+mix entirely:
+
+- the harness: pa_bad=5-7/40, deterministic per rep (rep 0 h2 e10 =
+  4.7418e+30 and rep 6 h3 e122 = 75.2225 byte-identical across runs), the
+  corruption concentrated in the g=1 KV group;
+- **the discriminator case (`w22-disc.log`): ONE raw RAC write at slot 0,
+  then ONE raw PA decode — no churn, no embed, no GEMMs — and the PA's
+  output is garbage at seq=2 (4.86e+33), seq=5 (2.99717e+32) and seq=7
+  (2.99717e+32 — the IDENTICAL bytes as seq=5), while seq=1,3,4,6,8 are
+  clean (0.04-0.12);**
+- arm (a): the COPY-seeded cache (host_current=true) at seq=1 — the PA
+  reads the host path — clean (0.12); arm (b): the RAC-seeded cache at
+  seq=64 — clean (0.08); the RAC's writes land in all 40 reps
+  (rac_bad=0 — the just-written slot reads back correct through the cache
+  tensor).
+
+**What it takes to reproduce the engine's misaddressing class: the raw
+RAC→PA device decode pair at a small sequence window** — the first isolated
+reproduction of the compute-class misaddressing (the W20/W21 record's
+"the poison needs the engine's op mix" is now falsified at this form). The
+garbage is deterministic (identical bytes at seq=5 and seq=7), the RAC's
+writes land, the Copy-seeded arm (the host read path) is clean — the defect
+is in the PA's device SDPA decode path's small-window handling. The form is
+OUT OF THE ENGINE's reach (the engine's decode/verify windows start after
+the prefill; seq=1..8 never runs), so this is a real PA defect at an
+out-of-engine form — not the engine's poison — and it is the next row's
+lever: the PA's device SDPA decode path at seq=2/5/7.

@@ -48,3 +48,12 @@ generated/
 # tracked to hold. Write a PR body OUTSIDE the repository.
 .prbody/
 build2/
+<<<<<<< HEAD
+=======
+# Raw device-dump corpora are evidence-of-execution, not record evidence:
+# the logs + READMEs carry the summaries. Keep the multi-MB binaries out.
+docs/bench-evidence/**/*.f32
+docs/bench-evidence/**/*.f64
+docs/bench-evidence/**/*.tdmp
+docs/bench-evidence/**/*.bin
+>>>>>>> 648e35908 (chore: purge the binary dump corpora from the tree (the hunt's waves committed 7700+ .tdmp/.bin/.f32 files; the W20 discipline kept them untracked — restore that; the logs/manifests carry the evidence))

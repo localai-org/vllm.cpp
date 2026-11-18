@@ -315,7 +315,134 @@ void MatmulBTKernel(Queue&, Tensor& out, const Tensor& a, const Tensor& b) {
       std::fflush(stderr);
     }
   }
+  // W22 PROBE 4 (ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the out_proj's OWN
+  // write. The GDN mixer's out_proj at the spec geometry (M=9, K=6144,
+  // N=5120 — the gated norm's output @ the out_proj weight, the [T,H]
+  // mixer output's producer) is the second unprobed write between the
+  // norm's CLEAN operands and the [MIXER-OUT] garbage at l >= 1. Same
+  // three-read shape as PROBE 3: the matmul's own output dual-read
+  // pre-commit ([OUTPROJ-PRECOMMIT]), the committed shadow's dual-read
+  // post-commit (DebugSlotTrustRead), raw f32 dumps of both + the
+  // activation (and the weight once — the [MMBT9] evidence: byte-identical
+  // across calls). Eager-only, the first 2 spec-geometry calls.
+  if (M == 9 && N == 5120 && std::getenv("VT_DUMP_TRUST") != nullptr &&
+      !tt_capture_active()) {
+    static std::atomic<int64_t> op_seq{0};
+    const int64_t opc = op_seq.fetch_add(1, std::memory_order_relaxed);
+    if (opc < 2) {
+      static const char* op_dir = std::getenv("VT_TT_SPEC_DUMP");
+      std::vector<float> c1 = dev_c.to_vector<float>();
+      std::vector<float> c2 = dev_c.to_vector<float>();
+      double acc = 0.0;
+      uint64_t nan = 0, inf = 0, zero = 0;
+      for (float f : c1) {
+        if (std::isnan(f)) { ++nan; continue; }
+        if (std::isinf(f)) { ++inf; continue; }
+        if (f == 0.0f) { ++zero; continue; }
+        acc += f > 0.0f ? f : -f;
+      }
+      std::fprintf(stderr,
+                   "[OUTPROJ-PRECOMMIT] agree=%d n=%zu asum=%.6g nan=%llu "
+                   "inf=%llu zero=%llu out_addr=%llx a_addr=%llx\n",
+                   (c1 == c2) ? 1 : 0, c1.size(), acc,
+                   static_cast<unsigned long long>(nan),
+                   static_cast<unsigned long long>(inf),
+                   static_cast<unsigned long long>(zero),
+                   static_cast<unsigned long long>(
+                       dev_c.mesh_buffer().address()),
+                   static_cast<unsigned long long>(
+                       dev_a.mesh_buffer().address()));
+      if (op_dir != nullptr && op_dir[0] != '\0') {
+        const std::string pfx =
+            std::string(op_dir) + "/outproj" + std::to_string(opc);
+        auto wr = [&](const std::string& path, const std::vector<float>& v) {
+          std::FILE* f = std::fopen(path.c_str(), "wb");
+          if (f != nullptr) {
+            std::fwrite(v.data(), 4, v.size(), f);
+            std::fclose(f);
+          }
+        };
+        wr(pfx + "_precommit.f32", c1);
+        wr(pfx + "_a.f32", dev_a.to_vector<float>());
+        if (opc == 0) wr(pfx + "_w.f32", dev_b.to_vector<float>());
+      }
+    }
+  }
+  // W22 (ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the MIXED qkvz GEMM's
+  // pre-commit read — the same instrument as [ZGEMM-PRECOMMIT] at the mixed
+  // geometry (M=9, N=10240). The W22 probe run's first garbage is THIS
+  // commit: [TRUST-SLOT] qkvz-mixed-c54 asum 3.46266e+40 inf=108 at addr
+  // b754800 (the address the [TT-COMMIT] installed) with the [MMBT9]
+  // operands dual-read verified clean at the same site, while the z GEMM on
+  // the SAME h (N=6144, same call) is clean (asum 21911.1). Garbage here
+  // (pre-commit) convicts the matmul COMPUTE (the W20 z-GEMM class); clean
+  // here with a garbage committed shadow convicts the WRITE.
+  if (M == 9 && N == 10240 && std::getenv("VT_DUMP_TRUST") != nullptr &&
+      !tt_capture_active()) {
+    static std::atomic<int64_t> mx_seq{0};
+    if (mx_seq.fetch_add(1, std::memory_order_relaxed) < 64) {
+      std::vector<float> c1 = dev_c.to_vector<float>();
+      std::vector<float> c2 = dev_c.to_vector<float>();
+      double acc = 0.0;
+      uint64_t nan = 0, inf = 0;
+      for (float f : c1) {
+        if (std::isnan(f)) {
+          ++nan;
+          continue;
+        }
+        if (std::isinf(f)) {
+          ++inf;
+          continue;
+        }
+        acc += f > 0.0f ? f : -f;
+      }
+      std::fprintf(stderr,
+                   "[MIXED-PRECOMMIT] agree=%d n=%zu asum=%.6g nan=%llu "
+                   "inf=%llu out_addr=%llx a_addr=%llx w_addr=%llx\n",
+                   (c1 == c2) ? 1 : 0, c1.size(), acc,
+                   static_cast<unsigned long long>(nan),
+                   static_cast<unsigned long long>(inf),
+                   static_cast<unsigned long long>(
+                       dev_c.mesh_buffer().address()),
+                   static_cast<unsigned long long>(
+                       dev_a.mesh_buffer().address()),
+                   static_cast<unsigned long long>(
+                       dev_b.mesh_buffer().address()));
+      std::fflush(stderr);
+    }
+  }
   CommitDevice2D(out, std::move(dev_c));
+  if (M == 9 && N == 5120 && std::getenv("VT_DUMP_TRUST") != nullptr &&
+      !tt_capture_active()) {
+    static std::atomic<int64_t> opc_seq{0};
+    const int64_t opc = opc_seq.fetch_add(1, std::memory_order_relaxed);
+    if (opc < 2) {
+      char tag[64];
+      std::snprintf(tag, sizeof(tag), "outproj-commit-%lld",
+                    static_cast<long long>(opc));
+      DebugSlotTrustRead(out, tag);
+      static const char* op_dir2 = std::getenv("VT_TT_SPEC_DUMP");
+      if (op_dir2 != nullptr && op_dir2[0] != '\0') {
+        std::optional<ttnn::Tensor> committed;
+        {
+          std::lock_guard<std::mutex> g(SlotMutex());
+          BufferSlot* s = FindSlot(out.data);
+          if (s != nullptr && s->device_current && s->device.has_value())
+            committed = *s->device;
+        }
+        if (committed.has_value()) {
+          std::vector<float> cv = committed->to_vector<float>();
+          std::FILE* f = std::fopen(
+              (std::string(op_dir2) + "/outproj" + std::to_string(opc) +
+               "_committed.f32").c_str(), "wb");
+          if (f != nullptr) {
+            std::fwrite(cv.data(), 4, cv.size(), f);
+            std::fclose(f);
+          }
+        }
+      }
+    }
+  }
 }
 
 // kAdd: elementwise add, plus the rank-1 `b` row-broadcast form used for

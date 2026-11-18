@@ -6001,6 +6001,135 @@ TEST_CASE("kTENSTORRENT kGdnStateGather/Scatter match the CPU f32 oracle (indexe
   }
 }
 
+// W22 (issue ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the residual-risk guard
+// on ScatterRowsExact — the MEASURED strided form (multi-replacement,
+// strictly ascending ids with a gap) must be REFUSED BY NAME, because in the
+// engine ttnn::indexed_fill's k-th replacement row lands at id[k]+k for that
+// form (w21-specdump cs0_filled: ids [0,9,...,72] wrote x[0..8] at blocks
+// [0,10,20,30,40,50,60,70,72], the zeroed conv outputs at tokens 4-7) and the
+// miswrite survives a program-cache bust. In ISOLATION the fill is faithful
+// (the W21 harness: 40 reps of the fill at the conv-spec geometry, 0 bad), so
+// this case pins the GUARD — the form must never reach the convicted op —
+// and not the miswrite, which is engine-only. The legal forms still run and
+// stay oracle-exact: the consecutive [0..F) state-commit form (the decode
+// path's form, never measured miswritten), the unsorted {4,0,2} and the
+// duplicate {0,2,2} forms the scatter tests above exercise.
+TEST_CASE("kTENSTORRENT ScatterRowsExact refuses the measured strided multi-replacement form (W21 residual-risk guard)") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = *vt::TryGetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+
+  constexpr int64_t Hv = 2, Dv = 8, Dk = 4;
+  auto make_tensor = [](void* mem, vt::DType dt, Device dev,
+                        const std::vector<int64_t>& shape) {
+    Tensor t{};
+    t.data = mem;
+    t.dtype = dt;
+    t.device = dev;
+    t.rank = static_cast<int32_t>(shape.size());
+    int64_t acc = 1;
+    for (int64_t i = shape.size(); i-- > 0;) {
+      t.shape[i] = shape[i];
+      t.stride[i] = acc;
+      acc *= shape[i];
+    }
+    return t;
+  };
+
+  // Scatter `work` rows into `cache` at `idx` on the TT arm; return the cache.
+  auto scatter_tt = [&](const std::vector<int64_t>& cache_shape,
+                        const std::vector<float>& cache,
+                        const std::vector<float>& work,
+                        const std::vector<int32_t>& idx) {
+    void* mc = backend.Alloc(cache.size() * sizeof(float));
+    void* mw = backend.Alloc(work.size() * sizeof(float));
+    void* mi = backend.Alloc(idx.size() * sizeof(int32_t));
+    backend.Copy(q, mc, cache.data(), cache.size() * sizeof(float));
+    backend.Copy(q, mw, work.data(), work.size() * sizeof(float));
+    backend.Copy(q, mi, idx.data(), idx.size() * sizeof(int32_t));
+    Tensor tc = make_tensor(mc, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0}, cache_shape);
+    Tensor tw = make_tensor(mw, vt::DType::kF32, Device{DeviceType::kTENSTORRENT, 0},
+                            {static_cast<int64_t>(idx.size()), cache_shape[1], cache_shape[2], cache_shape[3]});
+    Tensor ti = Tensor::Contiguous(mi, vt::DType::kI32, Device{DeviceType::kTENSTORRENT, 0},
+                                   {static_cast<int64_t>(idx.size())});
+    vt::GdnStateScatter(q, tc, tw, ti);
+    std::vector<float> got(cache.size());
+    backend.Copy(q, got.data(), mc, got.size() * sizeof(float));
+    backend.Free(mc);
+    backend.Free(mw);
+    backend.Free(mi);
+    return got;
+  };
+
+  // The CPU oracle: cache[idx[r]] = work[r]; last writer wins a duplicate;
+  // NULL (<0) writes nothing.
+  auto oracle = [&](const std::vector<float>& cache,
+                    const std::vector<float>& work,
+                    const std::vector<int32_t>& idx,
+                    int64_t row_elems) {
+    std::vector<float> want = cache;
+    for (size_t r = 0; r < idx.size(); ++r)
+      if (idx[r] >= 0)
+        for (int64_t e = 0; e < row_elems; ++e)
+          want[static_cast<size_t>(idx[r]) * row_elems + e] = work[r * row_elems + e];
+    return want;
+  };
+
+  const int64_t row_elems = Hv * Dv * Dk;
+
+  // 1. The measured strided form: strictly ascending ids with a gap. RED
+  // before the guard (the call passed through to indexed_fill); GREEN after
+  // (the refusal names the measured miswrite class).
+  {
+    const int64_t slots = 7;
+    std::vector<float> cache(static_cast<size_t>(slots * row_elems));
+    { uint32_t s = 915001u; for (float& x : cache) x = 0.3f * GdnLcg(s); }
+    std::vector<float> work(3 * row_elems);
+    { uint32_t s = 915002u; for (float& x : work) x = 0.3f * GdnLcg(s); }
+    const std::vector<int32_t> idx{0, 3, 6};  // strictly ascending, gapped
+    bool refused = false;
+    try {
+      auto got = scatter_tt({slots, Hv, Dv, Dk}, cache, work, idx);
+      (void)got;
+      MESSAGE("the strided form PASSED THROUGH to indexed_fill (red-before)");
+    } catch (const std::exception& e) {
+      refused = true;
+      const std::string what_copy = e.what();  // copy: e dies at the catch end
+      MESSAGE("refusal: ", what_copy);
+      CHECK(what_copy.find("refusing the multi-replacement") !=
+            std::string::npos);
+    }
+    CHECK_MESSAGE(refused,
+                  "the measured strided form (ascending ids with a gap) must "
+                  "be refused by name, never handed to the convicted "
+                  "indexed_fill path");
+  }
+
+  // 2. The legal forms still run, oracle-exact: consecutive [0..F) (the
+  // state-commit form), unsorted {4,0,2}, duplicate {0,2,2}.
+  {
+    const int64_t slots = 5;
+    std::vector<float> cache(static_cast<size_t>(slots * row_elems));
+    { uint32_t s = 915003u; for (float& x : cache) x = 0.3f * GdnLcg(s); }
+    std::vector<float> work(3 * row_elems);
+    { uint32_t s = 915004u; for (float& x : work) x = 0.3f * GdnLcg(s); }
+    for (const auto& idx : {std::vector<int32_t>{0, 1, 2}, std::vector<int32_t>{4, 0, 2},
+                            std::vector<int32_t>{0, 2, 2}}) {
+      auto got = scatter_tt({slots, Hv, Dv, Dk}, cache, work, idx);
+      auto want = oracle(cache, work, idx, row_elems);
+      double max_abs = 0.0;
+      for (size_t i = 0; i < got.size(); ++i)
+        max_abs = std::max(max_abs, std::fabs(static_cast<double>(got[i]) - want[i]));
+      MESSAGE("legal form max_abs=", max_abs);
+      CHECK(std::isfinite(max_abs));
+      CHECK(max_abs <= 1e-6);
+    }
+  }
+}
+
 TEST_CASE("kTENSTORRENT GDN edge shapes (all-empty prefill early return, empty decode batch, empty gather)") {
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
@@ -14768,7 +14897,6 @@ TEST_CASE("kTENSTORRENT Q8_K keep-quant composite matmul matches the CPU "
   MESSAGE("Q8_K composite matmul: matches the CPU dequant oracle");
 }
 
-<<<<<<< HEAD
 // ===========================================================================
 // TT-PA-SMALL-WINDOW (W1 characterization). The stage-C W22 discriminator
 // (67d041d76 on row/QWEN38-DFLASH2-STAGE-C) isolated the compute class: ONE
@@ -15055,7 +15183,6 @@ void PaSmallWindowReport(const char* arm, const std::vector<PaSeqRow>& rows) {
 }  // namespace
 
 TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded PA decode seq sweep 1..64 (the focused red)") {
-=======
 // ── W20 (QWEN38-DFLASH2-STAGE-C, ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H) ────
 // The engine's z GEMM committed garbage (asum 3.75e40, 113 Infs) at the first
 // spec step's l=9 with VERIFIED-CLEAN inputs — the only staging difference
@@ -15166,12 +15293,10 @@ TEST_CASE("kTENSTORRENT kMatmulBT bf16 weight staged BFP8 at the spec geometry")
 // iteration k with clean iterations before it = the warm-state defect, and k
 // names the cycle length (the engine's "every 3rd fill" periodicity).
 TEST_CASE("kTENSTORRENT kMatmulBT bf16 BFP8 M=9 repeated warm calls") {
->>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
     return;
   }
-<<<<<<< HEAD
   Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
   Queue q = backend.CreateQueue();
   auto lcg = [x = 31337u]() mutable {
@@ -15323,7 +15448,6 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: payload tracking at the garbage s
 }
 
 TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: fresh cache per seq (intrinsic-to-cur_pos vs process state)") {
-=======
   REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
   Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
   setenv("VT_TT_WEIGHT_RESIDENCY", "bfp8", 1);
@@ -15404,12 +15528,10 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: fresh cache per seq (intrinsic-to
 // matmul's output reads bytes the staging pipeline wrote after it — the
 // free-without-sync reuse hazard, the engine's poison class.
 TEST_CASE("kTENSTORRENT kMatmulBT M=9 bfp8 with unsynced staging temporary") {
->>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
   if (!TenstorrentPresent()) {
     MESSAGE("SKIPPED: no Tenstorrent device on this box");
     return;
   }
-<<<<<<< HEAD
   Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
   Queue q = backend.CreateQueue();
   auto lcg = [x = 31337u]() mutable {
@@ -15509,7 +15631,6 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program
   for (const auto& r : rows)
     CHECK_MESSAGE(r.max_abs < kPaSweepGarbage,
                   "nocache-sweep seq=" << r.seq << " max_abs=" << r.max_abs);
-=======
   REQUIRE(vt::OpRegistered(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
   Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
   setenv("VT_TT_WEIGHT_RESIDENCY", "bfp8", 1);
@@ -15591,7 +15712,6 @@ TEST_CASE("kTENSTORRENT TT-PA-SMALL-WINDOW W1: RAC-seeded sweep with the program
   unsetenv("VT_TT_WEIGHT_RESIDENCY");
   CHECK(bad_reps == 0);
   MESSAGE("unsynced-staging M=9 bfp8: bad_reps=" << bad_reps << "/" << kReps);
->>>>>>> 20318d42b (feat(QWEN38-DFLASH2-STAGE-C): the trusted dual-read convicts the qkvz commit — the serve-alias and block-recycle theories falsified)
 }
 
 // W21 (QWEN38-DFLASH2-STAGE-C): the INTERLEAVED-OP harness — the first
@@ -15747,4 +15867,812 @@ TEST_CASE("kTENSTORRENT W21 interleaved op mix: matmul + multi-replacement index
   CHECK(fill_bad == 0);
   CHECK(matmul_bad == 0);
   CHECK(gather_bad == 0);
+}
+
+// W22 (issue ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the shared-cache
+// harness grown toward engine state — the B4 lever the W21 disposition and
+// the W22 probe run name. The W21 mix (the recycle churn + one M=9 matmul +
+// the multi-replacement fill + the gather) is GREEN — the poison needs
+// richer engine state. The W22 probe run localized the poison's entry at
+// the first spec step's l=8: the MIXED qkvz GEMM's committed output reads
+// garbage (asum 3.46266e+40, 108 Infs — [TRUST-SLOT] qkvz-mixed-c54, addr
+// b754800 = the address the [TT-COMMIT] installed) with the [MMBT9]
+// operands dual-read verified clean at the same site, while the SPLIT z
+// GEMM on the SAME h (N=6144, the same call) is clean (asum 21911.1); the
+// poisoned x stream then flows through the conv (NaNs), the recurrence,
+// the norm (its write lands — PROBE 3), the out_proj (its write lands —
+// PROBE 4) into the [MIXER-OUT] garbage. The engine state this harness
+// adds around the W21 mix:
+//   1. the GEMM TRIO on ONE activation h [9,5120] bf16 — the mixed
+//      (N=10240), the split z (N=6144), the out_proj (N=5120, its input
+//      the z GEMM's DEVICE output, the norm's-output stand-in) — the
+//      engine's l=8 op sequence;
+//   2. the weights staged through the REAL EnsureMatmulWeightDevice path at
+//      VT_TT_WEIGHT_RESIDENCY=bfp8 (the drafter-ON leg's residency);
+//   3. the embed: kEmbeddingQuant's tied-table row decode (Q8_0 — the
+//      engine's embed arm);
+//   4. RAC + paged attention at the engine's KV geometry (D=128, block 32),
+//      the sequence length advancing one per rep (the decode step's
+//      advance);
+//   5. the DBuf pool's persistent-buffer hold: buffers held LIVE across
+//      reps (the logits ring, the persistent step input) while the churn
+//      runs — the pool's held blocks the ops' fresh allocations must skip.
+// 40 reps; EVERY output checked against the CPU oracle; a RED rep names
+// the op and the cycle. GREEN here means the engine's misaddressing still
+// needs state beyond this mix.
+TEST_CASE("kTENSTORRENT W22 harness: the engine's poison-site op mix — the GEMM trio on one h (bfp8 weights), embed, RAC+PA, the DBuf hold") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  // The engine's drafter-ON residency, restored at the case end.
+  ScopedEnv residency_guard("bfp8");
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 2026u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0) - 0.5f;
+  };
+
+  constexpr int64_t kM = 9, kH = 5120;
+  constexpr int64_t kNQkvz = 10240, kNZ = 6144, kNOut = 5120;
+  std::vector<float> host_h(kM * kH);
+  for (auto& v : host_h) v = lcg() * 2.0f;
+  std::vector<uint16_t> h_bf(kM * kH);
+  for (size_t i = 0; i < host_h.size(); ++i) h_bf[i] = vt::F32ToBF16(host_h[i]);
+
+  struct GemmArm {
+    const char* name;
+    int64_t n, k;
+    std::vector<float> host_w;
+    std::vector<uint16_t> w_bf;
+    void* mem_w = nullptr;
+  };
+  std::vector<GemmArm> arms{
+      {"mixed", kNQkvz, kH, {}, {}, nullptr},
+      {"z", kNZ, kH, {}, {}, nullptr},
+      {"outproj", kNOut, kNZ, {}, {}, nullptr},
+  };
+  for (auto& arm : arms) {
+    arm.host_w.resize(static_cast<size_t>(arm.n) * static_cast<size_t>(arm.k));
+    for (auto& v : arm.host_w) v = lcg() * 0.4f;
+    arm.w_bf.resize(arm.host_w.size());
+    for (size_t i = 0; i < arm.host_w.size(); ++i)
+      arm.w_bf[i] = vt::F32ToBF16(arm.host_w[i]);
+    arm.mem_w = backend.Alloc(arm.w_bf.size() * sizeof(uint16_t));
+    backend.Copy(q, arm.mem_w, arm.w_bf.data(), arm.w_bf.size() * sizeof(uint16_t));
+  }
+  void* mem_h = backend.Alloc(h_bf.size() * sizeof(uint16_t));
+  backend.Copy(q, mem_h, h_bf.data(), h_bf.size() * sizeof(uint16_t));
+  Tensor th = Tensor::Contiguous(mem_h, vt::DType::kBF16,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {kM, kH});
+  auto matmul_bt = reinterpret_cast<vt::MatmulFn>(
+      vt::GetOp(vt::OpId::kMatmulBT, DeviceType::kTENSTORRENT));
+
+  // The embed: kEmbeddingQuant's tied-table row decode (Q8_0 — the engine's
+  // embed arm). Rows are distinguishable (row r element j ~ r*100 + j) so a
+  // wrong row shows as an identifiable value.
+  constexpr int64_t kVocab = 4096, kEmbH = 512;
+  vt::cpu::FromFloatFn from_float = vt::cpu::BlockFromFloat(vt::DType::kQ8_0);
+  vt::cpu::ToFloatFn to_float = vt::cpu::BlockToFloat(vt::DType::kQ8_0);
+  REQUIRE(from_float != nullptr);
+  REQUIRE(to_float != nullptr);
+  const size_t emb_row_bytes = vt::RowSizeBytes(vt::DType::kQ8_0, kEmbH);
+  std::vector<uint8_t> emb_packed(static_cast<size_t>(kVocab) * emb_row_bytes);
+  std::vector<float> emb_ref(static_cast<size_t>(kVocab) * kEmbH);
+  for (int64_t r = 0; r < kVocab; ++r) {
+    std::vector<float> row(static_cast<size_t>(kEmbH));
+    for (int64_t j = 0; j < kEmbH; ++j)
+      row[static_cast<size_t>(j)] = static_cast<float>(r * 100 + j) * 0.01f;
+    std::memcpy(emb_ref.data() + static_cast<size_t>(r) * kEmbH, row.data(),
+                sizeof(float) * kEmbH);
+    from_float(row.data(),
+               emb_packed.data() + static_cast<size_t>(r) * emb_row_bytes, kEmbH);
+  }
+  void* mem_emb_table = backend.Alloc(emb_packed.size());
+  backend.Copy(q, mem_emb_table, emb_packed.data(), emb_packed.size());
+
+  // RAC + PA: the engine's KV geometry (D=128, block 32, GQA 2:1), one
+  // request, the sequence ADVANCING one token per rep (the decode step's
+  // cur_pos advance; the block table spans all 8 blocks up front).
+  constexpr int64_t kHq = 4, kHkv = 2, kD = 128, kBsz = 32, kNBlocks = 8;
+  constexpr int64_t kPage = kHkv * kD;
+  const size_t kv_cache_elems = static_cast<size_t>(kNBlocks) * kBsz * kPage;
+  std::vector<float> host_kc(kv_cache_elems, 0.0f), host_vc(kv_cache_elems, 0.0f);
+  void* mem_kc = backend.Alloc(kv_cache_elems * sizeof(float));
+  void* mem_vc = backend.Alloc(kv_cache_elems * sizeof(float));
+  backend.Copy(q, mem_kc, host_kc.data(), kv_cache_elems * sizeof(float));
+  backend.Copy(q, mem_vc, host_vc.data(), kv_cache_elems * sizeof(float));
+  void* mem_bt = backend.Alloc(sizeof(int32_t) * static_cast<size_t>(kNBlocks));
+  void* mem_sl = backend.Alloc(sizeof(int32_t));
+  void* mem_qsl = backend.Alloc(sizeof(int32_t) * 2);
+  std::vector<int32_t> block_table(static_cast<size_t>(kNBlocks));
+  for (int64_t b = 0; b < kNBlocks; ++b)
+    block_table[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+  backend.Copy(q, mem_bt, block_table.data(), block_table.size() * sizeof(int32_t));
+  auto rac = reinterpret_cast<vt::ReshapeAndCacheFn>(
+      vt::GetOp(vt::OpId::kReshapeAndCache, DeviceType::kTENSTORRENT));
+  auto pa = reinterpret_cast<vt::PagedAttentionFn>(
+      vt::GetOp(vt::OpId::kPagedAttention, DeviceType::kTENSTORRENT));
+
+  // The DBuf pool's persistent-buffer hold: buffers held LIVE across reps —
+  // the logits ring (2 slots) + the persistent step input — so the ops'
+  // fresh allocations must skip them, the way the engine's pool hands the
+  // free list around its held blocks. Committed bytes checked per rep: a
+  // late/aliased writer to a held block shows up here.
+  std::vector<void*> held;
+  auto hold = [&](size_t bytes) {
+    void* p = backend.Alloc(bytes);
+    held.push_back(p);
+    return p;
+  };
+  void* ring0 = hold(static_cast<size_t>(kM) * kH * sizeof(uint16_t));
+  void* ring1 = hold(static_cast<size_t>(kM) * kH * sizeof(uint16_t));
+  void* persist_qkvz = hold(static_cast<size_t>(kM) * kNQkvz * sizeof(uint16_t));
+  std::vector<std::vector<uint16_t>> ring_want(
+      2, std::vector<uint16_t>(static_cast<size_t>(kM) * kH));
+  for (int s = 0; s < 2; ++s)
+    for (size_t i = 0; i < ring_want[static_cast<size_t>(s)].size(); ++i)
+      ring_want[static_cast<size_t>(s)][i] =
+          vt::F32ToBF16(static_cast<float>(s * 1000 + static_cast<int>(i % 97)) * 0.01f);
+  backend.Copy(q, ring0, ring_want[0].data(), ring_want[0].size() * 2);
+  backend.Copy(q, ring1, ring_want[1].data(), ring_want[1].size() * 2);
+  std::vector<uint16_t> persist_want(static_cast<size_t>(kM) * kNQkvz);
+  for (size_t i = 0; i < persist_want.size(); ++i)
+    persist_want[i] = vt::F32ToBF16(static_cast<float>(i % 89) * 0.01f);
+  backend.Copy(q, persist_qkvz, persist_want.data(), persist_want.size() * 2);
+
+  // The W21 ops' geometries (the conv-spec fill + the gather), local to
+  // this case: the fill's base [81,10240] zeros, the 9 strided ids; the
+  // gather's source [54,131072] and 6 identity rows.
+  constexpr int64_t kTokens = 9, kSlots = 9, kC = 10240;
+  constexpr int64_t kBaseRows = kTokens * kSlots;
+  std::vector<float> fill_base(static_cast<size_t>(kBaseRows) * kC, 0.0f);
+  std::vector<uint32_t> fill_ids(static_cast<size_t>(kTokens));
+  for (int64_t t = 0; t < kTokens; ++t) fill_ids[static_cast<size_t>(t)] = static_cast<uint32_t>(t * kSlots);
+  constexpr int64_t kGRows = 54, kGBlk = 131072, kGPick = 6;
+  std::vector<float> gsrc(static_cast<size_t>(kGRows) * kGBlk);
+  for (auto& v : gsrc) v = lcg() * 0.1f;
+  std::vector<uint32_t> gpick(static_cast<size_t>(kGPick));
+  for (int64_t r = 0; r < kGPick; ++r) gpick[static_cast<size_t>(r)] = static_cast<uint32_t>(r);
+
+  constexpr int kReps = 40;
+  int embed_bad = 0, pa_bad = 0, mixed_bad = 0, z_bad = 0, outproj_bad = 0,
+      fill_bad = 0, gather_bad = 0, hold_bad = 0, rac_bad = 0;
+  for (int rep = 0; rep < kReps; ++rep) {
+    // The engine's recycle churn (the W21 harness's exact pattern).
+    {
+      void* big = backend.Alloc(28311552);
+      void* mid = backend.Alloc(3317760);
+      void* small = backend.Alloc(110592);
+      backend.Free(big);
+      backend.Free(mid);
+      backend.Free(small);
+    }
+
+    // 1. the embed: 9 rows decoded from the packed table.
+    {
+      const int64_t T = 9;
+      std::vector<int32_t> ids(static_cast<size_t>(T));
+      for (int64_t t = 0; t < T; ++t)
+        ids[static_cast<size_t>(t)] =
+            static_cast<int32_t>((rep * 3 + t * 7) % kVocab);
+      void* mem_ids = backend.Alloc(ids.size() * sizeof(int32_t));
+      void* mem_out = backend.Alloc(static_cast<size_t>(T) * kEmbH * sizeof(float));
+      backend.Copy(q, mem_ids, ids.data(), ids.size() * sizeof(int32_t));
+      Tensor ti = Tensor::Contiguous(mem_ids, vt::DType::kI32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {T});
+      Tensor to = Tensor::Contiguous(mem_out, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {T, kEmbH});
+      auto emb = reinterpret_cast<vt::EmbeddingFn>(
+          vt::GetOp(vt::OpId::kEmbeddingQuant, DeviceType::kTENSTORRENT));
+      REQUIRE(emb != nullptr);
+      Tensor ttab = Tensor::Contiguous(mem_emb_table, vt::DType::kQ8_0,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {kVocab, kEmbH});
+      emb(q, to, ttab, ti);
+      std::vector<float> ob(static_cast<size_t>(T) * kEmbH);
+      backend.Copy(q, ob.data(), mem_out, ob.size() * sizeof(float));
+      for (int64_t t = 0; t < T && embed_bad == 0; ++t) {
+        std::vector<float> want(static_cast<size_t>(kEmbH));
+        to_float(emb_packed.data() +
+                     static_cast<size_t>(ids[static_cast<size_t>(t)]) * emb_row_bytes,
+                 want.data(), kEmbH);
+        for (int64_t j = 0; j < kEmbH; ++j) {
+          const float got =
+              ob[static_cast<size_t>(t) * kEmbH + static_cast<size_t>(j)];
+          const float want_bf =
+              vt::BF16ToF32(vt::F32ToBF16(want[static_cast<size_t>(j)]));
+          if (std::fabs(got - want_bf) > 1e-6f) {
+            ++embed_bad;
+            MESSAGE("REP " << rep << " EMBED: t=" << t << " j=" << j
+                           << " got=" << got
+                           << " want=" << want[static_cast<size_t>(j)]);
+            break;
+          }
+        }
+      }
+      backend.Free(mem_ids);
+      backend.Free(mem_out);
+    }
+
+    // 2. RAC: write this step's K/V at slot `rep` (the decode step's
+    // write), then PA: one query token attending the grown sequence.
+    std::vector<float> k_row(static_cast<size_t>(kPage)), v_row(static_cast<size_t>(kPage));
+    for (auto& v : k_row) v = lcg() * 0.15f;
+    for (auto& v : v_row) v = lcg() * 0.05f - 0.1f;
+    Tensor tkc = Tensor::Contiguous(mem_kc, vt::DType::kF32,
+                                    Device{DeviceType::kTENSTORRENT, 0}, {kNBlocks, kBsz, kHkv, kD});
+    Tensor tvc = Tensor::Contiguous(mem_vc, vt::DType::kF32,
+                                    Device{DeviceType::kTENSTORRENT, 0}, {kNBlocks, kBsz, kHkv, kD});
+    {
+      void* mem_kr = backend.Alloc(kPage * sizeof(float));
+      void* mem_vr = backend.Alloc(kPage * sizeof(float));
+      void* mem_slots = backend.Alloc(sizeof(int64_t));
+      backend.Copy(q, mem_kr, k_row.data(), kPage * sizeof(float));
+      backend.Copy(q, mem_vr, v_row.data(), kPage * sizeof(float));
+      const int64_t slot_val = rep;
+      backend.Copy(q, mem_slots, &slot_val, sizeof(int64_t));
+      Tensor tk = Tensor::Contiguous(mem_kr, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {1, kHkv, kD});
+      Tensor tv = Tensor::Contiguous(mem_vr, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {1, kHkv, kD});
+      Tensor tslots = Tensor::Contiguous(mem_slots, vt::DType::kI64,
+                                         Device{DeviceType::kTENSTORRENT, 0}, {1});
+      rac(q, tk, tv, tkc, tvc, tslots);
+      backend.Free(mem_kr);
+      backend.Free(mem_vr);
+      backend.Free(mem_slots);
+      // The host cache oracle: the RAC's write, mirrored. AND the write's
+      // own landing check: read the just-written slot back THROUGH THE
+      // CACHE TENSOR (the same shadow the PA reads) — a RAC write that
+      // missed reads zeros/garbage here, exonerating the PA's read.
+      {
+        std::vector<float> kb(kv_cache_elems), vb(kv_cache_elems);
+        backend.Copy(q, kb.data(), mem_kc, kb.size() * sizeof(float));
+        backend.Copy(q, vb.data(), mem_vc, vb.size() * sizeof(float));
+        const size_t ro = static_cast<size_t>(rep) * kPage;
+        for (int64_t e = 0; e < kPage; ++e) {
+          if (std::fabs(kb[ro + static_cast<size_t>(e)] - k_row[static_cast<size_t>(e)]) > 1e-5f) {
+            ++rac_bad;
+            MESSAGE("REP " << rep << " RAC land K e" << e << ": got="
+                           << kb[ro + static_cast<size_t>(e)] << " want="
+                           << k_row[static_cast<size_t>(e)]);
+            break;
+          }
+          if (std::fabs(vb[ro + static_cast<size_t>(e)] - v_row[static_cast<size_t>(e)]) > 1e-5f) {
+            ++rac_bad;
+            MESSAGE("REP " << rep << " RAC land V e" << e << ": got="
+                           << vb[ro + static_cast<size_t>(e)] << " want="
+                           << v_row[static_cast<size_t>(e)]);
+            break;
+          }
+        }
+      }
+      std::memcpy(host_kc.data() + static_cast<size_t>(rep) * kPage, k_row.data(),
+                  kPage * sizeof(float));
+      std::memcpy(host_vc.data() + static_cast<size_t>(rep) * kPage, v_row.data(),
+                  kPage * sizeof(float));
+    }
+    {
+      std::vector<float> host_q(static_cast<size_t>(kHq * kD));
+      for (auto& v : host_q) v = lcg() * 0.3f;
+      void* mem_q = backend.Alloc(host_q.size() * sizeof(float));
+      void* mem_out = backend.Alloc(host_q.size() * sizeof(float));
+      backend.Copy(q, mem_q, host_q.data(), host_q.size() * sizeof(float));
+      const int32_t seq = rep + 1;
+      backend.Copy(q, mem_sl, &seq, sizeof(int32_t));
+      const int32_t qsl[2] = {0, 1};
+      backend.Copy(q, mem_qsl, qsl, sizeof(qsl));
+      Tensor tq = Tensor::Contiguous(mem_q, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+      Tensor tout = Tensor::Contiguous(mem_out, vt::DType::kF32,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+      Tensor tbt = Tensor::Contiguous(mem_bt, vt::DType::kI32,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {1, kNBlocks});
+      Tensor tsl = Tensor::Contiguous(mem_sl, vt::DType::kI32,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {1});
+      Tensor tqsl = Tensor::Contiguous(mem_qsl, vt::DType::kI32,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {2});
+      vt::PagedAttentionArgs pargs;
+      pargs.scale = 1.0f / std::sqrt(static_cast<float>(kD));
+      pargs.causal = true;
+      pa(q, tout, tq, tkc, tvc, tbt, tsl, tqsl, pargs);
+      std::vector<float> ob(host_q.size());
+      backend.Copy(q, ob.data(), mem_out, ob.size() * sizeof(float));
+      backend.Free(mem_q);
+      backend.Free(mem_out);
+      // The host NHD oracle over the slots written so far (the pure-decode
+      // test's reference, the growing window).
+      const int64_t qpk = kHq / kHkv;
+      float max_abs = 0.0f;
+      for (int64_t h = 0; h < kHq; ++h) {
+        const int64_t g = h / qpk;
+        const int64_t qoff = h * kD;
+        float m = -std::numeric_limits<float>::infinity();
+        std::vector<float> scores(static_cast<size_t>(rep + 1));
+        for (int64_t j = 0; j <= rep; ++j) {
+          float dot = 0.0f;
+          const int64_t kbase = j * kPage + g * kD;
+          for (int64_t e = 0; e < kD; ++e)
+            dot += host_q[static_cast<size_t>(qoff + e)] *
+                   host_kc[static_cast<size_t>(kbase + e)];
+          scores[static_cast<size_t>(j)] = dot * pargs.scale;
+          m = std::max(m, scores[static_cast<size_t>(j)]);
+        }
+        float denom = 0.0f;
+        for (int64_t j = 0; j <= rep; ++j) {
+          scores[static_cast<size_t>(j)] = std::exp(scores[static_cast<size_t>(j)] - m);
+          denom += scores[static_cast<size_t>(j)];
+        }
+        const float inv = 1.0f / denom;
+        for (int64_t e = 0; e < kD; ++e) {
+          float acc = 0.0f;
+          for (int64_t j = 0; j <= rep; ++j)
+            acc += scores[static_cast<size_t>(j)] * inv *
+                   host_vc[static_cast<size_t>(j * kPage + g * kD + e)];
+          max_abs = std::max(max_abs,
+                             std::fabs(ob[static_cast<size_t>(qoff + e)] - acc));
+        }
+      }
+      if (!(max_abs < 0.5f)) {
+        ++pa_bad;
+        // The failure's face: WHICH (head, element) is wrong, and by how
+        // much — a no-land write reads the recycled block's previous tenant
+        // (arbitrary bytes); a wrong window reads plausible-but-wrong
+        // blends. Per-head max_abs + the worst element's coordinates.
+        for (int64_t h = 0; h < kHq; ++h) {
+          float hm = 0.0f;
+          int64_t he = -1;
+          for (int64_t e = 0; e < kD; ++e) {
+            const int64_t qoff = h * kD + e;
+            const int64_t g = h / (kHq / kHkv);
+            float acc = 0.0f;
+            float m = -std::numeric_limits<float>::infinity();
+            std::vector<float> sc(static_cast<size_t>(rep + 1));
+            for (int64_t j = 0; j <= rep; ++j) {
+              float dot = 0.0f;
+              for (int64_t e2 = 0; e2 < kD; ++e2)
+                dot += host_q[static_cast<size_t>(h * kD + e2)] *
+                       host_kc[static_cast<size_t>(j * kPage + g * kD + e2)];
+              sc[static_cast<size_t>(j)] = dot * pargs.scale;
+              m = std::max(m, sc[static_cast<size_t>(j)]);
+            }
+            float den = 0.0f;
+            for (int64_t j = 0; j <= rep; ++j) {
+              sc[static_cast<size_t>(j)] = std::exp(sc[static_cast<size_t>(j)] - m);
+              den += sc[static_cast<size_t>(j)];
+            }
+            for (int64_t j = 0; j <= rep; ++j)
+              acc += sc[static_cast<size_t>(j)] / den *
+                   host_vc[static_cast<size_t>(j * kPage + g * kD + e)];
+            const float d5 = std::fabs(ob[static_cast<size_t>(qoff)] - acc);
+            if (d5 > hm) { hm = d5; he = e; }
+          }
+          MESSAGE("REP " << rep << " PA h" << h << ": max_abs=" << hm
+                         << " at e" << he << " got="
+                         << ob[static_cast<size_t>(h * kD + he)]);
+        }
+        MESSAGE("REP " << rep << " PA: max_abs=" << max_abs);
+      }
+    }
+
+    // 3. the GEMM trio on ONE h (the engine's l=8 sequence), bfp8 weights.
+    // The z GEMM's output stays DEVICE-side and feeds the out_proj (the
+    // norm's-output stand-in); both outputs read back for the oracle.
+    std::vector<uint16_t> mixed_bits(static_cast<size_t>(kM) * kNQkvz);
+    std::vector<uint16_t> z_bits(static_cast<size_t>(kM) * kNZ);
+    std::vector<uint16_t> outproj_bits(static_cast<size_t>(kM) * kNOut);
+    {
+      void* mem_out = backend.Alloc(mixed_bits.size() * sizeof(uint16_t));
+      Tensor tout = Tensor::Contiguous(mem_out, vt::DType::kBF16,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {kM, kNQkvz});
+      Tensor tw = Tensor::Contiguous(arms[0].mem_w, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {arms[0].n, arms[0].k});
+      matmul_bt(q, tout, th, tw);
+      backend.Copy(q, mixed_bits.data(), mem_out, mixed_bits.size() * sizeof(uint16_t));
+      backend.Free(mem_out);
+    }
+    void* mem_zout = backend.Alloc(z_bits.size() * sizeof(uint16_t));
+    Tensor tzout = Tensor::Contiguous(mem_zout, vt::DType::kBF16,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {kM, kNZ});
+    {
+      Tensor tw = Tensor::Contiguous(arms[1].mem_w, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {arms[1].n, arms[1].k});
+      matmul_bt(q, tzout, th, tw);
+      backend.Copy(q, z_bits.data(), mem_zout, z_bits.size() * sizeof(uint16_t));
+    }
+    {
+      void* mem_out = backend.Alloc(outproj_bits.size() * sizeof(uint16_t));
+      Tensor tout = Tensor::Contiguous(mem_out, vt::DType::kBF16,
+                                       Device{DeviceType::kTENSTORRENT, 0}, {kM, kNOut});
+      Tensor tw = Tensor::Contiguous(arms[2].mem_w, vt::DType::kBF16,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {arms[2].n, arms[2].k});
+      matmul_bt(q, tout, tzout, tw);
+      backend.Copy(q, outproj_bits.data(), mem_out, outproj_bits.size() * sizeof(uint16_t));
+      backend.Free(mem_out);
+    }
+    // The trio's oracle: the f32 accumulate on the bf16-rounded operands,
+    // the bfp8 band (the W20 envelope: max_rel < 5 percent, 0 non-finite).
+    auto trio_check = [&](const char* name, int bad_dummy, const std::vector<uint16_t>& ob,
+                          int64_t n, int64_t kk, const std::vector<float>& host_a,
+                          const std::vector<float>& host_w) {
+      (void)bad_dummy;
+      uint64_t nonfinite = 0;
+      double max_rel = 0.0;
+      for (int64_t i = 0; i < kM; ++i)
+        for (int64_t j = 0; j < n; ++j) {
+          float acc = 0.0f;
+          for (int64_t k2 = 0; k2 < kk; ++k2)
+            acc += host_a[static_cast<size_t>(i) * kk + static_cast<size_t>(k2)] *
+                   host_w[static_cast<size_t>(j) * kk + static_cast<size_t>(k2)];
+          const float got = vt::BF16ToF32(ob[static_cast<size_t>(i) * n + static_cast<size_t>(j)]);
+          if (!std::isfinite(got)) {
+            ++nonfinite;
+            continue;
+          }
+          max_rel = std::max(max_rel,
+                             std::fabs(static_cast<double>(got) - acc) /
+                                 (std::fabs(acc) + 1.0));
+        }
+      const bool bad = nonfinite != 0 || max_rel >= 0.05;
+      if (std::strcmp(name, "mixed") == 0 && bad) ++mixed_bad;
+      if (std::strcmp(name, "z") == 0 && bad) ++z_bad;
+      if (std::strcmp(name, "outproj") == 0 && bad) ++outproj_bad;
+      if (bad)
+        MESSAGE("REP " << rep << " " << name << ": nonfinite=" << nonfinite
+                       << " max_rel=" << max_rel);
+    };
+    trio_check("mixed", 0, mixed_bits, kNQkvz, kH, host_h, arms[0].host_w);
+    trio_check("z", 0, z_bits, kNZ, kH, host_h, arms[1].host_w);
+    // The out_proj's activation = the z output's bf16 bits (the device
+    // tensor the out_proj consumed), widened for the oracle.
+    std::vector<float> host_zin(static_cast<size_t>(kM) * kNZ);
+    for (size_t i = 0; i < host_zin.size(); ++i) host_zin[i] = vt::BF16ToF32(z_bits[i]);
+    trio_check("outproj", 0, outproj_bits, kNOut, kNZ, host_zin, arms[2].host_w);
+
+    // 4. the conv-spec fill + the gather (the W21 ops), the fill's values =
+    // the mixed output's x stream (the engine's data flow: the conv-spec
+    // fill scatters the qkvz rows into the zeros base).
+    {
+      std::vector<float> vals(static_cast<size_t>(kTokens) * kC);
+      for (int64_t t = 0; t < kTokens; ++t)
+        for (int64_t c = 0; c < kC; ++c)
+          vals[static_cast<size_t>(t) * kC + static_cast<size_t>(c)] =
+              vt::BF16ToF32(mixed_bits[static_cast<size_t>(t) * kNQkvz + static_cast<size_t>(c)]);
+      auto got = vt::tenstorrent::ConvSpecFillForTest(fill_base, vals, fill_ids, kBaseRows, kC);
+      int wrong_written = 0, wrong_untouched = 0;
+      for (int64_t t = 0; t < kTokens; ++t) {
+        const int64_t blk = static_cast<int64_t>(fill_ids[static_cast<size_t>(t)]) * kC;
+        if (!std::equal(vals.begin() + static_cast<std::ptrdiff_t>(t) * kC,
+                        vals.begin() + static_cast<std::ptrdiff_t>(t + 1) * kC,
+                        got.begin() + static_cast<std::ptrdiff_t>(blk)))
+          ++wrong_written;
+      }
+      for (int64_t b = 0; b < kBaseRows; ++b) {
+        const bool written = std::find(fill_ids.begin(), fill_ids.end(),
+                                       static_cast<uint32_t>(b)) != fill_ids.end();
+        if (written) continue;
+        if (!std::all_of(got.begin() + static_cast<std::ptrdiff_t>(b) * kC,
+                         got.begin() + static_cast<std::ptrdiff_t>(b + 1) * kC,
+                         [](float f) { return f == 0.0f; }))
+          ++wrong_untouched;
+      }
+      if (wrong_written != 0 || wrong_untouched != 0) {
+        ++fill_bad;
+        MESSAGE("REP " << rep << " FILL: wrong_written=" << wrong_written
+                       << " wrong_untouched=" << wrong_untouched);
+      }
+    }
+    {
+      auto got = vt::tenstorrent::GatherRowsForTest(gsrc, gpick, kGRows, kGBlk);
+      int wrong = 0;
+      for (int64_t r = 0; r < kGPick; ++r)
+        if (!std::equal(
+                gsrc.begin() + static_cast<std::ptrdiff_t>(gpick[static_cast<size_t>(r)]) * kGBlk,
+                gsrc.begin() + static_cast<std::ptrdiff_t>(gpick[static_cast<size_t>(r)] + 1) * kGBlk,
+                got.begin() + static_cast<std::ptrdiff_t>(r) * kGBlk))
+          ++wrong;
+      if (wrong != 0) {
+        ++gather_bad;
+        MESSAGE("REP " << rep << " GATHER: wrong_rows=" << wrong);
+      }
+    }
+
+    // 5. the DBuf hold: the held buffers must still read their committed
+    // bytes (a late/aliased writer to a held block shows up here).
+    {
+      std::vector<uint16_t> ob(ring_want[0].size());
+      backend.Copy(q, ob.data(), ring0, ob.size() * 2);
+      if (ob != ring_want[0]) {
+        ++hold_bad;
+        MESSAGE("REP " << rep << " HOLD ring0: bytes changed");
+      }
+      std::vector<uint16_t> ob2(persist_want.size());
+      backend.Copy(q, ob2.data(), persist_qkvz, ob2.size() * 2);
+      if (ob2 != persist_want) {
+        ++hold_bad;
+        MESSAGE("REP " << rep << " HOLD persist: bytes changed");
+      }
+    }
+  }
+  for (auto& arm : arms) backend.Free(arm.mem_w);
+  backend.Free(mem_h);
+  backend.Free(mem_emb_table);
+  backend.Free(mem_kc);
+  backend.Free(mem_vc);
+  backend.Free(mem_bt);
+  backend.Free(mem_sl);
+  backend.Free(mem_qsl);
+  for (void* p : held) backend.Free(p);
+  MESSAGE("w22 mix: rac_bad=" << rac_bad << " embed_bad=" << embed_bad
+                                << " pa_bad=" << pa_bad
+                                << " mixed_bad=" << mixed_bad << " z_bad=" << z_bad
+                                << " outproj_bad=" << outproj_bad
+                                << " fill_bad=" << fill_bad
+                                << " gather_bad=" << gather_bad
+                                << " hold_bad=" << hold_bad << "/" << kReps);
+  CHECK(rac_bad == 0);
+  CHECK(embed_bad == 0);
+  CHECK(pa_bad == 0);
+  CHECK(mixed_bad == 0);
+  CHECK(z_bad == 0);
+  CHECK(outproj_bad == 0);
+  CHECK(fill_bad == 0);
+  CHECK(gather_bad == 0);
+  CHECK(hold_bad == 0);
+}
+
+// W22 discriminator (issue ISSUE-LOCAL-01M7FY5W1A91XHV1PZDGZEKR7H): the W22
+// harness's PA ingredient fails deterministically at the g=1 KV group
+// (rep 0 h2 e10 = 4.7418e30, rep 6 h3 e122 = 75.2225 — identical bytes
+// across runs) while the RAC's own writes land (rac_bad=0 in all 40 reps).
+// This case strips the mix: ONE raw RAC write at slot 0, then ONE raw PA
+// decode at seq=1 — no churn, no embed, no GEMMs, no metadata reuse. RED
+// here = an op-level RAC->PA defect at the small-seq decode geometry; GREEN
+// here = the harness's mix state is the trigger, and the poison's
+// reproduction needs it.
+TEST_CASE("kTENSTORRENT W22 discriminator: raw RAC write then PA decode at seq=1, no mix") {
+  if (!TenstorrentPresent()) {
+    MESSAGE("SKIPPED: no Tenstorrent device on this box");
+    return;
+  }
+  Backend& backend = vt::GetBackend(DeviceType::kTENSTORRENT);
+  Queue q = backend.CreateQueue();
+  auto lcg = [x = 31337u]() mutable {
+    x = x * 1664525u + 1013904223u;
+    return static_cast<float>(static_cast<double>(x >> 8) / 8388608.0) - 0.5f;
+  };
+  constexpr int64_t kHq = 4, kHkv = 2, kD = 128, kBsz = 32, kNBlocks = 8;
+  constexpr int64_t kPage = kHkv * kD;
+  const size_t kv_cache_elems = static_cast<size_t>(kNBlocks) * kBsz * kPage;
+  std::vector<float> host_kc(kv_cache_elems, 0.0f), host_vc(kv_cache_elems, 0.0f);
+  void* mem_kc = backend.Alloc(kv_cache_elems * sizeof(float));
+  void* mem_vc = backend.Alloc(kv_cache_elems * sizeof(float));
+  backend.Copy(q, mem_kc, host_kc.data(), kv_cache_elems * sizeof(float));
+  backend.Copy(q, mem_vc, host_vc.data(), kv_cache_elems * sizeof(float));
+  std::vector<float> k_row(static_cast<size_t>(kPage)), v_row(static_cast<size_t>(kPage));
+  for (auto& v : k_row) v = lcg() * 0.15f;
+  for (auto& v : v_row) v = lcg() * 0.05f - 0.1f;
+  void* mem_kr = backend.Alloc(kPage * sizeof(float));
+  void* mem_vr = backend.Alloc(kPage * sizeof(float));
+  void* mem_slots = backend.Alloc(sizeof(int64_t));
+  backend.Copy(q, mem_kr, k_row.data(), kPage * sizeof(float));
+  backend.Copy(q, mem_vr, v_row.data(), kPage * sizeof(float));
+  const int64_t slot_val = 0;
+  backend.Copy(q, mem_slots, &slot_val, sizeof(int64_t));
+  Tensor tk = Tensor::Contiguous(mem_kr, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kHkv, kD});
+  Tensor tv = Tensor::Contiguous(mem_vr, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kHkv, kD});
+  Tensor tkc = Tensor::Contiguous(mem_kc, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {kNBlocks, kBsz, kHkv, kD});
+  Tensor tvc = Tensor::Contiguous(mem_vc, vt::DType::kF32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {kNBlocks, kBsz, kHkv, kD});
+  Tensor tslots = Tensor::Contiguous(mem_slots, vt::DType::kI64,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {1});
+  auto rac = reinterpret_cast<vt::ReshapeAndCacheFn>(
+      vt::GetOp(vt::OpId::kReshapeAndCache, DeviceType::kTENSTORRENT));
+  rac(q, tk, tv, tkc, tvc, tslots);
+  // The PA decode at seq=1: one query token attending slot 0.
+  std::vector<float> host_q(static_cast<size_t>(kHq * kD));
+  for (auto& v : host_q) v = lcg() * 0.3f;
+  void* mem_q = backend.Alloc(host_q.size() * sizeof(float));
+  void* mem_out = backend.Alloc(host_q.size() * sizeof(float));
+  backend.Copy(q, mem_q, host_q.data(), host_q.size() * sizeof(float));
+  const int32_t seq = 1;
+  void* mem_sl = backend.Alloc(sizeof(int32_t));
+  void* mem_qsl = backend.Alloc(sizeof(int32_t) * 2);
+  backend.Copy(q, mem_sl, &seq, sizeof(int32_t));
+  const int32_t qsl[2] = {0, 1};
+  backend.Copy(q, mem_qsl, qsl, sizeof(qsl));
+  void* mem_bt = backend.Alloc(sizeof(int32_t) * static_cast<size_t>(kNBlocks));
+  std::vector<int32_t> block_table(static_cast<size_t>(kNBlocks));
+  for (int64_t b = 0; b < kNBlocks; ++b)
+    block_table[static_cast<size_t>(b)] = static_cast<int32_t>(b);
+  backend.Copy(q, mem_bt, block_table.data(), block_table.size() * sizeof(int32_t));
+  Tensor tq = Tensor::Contiguous(mem_q, vt::DType::kF32,
+                                 Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+  Tensor tout = Tensor::Contiguous(mem_out, vt::DType::kF32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+  Tensor tbt = Tensor::Contiguous(mem_bt, vt::DType::kI32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {1, kNBlocks});
+  Tensor tsl = Tensor::Contiguous(mem_sl, vt::DType::kI32,
+                                  Device{DeviceType::kTENSTORRENT, 0}, {1});
+  Tensor tqsl = Tensor::Contiguous(mem_qsl, vt::DType::kI32,
+                                   Device{DeviceType::kTENSTORRENT, 0}, {2});
+  vt::PagedAttentionArgs pargs;
+  pargs.scale = 1.0f / std::sqrt(static_cast<float>(kD));
+  pargs.causal = true;
+  auto pa = reinterpret_cast<vt::PagedAttentionFn>(
+      vt::GetOp(vt::OpId::kPagedAttention, DeviceType::kTENSTORRENT));
+  pa(q, tout, tq, tkc, tvc, tbt, tsl, tqsl, pargs);
+  std::vector<float> ob(host_q.size());
+  backend.Copy(q, ob.data(), mem_out, ob.size() * sizeof(float));
+  // The oracle: the softmax over the single slot = v_row per group.
+  float max_abs = 0.0f;
+  const int64_t qpk = kHq / kHkv;
+  for (int64_t h = 0; h < kHq; ++h) {
+    const int64_t g = h / qpk;
+    for (int64_t e = 0; e < kD; ++e)
+      max_abs = std::max(max_abs,
+                         std::fabs(ob[static_cast<size_t>(h * kD + e)] -
+                                   v_row[static_cast<size_t>(g * kD + e)]));
+  }
+  MESSAGE("raw RAC->PA seq=1: max_abs=", max_abs);
+  CHECK(max_abs < 0.5f);
+
+  // Arm (a): the COPY-seeded cache, NO RAC, PA at seq=1 — isolates the PA's
+  // small-seq decode from the RAC's write. The pure-decode test (Seq=64,
+  // Copy-seeded) passes; this is its seq=1 sibling.
+  {
+    std::vector<float> kc2(kv_cache_elems, 0.0f), vc2(kv_cache_elems, 0.0f);
+    std::memcpy(kc2.data(), k_row.data(), kPage * sizeof(float));
+    std::memcpy(vc2.data(), v_row.data(), kPage * sizeof(float));
+    void* mk2 = backend.Alloc(kv_cache_elems * sizeof(float));
+    void* mv2 = backend.Alloc(kv_cache_elems * sizeof(float));
+    backend.Copy(q, mk2, kc2.data(), kv_cache_elems * sizeof(float));
+    backend.Copy(q, mv2, vc2.data(), kv_cache_elems * sizeof(float));
+    Tensor tkc2 = Tensor::Contiguous(mk2, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {kNBlocks, kBsz, kHkv, kD});
+    Tensor tvc2 = Tensor::Contiguous(mv2, vt::DType::kF32,
+                                     Device{DeviceType::kTENSTORRENT, 0}, {kNBlocks, kBsz, kHkv, kD});
+    void* mo2 = backend.Alloc(host_q.size() * sizeof(float));
+    Tensor to2 = Tensor::Contiguous(mo2, vt::DType::kF32,
+                                    Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+    pa(q, to2, tq, tkc2, tvc2, tbt, tsl, tqsl, pargs);
+    std::vector<float> ob2(host_q.size());
+    backend.Copy(q, ob2.data(), mo2, ob2.size() * sizeof(float));
+    float m2 = 0.0f;
+    for (int64_t h = 0; h < kHq; ++h) {
+      const int64_t g = h / qpk;
+      for (int64_t e = 0; e < kD; ++e)
+        m2 = std::max(m2, std::fabs(
+            ob2[static_cast<size_t>(h * kD + e)] -
+            v_row[static_cast<size_t>(g * kD + e)]));
+    }
+    MESSAGE("arm a (Copy-seeded, no RAC) seq=1: max_abs=", m2);
+    CHECK(m2 < 0.5f);
+    backend.Free(mk2);
+    backend.Free(mv2);
+    backend.Free(mo2);
+  }
+  // Arm (b): the RAC-seeded cache, PA at seq=64 — the pure-decode test's
+  // window with the RAC's write instead of the Copy seed. Isolates the RAC
+  // write's landing at a window that crosses blocks.
+  {
+    for (int64_t s = 1; s < 64; ++s) {
+      for (auto& v : k_row) v = lcg() * 0.15f;
+      for (auto& v : v_row) v = lcg() * 0.05f - 0.1f;
+      backend.Copy(q, mem_kr, k_row.data(), kPage * sizeof(float));
+      backend.Copy(q, mem_vr, v_row.data(), kPage * sizeof(float));
+      const int64_t sv = s;
+      backend.Copy(q, mem_slots, &sv, sizeof(int64_t));
+      rac(q, tk, tv, tkc, tvc, tslots);
+      std::memcpy(host_kc.data() + static_cast<size_t>(s) * kPage, k_row.data(),
+                  kPage * sizeof(float));
+      std::memcpy(host_vc.data() + static_cast<size_t>(s) * kPage, v_row.data(),
+                  kPage * sizeof(float));
+    }
+    const int32_t seq64 = 64;
+    backend.Copy(q, mem_sl, &seq64, sizeof(int32_t));
+    void* mo3 = backend.Alloc(host_q.size() * sizeof(float));
+    Tensor to3 = Tensor::Contiguous(mo3, vt::DType::kF32,
+                                    Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+    pa(q, to3, tq, tkc, tvc, tbt, tsl, tqsl, pargs);
+    std::vector<float> ob3(host_q.size());
+    backend.Copy(q, ob3.data(), mo3, ob3.size() * sizeof(float));
+    float m3 = 0.0f;
+    for (int64_t h = 0; h < kHq; ++h) {
+      const int64_t g = h / qpk;
+      float mm = -std::numeric_limits<float>::infinity();
+      std::vector<float> sc(64);
+      for (int64_t j = 0; j < 64; ++j) {
+        float dot = 0.0f;
+        for (int64_t e2 = 0; e2 < kD; ++e2)
+          dot += host_q[static_cast<size_t>(h * kD + e2)] *
+                 host_kc[static_cast<size_t>(j * kPage + g * kD + e2)];
+        sc[static_cast<size_t>(j)] = dot * pargs.scale;
+        mm = std::max(mm, sc[static_cast<size_t>(j)]);
+      }
+      float den = 0.0f;
+      for (int64_t j = 0; j < 64; ++j) {
+        sc[static_cast<size_t>(j)] = std::exp(sc[static_cast<size_t>(j)] - mm);
+        den += sc[static_cast<size_t>(j)];
+      }
+      for (int64_t e = 0; e < kD; ++e) {
+        float acc = 0.0f;
+        for (int64_t j = 0; j < 64; ++j)
+          acc += sc[static_cast<size_t>(j)] / den *
+                 host_vc[static_cast<size_t>(j * kPage + g * kD + e)];
+        m3 = std::max(m3, std::fabs(ob3[static_cast<size_t>(h * kD + e)] - acc));
+      }
+    }
+    MESSAGE("arm b (RAC-seeded) seq=64: max_abs=", m3);
+    CHECK(m3 < 0.5f);
+    backend.Free(mo3);
+  }
+  // Arm (c): the RAC-seeded cache (slot 0 only), the PA at EVERY seq 1..8
+  // with FRESH metadata tensors per seq — the raw device path at the small
+  // windows, no mix, no metadata reuse. The oracle reads the same cache
+  // state (slot 0's bytes, the rest zeros).
+  {
+    for (int32_t sq = 1; sq <= 8; ++sq) {
+      void* mo4 = backend.Alloc(host_q.size() * sizeof(float));
+      void* ms4 = backend.Alloc(sizeof(int32_t));
+      void* mq4 = backend.Alloc(sizeof(int32_t) * 2);
+      backend.Copy(q, ms4, &sq, sizeof(int32_t));
+      const int32_t q4[2] = {0, 1};
+      backend.Copy(q, mq4, q4, sizeof(q4));
+      Tensor to4 = Tensor::Contiguous(mo4, vt::DType::kF32,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {1, kHq, kD});
+      Tensor ts4 = Tensor::Contiguous(ms4, vt::DType::kI32,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {1});
+      Tensor tq4 = Tensor::Contiguous(mq4, vt::DType::kI32,
+                                      Device{DeviceType::kTENSTORRENT, 0}, {2});
+      pa(q, to4, tq, tkc, tvc, tbt, ts4, tq4, pargs);
+      std::vector<float> ob4(host_q.size());
+      backend.Copy(q, ob4.data(), mo4, ob4.size() * sizeof(float));
+      float m4 = 0.0f;
+      for (int64_t h = 0; h < kHq; ++h) {
+        const int64_t g = h / qpk;
+        float mm = -std::numeric_limits<float>::infinity();
+        std::vector<float> sc(static_cast<size_t>(sq));
+        for (int64_t j = 0; j < sq; ++j) {
+          float dot = 0.0f;
+          for (int64_t e2 = 0; e2 < kD; ++e2)
+            dot += host_q[static_cast<size_t>(h * kD + e2)] *
+                   host_kc[static_cast<size_t>(j * kPage + g * kD + e2)];
+          sc[static_cast<size_t>(j)] = dot * pargs.scale;
+          mm = std::max(mm, sc[static_cast<size_t>(j)]);
+        }
+        float den = 0.0f;
+        for (int64_t j = 0; j < sq; ++j) {
+          sc[static_cast<size_t>(j)] = std::exp(sc[static_cast<size_t>(j)] - mm);
+          den += sc[static_cast<size_t>(j)];
+        }
+        for (int64_t e = 0; e < kD; ++e) {
+          float acc = 0.0f;
+          for (int64_t j = 0; j < sq; ++j)
+            acc += sc[static_cast<size_t>(j)] / den *
+                   host_vc[static_cast<size_t>(j * kPage + g * kD + e)];
+          m4 = std::max(m4, std::fabs(ob4[static_cast<size_t>(h * kD + e)] - acc));
+        }
+      }
+      MESSAGE("arm c (RAC slot0, fresh meta) seq=" << sq << ": max_abs=" << m4);
+      CHECK_MESSAGE(m4 < 0.5f, "arm c seq window");
+      backend.Free(mo4);
+      backend.Free(ms4);
+      backend.Free(mq4);
+    }
+  }
+  backend.Free(mem_kc);
+  backend.Free(mem_vc);
+  backend.Free(mem_kr);
+  backend.Free(mem_vr);
+  backend.Free(mem_slots);
+  backend.Free(mem_q);
+  backend.Free(mem_out);
+  backend.Free(mem_sl);
+  backend.Free(mem_qsl);
+  backend.Free(mem_bt);
 }
