@@ -16,4 +16,26 @@ Three new candidate artifacts are downloaded and pinned but NONE parses today: (
 
 ## Resolution
 
--
+- 2026-11-19: LANDED (parsers only; forwards still OWED to row
+  NEW-CANDIDATE-PORTS). Enumerations committed
+  (docs/bench-evidence/new-candidates-parsers-20261119/: olala-kvs.txt — GGUF
+  v3, 989 TENSORS / 52 metadata KVs; hy4-kvs.txt — 1415 tensors / 76 KVs,
+  shard 1; maxwell-fields.txt — config.json field map + all 35 shard headers,
+  34270 tensors). Builders: OlalaHfConfigFromGguf
+  (src/vllm/model_executor/models/olala_gguf_config.cpp),
+  HyV4FlashHfConfigFromGguf (hy_v4_flash_gguf_config.cpp), MaxwellConfigFromJson
+  (maxwell_config.cpp); shared KV readers gguf_config_kv.h; GgufFile::Kvs()
+  accessor added to gguf_reader.h for the carry-verbatim walk. Loader rows
+  added to kGgufArchArms (model_loader.cpp) plus the Maxwell branch on the
+  safetensors path; refuse-by-name at the forward boundary names
+  NEW-CANDIDATE-PORTS. CPU tests: tests/vllm/models/
+  test_new_candidate_parsers.cpp, 11/11 cases PASS against the pinned
+  artifacts (fixture paths skip loudly when absent). Findings recorded:
+  olala vocab is 151936 (token_embd, not a KV); olala has no per-block
+  attn_norm (geo_* family); hy indexer.types covers block_count minus the 1
+  nextn layer (42/43); hy shard 2 carries a fork-specific ggml type 43
+  (per_layer_token_embd) the reader does not tabulate, so a merged open
+  refuses in the READER — port-row work; Maxwell heads*head_dim (4096) is
+  twice hidden (2048), confirmed by q_proj [4096, 2048] — recorded, not
+  assumed away. Remote code for Maxwell is never executed; the fields it
+  would default are recorded UNKNOWN under raw["maxwell_unknown"].

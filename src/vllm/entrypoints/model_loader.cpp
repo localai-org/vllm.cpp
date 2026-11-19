@@ -42,6 +42,9 @@
 #include "vllm/model_executor/models/glm_moe_dsa.h"  // glm-dsa GGUF arm
 #include "vllm/model_executor/models/laguna.h"  // laguna GGUF arm
 #include "vllm/model_executor/models/kolibri1_gguf_weights.h"  // kolibri1 GGUF arm
+#include "vllm/model_executor/models/olala_gguf_config.h"  // olala GGUF arm (parse-only)
+#include "vllm/model_executor/models/hy_v4_flash_gguf_config.h"  // hy_v4_flash GGUF arm (parse-only)
+#include "vllm/model_executor/models/maxwell_config.h"  // maxwell_moe config.json arm (parse-only)
 #include "vllm/model_executor/models/muse_glimmer_gguf_weights.h"  // muse-glimmer GGUF arm
 #include "vllm/model_executor/models/qwen4_exp_gguf_weights.h"  // qwen4exp GGUF arm
 #include "vllm/model_executor/models/nemotron_h.h"  // the OWED nemotron_h* GGUF refusal (#809)
@@ -1253,6 +1256,16 @@ std::unique_ptr<vllm::v1::kv_offload::KVConnector> BuildKvConnector(
 //    the row that discharges O9: `scripts/convert-glm5-next-gguf.py` is the
 //    only writer of that container -- no upstream tool can produce one -- and
 //    until this row existed the file it wrote was refused as unrecognized.
+//  * `olala` -> OlalaHfConfigFromGguf and `hy_v4_flash` ->
+//    HyV4FlashHfConfigFromGguf (row NEW-CANDIDATE-PARSERS): PARSE-ONLY rows.
+//    Each builder maps the standard fields by name off the pinned artifact's
+//    own KVs (the committed walks under
+//    docs/bench-evidence/new-candidates-parsers-20261119/), carries every
+//    unmapped KV verbatim, and the loader refuses at the forward boundary
+//    naming row NEW-CANDIDATE-PORTS -- the arch ports are their own rows.
+//  * Maxwell (`maxwell_moe`, safetensors + remote-code config.json) has no row
+//    in THIS table -- it enters through the safetensors branch below, where
+//    MaxwellConfigFromJson parses and the same forward-boundary refusal fires.
 //  * `laguna` -> LagunaHfConfigFromGguf. The Laguna registry has carried a GGUF
 //    load arm (and `LagunaParamsFromGguf`) since W5, but no row here reached
 //    it, so every Laguna GGUF was refused at this table and only
@@ -1276,6 +1289,8 @@ constexpr GgufArchArm kGgufArchArms[] = {
     {"laguna", &vllm::LagunaHfConfigFromGguf},
     {vllm::kKolibri1GgufArch, &vllm::Kolibri1HfConfigFromGguf},
     {vllm::kFlintGgufArch, &vllm::FlintHfConfigFromGguf},
+    {"olala", &vllm::OlalaHfConfigFromGguf},
+    {vllm::kHyV4FlashGgufArch, &vllm::HyV4FlashHfConfigFromGguf},
 };
 
 std::string SupportedGgufArchitectures() {
@@ -2879,6 +2894,18 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     vllm::GgufFile gguf = vllm::GgufFile::Open(model_dir);
     ReportLoadPhase("mmap+header", SecondsSince(t_gguf_open));
     HfConfig config = HfConfigFromGgufDispatch(gguf);
+    // PARSE-ONLY rows (NEW-CANDIDATE-PARSERS): the builder above has already
+    // run — the parse IS reached by this production entry point — and the
+    // forward is owed to row NEW-CANDIDATE-PORTS. Refusing HERE, before
+    // ModelRegistry::Resolve, means the message names the owning row instead
+    // of the registry's generic unsupported-architecture text (#809's
+    // wrong-message lesson, applied in the parse/forward direction).
+    if (vllm::IsOlalaGguf(gguf)) {
+      throw std::runtime_error(vllm::OlalaForwardRefusal());
+    }
+    if (vllm::IsHyV4FlashGguf(gguf)) {
+      throw std::runtime_error(vllm::HyV4FlashForwardRefusal());
+    }
     // Resolve before tokenizer/weight work so unsupported architecture errors
     // are deterministic and match registry.py rather than being masked by a
     // later source-specific missing-tensor/tokenizer error.
@@ -3489,6 +3516,15 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     }
   }
   HfConfig config = vllm::LoadHfConfig(config_path);
+  // PARSE-ONLY row (NEW-CANDIDATE-PARSERS): Maxwell enters on config.json +
+  // safetensors headers, the remote code in its auto_map is NEVER executed,
+  // and the forward is owed to row NEW-CANDIDATE-PORTS. The full parse and
+  // shard-header validation run BEFORE the refusal, so the parser is reached
+  // by this production entry point and the message names the owning row.
+  if (vllm::IsMaxwellMoeConfig(config)) {
+    config = vllm::MaxwellConfigFromJson(config, model_dir);
+    throw std::runtime_error(vllm::MaxwellForwardRefusal());
+  }
   const ModelRegistration& registration = ModelRegistry::Resolve(config);
   // #2314, and see the GGUF branch above for why this precedes weight I/O.
   // No `GgufFile` on this path: `--fit` refuses by name rather than resolving to
