@@ -1,0 +1,55 @@
+magic=b'GGUF' version=3 tensors=989 kv_count=52
+0	str	general.architecture = 'olala'
+1	str	general.type = 'model'
+2	str	general.name = 'CODE_FINAL Step220 Rlhf Behavior Step520 Agentic Step180 Dpo v5 Agentic4 Step300 Agentic3 Step50'
+3	str	general.size_label = '256x1.4B'
+4	u32	olala.block_count = 36
+5	u32	olala.context_length = 100000
+6	u32	olala.embedding_length = 1536
+7	u32	olala.feed_forward_length = 0
+8	u32	olala.attention.head_count = 48
+9	u32	olala.attention.head_count_kv = 12
+10	u32	olala.attention.key_length = 128
+11	u32	olala.attention.value_length = 128
+12	f32	olala.attention.layer_norm_rms_epsilon = 9.999999974752427e-07
+13	u32	general.file_type = 32
+14	u32	olala.attention.sliding_window = 32768
+15	f32	olala.attn_logit_softcapping = 150.0
+16	u32	olala.expert_count = 256
+17	u32	olala.expert_used_count = 6
+18	u32	olala.expert_feed_forward_length = 768
+19	u32	olala.expert_shared_feed_forward_length = 1536
+20	u32	olala.expert_shared_count = 1
+21	f32	olala.expert_weights_scale = 2.450000047683716
+22	u32	olala.expert_gating_func = 2
+23	u32	olala.moe_latent_size = 384
+24	u32	olala.ssm.inner_size = 3072
+25	u32	olala.ssm.state_size = 128
+26	u32	olala.ssm.group_count = 1
+27	u32	olala.ssm.time_step_rank = 64
+28	u32	olala.mamba_mimo_dim = 4
+29	u32	olala.mamba_headdim = 64
+30	u32	olala.num_signal_heads = 36
+31	u32	olala.num_noise_heads = 12
+32	u32	olala.tpa_rank = 4
+33	u32	olala.num_rope_angles = 32
+34	str	olala.layer_types = 'MMMMVMMMMVMMMMVMMMMVMMMMVMMMMVMMMMVM'
+35	bool	olala.zero_centered_gamma = True
+36	f32	olala.gate_bias = 1.149999976158142
+37	bool	olala.gate_attn = True
+38	bool	olala.gate_gdn = True
+39	bool	olala.geodesic_update = True
+40	bool	olala.final_norm = False
+41	u32	general.quantization_version = 2
+42	str	tokenizer.ggml.model = 'gpt2'
+43	str	tokenizer.ggml.pre = 'qwen2'
+44	array	tokenizer.ggml.tokens = ['!', '"', '#', '$', '%', '&', "'", '(', '...+151928 more']
+45	array	tokenizer.ggml.token_type = [1, 1, 1, 1, 1, 1, 1, 1, '...+151928 more']
+46	array	tokenizer.ggml.merges = ['Ġ Ġ', 'ĠĠ ĠĠ', 'i n', 'Ġ t', 'ĠĠĠĠ ĠĠĠĠ', 'e r', 'ĠĠ Ġ', 'o n', '...+151379 more']
+47	u32	tokenizer.ggml.eos_token_id = 151645
+48	u32	tokenizer.ggml.padding_token_id = 151643
+49	bool	tokenizer.ggml.add_bos_token = False
+50	bool	tokenizer.ggml.add_eos_token = False
+51	str	tokenizer.chat_template = '{%- macro format_single_tool_call(tool_call, tool_call_id) -%}\n    {%- if tool_call.function -%}\n        {% set tool_call = tool_call.function %}\n    {%- endif -%}\n    <call id="{{ tool_call_id }}"><name>{{ tool_call.name }}</name><arguments>{{ tool_call.argumen
+DUPLICATE KEYS: {}
+TOP-LEVEL PREFIX COUNTS: {'olala': 36, 'tokenizer': 10, 'general': 6}
