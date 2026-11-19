@@ -4889,3 +4889,10 @@ vllm_cpp_add_test(test_qwen38_27b_radixark_w4a4_notice
   vllm/models/test_qwen38_27b_radixark_w4a4_notice.cpp)
 target_include_directories(test_qwen38_27b_radixark_w4a4_notice PRIVATE
   ${CMAKE_SOURCE_DIR}/src)
+
+# Row NEW-CANDIDATE-PARSERS: the parse-only config builders for olala,
+# hy_v4_flash (GGUF) and maxwell_moe (config.json + safetensors headers).
+# Checkpoint-GATED: each fixture path skips loudly when /mnt/models is not
+# mounted (the test_flint_gguf pattern).
+vllm_cpp_add_test(test_new_candidate_parsers vllm/models/test_new_candidate_parsers.cpp)
+target_include_directories(test_new_candidate_parsers PRIVATE ${CMAKE_SOURCE_DIR}/src)

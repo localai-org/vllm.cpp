@@ -129,6 +129,10 @@ class GgufFile {
 
   // Metadata kv by key; nullptr if absent.
   const GgufValue* FindKv(const std::string& key) const;
+  // The whole metadata table, key -> value in file order. The carry-verbatim
+  // config builders (row NEW-CANDIDATE-PARSERS) walk this to record every KV
+  // they did NOT map; no other consumer needs it.
+  const std::map<std::string, GgufValue>& Kvs() const { return kvs_; }
   // Tensor infos in file-appearance order.
   const std::vector<GgufTensorInfo>& Tensors() const { return tensors_; }
   // Throws std::runtime_error if `name` is not present.
