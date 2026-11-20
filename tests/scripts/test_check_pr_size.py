@@ -851,6 +851,12 @@ class BudgetEnforcement(unittest.TestCase):
             # AttributeError. Measured with the stub in place, not asserted:
             # "Ran 9 tests" then "FAILED (errors=9)", ZERO cases surviving.
             "scripts/check-evidence-pin-sha.py",
+            # 2026-11-20: the TT public-surface guard (ISSUE-LOCAL-01M7W2ZKR8HRBYJF6HCPP46AGH).
+            # Created in this range, so it has no BASE version to mutate. Its suite runs
+            # the checker as a subprocess over fixture trees and asserts exit codes, so
+            # the disabled stub (exit 0, no output) turns every red-fixture case red;
+            # the green cases pass, so the base run fails as the contract requires.
+            "scripts/check-tt-public-surface.py",
         }
         self.assertEqual(set(checker.CREATION_MUTATIONS), expected)
         for path, mutation in checker.CREATION_MUTATIONS.items():
