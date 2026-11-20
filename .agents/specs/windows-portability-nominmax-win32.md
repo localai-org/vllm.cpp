@@ -5,7 +5,7 @@ change.
 
 ## Why
 
-`scripts/check-windows-portability.py::_has_central_msvc_nominmax` accepts
+`scripts/check-windows-portability.py::_has_central_nominmax` accepts
 ONLY the literal `if(MSVC)` block carrying `add_compile_definitions(... NOMINMAX ...)`.
 PR #3561 (Windows clang++ in GNU mode) correctly widens that guard to
 `if(WIN32)` — clang++ on Windows is not MSVC (CMake's `MSVC` variable is false
@@ -20,7 +20,7 @@ clang++ on Windows). The agent-record CI job on #3561 failed on exactly this.
 
 ## Change
 
-- `_has_central_msvc_nominmax` renamed `_has_central_nominmax`; the contract
+- `_has_central_nominmax` renamed from its old MSVC-only spelling; the contract
   regex accepts `if(MSVC)` or `if(WIN32)` (either spelling) with the
   `add_compile_definitions(... NOMINMAX ...)` inside the block and the block
   before the first `add_library/add_executable/add_subdirectory` — unchanged
