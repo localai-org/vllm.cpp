@@ -628,6 +628,7 @@ jobs:
           # never be silent.
           python3 tests/scripts/test_convert_glm5_next_gguf.py
           python3 tests/scripts/test_ltx25_pixel_ab_harness.py
+          python3 tests/scripts/test_glm4_k1k2_runner.py
           # Same numpy-only lane, same reason (#2705, repairing #2590): the two
           # ROCM-TIER-DIVERGENCE comparators read raw activation and logit dumps
           # with `np.fromfile`, and `tier-hidden-delta.py` decodes bf16 by
