@@ -323,3 +323,10 @@ ever stops delegating.
 0/40 for the watcher, multi-core and pinned to one core alike, on a box at load
 average 397–415. The slowest observer run under that load was 0.92s against the
 60s deadline.
+## Owed
+
+- **`ISSUE-GH-296` — the two limitations recorded when
+  [#285](https://github.com/mudler/vllm.cpp/issues/285) landed**: a stale TTL
+  comment and a publish-NAME pin that `os.rename` escapes, both carried in the
+  Follow-up section above. They are debt of this spec's own lock/record design,
+  which is why the identity is owned here.
