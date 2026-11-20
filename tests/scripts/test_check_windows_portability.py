@@ -344,8 +344,12 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
         for flag in ("/WX-", "/W0", "/w"):
             with self.subTest(negation=flag):
                 self.assertFalse(checker.has_msvc_flag(reaching, flag))
-        # The prose in CMakeLists.txt is NOT what answers for the policy.
-        self.assertIn("/W4 /WX remains unchanged", cmake)
+        # The prose in CMakeLists.txt is NOT what answers for the policy, but
+        # it must still document it — normalize comment line-wraps (newline +
+        # leading '#') into single spaces, so a re-wrap (PR #3561) does not
+        # break the documentation assertion.
+        prose = " ".join(re.sub(r"(?m)\n\s*#\s?", " ", cmake).split())
+        self.assertIn("/W4 /WX remains unchanged", prose)
         self.assertFalse(
             checker.has_msvc_flag(checker.msvc_cxx_flag_text(cmake), "/WX")
         )
@@ -1064,6 +1068,36 @@ class WindowsPortabilityCheckerTest(unittest.TestCase):
             unguarded,
             "unguarded source-local NOMINMAX",
         )
+
+    def test_nominmax_central_definition_accepts_win32_guard(self) -> None:
+        # PR #3561 widens if(MSVC) to if(WIN32): clang++ on Windows is not
+        # MSVC but includes the same Windows headers under the same min/max
+        # macro contract, so NOMINMAX must be central for it too. WIN32 is
+        # the BROADER spelling (true for cl.exe AND clang++), still before
+        # the first target — the checker's contract, not just its spelling.
+        cmake = textwrap.dedent(SAFE_FILES["CMakeLists.txt"])
+        win32_form = cmake.replace("if(MSVC)", "if(WIN32)")
+        result = self.run_checker(self.make_tree({"CMakeLists.txt": win32_form}))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        # A WIN32 guard without NOMINMAX inside still fails.
+        without_central = win32_form.replace(
+            "add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)", ""
+        )
+        result = self.run_checker(
+            self.make_tree({"CMakeLists.txt": without_central})
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("NOMINMAX", result.stdout + result.stderr)
+
+        # NOMINMAX defined only AFTER the first target is not central.
+        late_cmake = (
+            "add_library(vllm STATIC dummy.cpp)\n"
+            "if(WIN32)\n  add_compile_definitions(NOMINMAX)\nendif()\n"
+        )
+        result = self.run_checker(self.make_tree({"CMakeLists.txt": late_cmake}))
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("NOMINMAX", result.stdout + result.stderr)
 
     def test_nominmax_real_closure_accepts_guarded_fallbacks_before_headers(
             self) -> None:
