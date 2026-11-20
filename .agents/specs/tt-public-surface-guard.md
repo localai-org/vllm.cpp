@@ -161,7 +161,11 @@ build directory.
 ## Now
 
 Filed 2026-11-20 from the red `build-newest-gcc` lane on main (14e06b7bc).
-Implementation in worktree `/tmp/fix-ensure`, branch `fix/ensurehost-cpu-link`.
+Landed on branch `fix/ensurehost-cpu-link` (pushed to `mine`): spec+issue
+`a5b7b18fa`, fix `7880f6528`, issue closure `33ef6ad8a`. Checker green
+(0 violations / 96 stubbed symbols), unit tests 9/9, CPU-only link+run of
+the drafter test proven in `/tmp/build-tt-surface`. Awaiting merge; the red
+lane on main (build-newest-gcc) goes green once it lands.
 
 ## Owed
 
