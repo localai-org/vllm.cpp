@@ -477,6 +477,15 @@ else
   done
 fi
 # QWEN3-CAPTURE-TOOLS: end
+# K2 of the GLM4-MoE-Lite gate (#2839): the oracle's own path determinism.
+# The probe imports numpy, so an absent numpy is a SKIP and never an `ok`.
+if python3 -c 'import numpy' >/dev/null 2>&1; then
+  run "test_glm4_path_determinism" python3 tests/scripts/test_glm4_path_determinism.py
+else
+  skip "test_glm4_path_determinism" \
+    "numpy is not importable here, and the probe this suite exercises needs it." \
+    "CI installs python3-numpy and runs the same suite."
+fi
 
 # THE ONE SUITE HERE WITH A THIRD-PARTY DEPENDENCY (#1612). It exercises
 # `scripts/ltx25-render-compare.py`, whose only import beyond the standard
