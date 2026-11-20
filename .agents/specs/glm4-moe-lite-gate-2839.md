@@ -131,3 +131,21 @@ host with no GPU and no snapshot, and neither is this row's work.
   no revision and no sha256 — which `CLAUDE.md` §"Say which weights, and from
   where" requires. Not repaired here because the values must be read off the
   artifact this host does not have.
+
+## Now
+
+2026-11-20: the blocker named in Stop conditions ("neither is available to a
+host with no GPU and no snapshot") is gone — the developer authorized the
+download and `zai-org/GLM-4.7-Flash` @ `7dd20894a642a0aa287e9827cb1a1f7f91386b67`
+(62.5 GB, MIT, bf16 48 shards) is now in the local HF cache, so T3 runs on
+this host's CPU (~5 min per battery; the anchor REQUIRE at test :387 fails
+locally because the committed our_ids was dgx-captured and CPU numerics drift
+— host artifact, regenerate locally with VT_GLM_DUMP_IDS=1 +
+scripts/glm4-moe-lite-neartie-gap.py). Repair task filed as
+ISSUE-LOCAL-01M7XH1MTYH6QQHDKT31WGB76Y: bisect d85fd04fb (where the forward
+was 8/8) .. HEAD on the failing cells (prompts 1-6 diverge at pos 4-6, prompt
+0 at pos 14, prompt 7 exact; gap artifact all-zero so the argmax flip is a
+real logits difference), repair the forward, drive T2/T3 to 128/128 — exit 1,
+no weakening of T2. O2 and O3 resolve in the same change (T3 executed here; the
+USAGE.md weights row gets repo+revision+sha256 read off the downloaded
+snapshot). Worktree /tmp/glm4-2839, branch row/MODEL-TEXT-GLM4-MOE-LITE-GATE-2839.
