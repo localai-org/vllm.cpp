@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M7W2ZKR8HRBYJF6HCPP46AGH
 Title: TT public surface: EnsureHost forward-declared in always-compiled drafter test breaks CPU-only link; guard the stub discipline with a checker
 Row: BACKEND-TENSTORRENT
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-20
 Updated: 2026-11-20
-Closed: -
+Closed: 2026-11-20
 
 ## Problem
 
@@ -16,4 +16,4 @@ tests/vllm/models/test_qwen38_dflash2_drafter_tt.cpp:74-77 forward-declares vt::
 
 ## Resolution
 
--
+Fixed on branch fix/ensurehost-cpu-link (a5b7b18fa spec + 7880f6528 fix, on main 14e06b7bc). EnsureHost moved to the public tenstorrent_device.h with #else no-op stubs; 17 unconditional header danglers (DeviceAvailable; SharedMeshDevice moved to a TT-only section; RegisterHostBuffer/UnregisterHostBuffer/MarkHostWritten/MarkScratchAcquired/EnsureHostBytes; CopyDeviceDeviceIfCapture/MemsetDeviceIfCapture/MemsetDeviceFill/CopyDeviceDeviceIfResident; 6 Trace* entry points) now carry stubs; the drafter test includes the public header instead of forward-declaring. New gate scripts/check-tt-public-surface.py (picked up by the preflight sweep) enforces R1-R4 over always-compiled TUs; red-before on the pre-fix tree was 19 violations (drafter:74 R2, drafter:787 R3 EnsureHost, 17 R4), green-after 0 violations / 96 stubbed symbols; unit tests 9/9. Link proof: CPU-only build (VLLM_CPP_TENSTORRENT=OFF) of test_qwen38_dflash2_drafter_tt in /tmp/build-tt-surface BUILD EXIT 0, nm shows W (weak inline) EnsureHost, binary runs 5/5 cases 143/143 assertions on CPU. Spec .agents/specs/tt-public-surface-guard.md committed first (a5b7b18fa). Trailer/style gates OK on both commits.
