@@ -555,6 +555,13 @@ CREATION_MUTATIONS = {
     # red-first is corrupting the recorded sha in
     # docs/bench-evidence/flint-cpu-parity-20261029/report.md.
     "scripts/check-evidence-pin-sha.py": DISABLED_CREATION_CHECKER,
+    # 2026-11-20: the TT public-surface guard (ISSUE-LOCAL-01M7W2ZKR8HRBYJF6HCPP46AGH).
+    # Created in this range, so it has no BASE version to mutate. Its suite runs the
+    # checker as a SUBPROCESS over synthetic fixture trees and asserts exit codes, so
+    # the disabled stub (exits 0, prints nothing) takes every red-fixture case red
+    # (expected 1, got 0) while the green-tree cases still pass — the head run is 9/9
+    # and the base run fails, which is exactly the red-before contract.
+    "scripts/check-tt-public-surface.py": DISABLED_CREATION_CHECKER,
 }
 SELF_CHECKER = "scripts/check-pr-size.py"
 EVIDENCE_TIMEOUT_SECONDS = 120
