@@ -150,15 +150,19 @@ TEST_CASE("vt block geometry agrees with the GGUF reader's GgmlTraits") {
     CHECK(back == c.dtype);
 
     if (c.dtype == vt::DType::kQ8_K) {
-      // FILE GEOMETRY IS NOT KEEP-QUANT CAPABILITY. The reader names the block
-      // size, and the loader still refuses to keep Q8_K resident through a GEMM:
-      // the encoding has no weight-side dot kernel, so the public predicate the
-      // production loader itself calls answers false, and the embedding role
-      // preserves the blocks packed through the decode-only gather arm.
+      // FILE GEOMETRY IS NOT KEEP-QUANT CAPABILITY, and neither is the absence
+      // of a weight-side dot kernel any more: TT-KEEPQUANT-Q8K-WEIGHTS landed
+      // kQ8_K INTO the GEMM keep-quant set as the named dequant-composite
+      // exception (gguf_keep_quant.cpp:334-340 — it serves the tree-standard
+      // Q8_K weight arm via ComposeChunk on CPU and the TT composite chain on
+      // device, precisely because it has no vec_dot). So the loader's public
+      // predicate answers TRUE with kept=kQ8_K; what stays absent is the
+      // weight-side dot kernel itself.
       CHECK(vt::cpu::BlockVecDot(vt::DType::kQ8_K) == nullptr);
       CHECK_FALSE(vt::cpu::HasQuantDotKernel(vt::DType::kQ8_K));
       vt::DType kept = vt::DType::kF32;
-      CHECK_FALSE(vllm::KeepQuantDType(c.ggml_type, &kept));
+      CHECK(vllm::KeepQuantDType(c.ggml_type, &kept));
+      CHECK(kept == vt::DType::kQ8_K);
     }
   }
 }

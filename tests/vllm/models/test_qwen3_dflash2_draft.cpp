@@ -1997,18 +1997,17 @@ TEST_CASE("dflash2 selector: input_embedding_scale is REFUSED BY NAME") {
   CHECK(what.find("O9") != std::string::npos);
 }
 
-TEST_CASE("dflash2 selector: a GGUF target's QUANTIZED lm_head is CARRIED as dequantized") {
-  // The other half of D12, and the half a mutation proved was ungated: the guard
-  // above can only fire if something SETS `lm_head_dequantized`, and the only
-  // thing that can is the GGUF shared-head loader. Making it always report
-  // `false` left every suite in this repository green.
-  //
-  // A GGUF target's `output.weight` is normally block-quantized, and
-  // `LoadGgufSharedEmbedAndHeadBf16` dequantizes it to bf16 for the draft. A
-  // scalar ggml type packs ONE element per "block"; anything else was
-  // dequantized. Both arms are asserted, because a carry that always reported
-  // `true` would satisfy the DFlash2 guard while refusing every bf16 GGUF target
-  // the DFlash1 lane has shipped since `SPEC-DFLASH-GGUF`.
+TEST_CASE("dflash2 selector: a GGUF target's block-quant lm_head is kept PACKED (W3 contract)") {
+  // QWEN38-DFLASH2-STAGE-C W3 (cbe58628b) flipped this contract: a GGUF
+  // target's block-quantized `output.weight` is NO LONGER dequantized to a
+  // bf16 copy — it is kept PACKED in the exact owner the target's own logits
+  // GEMM reads (OwnGgufQuantBlocks, dtype = the block dtype, nk = true), which
+  // also removes the ~2.44 GB duplicate device residency that OOM'd the 27B
+  // k-quant arms, and lets the selector's top-K come off the target's exact
+  // quantized-head logits (#1628's ADMITTED state). `head_was_quantized` is
+  // false in BOTH arms now (packed head = not dequantized; scalar head was
+  // never block-quantized); the D12 refusal survives only for the safetensors
+  // NVFP4 path, where the head cannot be computed natively.
   constexpr int64_t V = 32, H = 32;  // Q8_0 blocks are 32 elements / 34 bytes
   const std::string bf16_rows(static_cast<size_t>(V * H) * 2, '\x3c');
   const auto build = [&](uint32_t head_type, const std::string& head_data) {
@@ -2021,7 +2020,7 @@ TEST_CASE("dflash2 selector: a GGUF target's QUANTIZED lm_head is CARRIED as deq
     return b.Build();
   };
 
-  {  // BF16 head: read as dense floats, nothing dequantized.
+  {  // BF16 head: read as dense bf16, nothing dequantized, flag false.
     const gguf_test::TempFile f(build(30, bf16_rows));
     const vllm::GgufFile g = vllm::GgufFile::Open(f.path());
     vllm::OwnedTensor embed, head;
@@ -2029,8 +2028,10 @@ TEST_CASE("dflash2 selector: a GGUF target's QUANTIZED lm_head is CARRIED as deq
                             // never writes the flag cannot pass this arm
     vllm::LoadGgufSharedEmbedAndHeadBf16(g, &embed, &head, &quantized);
     CHECK_FALSE(quantized);
+    CHECK(head.dtype == vt::DType::kBF16);
   }
-  {  // Q8_0 head: 34 bytes per 32-element block, dequantized on the way in.
+  {  // Q8_0 head: 34 bytes per 32-element block, kept PACKED — not widened —
+     // and the flag reports false because nothing was dequantized.
     const int64_t blocks = V * H / 32;
     std::string q8(static_cast<size_t>(blocks) * 34, '\0');
     for (int64_t i = 0; i < blocks; ++i) {
@@ -2040,9 +2041,14 @@ TEST_CASE("dflash2 selector: a GGUF target's QUANTIZED lm_head is CARRIED as deq
     const gguf_test::TempFile f(build(/*Q8_0=*/8, q8));
     const vllm::GgufFile g = vllm::GgufFile::Open(f.path());
     vllm::OwnedTensor embed, head;
-    bool quantized = false;
+    bool quantized = true;  // deliberately the WRONG default (see BF16 arm)
     vllm::LoadGgufSharedEmbedAndHeadBf16(g, &embed, &head, &quantized);
-    CHECK(quantized);
+    CHECK_FALSE(quantized);
+    CHECK(head.dtype == vt::DType::kQ8_0);
+    CHECK(head.nk);
+    CHECK(head.rank == 2);
+    CHECK(head.shape[0] == V);
+    CHECK(head.shape[1] == H);
   }
 }
 
