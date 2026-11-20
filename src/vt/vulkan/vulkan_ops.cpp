@@ -345,7 +345,8 @@ static_assert(sizeof(PagedAttnParams) <= 128,
               "push constants must fit the guaranteed 128 bytes");
 static_assert(sizeof(ConvUpdateParams) <= 128,
               "push constants must fit the guaranteed 128 bytes");
-// The widest block in the backend at 84 bytes: the fused post-conv carries ten
+// The widest block in the backend at 84 bytes (tied with ConvFwdParams): the
+// fused post-conv carries ten
 // operand offsets. If it ever needs an eleventh, the step list has to move to the
 // scratch buffer the way vt_fused_chain's does.
 static_assert(sizeof(GdnPostConvParams) <= 128,
@@ -1669,12 +1670,11 @@ void QkvSplitKernel(Queue&, Tensor& q_out, Tensor& k_out, Tensor& v_out, const T
 //     __init__). Leaving it on the host MIRRORS upstream; "implementing" it would
 //     be a regression, and the assertion in tests/vt/test_vulkan_backend.cpp says
 //     so out loud.
-//   * kCausalConv1dFwd — the PREFILL conv. It is the same arithmetic as the
-//     update below but its state write-back reads the OLD state row while other
-//     tokens of the same sequence are still reading it, so it needs either a
-//     per-(sequence, channel) serial invocation over the whole token range or a
-//     buffered old row; that is a different dispatch shape, not a wider push
-//     block, and it is left for a follow-up rather than guessed at here.
+//   * kCausalConv1dFwd — the PREFILL conv — is NATIVE now, in the first of the
+//     two shapes this comment used to name: one invocation per (sequence,
+//     channel), serial over the whole token range, with the old state row copied
+//     into a private array before the write-back. See CausalConv1dFwdKernel; an
+//     opt-in token-block split exists and its own hazard is documented there.
 // ===========================================================================
 
 // cpu_ops.cpp:2272-2279 SigmoidGateBf16Kernel. Flat, one invocation per element.
@@ -1805,6 +1805,181 @@ void GdnStateScatterKernel(Queue&, Tensor& cache, const Tensor& working,
                           work_off,
                           idx_off};
   Go("vt_gdn_state_scatter", bind, p, FlatGroupCount(g.rows * g.work_row));
+}
+
+struct ConvFwdParams {
+  uint32_t n, c_dim, k, width, x_rs;
+  uint32_t max_t_len;
+  uint32_t has_bias, his_is_i8, silu;
+  uint32_t out_dt, x_dt, w_dt, bias_dt, st_dt;
+  uint32_t out_off, x_off, w_off, bias_off, st_off, qsl_off, his_off;
+};
+static_assert(sizeof(ConvFwdParams) <= 128,
+              "push constants must fit the guaranteed 128 bytes");
+
+// cpu_ops.cpp CausalConv1dFwdKernel, the GDN PREFILL conv.
+//
+// DEFAULT MAPPING: one invocation per (sequence, channel), serial over that
+// sequence's whole token range -- the CPU kernel's own ForRows unit, and the
+// first of the two shapes the block comment above this family names for this
+// op. The op computes every output from the OLD state window and then
+// overwrites that window; one invocation owns both the reads and the
+// write-back for its (sequence, channel), and it copies the old window into a
+// private array first (the CPU kernel's `old_row`), so no other invocation can
+// observe a half-rolled state.
+//
+// Deliberately NOT llama.cpp's ssm_conv.comp shape by default, which also
+// parallelises over tokens: that works there because ggml advances the conv
+// state as a separate node, and here the same dispatch reads and advances it.
+//
+// OPTIONAL TOKEN BLOCKS, VT_VULKAN_CONV_TARGET_GROUPS=<g>: split each sequence
+// into VT_CONV_BLOCKS token blocks in the same dispatch. Only tokens t < width
+// read the carried state, and the shader gives every one of them to block 0 --
+// the block that also writes the state back -- so block 0 is the only one that
+// touches conv_state at all. An earlier split that did not do this raced: see
+// the BLOCK 0 comment in vt_causal_conv1d_fwd.comp. The split changes the grid
+// shape only, never the output, so it is off unless asked for.
+//
+// STATE ROWS: the CPU reference addresses conv_state with stride `width` and
+// the shader mirrors it. The op layer also admits rows WIDER than K-1
+// (speculative-decode taps, ops.cpp CheckConvCommon), where that stride and
+// the row's physical stride disagree. This kernel declines those shapes
+// rather than choose between them, so they keep the reference tier's answer.
+void CausalConv1dFwdKernel(Queue& q, Tensor& out, const Tensor& x, const Tensor& w,
+                           const Tensor* bias, Tensor& conv_state, const Tensor& qsl,
+                           const Tensor& his, const CausalConv1dArgs& args) {
+  const int64_t c_dim = x.shape[1], k = w.shape[1], total = x.shape[0];
+  const int64_t n = conv_state.shape[0];
+  if (n == 0 || c_dim == 0) return;
+  auto decline = [&] {
+    auto next = reinterpret_cast<CausalConv1dFwdFn>(
+        GetOpFallback(OpId::kCausalConv1dFwd, DeviceType::kVULKAN, kNativeProviderName));
+    next(q, out, x, w, bias, conv_state, qsl, his, args);
+  };
+  // PER-CALL REFUSAL rather than a throw, the seam vt_paged_attn and the GDN
+  // recurrences use: a shape this shader cannot serve forwards to the portable
+  // reference tier, which is correct for every shape. Reasons to decline:
+  //   * K = 1 (no carried state, so a zero-length state row to bind) or a
+  //     kernel width past the shader's private window (VT_CONV_MAX_WIDTH).
+  //   * conv_state rows wider than K-1 (see STATE ROWS above).
+  //   * A storage dtype outside f32/f16/bf16 (conv_state: f32/bf16).
+  //   * has_initial_state that is neither i8 nor i32.
+  //   * More (sequence, channel) pairs than one dispatch can cover: the grid
+  //     is 1-D and Dispatch refuses a count above the device's
+  //     maxComputeWorkGroupCount[0].
+  //   * Any index the shader forms that would not fit its uint32 arithmetic
+  //     (checked after binding, below, because it includes the offsets).
+  const auto is_float = [](DType d) {
+    return d == DType::kF32 || d == DType::kF16 || d == DType::kBF16;
+  };
+  const int64_t max_invocations =
+      static_cast<int64_t>(VulkanContext::Get().max_workgroup_count_x()) * kWorkgroupSize;
+  const bool serve = n * c_dim <= max_invocations && k >= 2 && k - 1 <= 8 &&
+                     conv_state.shape[2] == k - 1 && is_float(out.dtype) &&
+                     is_float(x.dtype) && is_float(w.dtype) &&
+                     (bias == nullptr || is_float(bias->dtype)) &&
+                     (conv_state.dtype == DType::kF32 || conv_state.dtype == DType::kBF16) &&
+                     (his.dtype == DType::kI8 || his.dtype == DType::kI32);
+  if (!serve) {
+    decline();
+    return;
+  }
+  // query_start_loc is NOT read on the host: it is device memory, and reading
+  // it here would need the pending batch drained first. The shader guards
+  // memory, not semantics -- see the guard at the top of its main(). (A
+  // DECLINED call does reach host code: GetOpFallback drains the batch and the
+  // reference tier runs over host-visible device storage.)
+
+  Binder bind;
+  const uint32_t out_off = bind.Add(out, "causal_conv1d_fwd: out");
+  const uint32_t x_off = bind.Add(x, "causal_conv1d_fwd: x");
+  const uint32_t w_off = bind.Add(w, "causal_conv1d_fwd: weight");
+  const uint32_t bias_off = bias != nullptr ? bind.Add(*bias, "causal_conv1d_fwd: bias")
+                                            : bind.Add(w, "causal_conv1d_fwd: weight");
+  const uint32_t st_off = bind.Add(conv_state, "causal_conv1d_fwd: conv_state");
+  const uint32_t qsl_off = bind.AddU32Only(qsl, "causal_conv1d_fwd: query_start_loc");
+  // has_initial_state may be i8, which is not 4-byte aligned, so it goes through
+  // the byte view and the shader unpacks it -- the same reasoning the update
+  // kernel gives for aliasing a bf16 state through AddByteView.
+  const uint32_t his_off = bind.AddByteView(his, "causal_conv1d_fwd: has_initial_state");
+
+  // F5 of the review: the shader forms every index in uint32. Decline when the
+  // largest one -- the binding's base element plus the farthest element the
+  // shader can address in it -- would not fit.
+  {
+    constexpr int64_t kU32 = 0xFFFFFFFFll;
+    const auto elem = [](DType d) { return d == DType::kF32 ? 4 : 2; };
+    const auto fits = [&](uint32_t off_bytes, int64_t esize, int64_t extent) {
+      return static_cast<int64_t>(off_bytes) / esize + extent <= kU32;
+    };
+    const int64_t x_extent = (total > 0 ? (total - 1) * x.stride[0] : 0) + c_dim;
+    const bool ok =
+        // query_start_loc is i32 and its last entry is `total`, so every
+        // sequence length the shader sees is below 2^31; asserting it here is
+        // what makes the shader's block arithmetic provably wrap-free.
+        total <= 0x7FFFFFFFll && x.stride[0] >= 0 && x.stride[0] <= kU32 &&
+        n * c_dim * k <= kU32 &&
+        fits(out_off, elem(out.dtype), total * c_dim) &&
+        fits(x_off, elem(x.dtype), x_extent) &&
+        fits(w_off, elem(w.dtype), c_dim * k) &&
+        (bias == nullptr || fits(bias_off, elem(bias->dtype), c_dim)) &&
+        fits(st_off, elem(conv_state.dtype), n * c_dim * (k - 1)) &&
+        fits(qsl_off, 4, n + 1) && fits(his_off, 1, n + 4);
+    if (!ok) {
+      decline();
+      return;
+    }
+  }
+
+  ConvFwdParams p{static_cast<uint32_t>(n),
+                  static_cast<uint32_t>(c_dim),
+                  static_cast<uint32_t>(k),
+                  static_cast<uint32_t>(k - 1),
+                  static_cast<uint32_t>(x.stride[0]),
+                  static_cast<uint32_t>(total),
+                  bias != nullptr ? 1u : 0u,
+                  his.dtype == DType::kI8 ? 1u : 0u,
+                  args.silu_activation ? 1u : 0u,
+                  DtypeCode(out.dtype),
+                  DtypeCode(x.dtype),
+                  DtypeCode(w.dtype),
+                  bias != nullptr ? DtypeCode(bias->dtype) : DtypeCode(w.dtype),
+                  DtypeCode(conv_state.dtype),
+                  out_off,
+                  x_off,
+                  w_off,
+                  bias_off,
+                  st_off,
+                  qsl_off,
+                  his_off};
+  // TOKEN BLOCKS: 1 unless VT_VULKAN_CONV_TARGET_GROUPS asks for a split. Read
+  // on every call rather than cached, so one test process can run both
+  // mappings -- the split path carries the block-0 rule and has to stay under
+  // test even though it is not the default.
+  int64_t blocks = 1;
+  if (const char* v = std::getenv("VT_VULKAN_CONV_TARGET_GROUPS")) {
+    const long g = std::strtol(v, nullptr, 10);
+    if (g >= 1 && g <= 65536) {
+      const int64_t base_groups = (n * c_dim + 127) / 128;
+      // Never more blocks than there are tokens to give them: past that the
+      // extra invocations are empty and only cost launch.
+      const int64_t avg_len = std::max<int64_t>(1, total / n);
+      blocks = (static_cast<int64_t>(g) + base_groups - 1) / base_groups;
+      blocks = std::max<int64_t>(1, std::min<int64_t>(blocks, avg_len));
+      // ...and never more than one dispatch can launch.
+      blocks = std::min<int64_t>(blocks, max_invocations / (n * c_dim));
+      // VT_CONV_BLOCKS is a specialization constant, so every distinct value is
+      // a separately compiled pipeline; the cap bounds what this knob can
+      // create to 64. A cap, NOT power-of-two rounding: with rounding, the
+      // pre-fix race stopped reproducing on llvmpipe (4 blocks of one
+      // (sequence, channel) sat inside one 8-lane subgroup in the test's
+      // layout), so it would have hidden the hazard from the test that guards it.
+      blocks = std::min<int64_t>(blocks, 64);
+    }
+  }
+  const uint32_t conv_spec[1] = {static_cast<uint32_t>(blocks)};
+  Go("vt_causal_conv1d_fwd", bind, p,
+     FlatGroupCount(n * c_dim * blocks), conv_spec, 1);
 }
 
 // cpu_ops.cpp:1081-1127 CausalConv1dUpdateKernel. One invocation per
@@ -2621,9 +2796,8 @@ struct Registrar {
                reinterpret_cast<void*>(static_cast<RmsNormFn>(&RmsNormKernel)));
     RegisterOp(OpId::kFusedChain, DeviceType::kVULKAN,
                reinterpret_cast<void*>(static_cast<FusedChainFn>(&FusedChainKernel)));
-    // BACKEND-VULKAN-GDN: the GDN glue family. kCausalConv1dFwd (the prefill
-    // conv) stays on the portable reference tier; see the block comment above
-    // these kernels.
+    // BACKEND-VULKAN-GDN: the GDN glue family, now including kCausalConv1dFwd
+    // (the prefill conv), registered after the update op below.
     RegisterOp(OpId::kSigmoidGateBf16, DeviceType::kVULKAN,
                reinterpret_cast<void*>(static_cast<SigmoidGateBf16Fn>(&SigmoidGateBf16Kernel)));
     RegisterOp(OpId::kRmsNormGated, DeviceType::kVULKAN,
@@ -2635,6 +2809,17 @@ struct Registrar {
     RegisterOp(
         OpId::kCausalConv1dUpdate, DeviceType::kVULKAN,
         reinterpret_cast<void*>(static_cast<CausalConv1dUpdateFn>(&CausalConv1dUpdateKernel)));
+    // The PREFILL conv. VT_VULKAN_CONV_FWD=0 leaves it on the portable CPU
+    // reference tier, where it lived before this kernel existed, so its effect
+    // can be attributed with a same-binary A/B rather than across two builds --
+    // the same shape as VT_VULKAN_COOPMAT.
+    {
+      const char* conv_env = std::getenv("VT_VULKAN_CONV_FWD");
+      if (conv_env == nullptr || conv_env[0] != '0') {
+        RegisterOp(OpId::kCausalConv1dFwd, DeviceType::kVULKAN,
+                   reinterpret_cast<void*>(static_cast<CausalConv1dFwdFn>(&CausalConv1dFwdKernel)));
+      }
+    }
     RegisterOp(OpId::kGdnPostConv, DeviceType::kVULKAN,
                reinterpret_cast<void*>(static_cast<GdnPostConvFn>(&GdnPostConvKernel)));
     // BACKEND-VULKAN-GDN-CORE: the two recurrences.
