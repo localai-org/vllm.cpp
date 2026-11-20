@@ -43,6 +43,7 @@
 #include "vllm/model_executor/models/laguna.h"  // laguna GGUF arm
 #include "vllm/model_executor/models/kolibri1_gguf_weights.h"  // kolibri1 GGUF arm
 #include "vllm/model_executor/models/olala_gguf_config.h"  // olala GGUF arm (parse-only)
+#include "vllm/model_executor/models/olala_gguf_weights.h"  // olala W1 census (NEW-CANDIDATE-PORTS)
 #include "vllm/model_executor/models/hy_v4_flash_gguf_config.h"  // hy_v4_flash GGUF arm (parse-only)
 #include "vllm/model_executor/models/maxwell_config.h"  // maxwell_moe config.json arm (parse-only)
 #include "vllm/model_executor/models/muse_glimmer_gguf_weights.h"  // muse-glimmer GGUF arm
@@ -2901,6 +2902,11 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     // of the registry's generic unsupported-architecture text (#809's
     // wrong-message lesson, applied in the parse/forward direction).
     if (vllm::IsOlalaGguf(gguf)) {
+      // NEW-CANDIDATE-PORTS W1: the GGUF weights arm's census runs on the
+      // production path (every tensor mapped, counts/shapes vs the parsed
+      // config) BEFORE the forward refusal, so a malformed container fails
+      // here with the census message instead of at the forward boundary.
+      vllm::ValidateOlalaGguf(gguf, config);
       throw std::runtime_error(vllm::OlalaForwardRefusal());
     }
     if (vllm::IsHyV4FlashGguf(gguf)) {

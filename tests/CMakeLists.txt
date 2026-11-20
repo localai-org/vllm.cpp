@@ -4896,3 +4896,7 @@ target_include_directories(test_qwen38_27b_radixark_w4a4_notice PRIVATE
 # mounted (the test_flint_gguf pattern).
 vllm_cpp_add_test(test_new_candidate_parsers vllm/models/test_new_candidate_parsers.cpp)
 target_include_directories(test_new_candidate_parsers PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# NEW-CANDIDATE-PORTS W1: the olala GGUF weights arm's census over the pinned
+# bf16 + q6_k artifacts (checkpoint-gated, same skip-loudly pattern).
+vllm_cpp_add_test(test_olala_gguf_weights vllm/models/test_olala_gguf_weights.cpp)
+target_include_directories(test_olala_gguf_weights PRIVATE ${CMAKE_SOURCE_DIR}/src)
