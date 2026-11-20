@@ -478,6 +478,17 @@ else
 fi
 # QWEN3-CAPTURE-TOOLS: end
 
+# K1 of the GLM4-MoE-Lite gate (#2839): the teacher-forced gap at full
+# resolution. `scripts/glm4-moe-lite-neartie-gap.py` imports numpy, so an absent
+# numpy is a SKIP here and never an `ok` -- nothing was verified.
+if python3 -c 'import numpy' >/dev/null 2>&1; then
+  run "test_glm4_neartie_gap" python3 tests/scripts/test_glm4_neartie_gap.py
+else
+  skip "test_glm4_neartie_gap" \
+    "numpy is not importable here, and the capture tool this suite exercises needs it." \
+    "CI installs python3-numpy and runs the same suite."
+fi
+
 # THE ONE SUITE HERE WITH A THIRD-PARTY DEPENDENCY (#1612). It exercises
 # `scripts/ltx25-render-compare.py`, whose only import beyond the standard
 # library is numpy -- the tool reads PPM and WAV by hand precisely so that a
