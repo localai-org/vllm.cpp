@@ -4669,7 +4669,8 @@ GdnQkvzOutput ProjectGdnQkvz(Dev d, const GdnLayerWeights& w, const Tensor& h,
       std::vector<float> zv_ =
           vt::tenstorrent::DebugDeviceReadbackF32(d.q, out.z);
       double z_acc = 0.0;
-      uint64_t z_nan = 0, z_inf = 0, z_max = 0;
+      uint64_t z_nan = 0, z_inf = 0;
+      double z_max = 0;  // max-abs is a float value; uint64_t tripped MSVC C4244 (windows-msvc lanes, -WX)
       for (float f : zv_) {
         if (std::isnan(f)) {
           ++z_nan;
@@ -4700,36 +4701,36 @@ GdnQkvzOutput ProjectGdnQkvz(Dev d, const GdnLayerWeights& w, const Tensor& h,
       const bool rowp = vt::tenstorrent::KeepQuantRowWordsPresentForTest(host);
       const bool legacy =
           vt::tenstorrent::KeepQuantWordShadowPresentForTest(host);
-      uint64_t h = 1469598103934665603ull;
+      uint64_t wh = 1469598103934665603ull;  // 'h' hides the hidden-dim parameter (MSVC C4457, -WX)
       size_t wn = 0;
       if (rowp) {
         auto v = vt::tenstorrent::KeepQuantRowWordsReadBackForTest(host);
         wn = v.size();
         for (int32_t x : v) {
-          h = (h ^ static_cast<uint64_t>(static_cast<uint32_t>(x))) *
+          wh = (wh ^ static_cast<uint64_t>(static_cast<uint32_t>(x))) *
               1099511628211ull;
         }
       } else if (legacy) {
         auto v = vt::tenstorrent::KeepQuantWordReadBackForTest(host);
         wn = v.size();
         for (int32_t x : v) {
-          h = (h ^ static_cast<uint64_t>(static_cast<uint32_t>(x))) *
+          wh = (wh ^ static_cast<uint64_t>(static_cast<uint32_t>(x))) *
               1099511628211ull;
         }
       }
       static std::map<const void*, std::pair<uint64_t, size_t>> seen;
       auto it = seen.find(host);
-      if (it == seen.end() || it->second.first != h ||
+      if (it == seen.end() || it->second.first != wh ||
           it->second.second != wn) {
         std::fprintf(stderr,
                      "[QKVZ-W] call=%lld %s host=%p rowp=%d legacy=%d words=%zu "
                      "hash=%016llx%s\n",
                      static_cast<long long>(qkvz_call), wtag, host, rowp ? 1 : 0,
                      legacy ? 1 : 0, wn,
-                     static_cast<unsigned long long>(h),
+                     static_cast<unsigned long long>(wh),
                      it == seen.end() ? " first" : " CHANGED");
       }
-      seen[host] = {h, wn};
+      seen[host] = {wh, wn};
     }
     std::fflush(stderr);
   }
@@ -5380,16 +5381,16 @@ DBuf GdnBlockPagedMixedSpec(Dev d, const GdnLayerWeights& w, const HfConfig& cfg
         std::vector<float> dv_ =
             vt::tenstorrent::DebugDeviceReadbackF32(d.q, dcore.t());
         double a = 0.0;
-        uint64_t z = 0, nn = 0;
+        uint64_t nzero = 0, nn = 0;  // 'z' hides a parameter (MSVC C4457, -WX)
         for (float f : dv_) {
           if (std::isnan(f)) { ++nn; continue; }
-          if (f == 0.0f) ++z;
+          if (f == 0.0f) ++nzero;
           a += f > 0.0f ? f : -f;
         }
         std::fprintf(stderr,
                      " | dcore asum=%.6g nan=%llu zero=%llu/%zu\n", a,
                      static_cast<unsigned long long>(nn),
-                     static_cast<unsigned long long>(z), dv_.size());
+                     static_cast<unsigned long long>(nzero), dv_.size());
         std::fflush(stderr);
       }
     }
@@ -12899,7 +12900,7 @@ ForwardLogits Qwen3_5DenseDecodeGraph::Step(
         const uint32_t half = ab[static_cast<size_t>(t * aux_h)];
         const uint32_t fbits = half << 16;
         float first_f;
-        __builtin_memcpy(&first_f, &fbits, sizeof first_f);
+        std::memcpy(&first_f, &fbits, sizeof first_f);  // __builtin_memcpy does not exist on MSVC (C3861)
         std::fprintf(stderr,
                      "[GDN-TAP] kind=%s step=%lld TAP tap=%lld rows=%lld h=%lld "
                      "fnv=%016llx first=%a\n",
