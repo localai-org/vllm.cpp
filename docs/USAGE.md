@@ -405,7 +405,7 @@ tokens quietly.
 | Architecture | Why it refuses |
 |---|---|
 | `KimiK3ForConditionalGeneration` | Needs ~1.56 TB (MXFP4); no host here can run it |
-| `OlalaForCausalLM` (`olala` GGUF) | PARSE-ONLY (row NEW-CANDIDATE-PARSERS): `OlalaHfConfigFromGguf` parses the pinned GGUF and the loader refuses at the forward boundary naming row NEW-CANDIDATE-PORTS. [KV walk](bench-evidence/new-candidates-parsers-20261119/olala-kvs.txt) |
+| `OlalaForCausalLM` (`olala` GGUF) | PARSES + GGUF LOADER CENSUS (row NEW-CANDIDATE-PORTS W1): `OlalaHfConfigFromGguf` parses the pinned GGUF; `ValidateOlalaGguf` maps all 989 tensors to roles and checks counts/shapes against the config on the production load path; the loader still refuses at the forward boundary naming row NEW-CANDIDATE-PORTS (the mamba-hybrid forward is W2+). [KV walk](bench-evidence/new-candidates-parsers-20261119/olala-kvs.txt), [W1 name-map census](bench-evidence/new-candidate-ports-olala-20261120/olala-namemap.md) |
 | `HyV4FlashForCausalLM` (`hy_v4_flash` GGUF) | PARSE-ONLY (row NEW-CANDIDATE-PARSERS): `HyV4FlashHfConfigFromGguf` parses shard 1's header (shard 2 carries a fork-specific ggml type 43 the reader does not yet tabulate — port-row work) and refuses at the forward boundary naming row NEW-CANDIDATE-PORTS. [KV walk](bench-evidence/new-candidates-parsers-20261119/hy4-kvs.txt) |
 | `MaxwellMoeForCausalLM` (`maxwell_moe` safetensors) | PARSE-ONLY (row NEW-CANDIDATE-PARSERS): `MaxwellConfigFromJson` validates config.json plus every shard's safetensors header; the remote code in its `auto_map` is NEVER executed, and the forward refuses naming row NEW-CANDIDATE-PORTS. [Field map + header walk](bench-evidence/new-candidates-parsers-20261119/maxwell-fields.txt) |
 
