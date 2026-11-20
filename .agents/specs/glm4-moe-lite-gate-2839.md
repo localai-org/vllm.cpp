@@ -149,3 +149,32 @@ real logits difference), repair the forward, drive T2/T3 to 128/128 — exit 1,
 no weakening of T2. O2 and O3 resolve in the same change (T3 executed here; the
 USAGE.md weights row gets repo+revision+sha256 read off the downloaded
 snapshot). Worktree /tmp/glm4-2839, branch row/MODEL-TEXT-GLM4-MOE-LITE-GATE-2839.
+
+## Outcome (2026-11-20, exit 2 — ratified)
+
+Exit 1 (forward repair to STRICT 128/128) is **unreachable**, measured: STRICT
+needs bit-identical logits AND torch's argmax tie-break; even the dgx capture
+diverged at 59 cells, and the live engine at HEAD on CPU (snapshot now local,
+T3 runnable) diverges at the same cells (75/128 strictly exact, 2/8 prompts).
+Exit 2 taken: the committed teacher-forced gap (`neartie_gap_mnats.npy`,
+captured on dgx with the 31.2B checkpoint at G1 `d85fd04fb` — the re-capture
+this exit names) is **identically zero at all 128 positions**, i.e. every
+divergent cell has vLLM-argmax-vs-our-token gap < 0.5 mnat — below bf16
+resolution, so those cells are exact ties and the oracle's "determinism" (0
+multi-valued cells over K=5) is a tie-break convention: its top-K argmax set is
+a singleton by construction, which makes the InsideOracleTopK conjunct vacuous
+on the deterministic arm. Ratified bar: a position passes when token-exact OR
+its committed teacher-forced gap is within kNearTieMnats (0.5 nat); on the
+non-deterministic arm the top-K conjunct still applies; gap > band still fails
+as a real forward bug. Implemented in
+tests/vllm/models/test_glm4_moe_lite_paged_engine.cpp (T2 committed case, T3
+live case bar, and the anchor — all three now band-aware on the deterministic
+arm). Result: T2 green 10/10, full file green 2/2 cases 206/206 assertions on
+this host with the pinned snapshot
+(zai-org/GLM-4.7-Flash @ 7dd20894a642a0aa287e9827cb1a1f7f91386b67, 62.4 GB,
+downloaded 2026-11-20 with developer authorization; index sha256
+91e6e95ca21700f5…; USAGE.md weights row added). O1 resolved (T2 green under
+the ratified bar), O2 resolved (T3 executed on CPU here), O3 resolved.
+Rejected: exit 1 (unreachable, above); widening the band or dropping the gap
+conjunct entirely (the band still has a failure mode for any future real
+divergence).
