@@ -75,8 +75,14 @@ inline void UnpackQuarter(const uint8_t* q4, const uint8_t* qh, int8_t* a) {
   const uint8x16_t bias = vdupq_n_u8(32);
   const auto unpack = [&](const uint8x16_t& nib, uint8_t shift,
                           const uint8x16_t& qhv) {
-    const uint8x16_t p =
-        vshlq_n_u8(vandq_u8(vshrq_n_u8(qhv, shift), vdupq_n_u8(3)), 4);
+    // vshrq_n_u8 needs a compile-time constant; clang rejects the runtime
+    // `shift` (macos-metal-mlx, ISSUE-LOCAL-01M7W6RZN939E9XT39ZK7EME1Q). The
+    // variable-shift form is vshlq_u8 with a NEGATED signed shift vector
+    // (positive = left, negative = right) — identical semantics.
+    const uint8x16_t p = vshlq_n_u8(
+        vandq_u8(vshlq_u8(qhv, vdupq_n_s8(-static_cast<int8_t>(shift))),
+                 vdupq_n_u8(3)),
+        4);
     return vreinterpretq_s8_u8(vsubq_u8(vorrq_u8(nib, p), bias));
   };
   vst1q_s8(a, unpack(lo0, 0, qh0));
