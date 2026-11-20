@@ -409,8 +409,10 @@ float LoadElemF32(const Tensor& t, int64_t i);
 void StoreElemF32(Tensor& t, int64_t i, float v);
 bool IsFloatDType(DType d);
 void DownloadToHost(ttnn::Tensor& dev, Tensor& out, const char* ctx);
-void EnsureHost(Tensor& t);
-void EnsureHost(const Tensor& t);
+// EnsureHost moved to the PUBLIC header tenstorrent_device.h (with a non-TT
+// no-op stub), so always-compiled TUs can call it without this ttnn-pulling
+// header — ISSUE-LOCAL-01M7W2ZKR8HRBYJF6HCPP46AGH. This header includes the
+// public one, so the declarations below are unchanged for TT TUs.
 std::vector<float> ToHostF32(const Tensor& t);
 ttnn::Tensor UploadRows(const float* data, uint32_t rows, uint32_t cols, MeshDevice& device);
 ttnn::Tensor UploadRowsBf16(const Tensor& t, uint32_t rows, uint32_t cols,
