@@ -42,15 +42,22 @@ WINDOWS_EXCLUDED_SOURCE = "src/vt/cuda/nvfp4_persistent_cache.cpp"
 POWERSHELL_AUDIT_PATH_ENV = "VLLM_CPP_POWERSHELL_AUDIT_PATH"
 
 
-def _has_central_msvc_nominmax(cmake: str) -> bool:
-    """Return whether root CMake defines NOMINMAX before creating targets."""
+def _has_central_nominmax(cmake: str) -> bool:
+    """Return whether root CMake defines NOMINMAX before creating targets.
+
+    The guard may be `if(MSVC)` (cl.exe only) or `if(WIN32)` (cl.exe AND
+    clang++ on Windows — the broader spelling; PR #3561 widens to it because
+    CMake's MSVC variable is false for clang++ while the min/max-macro
+    contract is identical). Both satisfy the contract: central, before the
+    first target, on a Windows toolchain.
+    """
     active = re.sub(r"(?m)#.*$", "", cmake)
     first_target = re.search(
         r"(?im)^\s*(?:add_library|add_executable|add_subdirectory)\s*\(",
         active,
     )
     contract = re.search(
-        r"(?ims)^\s*if\s*\(\s*MSVC\s*\)\s*$"
+        r"(?ims)^\s*if\s*\(\s*(?:MSVC|WIN32)\s*\)\s*$"
         r"(?:(?!^\s*endif\b).)*?"
         r"^\s*add_compile_definitions\s*\([^)]*\bNOMINMAX\b[^)]*\)",
         active,
@@ -2235,7 +2242,7 @@ def check(root: Path, build_dir: Path | None = None,
                for _, line in windows_possible_lines(active_source)):
             errors.append(f"{relative}: non-portable compiler builtin reaches MSVC")
 
-    central_nominmax = _has_central_msvc_nominmax(cmake)
+    central_nominmax = _has_central_nominmax(cmake)
     for relative, source in texts.items():
         active_source = without_cpp_comments_and_literals(source)
         definitions = _local_nominmax_definitions(active_source)
