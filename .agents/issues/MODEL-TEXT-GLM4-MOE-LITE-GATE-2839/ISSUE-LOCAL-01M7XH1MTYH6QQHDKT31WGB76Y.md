@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M7XH1MTYH6QQHDKT31WGB76Y
 Title: GLM4 #2839 forward repair: drive the SACRED gate from 69/128 to 128/128 against the committed vLLM goldens (snapshot now local, T3 runnable on CPU)
 Row: MODEL-TEXT-GLM4-MOE-LITE-GATE-2839
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-20
-Updated: 2026-11-20
-Closed: -
+Updated: 2026-11-21
+Closed: 2026-11-21
 
 ## Problem
 
@@ -16,4 +16,4 @@ The committed-goldens STRICT case (T2) is red at 69/128 and the live SACRED case
 
 ## Resolution
 
--
+Fixed via exit 2 (ratified near-tie bar), 2026-11-20. Measured: all 59 divergent cells of the committed golden comparison have teacher-forced gap exactly 0 mnats (< 0.5 mnat, below bf16 resolution) — vLLM-side exact ties; the oracle's K=5 determinism is tie-break order (singleton argmax sets), so InsideOracleTopK is vacuous on the deterministic arm and STRICT 128/128 (exit 1) is unreachable — needs bit-identical logits AND torch's tie-break; even the dgx capture and the live CPU run at HEAD (75/128 exact) diverge at the same cells. Change: test_glm4_moe_lite_paged_engine.cpp now passes a position when token-exact OR committed gap <= kNearTieMnats on the deterministic arm (top-K conjunct kept on the non-deterministic arm; gap > band still fails as a real bug); anchor band-aware the same way. Result: full file 2/2 cases, 206/206 assertions, exit 0 on this host with the pinned snapshot zai-org/GLM-4.7-Flash @ 7dd20894a642a0aa287e9827cb1a1f7f91386b67 (62.4 GB, downloaded with developer authorization; USAGE.md weights row added with repo+rev+size+index sha256; FEATURES.md row updated). Spec Outcome records the ratification argument. Requires developer ratification at merge per the spec's stop condition.

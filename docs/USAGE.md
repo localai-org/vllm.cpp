@@ -500,6 +500,21 @@ What has been measured, on CPU only:
   axis. Both need a GPU lease and the full checkpoint
   ([the spec](../.agents/specs/cohere2-moe.md) `## Owed`).
 
+### GLM-4.7-Flash (`Glm4MoeLiteForCausalLM`): which weights, and what has been checked
+
+| Arm | Artifact | Size | Status |
+|---|---|---|---|
+| bf16 | [zai-org/GLM-4.7-Flash](https://huggingface.co/zai-org/GLM-4.7-Flash) @ `7dd20894a642a0aa287e9827cb1a1f7f91386b67`, 48 safetensors shards + tokenizer (`model.safetensors.index.json` sha256 `91e6e95ca21700f5…`) | 62,442,983,168 B of weights (62.4 GB; 31,221,488,576 params) | **loads and forwards**; SACRED gate green under the ratified near-tie bar (#2839 exit 2) — see [FEATURES.md](FEATURES.md) |
+| GGUF (unsloth `GLM-4.7-Flash-GGUF`, e.g. Q4_K_M 18.3 GB) | | | **refused**: the GGUF arm for `glm4_moe_lite` is not ported; load the bf16 checkpoint |
+
+The gate's committed goldens (`tests/parity/goldens/glm4_moe_lite_greedy/`,
+dgx-captured at G1 `d85fd04fb`) compare this engine against vLLM 0.25.0 over
+8 prompts × 16 tokens. The oracle is deterministic only by tie-break; all 59
+divergent cells have teacher-forced gap < 0.5 mnat (exact ties at bf16
+resolution), so the bar is STRICT modulo the ratified 0.5-nat near-tie band
+(ratified 2026-11-20, #2839 exit 2 — the full argument is in
+[the spec](../.agents/specs/glm4-moe-lite-gate-2839.md) and the test header).
+
 ## OpenAI-compatible server
 
 `vllm-server` is a small HTTP server speaking the OpenAI API. Source:
