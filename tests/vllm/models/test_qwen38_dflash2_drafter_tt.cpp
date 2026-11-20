@@ -67,14 +67,12 @@
 #include "vllm/model_executor/models/qwen3_5_weights.h"  // OwnedTensor
 #include "vllm/model_executor/models/qwen3_dflash.h"
 #include "vt/backend.h"
-// The TT residency helper is forward-DECLARED, not included: the internal
-// header pulls the ttnn headers, which no host-configuration target compiles
-// (the test_tenstorrent_backend.cpp precedent keeps its TU internal-free the
-// same way).
-namespace vt::tenstorrent {
-void EnsureHost(Tensor& t);
-void EnsureHost(const Tensor& t);
-}  // namespace vt::tenstorrent
+// The TT residency helper comes from the PUBLIC, ttnn-free header (it carries
+// a non-TT no-op stub, so this always-compiled test links in every configure) —
+// forward-declaring it here is what broke the CPU-only lanes
+// (ISSUE-LOCAL-01M7W2ZKR8HRBYJF6HCPP46AGH). The internal header that also
+// declares it pulls ttnn headers and stays out of this TU.
+#include "vt/tenstorrent/tenstorrent_device.h"
 
 namespace fs = std::filesystem;
 using namespace vllm;

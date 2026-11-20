@@ -34,7 +34,12 @@ using MeshDevice = tt::tt_metal::distributed::MeshDevice;
 // runtime-probe-before-registering shape vulkan_context.h's Available() uses,
 // so a Tenstorrent-enabled build on a host with no Blackhole card registers
 // nothing instead of throwing during static init.
+#ifdef VLLM_CPP_TENSTORRENT
 bool DeviceAvailable();
+#else
+// No Tenstorrent backend is linked: no device is ever enumerable.
+inline bool DeviceAvailable() { return false; }
+#endif
 
 // True iff host-free decode is enabled. Default ON; VT_TT_HOST_FREE_DECODE=0
 // opts out (reproduces the pre-flip default path). No function-local static
@@ -94,7 +99,13 @@ inline bool DecodeCaptureDefaultArch(
 // process exit, inside MeshDevice's own teardown chain, a cross-DSO static
 // destruction ordering hazard the real device-driver state survives fine
 // either way.
+// TT-only section: MeshDevice is an incomplete type here, so no non-TT stub
+// can exist. R3 of scripts/check-tt-public-surface.py fails any
+// always-compiled TU that references this — call it only from TT TUs or
+// behind #ifdef VLLM_CPP_TENSTORRENT.
+#ifdef VLLM_CPP_TENSTORRENT
 MeshDevice& SharedMeshDevice();
+#endif
 
 // Host-allocation registry for device-resident shadows (BACKEND-TENSTORRENT
 // residency). Implemented in tenstorrent_ops.cpp (the only TU that links
@@ -164,6 +175,12 @@ inline std::vector<float> GatherRowsForTest(const std::vector<float>&,
 }
 inline void TrustDump(Queue&, const char*, const char*, const Tensor&) {}
 #endif
+// Every symbol in this block is defined only in a TT-only TU; the #else stubs
+// keep the default (non-TT) configure linkable for always-compiled TUs that
+// call them behind a runtime DeviceType check (the WarmPagedKvShadow pattern,
+// and R4 of scripts/check-tt-public-surface.py fails a declaration that skips
+// it).
+#ifdef VLLM_CPP_TENSTORRENT
 void RegisterHostBuffer(void* host, size_t bytes);
 void UnregisterHostBuffer(void* host);
 // Host bytes at `host` (or any interior pointer into that allocation) were
@@ -182,6 +199,14 @@ void MarkScratchAcquired(void* host);
 // of truth, download to host. Used by Backend::Copy so D2H-style reads see
 // device-resident results without every op writing host eagerly.
 void EnsureHostBytes(void* host);
+// Download `t`'s device shadow to its host master (the blocking read the
+// residency layer brackets with StepPhaseReadBegin/End). Moved here from
+// tenstorrent_internal.h (ISSUE-LOCAL-01M7W2ZKR8HRBYJF6HCPP46AGH) so
+// always-compiled TUs can call it without pulling the ttnn-pulling internal
+// header; the drafter test forward-declared it by hand and broke the
+// CPU-only link.
+void EnsureHost(Tensor& t);
+void EnsureHost(const Tensor& t);
 // HOST-FREE-FORWARD R2: when capture is active and BOTH dst and src carry a
 // current device shadow, do a device->device copy (ttnn) instead of staging
 // through host. Returns true if it performed a device copy, false if the
@@ -205,6 +230,25 @@ bool MemsetDeviceIfCapture(void* p, int value, size_t bytes);
 // hold and the caller falls back to the host write it has always done.
 bool MemsetDeviceFill(void* p, int value, size_t bytes);
 bool CopyDeviceDeviceIfResident(void* dst, const void* src, size_t bytes);
+#else
+inline void RegisterHostBuffer(void*, size_t) {}
+inline void UnregisterHostBuffer(void*) {}
+inline void MarkHostWritten(void*) {}
+inline void MarkScratchAcquired(void*) {}
+inline void EnsureHostBytes(void*) {}
+inline void EnsureHost(Tensor&) {}
+inline void EnsureHost(const Tensor&) {}
+// The device-copy/memset probes decline without a device, so the caller takes
+// the host path it has always had.
+inline bool CopyDeviceDeviceIfCapture(void*, const void*, size_t) {
+  return false;
+}
+inline bool MemsetDeviceIfCapture(void*, int, size_t) { return false; }
+inline bool MemsetDeviceFill(void*, int, size_t) { return false; }
+inline bool CopyDeviceDeviceIfResident(void*, const void*, size_t) {
+  return false;
+}
+#endif
 
 // BACKEND-TENSTORRENT-KEEPQUANT W3 capture-safety probe: how many staging
 // writes (host repack + from_vector upload) the keep-quant decode path has
@@ -640,12 +684,21 @@ inline bool GdnStateShadowStaged() { return false; }
 // stay async on the mesh CQ with fixed device buffers; host Ensure/Download
 // and fresh program compiles during capture are illegal and will throw.
 // Warm the program cache with an identical shape before BeginCapture.
+#ifdef VLLM_CPP_TENSTORRENT
 void TraceBeginCapture();
 void TraceEndCapture();           // stores the default single-slot replay id
 void TraceReplay();               // replay the single-slot id
 void* TraceEndCaptureGraph();     // returns an opaque MeshTraceId* (caller owns)
 void TraceReplayGraph(void* graph);
 void TraceDestroyGraph(void* graph);
+#else
+inline void TraceBeginCapture() {}
+inline void TraceEndCapture() {}
+inline void TraceReplay() {}
+inline void* TraceEndCaptureGraph() { return nullptr; }
+inline void TraceReplayGraph(void*) {}
+inline void TraceDestroyGraph(void*) {}
+#endif
 
 // ---- BACKEND-TENSTORRENT-GDN W2: GDN state/conv-shadow PCIe traffic counters
 // The spec's Evidence gate requires the "no per-token state round-trip" claim
