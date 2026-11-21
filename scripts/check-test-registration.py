@@ -149,6 +149,13 @@ REQUIRED_SUITE_REGISTRATIONS = {
     # the two named cases in the mutation suite are what make it a semantic
     # change rather than a fixture edit.
     "test_q4exp_layerfp_diff": "tests/scripts/test_q4exp_layerfp_diff.py",
+    # The logits comparator (PR #3569). Same one-suite widening, same reason: it
+    # landed with a lane in the change that created it rather than after the next
+    # audit. Its red is the POSITIONAL count beside the union one -- `pairs=` is a
+    # sorted top-k, so a rank-by-rank differ reports k differences for one token
+    # crossing the cut -- and its KL refusal is the row's settled answer to a
+    # question a top-k capture cannot answer.
+    "test_q4exp_logits_diff": "tests/scripts/test_q4exp_logits_diff.py",
 }
 
 def _without_line_comments(text: str) -> str:

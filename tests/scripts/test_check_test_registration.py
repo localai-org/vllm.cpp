@@ -97,6 +97,9 @@ jobs:
       - name: The layer-fingerprint comparator parses every tap the instrument prints
         run: |
           python3 tests/scripts/test_q4exp_layerfp_diff.py
+      - name: The logits comparator keys on ids, refuses incomparable arms, and prints no KL
+        run: |
+          python3 tests/scripts/test_q4exp_logits_diff.py
 """
 
 
@@ -108,6 +111,7 @@ SUITES=(
   test_sglang_lease_identity
   test_ltx2_oracle_goldens
   test_q4exp_layerfp_diff
+  test_q4exp_logits_diff
 )
 for checker in "${CHECKERS[@]}"; do
   python3 "scripts/$checker.py"
@@ -358,6 +362,26 @@ class WiringMutationTests(unittest.TestCase):
             "          python3 tests/scripts/test_check_test_registration.py\n", ""
         )
         self.assert_wiring_error(self.preflight, mutated, "CI mutation suite")
+
+    # The logits comparator (PR #3569). Same shape as M10/M12 and deliberately
+    # NOT M-named: an M-number would drag the digest-pinned mutation manifest into
+    # a change about a new tool, which is not what that manifest records. One case
+    # per lane, because the pin names one lane each and a mutation that only
+    # exercises preflight would leave the CI half unproven.
+    def test_deleting_the_logits_comparator_from_preflight_fails(self) -> None:
+        mutated = self.preflight.replace("  test_q4exp_logits_diff\n", "")
+        self.assert_wiring_error(
+            mutated, self.ci, "test_q4exp_logits_diff is missing from preflight SUITES"
+        )
+
+    def test_deleting_the_logits_comparator_from_ci_fails(self) -> None:
+        mutated = self.ci.replace(
+            "          python3 tests/scripts/test_q4exp_logits_diff.py\n", ""
+        )
+        self.assert_wiring_error(
+            self.preflight, mutated,
+            "test_q4exp_logits_diff is missing from the CI suite lane"
+        )
 
     # The agent-record checker-step pin (CHECKER-HARDENING, M5). Before it,
     # deleting ANY wired step of that job reded nothing: this suite pinned only

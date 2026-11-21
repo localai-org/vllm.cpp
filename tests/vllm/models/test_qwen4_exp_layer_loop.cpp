@@ -3924,4 +3924,111 @@ TEST_CASE("qwen4_exp: VT_Q4EXP_LAYER_FP taps every layer of ModelRegistry::Forwa
   ::unsetenv("VT_Q4EXP_LAYER_FP");
   vllm::detail::Qwen4ExpLayerFpResetForTest();
   CHECK(vllm::detail::Qwen4ExpLayerFpTapsForTest() == 0);
+
+  // ─── VT_Q4EXP_LOGITS: the same three properties for the logits tap, plus one
+  // CONTENT property that the layer tap cannot offer. `LayerFp` stops at `out`,
+  // so without this tap the `lm_head` decode - int5, group 64 - has no
+  // observation at all, and the acceptance gate this row designs cannot see it.
+  //
+  // OFF IS THE RED, again: the variable unset must print nothing and count
+  // nothing, or the line stops being evidence that a run armed it.
+  ::unsetenv("VT_Q4EXP_LOGITS");
+  ::unsetenv("VT_Q4EXP_LOGITS_STEPS");
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  {
+    vllm::ForwardLogits fl;
+    REQUIRE_NOTHROW(fl = vllm::ModelRegistry::Forward(*model, in));
+  }
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 0);
+  CHECK(vllm::detail::Qwen4ExpLogitsTapLastTop1ForTest() == -1);
+
+  // ON, one step, top 4. One forward taps once - the tap is per step, not per
+  // layer, so a correct count is 1 and not kLayers.
+  ::setenv("VT_Q4EXP_LOGITS", "4", 1);
+  ::setenv("VT_Q4EXP_LOGITS_STEPS", "1", 1);
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  vllm::ForwardLogits tapped;
+  REQUIRE_NOTHROW(tapped = vllm::ModelRegistry::Forward(*model, in));
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 1);
+
+  // CONTENT: the tap's reported top-1 must be the argmax of the very tensor the
+  // forward returned, read independently here. This is the property that makes
+  // the line usable as a gate: a tap that printed a plausible id from the wrong
+  // row, or a stale one from the previous step, fails it.
+  {
+    REQUIRE(tapped.device_tensor.dtype == DType::kF32);
+    REQUIRE(tapped.device_tensor.rank == 2);
+    const int64_t vocab = tapped.device_tensor.shape[1];
+    std::vector<float> row(static_cast<size_t>(vocab));
+    std::memcpy(row.data(), tapped.device_tensor.data, row.size() * sizeof(float));
+    int64_t argmax = 0;
+    for (int64_t i = 1; i < vocab; ++i) {
+      if (row[static_cast<size_t>(i)] > row[static_cast<size_t>(argmax)]) argmax = i;
+    }
+    INFO("taps ", vllm::detail::Qwen4ExpLogitsTapTapsForTest(), " top1 ",
+         vllm::detail::Qwen4ExpLogitsTapLastTop1ForTest(), " argmax ", argmax);
+    CHECK(vllm::detail::Qwen4ExpLogitsTapLastTop1ForTest() == argmax);
+  }
+
+  // THE BUDGET IS A BUDGET: a second forward under a budget of 1 adds nothing.
+  {
+    vllm::ForwardLogits fl;
+    REQUIRE_NOTHROW(fl = vllm::ModelRegistry::Forward(*model, in));
+  }
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 1);
+
+  // ...and the step counter only advances on a tap that PRINTED, so re-arming
+  // with a fresh budget resumes instead of staying stuck.
+  ::setenv("VT_Q4EXP_LOGITS_STEPS", "2", 1);
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  for (int step = 0; step < 3; ++step) {
+    vllm::ForwardLogits fl;
+    REQUIRE_NOTHROW(fl = vllm::ModelRegistry::Forward(*model, in));
+  }
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 2);
+
+  // ─── THE INSTRUMENT MUST BE AN OBSERVER. `Qwen4ExpLogitsTap` copies the whole
+  // logits buffer to the host and synchronises the queue MID-FORWARD, which is
+  // exactly the shape of instrument that can perturb the thing it measures: a
+  // copy through the wrong queue, a missing sync, or a write-back bug would move
+  // the numbers the gate then compares. A gate whose instrument changes its own
+  // measurement is worth nothing, so the same fixed-seed forward must produce
+  // BIT-IDENTICAL logits armed and unarmed.
+  ::unsetenv("VT_Q4EXP_LOGITS");
+  ::unsetenv("VT_Q4EXP_LOGITS_STEPS");
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  vllm::ForwardLogits unarmed;
+  REQUIRE_NOTHROW(unarmed = vllm::ModelRegistry::Forward(*model, in));
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 0);
+
+  ::setenv("VT_Q4EXP_LOGITS", "4", 1);
+  ::setenv("VT_Q4EXP_LOGITS_STEPS", "1", 1);
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  vllm::ForwardLogits armed;
+  REQUIRE_NOTHROW(armed = vllm::ModelRegistry::Forward(*model, in));
+  // The tap actually ran, so the comparison below is not vacuous: an unarmed
+  // "armed" arm would pass this check trivially and prove nothing.
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 1);
+
+  {
+    REQUIRE(unarmed.device_tensor.dtype == armed.device_tensor.dtype);
+    REQUIRE(unarmed.device_tensor.rank == armed.device_tensor.rank);
+    size_t elems = 1;
+    for (int r = 0; r < unarmed.device_tensor.rank; ++r) {
+      REQUIRE(unarmed.device_tensor.shape[r] == armed.device_tensor.shape[r]);
+      elems *= static_cast<size_t>(unarmed.device_tensor.shape[r]);
+    }
+    REQUIRE(elems > 0);
+    const auto* a = static_cast<const unsigned char*>(unarmed.device_tensor.data);
+    const auto* b = static_cast<const unsigned char*>(armed.device_tensor.data);
+    const size_t bytes = elems * vt::SizeOf(unarmed.device_tensor.dtype);
+    // Byte equality, not an epsilon: the two arms are the SAME binary running the
+    // SAME kernels on the SAME inputs, so the only permitted difference is none.
+    CHECK(std::memcmp(a, b, bytes) == 0);
+  }
+
+  ::unsetenv("VT_Q4EXP_LOGITS");
+  ::unsetenv("VT_Q4EXP_LOGITS_STEPS");
+  vllm::detail::Qwen4ExpLogitsTapResetForTest();
+  CHECK(vllm::detail::Qwen4ExpLogitsTapTapsForTest() == 0);
 }

@@ -827,6 +827,122 @@ Qwen4ExpTextModelOutput Qwen4ExpTextModelForward(
 
 namespace detail {
 
+// ─── VT_Q4EXP_LOGITS: the step's logits ─────────────────────────────────────
+//
+// The layer tap stops at `out`; the logits are produced in the registry, after
+// the `lm_head` matmul, so the head's own decode had no observation. This tap
+// reads the finished `[rows, vocab]` f32 buffer through the same `Backend::Copy`
+// + `Synchronize` pair the layer tap uses, so one spelling reads a CPU queue and
+// a CUDA one.
+struct LogitsTapState {
+  int64_t topk = 0;    // pairs to print; 0 == the instrument is off
+  int64_t budget = 0;  // forward calls to tap
+  int64_t step = 0;    // the forward this process is on
+  int64_t taps = 0;    // lines printed, the counted property
+  int64_t last_top1 = -1;
+};
+
+int64_t LogitsTapTopkFromEnv() {
+  const char* e = std::getenv("VT_Q4EXP_LOGITS");
+  if (e == nullptr || e[0] == '\0') return 0;
+  const long long k = std::atoll(e);
+  if (k <= 0) return 0;
+  return k > 64 ? 64 : static_cast<int64_t>(k);
+}
+
+int64_t LogitsTapBudgetFromEnv() {
+  const char* e = std::getenv("VT_Q4EXP_LOGITS_STEPS");
+  if (e == nullptr || e[0] == '\0') return 8;
+  const long long v = std::atoll(e);
+  return v > 0 ? static_cast<int64_t>(v) : 0;
+}
+
+LogitsTapState& LogitsTapS() {
+  static LogitsTapState s = [] {
+    LogitsTapState t;
+    t.topk = LogitsTapTopkFromEnv();
+    t.budget = t.topk > 0 ? LogitsTapBudgetFromEnv() : 0;
+    return t;
+  }();
+  return s;
+}
+
+void Qwen4ExpLogitsTap(Dev d, const Tensor& logits) {
+  LogitsTapState& s = LogitsTapS();
+  if (s.topk <= 0 || s.step >= s.budget) return;
+  VT_CHECK(logits.IsContiguous(),
+           "qwen4_exp logits tap: VT_Q4EXP_LOGITS taps a contiguous [rows, vocab] tensor");
+  VT_CHECK(logits.rank == 2 && logits.dtype == DType::kF32,
+           "qwen4_exp logits tap: VT_Q4EXP_LOGITS taps f32 [rows, vocab]");
+  const int64_t rows = logits.shape[0];
+  const int64_t vocab = logits.shape[1];
+  if (rows <= 0 || vocab <= 0) return;
+  std::vector<float> host(static_cast<size_t>(rows) * static_cast<size_t>(vocab));
+  d.b.Copy(d.q, host.data(), logits.data, host.size() * sizeof(float));
+  d.b.Synchronize(d.q);
+
+  // The top-k and the extremes come from the FIRST row, which is the row the
+  // sampler asked for first on a prefill; the projections cover the whole buffer
+  // so a multi-row step is still one comparison per arm.
+  const size_t n = static_cast<size_t>(vocab);
+  std::vector<int32_t> idx(n);
+  for (size_t i = 0; i < n; ++i) idx[i] = static_cast<int32_t>(i);
+  const auto k = static_cast<size_t>(std::min<int64_t>(s.topk, vocab));
+  std::partial_sort(idx.begin(), idx.begin() + static_cast<std::ptrdiff_t>(k), idx.end(),
+                    [&host](int32_t a, int32_t b) { return host[static_cast<size_t>(a)] > host[static_cast<size_t>(b)]; });
+  float vmax = host[0];
+  float vmin = host[0];
+  for (size_t i = 1; i < n; ++i) {
+    if (host[i] > vmax) vmax = host[i];
+    if (host[i] < vmin) vmin = host[i];
+  }
+
+  constexpr int kNumProj = 8;
+  ProjRng rng(static_cast<uint64_t>(host.size()));
+  float w[kNumProj];
+  for (int i = 0; i < kNumProj; ++i) w[i] = rng.next();
+  double proj[kNumProj] = {0.0};
+  double sumabs = 0.0;
+  for (size_t i = 0; i < host.size(); ++i) {
+    const float v = host[i];
+    if (std::isfinite(v)) {
+      sumabs += std::fabs(static_cast<double>(v));
+      for (int p = 0; p < kNumProj; ++p) proj[p] += static_cast<double>(w[p]) * static_cast<double>(v);
+    }
+    for (int p = 0; p < kNumProj; ++p) w[p] = rng.next();
+  }
+
+  s.last_top1 = k > 0 ? static_cast<int64_t>(idx[0]) : -1;
+  ++s.taps;
+  std::fprintf(stderr,
+               "q4logit step=%lld rows=%lld n=%lld top=%lld top1=%lld vmax=%.9g vmin=%.9g "
+               "sumabs=%.9g proj=%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g pairs=",
+               static_cast<long long>(s.step), static_cast<long long>(rows),
+               static_cast<long long>(vocab), static_cast<long long>(k),
+               static_cast<long long>(s.last_top1), static_cast<double>(vmax),
+               static_cast<double>(vmin), sumabs, proj[0], proj[1], proj[2], proj[3], proj[4],
+               proj[5], proj[6], proj[7]);
+  for (size_t j = 0; j < k; ++j) {
+    std::fprintf(stderr, "%s%lld:%.9g", j == 0 ? "" : ",",
+                 static_cast<long long>(idx[j]), static_cast<double>(host[static_cast<size_t>(idx[j])]));
+  }
+  std::fputc('\n', stderr);
+  ++s.step;
+}
+
+void Qwen4ExpLogitsTapResetForTest() {
+  LogitsTapState& s = LogitsTapS();
+  s.topk = LogitsTapTopkFromEnv();
+  s.budget = s.topk > 0 ? LogitsTapBudgetFromEnv() : 0;
+  s.step = 0;
+  s.taps = 0;
+  s.last_top1 = -1;
+}
+
+int64_t Qwen4ExpLogitsTapTapsForTest() { return LogitsTapS().taps; }
+
+int64_t Qwen4ExpLogitsTapLastTop1ForTest() { return LogitsTapS().last_top1; }
+
 void Qwen4ExpLayerFpResetForTest() {
   LayerFpState& s = LayerFpS();
   s.budget = LayerFpBudgetFromEnv();

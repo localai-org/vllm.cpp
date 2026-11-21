@@ -1483,6 +1483,7 @@ add_library(vllm STATIC
   src/vt/cpu/cpu_matmul_elem.cpp
   src/vt/cpu/cpu_quant_dequant.cpp
   src/vt/cpu/cpu_exl3_dequant.cpp
+  src/vt/cpu/cpu_mach2_decode.cpp
   src/vt/cpu/cpu_exl3_kernels.cpp
   src/vt/cpu/cpu_quant_act.cpp
   src/vt/cpu/cpu_quant_dot.cpp

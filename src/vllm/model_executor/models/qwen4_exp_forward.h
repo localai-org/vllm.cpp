@@ -258,6 +258,32 @@ void Qwen4ExpLayerFpResetForTest();
 // gate asserts on, rather than grepping the process's stderr for a prefix.
 int64_t Qwen4ExpLayerFpTapsForTest();
 
+// `VT_Q4EXP_LOGITS=<topk>`: tap the step's logits. `LayerFp` stops at `out`, so
+// without this the `lm_head` decode - int5 with a group of 64 - and the final
+// projection have no model-level observation at all, and the acceptance gate
+// this row designs cannot see them.
+//
+// Off unless the variable is set, because a tap that runs regardless is a cost on
+// every forward whose line stops being evidence that the run asked for it. The
+// budget is counted in FORWARDS like the layer tap's, and read from
+// `VT_Q4EXP_LOGITS_STEPS` (default 8) so a long server run cannot print forever.
+//
+// Emitted once per forward, tagged `q4logit`: the top-`k` `(id, value)` pairs of
+// the first logits row - the row the sampler asked for first - plus `vmax`,
+// `vmin`, `sumabs` and EIGHT fixed-seed random projections over the whole
+// `[rows, vocab]` buffer. The projections are the same construction, and the same
+// reason, as the layer tap's: `sumabs` is sign-insensitive and under-reports a
+// real divergence by a median 75-140x, while `S w_i x_i` is a linear functional
+// of the difference and cannot cancel.
+void Qwen4ExpLogitsTap(dense_attn::Dev d, const vt::Tensor& logits);
+
+// TEST HOOKS, same shape and same reason as the layer tap's: the budget is read
+// once per process, so a case that sets the variable after another forward has
+// already run would measure nothing and report a pass.
+void Qwen4ExpLogitsTapResetForTest();
+int64_t Qwen4ExpLogitsTapTapsForTest();
+int64_t Qwen4ExpLogitsTapLastTop1ForTest();
+
 }  // namespace detail
 
 }  // namespace vllm

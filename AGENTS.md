@@ -291,6 +291,7 @@ only when it appears in this table and has a recorded pin:
 | `ddickmann/vllm-factory` | `vllm-factory` | GLiNER2.5 on vLLM (DeBERTa v2 encoder with disentangled attention + GLiNER2 pooler head + IO processor), which vLLM does not implement at the pin; no DeBERTa, no disentangled attention, and no GLiNER pooler exists in-tree or upstream |
 | `trycua/cua` | `cua` | the cua-s1-forms TinyTransformerScorer (byte-level 2-layer transformer encoder + cross-attention scoring head) for GUI form-filling decisions, which neither vLLM nor vLLM-Omni registers |
 | `Contrastive-LM/CLM` | `clm` | the CLM bi-encoder decision model (Qwen3-8B pooling + state/action projection heads), which neither vLLM nor vLLM-Omni registers |
+| `SyzygyResearch/Mach-2-Additive-Medium` (native packed) | `mach2-native` | the Mach-2 additive codec, which vLLM implements in no part: a QTIP bitshift trellis whose codewords are D4 lattice integers applied with addition only, with per-tile wave scales and radix-12/20 Hadamard rotations. The release `decode.py` defines the format (`fn_packed_v2`), so it is a byte-exact decode oracle; its GGUF sibling needs a fork whose documented payload is Mach-1, and is NOT this entry ([`mach2-native.md`](.agents/oracles/mach2-native.md)) |
 
 <!-- oracle-registry:end -->
 
