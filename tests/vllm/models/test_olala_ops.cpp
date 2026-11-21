@@ -243,3 +243,172 @@ TEST_CASE("olala W2c-1: latent MoE matches the reference formula (bf16 experts, 
     }
   }
 }
+
+namespace {
+
+// Independent f64 reference for OlalaVAttentionHost (modeling_olala.py:498-745).
+std::vector<double> RefVAttention(const std::vector<double>& x,
+                                  const std::vector<int64_t>& pos, int64_t len,
+                                  const vllm::OlalaLayerWeights& lw,
+                                  const vllm::OlalaParams& p) {
+  const int64_t H = p.heads, KV = p.kv_heads, D = p.head_dim, R = p.tpa_rank;
+  const int64_t SIG = H - KV, SNR = SIG / KV, GQA = H / KV;
+  const double scale = 1.0 / double(D);
+  const double wsize = p.window > 0 ? p.window : (double)len;
+  auto W2 = [&](const vllm::OwnedTensor& w, int64_t j, int64_t i) {
+    if (w.dtype == vt::DType::kF32)
+      return double(reinterpret_cast<const float*>(w.bytes.data())[j * w.shape[1] + i]);
+    return Bf16Bits(reinterpret_cast<const uint16_t*>(w.bytes.data())[j * w.shape[1] + i]);
+  };
+  int64_t hid = p.hidden;
+  std::vector<double> q(len * H * D), k(len * KV * D), v(len * KV * D);
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < H; ++h)
+      for (int64_t d = 0; d < D; ++d) {
+        double s = 0;
+        for (int64_t i = 0; i < hid; ++i) s += W2(lw.attn_q, h * D + d, i) * x[t * hid + i];
+        q[(t * H + h) * D + d] = s;
+      }
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < KV; ++h)
+      for (int64_t d = 0; d < D; ++d) {
+        double sk = 0, sv = 0;
+        for (int64_t r = 0; r < R; ++r) {
+          double ak = 0, av = 0, bk = 0, bv = 0;
+          for (int64_t i = 0; i < hid; ++i) {
+            ak += W2(lw.attn_wa_k, h * R + r, i) * x[t * hid + i];
+            av += W2(lw.attn_wa_v, h * R + r, i) * x[t * hid + i];
+            bk += W2(lw.attn_wb_k, r * D + d, i) * x[t * hid + i];
+            bv += W2(lw.attn_wb_v, r * D + d, i) * x[t * hid + i];
+          }
+          sk += ak * bk;
+          sv += av * bv;
+        }
+        k[(t * KV + h) * D + d] = sk / R;
+        v[(t * KV + h) * D + d] = sv / R;
+      }
+  // token shift
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < KV; ++h) {
+      double sa = 0, sb = 0;
+      for (int64_t i = 0; i < hid; ++i) {
+        sa += W2(lw.attn_shift_k, h, i) * x[t * hid + i];
+        sb += W2(lw.attn_shift_v, h, i) * x[t * hid + i];
+      }
+      double ak = 1.0 / (1.0 + std::exp(-sa)), av = 1.0 / (1.0 + std::exp(-sb));
+      if (pos[t] == 0) { ak = 0; av = 0; }
+      int64_t tp = pos[t] == 0 ? -1 : t - 1;
+      for (int64_t d = 0; d < D; ++d) {
+        double kp = tp < 0 ? 0 : k[(tp * KV + h) * D + d];
+        double vp = tp < 0 ? 0 : v[(tp * KV + h) * D + d];
+        k[(t * KV + h) * D + d] = ak * kp + (1 - ak) * k[(t * KV + h) * D + d];
+        v[(t * KV + h) * D + d] = av * vp + (1 - av) * v[(t * KV + h) * D + d];
+      }
+    }
+  // qk norm (plain rms, weights zero)
+  auto rms = [&](std::vector<double>& y, int64_t base, const float* w) {
+    double s = 0;
+    for (int64_t d = 0; d < D; ++d) s += y[base + d] * y[base + d];
+    double inv = 1.0 / std::sqrt(s / D + 1e-6);
+    for (int64_t d = 0; d < D; ++d) y[base + d] = y[base + d] * inv * (1.0 + w[d]);
+  };
+  const float* qn = reinterpret_cast<const float*>(lw.attn_q_norm.bytes.data());
+  const float* kn = reinterpret_cast<const float*>(lw.attn_k_norm.bytes.data());
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < H; ++h) rms(q, (t * H + h) * D, qn);
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < KV; ++h) rms(k, (t * KV + h) * D, kn);
+  // scalable softmax
+  const float* scaler = reinterpret_cast<const float*>(lw.attn_softmax_scaler.bytes.data());
+  for (int64_t t = 0; t < len; ++t) {
+    double lp = std::log(std::min(double(pos[t]) + 1.0, wsize));
+    for (int64_t h = 0; h < H; ++h)
+      for (int64_t d = 0; d < D; ++d) q[(t * H + h) * D + d] *= scaler[h] * lp;
+  }
+  // attention + differential merge
+  std::vector<double> att(len * H * D, 0.0);
+  std::vector<double> lamb(len * KV);
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < KV; ++h) {
+      double s = 0;
+      for (int64_t i = 0; i < hid; ++i) s += W2(lw.attn_lambda, h, i) * x[t * hid + i];
+      lamb[t * KV + h] = 1.0 / (1.0 + std::exp(-s));
+    }
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < H; ++h) {
+      int64_t kvh = h / GQA;
+      double wsum = 0;
+      std::vector<double> w(len, -1e300);
+      for (int64_t s = 0; s <= t; ++s) {
+        if (double(t - s) > wsize) continue;
+        double sc = 0;
+        for (int64_t d = 0; d < D; ++d) sc += q[(t * H + h) * D + d] * k[(s * KV + kvh) * D + d];
+        sc *= scale;
+        sc = p.softcap * std::tanh(sc / p.softcap);
+        w[s] = sc;
+        wsum += std::exp(sc);
+      }
+      for (int64_t s = 0; s <= t; ++s) {
+        if (w[s] <= -1e300) continue;
+        double pr = std::exp(w[s]) / wsum;
+        for (int64_t d = 0; d < D; ++d) att[(t * H + h) * D + d] += pr * v[(s * KV + kvh) * D + d];
+      }
+    }
+  std::vector<double> out(len * SIG * D);
+  for (int64_t t = 0; t < len; ++t)
+    for (int64_t h = 0; h < KV; ++h) {
+      double lv = lamb[t * KV + h];
+      for (int64_t s = 0; s < SNR; ++s)
+        for (int64_t d = 0; d < D; ++d) {
+          double a = att[(t * H + h * (SNR + 1) + s) * D + d];
+          double n = att[(t * H + h * (SNR + 1) + SNR) * D + d];
+          out[(t * SIG + h * SNR + s) * D + d] = a - lv * n;
+        }
+    }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("olala W2c-2: V-layer differential TPA attention matches the reference") {
+  vllm::OlalaParams p;
+  p.hidden = 8;
+  p.heads = 4;      // H
+  p.kv_heads = 2;   // KV (noise)
+  p.head_dim = 4;   // D
+  p.tpa_rank = 2;   // R
+  p.window = 3;
+  p.softcap = 30.0;
+  vllm::OlalaLayerWeights lw;
+  auto bf = [&](std::vector<int64_t> sh, float seed) {
+    int64_t n = 1;
+    for (auto d : sh) n *= d;
+    std::vector<float> vals(n);
+    for (int64_t i = 0; i < n; ++i) vals[i] = 0.08f * float(((int)(seed * 7 + i) % 7) - 3);
+    return Bf16Tensor(sh, vals);
+  };
+  lw.attn_q = bf({4 * 4, 8}, 1.0f);
+  lw.attn_wa_k = bf({2 * 2, 8}, 2.0f);
+  lw.attn_wb_k = bf({2 * 4, 8}, 3.0f);
+  lw.attn_wa_v = bf({2 * 2, 8}, 4.0f);
+  lw.attn_wb_v = bf({2 * 4, 8}, 5.0f);
+  lw.attn_shift_k = bf({2, 8}, 6.0f);
+  lw.attn_shift_v = bf({2, 8}, 7.0f);
+  lw.attn_lambda = bf({2, 8}, 8.0f);
+  lw.attn_q_norm = F32Tensor({4}, {0, 0, 0, 0});
+  lw.attn_k_norm = F32Tensor({4}, {0, 0, 0, 0});
+  lw.attn_softmax_scaler = F32Tensor({4}, {1.1f, 0.9f, 1.0f, 1.2f});
+
+  const int64_t L = 5;
+  std::vector<float> x(L * 8);
+  for (int64_t i = 0; i < L * 8; ++i) x[i] = 0.2f * float((i % 5) - 2);
+  std::vector<int64_t> pos = {0, 1, 2, 3, 4};
+  std::vector<float> out(L * 2 * 4, 0.0f);  // SIG=2, D=4
+  vllm::OlalaVAttentionHost(out.data(), x.data(), pos.data(), L, lw, p);
+  std::vector<double> xd(x.begin(), x.end());
+  auto ref = RefVAttention(xd, pos, L, lw, p);
+  for (int64_t i = 0; i < L * 2 * 4; ++i) {
+    CAPTURE(i);
+    CHECK(std::fabs(out[i] - ref[i]) < 5e-4);
+  }
+}
