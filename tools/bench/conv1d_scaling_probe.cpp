@@ -54,7 +54,10 @@
 // CI NEVER RUNS THIS. It is an executable and no test, like its sibling
 // `tools/bench/music3_vocoder_conv_ab.cpp`; the build compiles it so the one
 // file a reader has to compile to reproduce the measurement cannot rot.
+#include "vllm/support/platform_compat.h"  // NOMINMAX before windows.h; GetProcessTimes on Windows
+#if !defined(_WIN32)
 #include <sys/resource.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -92,10 +95,23 @@ std::vector<float> Fill(Lcg& rng, size_t n) {
 }
 
 double UserSeconds() {
+#if defined(_WIN32)
+  FILETIME created{}, exited{}, kernel{}, user{};
+  GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+  // FILETIME counts 100 ns ticks. user + kernel matches RUSAGE_SELF's sum below.
+  const auto seconds = [](const FILETIME& t) {
+    ULARGE_INTEGER ticks{};
+    ticks.LowPart = t.dwLowDateTime;
+    ticks.HighPart = t.dwHighDateTime;
+    return static_cast<double>(ticks.QuadPart) * 1e-7;
+  };
+  return seconds(user) + seconds(kernel);
+#else
   rusage ru{};
   getrusage(RUSAGE_SELF, &ru);
   return static_cast<double>(ru.ru_utime.tv_sec) + 1e-6 * static_cast<double>(ru.ru_utime.tv_usec) +
          static_cast<double>(ru.ru_stime.tv_sec) + 1e-6 * static_cast<double>(ru.ru_stime.tv_usec);
+#endif
 }
 
 double Now() {

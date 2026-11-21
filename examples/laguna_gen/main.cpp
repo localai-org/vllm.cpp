@@ -201,7 +201,14 @@ int main(int argc, char** argv) {
     // s/tok (2×; 2.56 → 5.0 tok/s), coherent + near-tie. `setenv(...,0)` respects an
     // explicit `VT_NVFP4_FP4_NATIVE=0` override. Scoped to this Laguna driver (the
     // 27B/35B use the separate DirectD cutlass path, untouched).
+#if defined(_WIN32)
+    // setenv(..., 0) semantics: set only when unset, so an explicit override wins.
+    if (std::getenv("VT_NVFP4_FP4_NATIVE") == nullptr) {
+      _putenv_s("VT_NVFP4_FP4_NATIVE", "1");
+    }
+#else
     setenv("VT_NVFP4_FP4_NATIVE", "1", 0);
+#endif
     const std::string config_path = (fs::path(model) / "config.json").string();
     const std::string tok_path = (fs::path(model) / "tokenizer.json").string();
     std::fprintf(stderr, "[gen] NVFP4 safetensors dir %s\n", model.c_str());
