@@ -122,7 +122,7 @@ TEST_CASE("registry_imports: every registered architecture has a complete factor
   // full RNoPE, MoE 384x6 + shared) with no vLLM registration. W1 gate is:
   // config parses, KV-cache spec builds, model resolves, FP8-block loader
   // reads; the forward refuses until its wave.
-  REQUIRE(registrations.size() == 60);
+  REQUIRE(registrations.size() == 61);
 
   for (const ModelRegistration& registration : registrations) {
     CAPTURE(registration.architecture);
@@ -199,6 +199,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   CHECK(has_arch("MiniCPMForCausalLM"));       // MiniCPM
   CHECK(has_arch("MiniCPM3ForCausalLM"));      // MiniCPM3 (MLA)
   CHECK(has_arch("Olmo2ForCausalLM"));         // OLMo-2
+  CHECK(has_arch("OlalaForCausalLM"));        // NEW-CANDIDATE-PORTS W2b
   CHECK(has_arch("Olmo3ForCausalLM"));         // OLMo-3 (reuses the OLMo-2 TU)
   CHECK(has_arch("PhiForCausalLM"));           // Phi-1/1.5/2
   CHECK(has_arch("Phi3ForCausalLM"));          // Phi-3
@@ -237,7 +238,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
   // with the kExampleConfigArchitectures ledger; adding a model appends its two
   // entries here.
   const std::vector<std::string_view> supported = ModelRegistry::SupportedArchs();
-  REQUIRE(supported.size() == 60);
+  REQUIRE(supported.size() == 61);
   CHECK(std::is_sorted(supported.begin(), supported.end()));
   // The full byte-order sequence. Note "MiniCPM3" < "MiniCPMF" and "Phi3" <
   // "PhiF" ('3' 0x33 < 'F' 0x46); "OPT" < "Olmo" ('P' 0x50 < 'l' 0x6C); and among
@@ -301,6 +302,7 @@ TEST_CASE("self_registration: every arch self-registers from its own TU") {
       "NemotronH_Nano_VL_V2",
       "NimbleModel",
       "OPTForCausalLM",
+      "OlalaForCausalLM",
       "Olmo2ForCausalLM",
       "Olmo3ForCausalLM",
       "ParakeetForCTC",
@@ -434,9 +436,12 @@ TEST_CASE("registry_model_property: Qwen registrations match pinned _ModelInfo")
     CHECK_FALSE(registration.info.supports_transcription);
     CHECK_FALSE(registration.info.supports_transcription_only);
     CHECK_FALSE(registration.info.is_pooling_model);
-    if (registration.architecture != "Tev1Model") {
+    if (registration.architecture != "Tev1Model" &&
+        registration.architecture != "OlalaForCausalLM") {
       // MODEL-TEV1: has_inner_state=true (GDN recurrent state in Qwen3.5
-      // backbone). All other text-generation models have has_inner_state=false.
+      // backbone). NEW-CANDIDATE-PORTS W2b: OlalaForCausalLM is the mamba-hybrid
+      // (29 Mamba3-MIMO layers carry recurrent state). All other
+      // text-generation models have has_inner_state=false.
       CHECK_FALSE(registration.info.has_inner_state);
     }
     CHECK(registration.info.score_type == "bi-encoder");
@@ -552,6 +557,12 @@ TEST_CASE("registry_model_property: Qwen registrations match pinned _ModelInfo")
       // promise about every checkpoint of it.
       CHECK_FALSE(registration.info.is_hybrid);
       CHECK(registration.info.supports_multimodal);
+    } else if (registration.architecture == "OlalaForCausalLM") {
+      // NEW-CANDIDATE-PORTS W2b: the mamba-hybrid IS hybrid and carries inner
+      // state (the M layers' MambaSpec group), text-only, not multimodal.
+      CHECK(registration.info.is_hybrid);
+      CHECK(registration.info.has_inner_state);
+      CHECK_FALSE(registration.info.supports_multimodal);
     } else {
       // Pure text-only full-attention/MLA arch (dense OR MoE): NOT hybrid (no
       // GDN linear-attention state), NOT multimodal (no vision/audio tower).
@@ -865,7 +876,7 @@ TEST_CASE("Qwen3.5 SSM cache dtype accepts upstream torch aliases exactly") {
 TEST_CASE("hf_registry_coverage: every registration has an example config fixture") {
   // C++ fixture registry for the currently implemented subset. Keep this list
   // alias-for-alias with the central ordered table, mirroring HF_EXAMPLE_MODELS.
-  constexpr std::array<std::string_view, 60> kExampleConfigArchitectures{
+  constexpr std::array<std::string_view, 61> kExampleConfigArchitectures{
       "BoundaryExtractor",
       // "ClmModel" (Cl) < "CohereForCausalLM" (Co): l=0x6C < o=0x6F.
       "ClmModel",
@@ -918,6 +929,7 @@ TEST_CASE("hf_registry_coverage: every registration has an example config fixtur
       "NemotronH_Nano_VL_V2",
       "NimbleModel",
       "OPTForCausalLM",
+      "OlalaForCausalLM",
       "Olmo2ForCausalLM",
       "Olmo3ForCausalLM",
       "ParakeetForCTC",
@@ -1023,7 +1035,7 @@ TEST_CASE("raise_for_unsupported: subset default message and order match oracle"
       "'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', "
       "'MiniCPM3ForCausalLM', 'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
       "'NemotronHForCausalLM', 'NemotronH_Nano_Omni_Reasoning_V3', 'NemotronH_Nano_VL_V2', 'NimbleModel', "
-      "'OPTForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', "
+      "'OPTForCausalLM', 'OlalaForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', "
       "'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', "
       "'Phi3ForCausalLM', 'PhiForCausalLM', 'Qwen3ForCausalLM', "
       "'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', "
