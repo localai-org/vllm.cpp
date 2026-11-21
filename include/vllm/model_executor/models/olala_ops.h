@@ -28,3 +28,20 @@ void OlalaMoeHost(float* out, const float* x, int64_t tokens, int64_t hidden,
                   const OlalaLayerWeights& lw, const OlalaParams& p);
 
 }  // namespace vllm
+
+namespace vllm {
+
+// W2c-2: the V-layer mixer core, OlalaDifferentialTensorProductAttentionV2
+// (modeling_olala.py:498-745), host f32, pre-mixer_proj. x: [len, hidden];
+// positions: [len] (0-based, one document); out: [len, signal_heads*head_dim].
+// NoPE on this artifact (rope_theta=0); qk-norm is plain RMSNorm
+// (zero_centered_gamma weight is zeros); scalable softmax scales q by
+// scaler[h] * log(min(pos+1, window)); softmax scale = 1/head_dim
+// (use_completed_p=True, :727); softcap tanh (:469-470); causal + left window
+// wsize (:472-491); GQA repeat_interleave (:464-465); differential merge with
+// sigmoid(lambda) (:734-740).
+void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
+                         int64_t len, const OlalaLayerWeights& lw,
+                         const OlalaParams& p);
+
+}  // namespace vllm
