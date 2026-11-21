@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M8061APCKHGTM8JHPRHRCMJ4
 Title: NEW-CANDIDATE-PORTS W2c-2 (olala): V-layer differential TPA attention host op, unit-gated vs reference
 Row: NEW-CANDIDATE-PORTS
-State: OPEN
+State: CLOSED
 Kind: task
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-22
 Updated: 2026-11-22
-Closed: -
+Closed: 2026-11-22
 
 ## Problem
 
@@ -16,4 +16,4 @@ W2c-1 landed (geodesic + MoE). W2c-2 ports the V-layer mixer core OlalaVAttentio
 
 ## Resolution
 
--
+Landed on row/NEW-CANDIDATE-PORTS (W2c-2 commit): OlalaVAttentionHost ports the V mixer core; test_olala_ops 3/3 cases 67/67 assertions green in a CPU-only build, including the doc-start alpha-zeroing slip the reference test caught. Vestigial tensors recorded as unused-by-reference.
