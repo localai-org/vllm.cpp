@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M8026Y8N21TP6H4H47RQHPRH
 Title: NEW-CANDIDATE-PORTS W2c-1 (olala): host ops for the geodesic norm and the latent MoE, unit-gated vs the author's reference formulas
 Row: NEW-CANDIDATE-PORTS
-State: OPEN
+State: CLOSED
 Kind: task
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-21
 Updated: 2026-11-21
-Closed: -
+Closed: 2026-11-21
 
 ## Problem
 
@@ -16,4 +16,4 @@ W2a/W2b landed (oracles pinned, registry + bf16 GGUF load + hybrid KV spec, forw
 
 ## Resolution
 
--
+Landed on branch row/NEW-CANDIDATE-PORTS (W2c-1): olala_ops.{h,cpp} with OlalaGeodesicNormHost (modeling_olala.py:1596-1617) and OlalaMoeHost (:1448-1552), host f32 over the W2b-loaded weights; test_olala_ops.cpp unit-gates both against independent in-test f64 transcriptions of the reference formulas — 2/2 cases, 27/27 assertions, SUCCESS in a CPU-only build. One real bug caught by the reference test: the clamp constant was pi/2 instead of the reference's pi/4. Gates: trailers/style/record rot 0, TT-surface checker 0 violations, supported-models OK.
