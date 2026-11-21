@@ -291,7 +291,7 @@ TEST_CASE("FromModelDir rejects an unknown dense architecture before loading") {
       "'Kolibri1ForCausalLM', 'LagunaForCausalLM', 'LayaModel', 'LlamaForCausalLM', 'LlamaModel', 'MiMoV2ForCausalLM', 'MiniCPM3ForCausalLM', "
       "'MiniCPMForCausalLM', 'MistralForCausalLM', 'MuseGlimmerForCausalLM', 'MuseGlimmerForConditionalGeneration', "
       "'NemotronHForCausalLM', 'NemotronH_Nano_Omni_Reasoning_V3', 'NemotronH_Nano_VL_V2', 'NimbleModel', 'OPTForCausalLM', "
-      "'Olmo2ForCausalLM', 'Olmo3ForCausalLM', 'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', 'Phi3ForCausalLM', "
+      "'OlalaForCausalLM', 'Olmo2ForCausalLM', 'Olmo3ForCausalLM', 'ParakeetForCTC', 'ParakeetForRNNT', 'ParakeetForTDT', 'Phi3ForCausalLM', "
       "'PhiForCausalLM', 'Qwen3ForCausalLM', 'Qwen3MoeForCausalLM', 'Qwen3VLForConditionalGeneration', 'Qwen3_5ForCausalLM', "
       "'Qwen3_5ForConditionalGeneration', 'Qwen3_5MoeForCausalLM', 'Qwen3_5MoeForConditionalGeneration', 'Qwen4ExpForConditionalGeneration', "
       "'SpanExtractor', 'StableLmForCausalLM', 'Tev1Model', 'XorModel'])",
