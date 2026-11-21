@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M8068GAJ85R4RNKSKABW7M67
 Title: NEW-CANDIDATE-PORTS W2c-3 (olala): Mamba3-MIMO host step op, unit-gated vs reference
 Row: NEW-CANDIDATE-PORTS
-State: OPEN
+State: CLOSED
 Kind: task
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-22
 Updated: 2026-11-22
-Closed: -
+Closed: 2026-11-22
 
 ## Problem
 
@@ -16,4 +16,4 @@ W2c-2 landed (V attention). W2c-3 ports the M-layer step OlalaMambaStepHost (mod
 
 ## Resolution
 
--
+Landed on row/NEW-CANDIDATE-PORTS (W2c-3 commit 7b6c159f3): OlalaMambaStepHost, 4/4 cases 243/243 assertions green vs the in-test f64 reference over 3 tokens incl. state. ssm_m3_* recorded as vestigial.
