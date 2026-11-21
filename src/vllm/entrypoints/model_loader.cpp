@@ -2902,12 +2902,13 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     // of the registry's generic unsupported-architecture text (#809's
     // wrong-message lesson, applied in the parse/forward direction).
     if (vllm::IsOlalaGguf(gguf)) {
-      // NEW-CANDIDATE-PORTS W1: the GGUF weights arm's census runs on the
+      // NEW-CANDIDATE-PORTS: the GGUF weights arm's census runs on the
       // production path (every tensor mapped, counts/shapes vs the parsed
-      // config) BEFORE the forward refusal, so a malformed container fails
-      // here with the census message instead of at the forward boundary.
+      // config) before the registry resolves, so a malformed container fails
+      // here with the census message. W2b registered OlalaForCausalLM, so the
+      // load proceeds and the forward boundary refuses with the unported ops
+      // named (OlalaForwardRefusalOps).
       vllm::ValidateOlalaGguf(gguf, config);
-      throw std::runtime_error(vllm::OlalaForwardRefusal());
     }
     if (vllm::IsHyV4FlashGguf(gguf)) {
       throw std::runtime_error(vllm::HyV4FlashForwardRefusal());
