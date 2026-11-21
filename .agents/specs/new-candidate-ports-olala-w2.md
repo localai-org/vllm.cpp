@@ -137,3 +137,12 @@ One PR per wave (row claim answer recorded 2026-11-20 for NEW-CANDIDATE-PORTS).
 
 W2a in progress on branch `row/NEW-CANDIDATE-PORTS`, worktree `/tmp/port-olala2`,
 base `cb0da7d66`.
+
+## Now (W2c)
+
+2026-11-21: W2a/W2b landed (PR #3583). W2c in progress: ISSUE-LOCAL for W2c-1
+(geodesic norm + latent MoE host ops, unit-gated vs numpy transcription of
+modeling_olala.py formulas with file:line citations — no torch on this host;
+the transformers oracle stays gateable=no until measured). W2c-2 = V
+differential attention (:498-764), W2c-3 = Mamba3-MIMO (:933-1406), then the
+quant-matched token gate vs llama-cpp-olala on q6_k. Worktree /tmp/olala-w2c.
