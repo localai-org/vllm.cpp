@@ -291,6 +291,8 @@ only when it appears in this table and has a recorded pin:
 | `ddickmann/vllm-factory` | `vllm-factory` | GLiNER2.5 on vLLM (DeBERTa v2 encoder with disentangled attention + GLiNER2 pooler head + IO processor), which vLLM does not implement at the pin; no DeBERTa, no disentangled attention, and no GLiNER pooler exists in-tree or upstream |
 | `trycua/cua` | `cua` | the cua-s1-forms TinyTransformerScorer (byte-level 2-layer transformer encoder + cross-attention scoring head) for GUI form-filling decisions, which neither vLLM nor vLLM-Omni registers |
 | `Contrastive-LM/CLM` | `clm` | the CLM bi-encoder decision model (Qwen3-8B pooling + state/action projection heads), which neither vLLM nor vLLM-Omni registers |
+| `OVHaiLLM/Olala-v1.0-mini-7A1B` (transformers custom code) | `olala-transformers` | the `olala` architecture's reference forward (Mamba3-MIMO + differential attention + geodesic norm + latent MoE), which vLLM registers at no pin — behavior oracle for the port |
+| `OVHai-LLM/llama.cpp` `olala-master` | `llama-cpp-olala` | the `olala` GGUF architecture, its conversion and graph, and the CPU quant-matched floor on an olala checkpoint — the only llama.cpp that loads the published olala GGUFs |projection heads), which neither vLLM nor vLLM-Omni registers |
 
 <!-- oracle-registry:end -->
 
