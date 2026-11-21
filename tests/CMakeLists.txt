@@ -4904,3 +4904,8 @@ target_include_directories(test_olala_gguf_weights PRIVATE ${CMAKE_SOURCE_DIR}/s
 # config builder over the pinned APEX Balanced GGUF (77-style skip when absent).
 vllm_cpp_add_test(test_inkling2_loop_gguf vllm/models/test_inkling2_loop_gguf.cpp)
 target_include_directories(test_inkling2_loop_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+# NEW-CANDIDATE-PORTS W2c-1: olala host-op unit gates (geodesic norm, latent MoE)
+# against in-test f64 transcriptions of the author's modeling_olala.py formulas.
+vllm_cpp_add_test(test_olala_ops vllm/models/test_olala_ops.cpp)
+target_include_directories(test_olala_ops PRIVATE ${CMAKE_SOURCE_DIR}/src)
