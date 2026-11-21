@@ -45,3 +45,23 @@ void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
                          const OlalaParams& p);
 
 }  // namespace vllm
+
+namespace vllm {
+
+// W2c-3: one Mamba3-MIMO decode token step (modeling_olala.py:1265-1370 step +
+// _mamba3_rotary_step_torch :861-868 + _mamba3_step_torch :871-889), host f32.
+// State layout (allocate_inference_cache :1372-1404): angle [H, A] f32,
+// ssm [H, P, N] f32, k_state [R, H, N], v_state [H, P]. u: [hidden]; out: [H*P]
+// pre-mixer_proj. Prefill = stepping per token (the chunked kernel matches the
+// step to bf16 noise, :1148).
+struct OlalaMambaState {
+  std::vector<float> angle;   // [H * A]
+  std::vector<float> ssm;     // [H * P * N]
+  std::vector<float> k_state; // [R * H * N]
+  std::vector<float> v_state; // [H * P]
+};
+
+void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
+                        const OlalaLayerWeights& lw, const OlalaParams& p);
+
+}  // namespace vllm

@@ -412,3 +412,211 @@ TEST_CASE("olala W2c-2: V-layer differential TPA attention matches the reference
     CHECK(std::fabs(out[i] - ref[i]) < 5e-4);
   }
 }
+
+namespace {
+
+// Independent f64 reference for one OlalaMambaStepHost token
+// (modeling_olala.py:861-889 step+rotary+step_torch).
+struct RefMamba {
+  std::vector<double> angle, ssm, k_state, v_state;
+};
+
+std::vector<double> RefMambaStep(RefMamba& st, const std::vector<double>& u,
+                                 const vllm::OlalaLayerWeights& lw,
+                                 const vllm::OlalaParams& p) {
+  const int64_t H = 2 * p.hidden / p.headdim, P = p.headdim, N = p.d_state,
+                R = p.mimo_dim, A = p.rope_angles, hid = p.hidden;
+  auto W2 = [&](const vllm::OwnedTensor& w, int64_t j, int64_t i) {
+    if (w.dtype == vt::DType::kF32)
+      return double(reinterpret_cast<const float*>(w.bytes.data())[j * w.shape[1] + i]);
+    return Bf16Bits(reinterpret_cast<const uint16_t*>(w.bytes.data())[j * w.shape[1] + i]);
+  };
+  std::vector<double> z(H * P), x(H * P), dt(H), Av(H), tr(H);
+  for (int64_t h = 0; h < H; ++h) {
+    for (int64_t d = 0; d < P; ++d) {
+      double sz = 0, sx = 0;
+      for (int64_t i = 0; i < hid; ++i) {
+        sz += W2(lw.ssm_in, h * (2 * P + 3) + d, i) * u[i];
+        sx += W2(lw.ssm_in, h * (2 * P + 3) + P + d, i) * u[i];
+      }
+      z[h * P + d] = sz;
+      x[h * P + d] = sx;
+    }
+    double sd = 0, sa = 0, stt = 0;
+    for (int64_t i = 0; i < hid; ++i) {
+      sd += W2(lw.ssm_in, h * (2 * P + 3) + 2 * P, i) * u[i];
+      sa += W2(lw.ssm_in, h * (2 * P + 3) + 2 * P + 1, i) * u[i];
+      stt += W2(lw.ssm_in, h * (2 * P + 3) + 2 * P + 2, i) * u[i];
+    }
+    dt[h] = sd; Av[h] = sa; tr[h] = stt;
+  }
+  std::vector<double> Bv(R * N), Cv(R * N), ang(A);
+  for (int64_t j = 0; j < R * N; ++j) {
+    double sb = 0, sc = 0;
+    for (int64_t i = 0; i < hid; ++i) {
+      sb += W2(lw.ssm_in_dyn, j, i) * u[i];
+      sc += W2(lw.ssm_in_dyn, R * N + j, i) * u[i];
+    }
+    Bv[j] = sb; Cv[j] = sc;
+  }
+  for (int64_t a = 0; a < A; ++a) {
+    double s = 0;
+    for (int64_t i = 0; i < hid; ++i) s += W2(lw.ssm_in_dyn, 2 * R * N + a, i) * u[i];
+    ang[a] = s;
+  }
+  const float* bn = reinterpret_cast<const float*>(lw.ssm_b_norm.bytes.data());
+  const float* cn = reinterpret_cast<const float*>(lw.ssm_c_norm.bytes.data());
+  const float* db = reinterpret_cast<const float*>(lw.ssm_dt_bias.bytes.data());
+  const float* cb = reinterpret_cast<const float*>(lw.ssm_c_bias.bytes.data());
+  const float* kb = reinterpret_cast<const float*>(lw.ssm_b_bias.bytes.data());
+  const float* Dv = reinterpret_cast<const float*>(lw.ssm_d.bytes.data());
+  auto proj = [&](const vllm::OwnedTensor& w, int64_t r, int64_t h, int64_t pp) {
+    return W2(w, h * R + r, pp);
+  };
+  auto rms = [&](const std::vector<double>& in, const float* w) {
+    double s = 0;
+    for (size_t n = 0; n < in.size(); ++n) s += in[n] * in[n];
+    double inv = 1.0 / std::sqrt(s / in.size() + 1e-6);
+    std::vector<double> o(in.size());
+    for (size_t n = 0; n < in.size(); ++n) o[n] = in[n] * inv * (1.0 + w[n]);
+    return o;
+  };
+  std::vector<double> DT(H), al(H), be(H), ga(H);
+  for (int64_t h = 0; h < H; ++h) {
+    double dtv = std::log1p(std::exp(dt[h] + db[h]));
+    DT[h] = dtv;
+    double a = std::min(-std::log1p(std::exp(Av[h])), -1e-4);
+    al[h] = std::exp(a * dtv);
+    double t = 1.0 / (1.0 + std::exp(-tr[h]));
+    be[h] = (1 - t) * dtv * al[h];
+    ga[h] = t * dtv;
+  }
+  std::vector<double> Bn(R * H * N), Cn(R * H * N);
+  for (int64_t r = 0; r < R; ++r) {
+    std::vector<double> bvec(Bv.begin() + r * N, Bv.begin() + (r + 1) * N);
+    std::vector<double> cvec(Cv.begin() + r * N, Cv.begin() + (r + 1) * N);
+    auto bn_ = rms(bvec, bn);
+    auto cn_ = rms(cvec, cn);
+    for (int64_t h = 0; h < H; ++h)
+      for (int64_t n = 0; n < N; ++n) {
+        Bn[(r * H + h) * N + n] = bn_[n];
+        Cn[(r * H + h) * N + n] = cn_[n];
+      }
+  }
+  std::vector<double> Q(R * H * N), K(R * H * N);
+  for (int64_t h = 0; h < H; ++h) {
+    std::vector<double> na(A);
+    for (int64_t a = 0; a < A; ++a) {
+      na[a] = st.angle[h * A + a] + std::tanh(ang[a]) * DT[h] * M_PI;
+      st.angle[h * A + a] = std::fmod(na[a], 2 * M_PI);
+    }
+    for (int64_t r = 0; r < R; ++r)
+      for (int64_t n = 0; n < N; ++n) {
+        double qv = Cn[(r * H + h) * N + n] + cb[(h * R + r) * N + n];
+        double kv = Bn[(r * H + h) * N + n] + kb[(h * R + r) * N + n];
+        if (n < A) {
+          double q2 = Cn[(r * H + h) * N + (n + N / 2)] + cb[(h * R + r) * N + (n + N / 2)];
+          double k2 = Bn[(r * H + h) * N + (n + N / 2)] + kb[(h * R + r) * N + (n + N / 2)];
+          Q[(r * H + h) * N + n] = qv * std::cos(na[n]) - q2 * std::sin(na[n]);
+          Q[(r * H + h) * N + (n + N / 2)] = qv * std::sin(na[n]) + q2 * std::cos(na[n]);
+          K[(r * H + h) * N + n] = kv * std::cos(na[n]) - k2 * std::sin(na[n]);
+          K[(r * H + h) * N + (n + N / 2)] = kv * std::sin(na[n]) + k2 * std::cos(na[n]);
+        } else {
+          Q[(r * H + h) * N + n] = qv;
+          K[(r * H + h) * N + n] = kv;
+        }
+      }
+  }
+  std::vector<double> newssm(H * P * N);
+  for (int64_t h = 0; h < H; ++h)
+    for (int64_t pp = 0; pp < P; ++pp)
+      for (int64_t n = 0; n < N; ++n) {
+        double s = st.ssm[(h * P + pp) * N + n] * al[h];
+        for (int64_t r = 0; r < R; ++r) {
+          double xv = x[h * P + pp] * proj(lw.ssm_mimo_x, r, h, pp);
+          s += xv * ga[h] * K[(r * H + h) * N + n];
+          double xs = st.v_state[h * P + pp] * proj(lw.ssm_mimo_x, r, h, pp);
+          s += xs * be[h] * st.k_state[(r * H + h) * N + n];
+        }
+        newssm[(h * P + pp) * N + n] = s;
+      }
+  std::vector<double> y(H * P, 0.0);
+  for (int64_t h = 0; h < H; ++h)
+    for (int64_t pp = 0; pp < P; ++pp) {
+      double acc = 0;
+      for (int64_t r = 0; r < R; ++r) {
+        double accr = 0;
+        for (int64_t n = 0; n < N; ++n) accr += newssm[(h * P + pp) * N + n] * Q[(r * H + h) * N + n];
+        double xvr = x[h * P + pp] * proj(lw.ssm_mimo_x, r, h, pp);
+        double orr = accr + xvr * Dv[h];
+        double gate = z[h * P + pp] * proj(lw.ssm_mimo_z, r, h, pp);
+        double silu = gate / (1.0 + std::exp(-gate));
+        acc += orr * silu * proj(lw.ssm_mimo_o, r, h, pp);
+      }
+      y[h * P + pp] = acc;
+    }
+  st.ssm = newssm;
+  st.k_state = K;
+  st.v_state.assign(x.begin(), x.end());
+  return y;
+}
+
+}  // namespace
+
+TEST_CASE("olala W2c-3: Mamba3-MIMO step matches the reference over 3 tokens") {
+  vllm::OlalaParams p;
+  p.hidden = 8;
+  p.headdim = 4;      // P
+  p.d_state = 8;      // N
+  p.mimo_dim = 2;     // R
+  p.rope_angles = 4;  // A
+  const int64_t H = 2 * p.hidden / p.headdim;  // 4
+  vllm::OlalaLayerWeights lw;
+  auto bf = [&](std::vector<int64_t> sh, float seed) {
+    int64_t n = 1;
+    for (auto d : sh) n *= d;
+    std::vector<float> vals(n);
+    for (int64_t i = 0; i < n; ++i) vals[i] = 0.06f * float(((int)(seed * 5 + i) % 6) - 2);
+    return Bf16Tensor(sh, vals);
+  };
+  lw.ssm_in = bf({H * (2 * 4 + 3), 8}, 1.0f);       // [44, 8]
+  lw.ssm_in_dyn = bf({2 * 2 * 8 + 4, 8}, 2.0f);    // [36, 8]
+  lw.ssm_b_bias = F32Tensor({H, 2, 8}, std::vector<float>(H * 2 * 8, 0.05f));
+  lw.ssm_c_bias = F32Tensor({H, 2, 8}, std::vector<float>(H * 2 * 8, -0.03f));
+  lw.ssm_b_norm = F32Tensor({8}, std::vector<float>(8, 0.0f));
+  lw.ssm_c_norm = F32Tensor({8}, std::vector<float>(8, 0.0f));
+  lw.ssm_dt_bias = F32Tensor({H}, {0.01f, -0.02f, 0.03f, 0.0f});
+  lw.ssm_d = F32Tensor({H}, {1.0f, 0.9f, 1.1f, 1.0f});
+  lw.ssm_mimo_x = bf({H, 2, 4}, 3.0f);
+  lw.ssm_mimo_z = bf({H, 2, 4}, 4.0f);
+  lw.ssm_mimo_o = bf({H, 2, 4}, 5.0f);
+
+  vllm::OlalaMambaState st;
+  st.angle.assign(H * 4, 0.1f);
+  st.ssm.assign(H * 4 * 8, 0.02f);
+  st.k_state.assign(2 * H * 8, -0.01f);
+  st.v_state.assign(H * 4, 0.03f);
+  RefMamba rst;
+  rst.angle.assign(st.angle.begin(), st.angle.end());
+  rst.ssm.assign(st.ssm.begin(), st.ssm.end());
+  rst.k_state.assign(st.k_state.begin(), st.k_state.end());
+  rst.v_state.assign(st.v_state.begin(), st.v_state.end());
+
+  for (int64_t t = 0; t < 3; ++t) {
+    std::vector<float> u(8);
+    for (int64_t i = 0; i < 8; ++i) u[i] = 0.15f * float(((t + i) % 4) - 1);
+    std::vector<float> out(H * 4, 0.0f);
+    vllm::OlalaMambaStepHost(out.data(), st, u.data(), lw, p);
+    std::vector<double> ud(u.begin(), u.end());
+    auto ref = RefMambaStep(rst, ud, lw, p);
+    for (int64_t i = 0; i < H * 4; ++i) {
+      CAPTURE(t); CAPTURE(i);
+      CHECK(std::fabs(out[i] - ref[i]) < 5e-4);
+    }
+  }
+  // state agreement
+  for (size_t i = 0; i < st.ssm.size(); ++i) {
+    CAPTURE(i);
+    CHECK(std::fabs(st.ssm[i] - rst.ssm[i]) < 5e-4);
+  }
+}
