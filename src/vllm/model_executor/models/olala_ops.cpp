@@ -366,3 +366,173 @@ void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
 }
 
 }  // namespace vllm
+
+namespace vllm {
+
+void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
+                        const OlalaLayerWeights& lw, const OlalaParams& p) {
+  const int64_t H = 2 * p.hidden / p.headdim;  // nheads = d_inner/headdim (:956)
+  const int64_t P = p.headdim, N = p.d_state, R = p.mimo_dim, A = p.rope_angles;
+  const int64_t hid = p.hidden;
+  const double A_floor = 1e-4;                 // :949
+  // in_proj split per head: z[P], x[P], dt, A, trap (:1287-1291; 2P+3 per head)
+  std::vector<float> z(H * P), x(H * P), dt(H), Av(H), trap(H);
+  for (int64_t h = 0; h < H; ++h) {
+    for (int64_t d = 0; d < P; ++d) {
+      double sz = 0, sx = 0;
+      for (int64_t i = 0; i < hid; ++i) {
+        const double ui = u[i];
+        sz += WAt(lw.ssm_in, h * (2 * P + 3) + d, i, "ssm_in") * ui;
+        sx += WAt(lw.ssm_in, h * (2 * P + 3) + P + d, i, "ssm_in") * ui;
+      }
+      z[h * P + d] = float(sz);
+      x[h * P + d] = float(sx);
+    }
+    double sdt = 0, sA = 0, str = 0;
+    for (int64_t i = 0; i < hid; ++i) {
+      const double ui = u[i];
+      sdt += WAt(lw.ssm_in, h * (2 * P + 3) + 2 * P, i, "ssm_in") * ui;
+      sA += WAt(lw.ssm_in, h * (2 * P + 3) + 2 * P + 1, i, "ssm_in") * ui;
+      str += WAt(lw.ssm_in, h * (2 * P + 3) + 2 * P + 2, i, "ssm_in") * ui;
+    }
+    dt[h] = float(sdt);
+    Av[h] = float(sA);
+    trap[h] = float(str);
+  }
+  // in_proj_dyn: B [R*N], C [R*N], angles [A] (:1299-1301; ngroups=1)
+  std::vector<float> Bv(R * N), Cv(R * N), ang(A);
+  for (int64_t j = 0; j < R * N; ++j) {
+    double sb = 0, sc = 0;
+    for (int64_t i = 0; i < hid; ++i) {
+      sb += WAt(lw.ssm_in_dyn, j, i, "ssm_in_dyn") * u[i];
+      sc += WAt(lw.ssm_in_dyn, R * N + j, i, "ssm_in_dyn") * u[i];
+    }
+    Bv[j] = float(sb);
+    Cv[j] = float(sc);
+  }
+  for (int64_t a = 0; a < A; ++a) {
+    double s = 0;
+    for (int64_t i = 0; i < hid; ++i)
+      s += WAt(lw.ssm_in_dyn, 2 * R * N + a, i, "ssm_in_dyn") * u[i];
+    ang[a] = float(s);
+  }
+  // _preprocess (:1248-1263): DT, _A clamp, trap sigmoid, B/C norm over N, expand
+  const float* bn = F32Bytes(lw.ssm_b_norm, "b_norm");
+  const float* cn = F32Bytes(lw.ssm_c_norm, "c_norm");
+  const float* dbias = F32Bytes(lw.ssm_dt_bias, "dt_bias");
+  std::vector<float> DT(H), alpha(H), beta(H), gamma(H), Bn(R * H * N), Cn(R * H * N);
+  for (int64_t h = 0; h < H; ++h) {
+    const double dtv = std::log1p(std::exp(double(dt[h]) + dbias[h]));  // softplus
+    DT[h] = float(dtv);
+    double a = -std::log1p(std::exp(double(Av[h])));                    // -softplus(A)
+    a = std::min(a, -A_floor);                                          // clamp max=-A_floor
+    const double adt = a * dtv;
+    alpha[h] = float(std::exp(adt));
+    const double tr = 1.0 / (1.0 + std::exp(-double(trap[h])));         // sigmoid
+    beta[h] = float((1.0 - tr) * dtv * std::exp(adt));
+    gamma[h] = float(tr * dtv);
+    (void)adt;
+  }
+  // B/C norm over d_state then expand G->H (ngroups=1, so r index direct)
+  for (int64_t r = 0; r < R; ++r) {
+    for (int64_t h = 0; h < H; ++h) {
+      // rmsnorm over N of Bv[r*N ..], weight bn (zero-centered -> 1+w=1 on this ckpt)
+      double s = 0;
+      for (int64_t n = 0; n < N; ++n) s += double(Bv[r * N + n]) * Bv[r * N + n];
+      const double inv = 1.0 / std::sqrt(s / N + 1e-6);
+      for (int64_t n = 0; n < N; ++n) {
+        const double w = 1.0 + bn[n];
+        Bn[(r * H + h) * N + n] = float(double(Bv[r * N + n]) * inv * w);
+      }
+    }
+    double s = 0;
+    for (int64_t n = 0; n < N; ++n) s += double(Cv[r * N + n]) * Cv[r * N + n];
+    const double inv = 1.0 / std::sqrt(s / N + 1e-6);
+    for (int64_t h = 0; h < H; ++h)
+      for (int64_t n = 0; n < N; ++n) {
+        const double w = 1.0 + cn[n];
+        Cn[(r * H + h) * N + n] = float(double(Cv[r * N + n]) * inv * w);
+      }
+  }
+  // rotary step (:861-868): angle += tanh(ang)*DT*pi; rotate q=C+C_bias, k=B+B_bias
+  // pairs (i, i+N/2) for i < A (:764-770). biases are (h, r, n) -> (r, h, n).
+  const float* cb = F32Bytes(lw.ssm_c_bias, "c_bias");
+  const float* kb = F32Bytes(lw.ssm_b_bias, "b_bias");
+  std::vector<float> Q(R * H * N), K(R * H * N);
+  for (int64_t h = 0; h < H; ++h) {
+    std::vector<double> na(A);
+    for (int64_t a = 0; a < A; ++a) {
+      const double prev = st.angle[h * A + a];
+      na[a] = prev + std::tanh(double(ang[a])) * DT[h] * M_PI;
+      st.angle[h * A + a] = float(std::fmod(na[a], 2 * M_PI));
+    }
+    std::vector<double> cs(A), sn(A);
+    for (int64_t a = 0; a < A; ++a) { cs[a] = std::cos(na[a]); sn[a] = std::sin(na[a]); }
+    for (int64_t r = 0; r < R; ++r) {
+      for (int64_t n = 0; n < N; ++n) {
+        double qv = Cn[(r * H + h) * N + n] + cb[(h * R + r) * N + n];
+        double kv = Bn[(r * H + h) * N + n] + kb[(h * R + r) * N + n];
+        if (n < A) {
+          const double q2 = Cn[(r * H + h) * N + (n + N / 2)] + cb[(h * R + r) * N + (n + N / 2)];
+          const double k2 = Bn[(r * H + h) * N + (n + N / 2)] + kb[(h * R + r) * N + (n + N / 2)];
+          Q[(r * H + h) * N + n] = float(qv * cs[n] - q2 * sn[n]);
+          Q[(r * H + h) * N + (n + N / 2)] = float(qv * sn[n] + q2 * cs[n]);
+          K[(r * H + h) * N + n] = float(kv * cs[n] - k2 * sn[n]);
+          K[(r * H + h) * N + (n + N / 2)] = float(kv * sn[n] + k2 * cs[n]);
+        } else {
+          Q[(r * H + h) * N + n] = float(qv);
+          K[(r * H + h) * N + n] = float(kv);
+        }
+      }
+    }
+  }
+  // mimo projections (h, r, p) -> (r, h, p) (:1328-1330)
+  auto proj = [&](const OwnedTensor& w, int64_t r, int64_t h, int64_t pp) {
+    return WAt(w, h * R + r, pp, "mimo");  // [H, R, P] read as [h*R+r, p]
+  };
+  // step (:871-889)
+  const float* Dv = F32Bytes(lw.ssm_d, "D");
+  std::vector<float> newssm(H * P * N, 0.0f);
+  for (int64_t h = 0; h < H; ++h) {
+    for (int64_t pp = 0; pp < P; ++pp) {
+      for (int64_t n = 0; n < N; ++n) {
+        double s = st.ssm[(h * P + pp) * N + n] * alpha[h];
+        for (int64_t r = 0; r < R; ++r) {
+          const double xv = double(x[h * P + pp]) * proj(lw.ssm_mimo_x, r, h, pp);
+          s += xv * gamma[h] * K[(r * H + h) * N + n];
+          const double xs = st.v_state[h * P + pp] * proj(lw.ssm_mimo_x, r, h, pp);
+          s += xs * beta[h] * st.k_state[(r * H + h) * N + n];
+        }
+        newssm[(h * P + pp) * N + n] = float(s);
+      }
+    }
+  }
+  // o = einsum(new, C) + xv * D per (r,h,p), gated by silu(z*zproj), then
+  // y = sum_r o_r * outproj_r (:886-888).
+  for (int64_t h = 0; h < H; ++h)
+    for (int64_t pp = 0; pp < P; ++pp) {
+      double yv = 0;
+      for (int64_t r = 0; r < R; ++r) {
+        double accr = 0;
+        for (int64_t n = 0; n < N; ++n)
+          accr += newssm[(h * P + pp) * N + n] * Q[(r * H + h) * N + n];
+        const double xvr = double(x[h * P + pp]) * proj(lw.ssm_mimo_x, r, h, pp);
+        const double orr = accr + xvr * Dv[h];
+        const double zproj = proj(lw.ssm_mimo_z, r, h, pp);
+        const double gate = double(z[h * P + pp]) * zproj;
+        const double silu = gate / (1.0 + std::exp(-gate));
+        yv += orr * silu * proj(lw.ssm_mimo_o, r, h, pp);
+      }
+      out[h * P + pp] = float(yv);
+    }
+  st.ssm = newssm;
+  // k_state = K (B), v_state = x
+  for (int64_t r = 0; r < R; ++r)
+    for (int64_t h = 0; h < H; ++h)
+      for (int64_t n = 0; n < N; ++n)
+        st.k_state[(r * H + h) * N + n] = K[(r * H + h) * N + n];
+  for (int64_t h = 0; h < H; ++h)
+    for (int64_t pp = 0; pp < P; ++pp) st.v_state[h * P + pp] = x[h * P + pp];
+}
+
+}  // namespace vllm
