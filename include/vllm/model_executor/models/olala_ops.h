@@ -1,0 +1,30 @@
+// vllm.cpp ORIGINAL — the `olala` host ops, row NEW-CANDIDATE-PORTS W2c-1.
+// Reference: modeling_olala.py @ f781f124 (OVHaiLLM/Olala-v1.0-mini-7A1B,
+// oracle olala-transformers) — each function cites the reference lines.
+#pragma once
+
+#include <cstdint>
+
+#include "vllm/model_executor/models/olala.h"
+
+namespace vllm {
+
+// OlalaGeodesicNorm.forward (modeling_olala.py:1596-1617), host f32.
+// x, g: [rows, cols] row-major; scale/bias: the geo_* [1] scalars; layer_idx
+// is the 0-based block index (the reference's 1-based layer_idx+1 divisor).
+void OlalaGeodesicNormHost(float* out, const float* x, const float* g,
+                           int64_t rows, int64_t cols, float scale,
+                           float bias, int64_t layer_idx);
+
+// OlalaMoE.forward (modeling_olala.py:1512-1552) + TorchMoEMLP
+// (:1448-1469) + OlalaMLP (:1414-1418), host f32 compute over the W2b-loaded
+// weights. x: [tokens, hidden] f32; out: [tokens, hidden] f32.
+// Router: logits = x @ ffn_gate_inp^T + exp_probs_b (f32), sigmoid, top-k,
+// probs normalized * expert_weights_scale. Routed: latent down [latent,hidden],
+// per-expert h = relu(xl @ up_e)^2, y = h @ down_e, fp32 weighted accumulate,
+// latent up [hidden, latent]. Shared: relu(ffn_up_shexp @ x)^2 @ ffn_down_shexp.
+// out = shared + routed.
+void OlalaMoeHost(float* out, const float* x, int64_t tokens, int64_t hidden,
+                  const OlalaLayerWeights& lw, const OlalaParams& p);
+
+}  // namespace vllm
