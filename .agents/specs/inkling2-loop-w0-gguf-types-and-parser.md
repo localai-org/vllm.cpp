@@ -15,7 +15,7 @@ The pinned artifact `mudler/Inkling-2-Mini-APEX-GGUF @ d85a58007995c3365eb2323b1
   - `vllm/model_executor/models/registry.py` (PR diff): `"Inkling2LoopForConditionalGeneration": ("vllm.models.inkling2", "Inkling2LoopForConditionalGeneration")`.
   - `vllm/transformers_utils/config.py` (PR diff): `inkling2_loop="Inkling2LoopMMConfig"`.
   - Upstream test `tests/models/inkling2/test_model.py::test_loop_serving_options_validation` (PR diff) is the applicable config test; its forward/GPU cases are port-row scope and NOT ported here.
-- GGML wire geometry: llama.cpp `ggml-common.h` `block_q4_1 = f16 d + f16 m + QK4_1/2 qs` = 2+2+16 = 20 bytes, QK4_1 = 32; `block_q5_1 = f16 d + f16 m + u8 qh + QK5_1/2 qs` = 2+2+1+16 = 21 bytes, QK5_1 = 32. (Same table the existing cases 2, 6, 8 cite at `gguf_reader.cpp:214-225`.) `GGML_QUANT_SIZES` in `gguf-py/gguf/constants.py` agrees.
+- GGML wire geometry: llama.cpp `ggml-common.h:210-212` `block_q4_1 = f16 d + f16 m + QK4_1/2 qs` = 2+2+16 = 20 bytes, QK4_1 = 32; `ggml-common.h:237-249` `block_q5_1 = f16 d + f16 m + u8 qh[4] + QK5_1/2 qs` = 2+2+4+16 = **24** bytes, QK5_1 = 32 (the `qh` array is 4 bytes — one high bit per quant — and the file's own `static_assert sizeof(block_q5_1) == 2*sizeof(ggml_half) + sizeof(uint32_t) + QK5_1/2` confirms it; a prior 21-byte tabulation was corrected by ISSUE-LOCAL-01M82AMJXV6DH2BD3SC40YG8DB). The committed walk's header offsets agree: a 14-expert Q5_1 tensor spans `numel/32 * 24` bytes exactly.
 
 ## Hazards — llama.cpp inkling2 oracle revisions
 
@@ -47,7 +47,7 @@ The pinned artifact `mudler/Inkling-2-Mini-APEX-GGUF @ d85a58007995c3365eb2323b1
 ## Scope
 
 IN:
-1. Two rows in `FindGgmlTraits`: id 3 `{32, 20, "Q4_1"}` and id 7 `{32, 21, "Q5_1"}`, so the reader can parse the header (no dequantization — this row does not run the forward).
+1. Two rows in `FindGgmlTraits`: id 3 `{32, 20, "Q4_1"}` and id 7 `{32, 24, "Q5_1"}`, so the reader can parse the header (no dequantization — this row does not run the forward).
 2. A CPU unit test over the real reader and the pinned artifact path: type-id geometry, `GgufFile::Open` succeeds, 704 tensors, arch `inkling2_loop`, 14 type-7 tensors, `token_embd.weight` shape; clean 77-style skip when the artifact is absent.
 3. `Inkling2LoopHfConfigFromGguf` (header + TU), mapping the walk's standard fields by name, mirroring upstream field names and validations, carrying every unmapped KV verbatim via the shared `gguf_config::CarryUnmapped`.
 4. ONE loader row `{"inkling2_loop", &vllm::Inkling2LoopHfConfigFromGguf}` in `kGgufArchArms` and one forward-boundary refusal in the GGUF branch, exactly the olala/hy_v4_flash pattern (`model_loader.cpp:1293-1294`, `:2913-2915`).
@@ -99,7 +99,7 @@ Stop and report `NEEDS_CONTEXT` if the artifact is absent AND no skip can be dem
 
 - **Measured:** PR #3586 landed on main at merge commit `7a4419e69` on 2026-11-22 after two fresh reviews and two independent operator gate reruns. Focused gate 11 cases / 11 passed and 72 assertions / 72 passed; related ctest subset green; `scripts/agent-preflight.sh --staged` exit 0 with the native pwsh apphost on PATH; `check-agent-record.py --report` rot 0 (1032 anchors, 0 stale, 0 broken); `agent-pr-body.py --pr 3586` exit 0. Six mutation REDs proved the loader wiring and all three loop_config checks are protected; the re-review reproduced each at the final head.
 - **Rejected:** direct-helper unit tests as sufficient coverage. The first review deleted both loader call sites and the gate stayed green, so a hermetic `FromModelDir` production-path test was added. Similarly, "mirrors upstream validation" was rejected as unproven until `gate_rank`, core-range and fixed-pass checks were each mutated to always-false and shown to turn the gate red. The mounted 20 GB artifact was rejected for the production-path test in favour of an in-memory `GgufModelBuilder`, so the test runs without shared storage. The host's dotnet pwsh shim failure was not gated away; the native apphost path was used instead.
-- **Why the defaults hold:** ggml geometry comes from llama.cpp `GGML_QUANT_SIZES` (Q4_1 32/20, Q5_1 32/21), not from a guessed padding. No model-path buffer or GEMM output is widened to f32, so the inherited dtype stays unchanged. `SKIP_RETURN_CODE 77` keeps CI without `/mnt/models` honest rather than silently passing. The refusal text names `NEW-CANDIDATE-PORTS` so a premature forward is attributable to this row.
+- **Why the defaults hold:** ggml geometry comes from llama.cpp `ggml-common.h` block layouts (Q4_1 32/20 at :210-212, Q5_1 32/24 at :237-249), not from a guessed padding; the 21-byte Q5_1 error was corrected in flow under ISSUE-LOCAL-01M82AMJXV6DH2BD3SC40YG8DB. No model-path buffer or GEMM output is widened to f32, so the inherited dtype stays unchanged. `SKIP_RETURN_CODE 77` keeps CI without `/mnt/models` honest rather than silently passing. The refusal text names `NEW-CANDIDATE-PORTS` so a premature forward is attributable to this row.
 
 ## Now
 
