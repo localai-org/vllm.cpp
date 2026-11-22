@@ -6,17 +6,24 @@
 // /mnt/models reports Skipped, never a false green (issue #463).
 #include <doctest/doctest.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "vllm/entrypoints/model_loader.h"
 #include "vllm/gguf_builder.h"
 #include "vllm/model_executor/model_loader/gguf_reader.h"
 #include "vllm/model_executor/models/inkling2_loop_gguf_config.h"
 #include "vllm/transformers_utils/hf_config.h"
+
+using vllm::entrypoints::EngineParams;
+using vllm::entrypoints::LoadedEngine;
 
 #ifndef INKLING2_APEX_GGUF_PATH
 #define INKLING2_APEX_GGUF_PATH \
@@ -39,6 +46,62 @@ const char* ApexPath() {
                "SKIP: %s not mounted; CTest reports this as Skipped (exit 77)\n",
                ApexPath());
   std::exit(77);
+}
+
+// A tiny, fully-valid inkling2_loop GGUF built entirely in memory. No mount and
+// no large artifact: every KV the parser consumes is written with the shared
+// gguf_test builder. The defaults satisfy all three loop_config validations,
+// so the production refusal at the loader's forward boundary is the FIRST
+// thing that can throw. A test overrides one field to drive a single
+// validation, and the builder otherwise stays identical.
+struct TinyInkling2 {
+  int block_count = 4;
+  int hidden = 64;
+  int vocab = 32;
+  int core_start = 1;
+  int core_end = 3;
+  int num_passes = 3;
+  int gate_rank = 64;
+  bool is_varloop = false;
+};
+
+std::string TinyInkling2Gguf(const TinyInkling2& f = {}) {
+  gguf_test::GgufModelBuilder b;
+  b.AddKv(gguf_test::StrKv("general.architecture", "inkling2_loop"));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.block_count", f.block_count));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.embedding_length", f.hidden));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.feed_forward_length", 128));
+  b.AddKv(gguf_test::I32ArrayKv(
+      "inkling2_loop.attention.head_count",
+      std::vector<int32_t>(f.block_count, 4)));
+  b.AddKv(gguf_test::I32ArrayKv(
+      "inkling2_loop.attention.head_count_kv",
+      std::vector<int32_t>(f.block_count, 2)));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.attention.key_length", 16));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.expert_count", 8));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.expert_used_count", 2));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.expert_feed_forward_length", 128));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.context_length", 1024));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.attention.sliding_window", 512));
+  b.AddKv(gguf_test::F32Kv(
+      "inkling2_loop.attention.layer_norm_rms_epsilon", 1e-5f));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.vocab_size", f.vocab));
+  // ggml dims are inner-first: {hidden, vocab} reverses to shape
+  // [vocab, hidden], which is what the parser cross-checks against vocab_size
+  // and embedding_length.
+  b.AddTensor("token_embd.weight",
+              {static_cast<uint64_t>(f.hidden), static_cast<uint64_t>(f.vocab)},
+              0 /* F32 */,
+              std::string(static_cast<size_t>(f.hidden) * f.vocab * 4, '\0'));
+  b.AddKv(gguf_test::BoolArrayKv(
+      "inkling2_loop.attention.sliding_window_pattern",
+      std::vector<bool>(f.block_count, false)));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.loop.start", f.core_start));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.loop.end", f.core_end));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.loop.count", f.num_passes));
+  b.AddKv(gguf_test::U32Kv("inkling2_loop.loop.gate_rank", f.gate_rank));
+  b.AddKv(gguf_test::BoolKv("inkling2_loop.loop.varying", f.is_varloop));
+  return b.Build();
 }
 
 }  // namespace
@@ -161,4 +224,55 @@ TEST_CASE("inkling2_loop: a wrong architecture refuses by name") {
   const vllm::GgufFile gguf = vllm::GgufFile::Open(f.path());
   CHECK_THROWS_WITH(vllm::Inkling2LoopHfConfigFromGguf(gguf),
                     doctest::Contains("inkling2_loop"));
+}
+
+TEST_CASE("inkling2_loop: FromModelDir reaches the loader row and refuses") {
+  // The production path a real `.gguf` argument takes. A direct call to the
+  // builder proves the parser works; it says nothing about whether the loader
+  // ever calls it. Drive LoadedEngine::FromModelDir with the tiny valid file so
+  // the arch table selects this family's builder and the forward-boundary
+  // refusal fires. Delete EITHER the kGgufArchArms row OR the refusal block and
+  // the thrown message loses "NEW-CANDIDATE-PORTS" -- this case goes red.
+  gguf_test::TempFile f(TinyInkling2Gguf());
+  try {
+    LoadedEngine::FromModelDir(f.path(), EngineParams{});
+    FAIL("FromModelDir must refuse the inkling2_loop forward boundary");
+  } catch (const std::exception& e) {
+    const std::string message = e.what();
+    CHECK(message.find("NEW-CANDIDATE-PORTS") != std::string::npos);
+    CHECK(message.find("forward boundary") != std::string::npos);
+  }
+}
+
+TEST_CASE("inkling2_loop: loop core layers outside the block count are refused") {
+  // Synthetic, no mount. core_end 5 > block_count 4 -- upstream configs.py
+  // requires 0 < core_start < core_end <= num_hidden_layers.
+  TinyInkling2 f;
+  f.core_end = 5;
+  gguf_test::TempFile file(TinyInkling2Gguf(f));
+  const vllm::GgufFile gguf = vllm::GgufFile::Open(file.path());
+  CHECK_THROWS_WITH(vllm::Inkling2LoopHfConfigFromGguf(gguf),
+                    doctest::Contains("loop core layers are out of range"));
+}
+
+TEST_CASE("inkling2_loop: gate_rank 0 is refused") {
+  // Upstream configs.py requires gate_rank >= 1.
+  TinyInkling2 f;
+  f.gate_rank = 0;
+  gguf_test::TempFile file(TinyInkling2Gguf(f));
+  const vllm::GgufFile gguf = vllm::GgufFile::Open(file.path());
+  CHECK_THROWS_WITH(vllm::Inkling2LoopHfConfigFromGguf(gguf),
+                    doctest::Contains("loop gate_rank must be >= 1"));
+}
+
+TEST_CASE("inkling2_loop: a single fixed-loop pass is refused") {
+  // A non-varloop checkpoint needs at least two passes (configs.py
+  // check_loop_options). A varloop with one pass would be accepted.
+  TinyInkling2 f;
+  f.num_passes = 1;
+  f.is_varloop = false;
+  gguf_test::TempFile file(TinyInkling2Gguf(f));
+  const vllm::GgufFile gguf = vllm::GgufFile::Open(file.path());
+  CHECK_THROWS_WITH(vllm::Inkling2LoopHfConfigFromGguf(gguf),
+                    doctest::Contains("at least 2 passes"));
 }
