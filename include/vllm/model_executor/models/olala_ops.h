@@ -68,13 +68,16 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
 
 namespace vllm {
 
-// W2d: single-token V-layer attention step with the raw k_last/v_last cache
-// (modeling_olala.py:600-619 L==1 decode arm). k_last/v_last: [KV*D] in/out —
-// the RAW last k/v (the reference caches them BEFORE the shift, :619).
-void OlalaVAttentionStepHost(float* out, const float* attn_k_cache,
-                             const float* attn_v_cache, float* raw_k_last,
-                             float* raw_v_last, const float* x, int64_t pos,
-                             const OlalaLayerWeights& lw, const OlalaParams& p);
+// W2d-2: single-token V-layer attention step. attn_k_cache/attn_v_cache:
+// [pos+1, KV*D] post-shift post-norm k/v; the step READS rows 0..pos-1 and
+// WRITES row pos (the caller sizes the cache to (pos+1)*KV*D before the
+// call). raw_k_last/raw_v_last: [KV*D] in/out — the RAW pre-shift k/v of the
+// previous token (the reference caches them BEFORE the shift, :619).
+void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
+                             float* raw_k_last, float* raw_v_last,
+                             const float* x, int64_t pos,
+                             const OlalaLayerWeights& lw, const OlalaParams& p,
+                             float* out);
 
 // W2d: full-model greedy generation, host f32. token_ids: prompt in, prompt +
 // generated ids out (n_gen appended). Stepping per token: M layers via

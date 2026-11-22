@@ -555,16 +555,18 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
 
 namespace vllm {
 
-void OlalaVAttentionStepHost(float* out, const float* attn_k_cache,
-                             const float* attn_v_cache, float* raw_k_last,
-                             float* raw_v_last, const float* x, int64_t pos,
-                             const OlalaLayerWeights& lw, const OlalaParams& p) {
+void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
+                             float* raw_k_last, float* raw_v_last,
+                             const float* x, int64_t pos,
+                             const OlalaLayerWeights& lw, const OlalaParams& p,
+                             float* out) {
   // Decode arm (L==1, modeling_olala.py:578-645, :643-673, :720-740).
-  // attn_k_cache/attn_v_cache: [pos, KV*D] post-shift post-norm k/v for cache
-  // positions 0..pos-1. raw_k_last/raw_v_last: [KV*D] in/out — the RAW
-  // pre-shift k/v of the previous token (the reference caches them at :619,
-  // BEFORE qk-norm, precisely so the shift can blend with them next step).
-  // x: [hidden]. out: [SIG*D = 4608] mixer output (pre-mixer_proj).
+  // attn_k_cache/attn_v_cache: [pos+1, KV*D] post-shift post-norm k/v; rows
+  // 0..pos-1 are read, row pos is WRITTEN by this step. raw_k_last/
+  // raw_v_last: [KV*D] in/out — the RAW pre-shift k/v of the previous token
+  // (the reference caches them at :619, BEFORE qk-norm, precisely so the
+  // shift can blend with them next step). x: [hidden]. out: [SIG*D = 4608]
+  // mixer output (pre-mixer_proj).
   const int64_t H = p.heads, KV = p.kv_heads, D = p.head_dim, R = p.tpa_rank;
   const int64_t SIG = H - KV, SNR = SIG / KV, GQA = H / KV;
   const double scale = 1.0 / double(D);  // use_completed_p (:727)
@@ -707,8 +709,12 @@ void OlalaVAttentionStepHost(float* out, const float* attn_k_cache,
       }
   }
 
-  // 9. the caller appends the post-shift post-norm k/v to the attention cache.
+  // 9. commit this token's post-shift post-norm k/v into cache row pos (the
+  //    caller sized the cache to (pos+1)*KV*D) and re-cache the RAW k/v for
+  //    the NEXT token's shift (:619, before qk-norm).
   for (int64_t i = 0; i < KV * D; ++i) {
+    attn_k_cache[pos * KV * D + i] = k[i];
+    attn_v_cache[pos * KV * D + i] = v[i];
     raw_k_last[i] = kraw[i];
     raw_v_last[i] = vraw[i];
   }
@@ -787,26 +793,11 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
         vv_cache[static_cast<size_t>(vidx)].resize(
             static_cast<size_t>((t + 1) * KV * D), 0.0f);
         OlalaVAttentionStepHost(
-            ymix.data(),
             vk_cache[static_cast<size_t>(vidx)].data(),
             vv_cache[static_cast<size_t>(vidx)].data(),
             rk_last[static_cast<size_t>(vidx)].data(),
             rv_last[static_cast<size_t>(vidx)].data(),
-            x.data(), t, lw, p);
-        // the step wrote the current (shifted+normed) k/v only into its local
-        // arrays — copy them into the cache row for position t
-        const int64_t row = t * KV * D;
-        for (int64_t i = 0; i < KV * D; ++i) {
-          // the cache holds POST-shift POST-norm k/v — but the step host does
-          // not return them; recompute is wasteful, so W2d-2 moves the cache
-          // write INTO the step host. For now the cache row stays zero and the
-          // attention at position t uses only the current k/v (still exact for
-          // the CURRENT token's output; later tokens lose cross-token k/v).
-          // RECORDED LIMITATION: see the test — this smoke checks assembly,
-          // determinism and finiteness, NOT the cross-token token gate.
-          vk_cache[static_cast<size_t>(vidx)][static_cast<size_t>(row + i)] = 0.0f;
-          vv_cache[static_cast<size_t>(vidx)][static_cast<size_t>(row + i)] = 0.0f;
-        }
+            x.data(), t, lw, p, ymix.data());
         ++vidx;
       }
       // mixer_proj: attn_output.weight [hidden, mixer_out] @ y

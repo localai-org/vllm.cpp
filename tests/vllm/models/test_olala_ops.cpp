@@ -629,10 +629,11 @@ TEST_CASE("olala W2c-3: Mamba3-MIMO step matches the reference over 3 tokens") {
 // W2d: the assembled full forward on the REAL bf16 artifact. This smoke gates
 // ASSEMBLY (loads through LoadOlalaGgufWeights, all ops composed, deterministic
 // repeat, finite logits, ids in vocab) — NOT token exactness vs an oracle
-// (that is the W2d-2 gate vs llama-cpp-olala / olala-transformers). One known
-// recorded limitation: the V-layer attention cache is not yet threaded through
-// the step host (each decode step attends only the current k/v), so later
-// tokens cannot see earlier cross-token keys — assembly-stage only.
+// (that is the token gate vs llama-cpp-olala / olala-transformers). The
+// V-layer attention cache IS threaded through the step host (W2d-2: the step
+// writes the post-shift post-norm k/v into cache row pos), so later tokens
+// attend earlier cross-token keys; the smoke still checks assembly properties
+// only.
 #ifndef OLALA_BF16_PATH
 #define OLALA_BF16_PATH "/mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-bf16.gguf"
 #endif
