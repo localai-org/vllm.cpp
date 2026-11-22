@@ -1,4 +1,4 @@
-﻿2026-11-21T21:37:53.2125227Z Current runner version: '2.338.2'
+2026-11-21T21:37:53.2125227Z Current runner version: '2.338.2'
 2026-11-21T21:37:53.2155315Z ##[group]Runner Image Provisioner
 2026-11-21T21:37:53.2156265Z Hosted Compute Agent
 2026-11-21T21:37:53.2157203Z Version: 20261111.635
@@ -3402,730 +3402,730 @@
 2026-11-21T22:37:20.7765637Z   Test  #97: test_minimax_music3_acoustic_real
 2026-11-21T22:37:20.7765899Z   Test  #98: test_minimax_music3_quant
 2026-11-21T22:37:20.7766137Z   Test  #99: test_minimax_music3_speech
-2026-11-21T22:37:20.7766382Z   Test #100: test_minimax_music3_quant_real
-2026-11-21T22:37:20.7766655Z   Test #101: test_minimax_music3_device_arm_real
-2026-11-21T22:37:20.7766933Z   Test #102: test_minimax_music3_depth_arm_real
-2026-11-21T22:37:20.7767191Z   Test #103: test_minimax_h3_video_fold
-2026-11-21T22:37:20.7767424Z   Test #104: test_video_engine
-2026-11-21T22:37:20.7767632Z   Test #105: test_render_phase_log
-2026-11-21T22:37:20.7767851Z   Test #106: test_ltx2_video
-2026-11-21T22:37:20.7768376Z   Test #107: test_ltx2_image_cond
-2026-11-21T22:37:20.7768632Z   Test #108: test_diffusion_device_seam
-2026-11-21T22:37:20.7768877Z   Test #109: test_ltx2_video_device_forward
-2026-11-21T22:37:20.7769112Z   Test #110: test_ltx2
-2026-11-21T22:37:20.7769296Z   Test #111: test_ltx2_device
-2026-11-21T22:37:20.7769496Z   Test #112: test_ltx2_vae
-2026-11-21T22:37:20.7769691Z   Test #113: test_ltx2_tiling
-2026-11-21T22:37:20.7769900Z   Test #114: test_ltx2_text_encoder
-2026-11-21T22:37:20.7770121Z   Test #115: test_ltx2_dfr
-2026-11-21T22:37:20.7770315Z   Test #116: test_ltx2_pipeline
-2026-11-21T22:37:20.7770724Z   Test #117: test_ltx2_iclora_reference
-2026-11-21T22:37:20.7770953Z   Test #118: test_ltx2_retake
-2026-11-21T22:37:20.7771155Z   Test #119: test_ltx2_lora
-2026-11-21T22:37:20.7771351Z   Test #120: test_ltx2_loader
-2026-11-21T22:37:20.7772026Z   Test #121: test_video_api
-2026-11-21T22:37:20.7772286Z   Test #122: test_speech_api
-2026-11-21T22:37:20.7772485Z   Test #123: test_platform
-2026-11-21T22:37:20.7772694Z   Test #124: test_cuda_arch_manifest
-2026-11-21T22:37:20.7772926Z   Test #125: test_device_selection
-2026-11-21T22:37:20.7773318Z   Test #126: test_gguf_device_fit
-2026-11-21T22:37:20.7773545Z   Test #127: test_gguf_device_fit_reach
-2026-11-21T22:37:20.7773782Z   Test #128: test_clip_mmproj_gguf
-2026-11-21T22:37:20.7774008Z   Test #129: test_gguf_mmproj_reach
-2026-11-21T22:37:20.7774239Z   Test #130: test_qwen38_27b_gguf_manifest
-2026-11-21T22:37:20.7774485Z   Test #131: test_gguf_accounting_reach
-2026-11-21T22:37:20.7774716Z   Test #132: test_fp8_block_quant
-2026-11-21T22:37:20.7774938Z   Test #133: test_fp8_block_weight_load
-2026-11-21T22:37:20.7775179Z   Test #134: test_fp8_block_linear
-2026-11-21T22:37:20.7775399Z   Test #135: test_fp8_block_merged
-2026-11-21T22:37:20.7775625Z   Test #136: test_fp8_block_numeric_bound
-2026-11-21T22:37:20.7775860Z   Test #137: test_linear_method
-2026-11-21T22:37:20.7776070Z   Test #138: test_qwen3_break_point
-2026-11-21T22:37:20.7776306Z   Test #139: test_qwen3_decode_graph_seam
-2026-11-21T22:37:20.7776561Z   Test #140: test_qwen3_moe_decode_graph_seam
-2026-11-21T22:37:20.7776816Z   Test #141: test_moe_async_device_ids
-2026-11-21T22:37:20.7777043Z   Test #142: test_rocm_moe_bf16
-2026-11-21T22:37:20.7777265Z   Test #143: test_voxtral_decode_graph_seam
-2026-11-21T22:37:20.7777532Z   Test #144: test_deepseek_v2_decode_graph_seam
-2026-11-21T22:37:20.7777806Z   Test #145: test_qwen3_5_decode_graph_seam
-2026-11-21T22:37:20.7778050Z   Test #146: test_qwen3_5_fa2_class
-2026-11-21T22:37:20.7778297Z   Test #147: test_qwen3_dflash_decode_graph_seam
-2026-11-21T22:37:20.7778565Z   Test #148: test_decode_graph_seam_g1_cuda
-2026-11-21T22:37:20.7778816Z   Test #149: test_decode_graph_sizes
-2026-11-21T22:37:20.7779047Z   Test #150: test_qwen35_paged_forward
-2026-11-21T22:37:20.7779286Z   Test #151: test_qwen35_zero_rope_unfused
-2026-11-21T22:37:20.7779551Z   Test #152: test_qwen35_paged_forward_gdn_out_f32
-2026-11-21T22:37:20.7779823Z   Test #153: test_qwen35_moe_gdn_ba_owner
-2026-11-21T22:37:20.7780066Z   Test #154: test_qwen3_5_moe_vision
-2026-11-21T22:37:20.7780302Z   Test #155: test_qwen3_5_dense_vision
-2026-11-21T22:37:20.7780537Z   Test #156: test_qwen3_5_gdn_spec_routing
-2026-11-21T22:37:20.7780775Z   Test #157: test_qwen3_5_gguf_mtp
-2026-11-21T22:37:20.7780998Z   Test #158: test_qwen3_dflash_gguf
-2026-11-21T22:37:20.7781226Z   Test #159: test_gdn_v_head_permute
-2026-11-21T22:37:20.7781454Z   Test #160: test_qwen27_dense_forward
-2026-11-21T22:37:20.7781717Z   Test #161: test_qwen27_dense_forward_glue_fuse_off
-2026-11-21T22:37:20.7782021Z   Test #162: test_qwen3_5_gdn_spec_routing_glue_fuse_off
-2026-11-21T22:37:20.7782352Z   Test #163: test_qwen3_5_gdn_spec_routing_fused_chain_off
-2026-11-21T22:37:20.7782652Z   Test #164: test_dense_gateup_fused_marlin
-2026-11-21T22:37:20.7783000Z   Test #165: test_dense_gateup_fused_marlin_off_vt_dense_marlin_gateup
-2026-11-21T22:37:20.7783620Z   Test #166: test_dense_gateup_fused_marlin_off_vt_nvfp4_marlin
-2026-11-21T22:37:20.7784287Z   Test #167: test_dense_gateup_fused_marlin_off_vt_moe_fused_w13
-2026-11-21T22:37:20.7784608Z   Test #168: test_qwen35_plain_weights
-2026-11-21T22:37:20.7784872Z   Test #169: test_loader_unaligned_offsets
-2026-11-21T22:37:20.7785112Z   Test #170: test_qwen3_8_text_only
-2026-11-21T22:37:20.7785332Z   Test #171: test_device_pool
-2026-11-21T22:37:20.7785549Z   Test #172: test_device_pool_concurrent
-2026-11-21T22:37:20.7785790Z   Test #173: test_moe_resident_lifetime
-2026-11-21T22:37:20.7786021Z   Test #174: test_qwen3_load
-2026-11-21T22:37:20.7786230Z   Test #175: test_qwen3_forward
-2026-11-21T22:37:20.7786443Z   Test #176: test_qwen3_dflash_forward
-2026-11-21T22:37:20.7786852Z   Test #177: test_qwen3_dflash_block_route
-2026-11-21T22:37:20.7787097Z   Test #178: test_qwen3_dflash2_draft
-2026-11-21T22:37:20.7787331Z   Test #179: test_qwen3_dflash2_gguf
-2026-11-21T22:37:20.7787567Z   Test #180: test_qwen38_dflash2_drafter_tt
-2026-11-21T22:37:20.7787812Z   Test #181: test_qwen3_dspark_markov
-2026-11-21T22:37:20.7788050Z   Test #182: test_qwen3_dspark_config
-2026-11-21T22:37:20.7788282Z   Test #183: test_qwen3_dspark_weights
-2026-11-21T22:37:20.7788518Z   Test #184: test_cudagraph_dispatch
-2026-11-21T22:37:20.7788741Z   Test #185: test_dspark_sample
-2026-11-21T22:37:20.7788953Z   Test #186: test_llama_forward
-2026-11-21T22:37:20.7789178Z   Test #187: test_dense_gate_up_seam_forward
-2026-11-21T22:37:20.7789429Z   Test #188: test_llama_embedding_fold
-2026-11-21T22:37:20.7789648Z   Test #189: test_kev
-2026-11-21T22:37:20.7789821Z   Test #190: test_clm
-2026-11-21T22:37:20.7790007Z   Test #191: test_gliner25_decide
-2026-11-21T22:37:20.7790252Z   Test #192: test_xor
-2026-11-21T22:37:20.7790429Z   Test #193: test_tev1
-2026-11-21T22:37:20.7790608Z   Test #194: test_nimble
-2026-11-21T22:37:20.7790805Z   Test #195: test_tev1_systemone
-2026-11-21T22:37:20.7791021Z   Test #196: test_mistral_forward
-2026-11-21T22:37:20.7791234Z   Test #197: test_gemma3_load
-2026-11-21T22:37:20.7791440Z   Test #198: test_gemma3_forward
-2026-11-21T22:37:20.7791655Z   Test #199: test_gemma2_load
-2026-11-21T22:37:20.7791864Z   Test #200: test_gemma2_forward
-2026-11-21T22:37:20.7792078Z   Test #201: test_gemma_load
-2026-11-21T22:37:20.7792283Z   Test #202: test_gemma_forward
-2026-11-21T22:37:20.7792492Z   Test #203: test_gemma4_honesty
-2026-11-21T22:37:20.7792722Z   Test #204: test_gemma4_moe_device_arm_guard
-2026-11-21T22:37:20.7792997Z   Test #205: test_gemma4_moe_fp8_native_arm_guard
-2026-11-21T22:37:20.7793566Z   Test #206: test_gemma4_indexed_max_t
-2026-11-21T22:37:20.7793805Z   Test #207: test_qwen3_moe_load
-2026-11-21T22:37:20.7794020Z   Test #208: test_qwen3_moe_forward
-2026-11-21T22:37:20.7794250Z   Test #209: test_flint_forward
-2026-11-21T22:37:20.7794457Z   Test #210: test_flint_paged
-2026-11-21T22:37:20.7794673Z   Test #211: test_flint_router_topk_equiv
-2026-11-21T22:37:20.7794920Z   Test #212: test_flint_paged_engine
-2026-11-21T22:37:20.7795141Z   Test #213: test_flint_gguf
-2026-11-21T22:37:20.7795349Z   Test #214: test_deepseek_v2_load
-2026-11-21T22:37:20.7795577Z   Test #215: test_deepseek_v2_forward
-2026-11-21T22:37:20.7795810Z   Test #216: test_deepseek_v4_scaffold
-2026-11-21T22:37:20.7796058Z   Test #217: test_deepseek_v4_fp8_ds_mla_bridge
-2026-11-21T22:37:20.7796320Z   Test #218: test_deepseek_v4_1_scaffold
-2026-11-21T22:37:20.7796556Z   Test #219: test_deepseek_v4_1_indexer
-2026-11-21T22:37:20.7796800Z   Test #220: test_deepseek_v4_pro_variant
-2026-11-21T22:37:20.7797037Z   Test #221: test_laguna_scaffold
-2026-11-21T22:37:20.7797263Z   Test #222: test_laguna_fused_gate_up
-2026-11-21T22:37:20.7797499Z   Test #223: test_laguna_nvfp4_loader
-2026-11-21T22:37:20.7797733Z   Test #224: test_laguna_gguf_load
-2026-11-21T22:37:20.7797956Z   Test #225: test_qwen3_gguf_weights
-2026-11-21T22:37:20.7798182Z   Test #226: test_deepseek_v4_dsa
-2026-11-21T22:37:20.7798407Z   Test #227: test_deepseek_v4_compressor
-2026-11-21T22:37:20.7798645Z   Test #228: test_deepseek_v4_mhc
-2026-11-21T22:37:20.7798868Z   Test #229: test_deepseek_v4_1_engram
-2026-11-21T22:37:20.7799516Z   Test #230: test_deepseek_v4_moe
-2026-11-21T22:37:20.7799769Z   Test #231: test_deepseek_v4_1_mxfp8
-2026-11-21T22:37:20.7799996Z   Test #232: test_deepseek_v4_forward
-2026-11-21T22:37:20.7800233Z   Test #233: test_deepseek_v4_gguf_load
-2026-11-21T22:37:20.7800465Z   Test #234: test_deepseek_v4_mtp
-2026-11-21T22:37:20.7800695Z   Test #235: test_deepseek_v4_mtp_inventory
-2026-11-21T22:37:20.7800947Z   Test #236: test_deepseek_v4_dspark_entry
-2026-11-21T22:37:20.7801193Z   Test #237: test_deepseek_v4_exl3_loader
-2026-11-21T22:37:20.7801434Z   Test #238: test_deepseek_v4_mm_loader
-2026-11-21T22:37:20.7801691Z   Test #239: test_deepseek_v4_exl3_device_residency
-2026-11-21T22:37:20.7802192Z   Test #240: test_deepseek_v4_exl3_forward
-2026-11-21T22:37:20.7802460Z   Test #241: test_deepseek_v4_exl3_forward_loop_arm
-2026-11-21T22:37:20.7802726Z   Test #242: test_cuda_deepseek_v4
-2026-11-21T22:37:20.7802957Z   Test #243: test_rocm_deepseek_v4_mhc
-2026-11-21T22:37:20.7803406Z   Test #244: test_kimi_k3_scaffold
-2026-11-21T22:37:20.7803646Z   Test #245: test_muse_glimmer_scaffold
-2026-11-21T22:37:20.7803885Z   Test #246: test_muse_glimmer_vision
-2026-11-21T22:37:20.7804124Z   Test #247: test_muse_glimmer_vision_real
-2026-11-21T22:37:20.7804371Z   Test #248: test_nano_nemotron_vl_vision
-2026-11-21T22:37:20.7804618Z   Test #249: test_nano_nemotron_vl_registry
-2026-11-21T22:37:20.7804857Z   Test #250: test_cohere2_moe
-2026-11-21T22:37:20.7805071Z   Test #251: test_cohere2_moe_registry
-2026-11-21T22:37:20.7805301Z   Test #252: test_muse_glimmer_text
-2026-11-21T22:37:20.7805540Z   Test #253: test_muse_glimmer_text_fallback
-2026-11-21T22:37:20.7805796Z   Test #254: test_muse_glimmer_wiring
-2026-11-21T22:37:20.7806021Z   Test #255: test_tower_skip
-2026-11-21T22:37:20.7806229Z   Test #256: test_vision_tower_dtype
-2026-11-21T22:37:20.7806467Z   Test #257: test_muse_glimmer_real_weights
-2026-11-21T22:37:20.7806711Z   Test #258: test_muse_glimmer_gguf
-2026-11-21T22:37:20.7806943Z   Test #259: test_qwen4_exp_gguf_load_plan
-2026-11-21T22:37:20.7807195Z   Test #260: test_qwen4_exp_gguf_weights
-2026-11-21T22:37:20.7807436Z   Test #261: test_kimi_linear_scaffold
-2026-11-21T22:37:20.7807669Z   Test #262: test_dots3_note_scaffold
-2026-11-21T22:37:20.7807903Z   Test #263: test_qwen4_exp_scaffold
-2026-11-21T22:37:20.7808136Z   Test #264: test_qwen4_exp_layer_loop
-2026-11-21T22:37:20.7808369Z   Test #265: test_qwen4_exp_runner
-2026-11-21T22:37:20.7808602Z   Test #266: test_qwen4_exp_matmul_bt_dtype
-2026-11-21T22:37:20.7808849Z   Test #267: test_qwen4_exp_kv_cache
-2026-11-21T22:37:20.7809086Z   Test #268: test_qwen4_exp_inject_residency
-2026-11-21T22:37:20.7809343Z   Test #269: test_glm5_next_scaffold
-2026-11-21T22:37:20.7809569Z   Test #270: test_glm5_next_gguf_load
-2026-11-21T22:37:20.7809797Z   Test #271: test_glm5_next_mhc
-2026-11-21T22:37:20.7810006Z   Test #272: test_glm5_next_dsa
-2026-11-21T22:37:20.7810222Z   Test #273: test_glm5_next_kpool_device
-2026-11-21T22:37:20.7810460Z   Test #274: test_glm5_next_moe
-2026-11-21T22:37:20.7810673Z   Test #275: test_glm5_next_layer
-2026-11-21T22:37:20.7810893Z   Test #276: test_glm5_next_attn
-2026-11-21T22:37:20.7811109Z   Test #277: test_glm5_next_bridge
-2026-11-21T22:37:20.7811330Z   Test #278: test_glm5_next_forward
-2026-11-21T22:37:20.7811560Z   Test #279: test_glm5_next_placement
-2026-11-21T22:37:20.7811808Z   Test #280: test_glm5_next_placement_default
-2026-11-21T22:37:20.7812071Z   Test #281: test_glm5_next_placement_off
-2026-11-21T22:37:20.7812331Z   Test #282: test_glm5_next_placement_nonexact
-2026-11-21T22:37:20.7812584Z   Test #283: test_dots3_note_attn
-2026-11-21T22:37:20.7812806Z   Test #284: test_dots3_note_vision
-2026-11-21T22:37:20.7813297Z   Test #285: test_dots3_note_audio
-2026-11-21T22:37:20.7813546Z   Test #286: test_nemotron_h_scaffold
-2026-11-21T22:37:20.7813779Z   Test #287: test_nemotron_h_forward
-2026-11-21T22:37:20.7814006Z   Test #288: test_nemotron_h_loader
-2026-11-21T22:37:20.7814245Z   Test #289: test_nemotron_h_quantized_forms
-2026-11-21T22:37:20.7814783Z   Test #290: test_nemotron_h_moe_device
-2026-11-21T22:37:20.7815039Z   Test #291: test_nemotron_h_paged_forward
-2026-11-21T22:37:20.7815287Z   Test #292: test_kimi_linear_forward
-2026-11-21T22:37:20.7815517Z   Test #293: test_kimi_linear_paged
-2026-11-21T22:37:20.7815744Z   Test #294: test_kimi_linear_fold_gate
-2026-11-21T22:37:20.7815976Z   Test #295: test_kimi_kda
-2026-11-21T22:37:20.7816173Z   Test #296: test_glm5_next_kda
-2026-11-21T22:37:20.7816401Z   Test #297: test_deepseek_v2_paged_engine
-2026-11-21T22:37:20.7816641Z   Test #298: test_glm4_moe_lite_load
-2026-11-21T22:37:20.7816879Z   Test #299: test_glm4_moe_lite_router_dtype
-2026-11-21T22:37:20.7817342Z   Test #300: test_glm4_moe_lite_paged_engine
-2026-11-21T22:37:20.7817601Z   Test #301: test_qwen27_paged_forward
-2026-11-21T22:37:20.7817838Z   Test #302: test_qwen35_gguf_logits_f32
-2026-11-21T22:37:20.7818094Z   Test #303: test_qwen35_gguf_q4km_dequant_dump
-2026-11-21T22:37:20.7818371Z   Test #304: test_qwen27_paged_forward_act_f32
-2026-11-21T22:37:20.7818651Z   Test #305: test_qwen27_paged_forward_act_dump
-2026-11-21T22:37:20.7819067Z   Test #306: test_unicode_data
-2026-11-21T22:37:20.7819280Z   Test #307: test_pretokenizer
-2026-11-21T22:37:20.7819509Z   Test #308: test_tokenizer_metaspace_split
-2026-11-21T22:37:20.7819748Z   Test #309: test_bpe
-2026-11-21T22:37:20.7819934Z   Test #310: test_bpe_equivalence
-2026-11-21T22:37:20.7820154Z   Test #311: test_detokenizer
-2026-11-21T22:37:20.7820358Z   Test #312: test_request
-2026-11-21T22:37:20.7820556Z   Test #313: test_kv_cache_utils
-2026-11-21T22:37:20.7820774Z   Test #314: test_kv_state_budget
-2026-11-21T22:37:20.7820999Z   Test #315: test_hybrid_kv_budget
-2026-11-21T22:37:20.7821229Z   Test #316: test_prefix_match_unit
-2026-11-21T22:37:20.7821459Z   Test #317: test_kv_cache_interface
-2026-11-21T22:37:20.7821685Z   Test #318: test_block_pool
-2026-11-21T22:37:20.7821886Z   Test #319: test_kv_events
-2026-11-21T22:37:20.7822106Z   Test #320: test_single_type_kv_cache_manager
-2026-11-21T22:37:20.7822369Z   Test #321: test_kv_cache_coordinator
-2026-11-21T22:37:20.7822607Z   Test #322: test_kv_cache_manager
-2026-11-21T22:37:20.7822833Z   Test #323: test_none_hash_determinism
-2026-11-21T22:37:20.7823283Z   Test #324: test_prefix_cache_stats
-2026-11-21T22:37:20.7823526Z   Test #325: test_prometheus_metrics
-2026-11-21T22:37:20.7823833Z   Test #326: test_kv_offload_cpu
-2026-11-21T22:37:20.7824051Z   Test #327: test_kv_offload_fs
-2026-11-21T22:37:20.7824266Z   Test #328: test_kv_offload_tiering
-2026-11-21T22:37:20.7824497Z   Test #329: test_kv_offload_connector
-2026-11-21T22:37:20.7824725Z   Test #330: test_lmcache_codec
-2026-11-21T22:37:20.7824950Z   Test #331: test_deepseek_v4_encoding
-2026-11-21T22:37:20.7825198Z   Test #332: test_deepseek_v4_image_processor
-2026-11-21T22:37:20.7825469Z   Test #333: test_deepseek_v4_vision
-2026-11-21T22:37:20.7825699Z   Test #334: test_deepseek_v4_mmproj
-2026-11-21T22:37:20.7825929Z   Test #335: test_deepseek_v4_mm_reach
-2026-11-21T22:37:20.7826176Z   Test #336: test_deepseek_v4_multigroup_kv
-2026-11-21T22:37:20.7826427Z   Test #337: test_qwen3vl_processor
-2026-11-21T22:37:20.7826650Z   Test #338: test_qwen3vl_tower
-2026-11-21T22:37:20.7826866Z   Test #339: test_gemma4_vision_tower
-2026-11-21T22:37:20.7827099Z   Test #340: test_gemma4_registry_e2e
-2026-11-21T22:37:20.7827330Z   Test #341: test_gemma4_audio_tower
-2026-11-21T22:37:20.7827557Z   Test #342: test_qwen3vl_text
-2026-11-21T22:37:20.7827764Z   Test #343: test_qwen3vl_e2e
-2026-11-21T22:37:20.7827978Z   Test #344: test_qwen3vl_registry_e2e
-2026-11-21T22:37:20.7828212Z   Test #345: test_qwen3_5_vl_e2e
-2026-11-21T22:37:20.7828435Z   Test #346: test_qwen3_5_moe_vision_hw
-2026-11-21T22:37:20.7828681Z   Test #347: bench_qwen3_5_vl_tower
-2026-11-21T22:37:20.7828915Z   Test #348: test_qwen3vl_video_processor
-2026-11-21T22:37:20.7829156Z   Test #349: test_qwen3vl_video_e2e
-2026-11-21T22:37:20.7829383Z   Test #350: test_audio_processor
-2026-11-21T22:37:20.7829614Z   Test #351: test_parakeet_audio_processor
-2026-11-21T22:37:20.7830184Z   Test #352: test_parakeet_encoder
-2026-11-21T22:37:20.7830438Z   Test #353: test_parakeet_ctc_engine
-2026-11-21T22:37:20.7830686Z   Test #354: test_parakeet_transcription_fold
-2026-11-21T22:37:20.7830944Z   Test #355: test_parakeet_transducer
-2026-11-21T22:37:20.7831175Z   Test #356: test_qwen3_5_vl_video_e2e
-2026-11-21T22:37:20.7831405Z   Test #357: test_whisper_audio
-2026-11-21T22:37:20.7831615Z   Test #358: test_voxtral_e2e
-2026-11-21T22:37:20.7831827Z   Test #359: test_encoder_cache_manager
-2026-11-21T22:37:20.7832059Z   Test #360: test_lmcache_client
-2026-11-21T22:37:20.7832273Z   Test #361: test_lmcache_connector
-2026-11-21T22:37:20.7832681Z   Test #362: test_lmcache_key_agreement
-2026-11-21T22:37:20.7832913Z   Test #363: test_scheduler_config
-2026-11-21T22:37:20.7833360Z   Test #364: test_speculative_draft_max_position_embeddings
-2026-11-21T22:37:20.7833657Z   Test #365: test_speculative_dspark
-2026-11-21T22:37:20.7833894Z   Test #366: test_dspark_draft_routing
-2026-11-21T22:37:20.7834135Z   Test #367: test_dflash2_draft_routing
-2026-11-21T22:37:20.7834384Z   Test #368: test_speculative_unknown_keys
-2026-11-21T22:37:20.7834642Z   Test #369: test_speculative_drafter_chain
-2026-11-21T22:37:20.7834893Z   Test #370: test_speculative_mtp_depth
-2026-11-21T22:37:20.7835129Z   Test #371: test_multimodal_config
-2026-11-21T22:37:20.7835353Z   Test #372: test_offload_config
-2026-11-21T22:37:20.7835582Z   Test #373: test_weight_residency_config
-2026-11-21T22:37:20.7835832Z   Test #374: test_deepseek_v4_paged_equiv
-2026-11-21T22:37:20.7836072Z   Test #375: test_multi_kv_refusal
-2026-11-21T22:37:20.7836344Z   Test #376: test_device_token_ids_refusal
-2026-11-21T22:37:20.7836603Z   Test #377: test_mm_embed_device_token_ids
-2026-11-21T22:37:20.7836849Z   Test #378: test_device_placement
-2026-11-21T22:37:20.7837076Z   Test #379: test_expert_stream_latch
-2026-11-21T22:37:20.7837313Z   Test #380: test_weight_residency_reach
-2026-11-21T22:37:20.7837551Z   Test #381: test_placement_reach
-2026-11-21T22:37:20.7837773Z   Test #382: test_tokenizer_subdir
-2026-11-21T22:37:20.7838006Z   Test #383: test_placement_dump_dtype
-2026-11-21T22:37:20.7838246Z   Test #384: test_placed_moe_roundtrip
-2026-11-21T22:37:20.7838473Z   Test #385: test_act_dump
-2026-11-21T22:37:20.7838678Z   Test #386: test_qwen3_moe_lm_head_bf16
-2026-11-21T22:37:20.7838912Z   Test #387: test_moe_fit_resolver
-2026-11-21T22:37:20.7839152Z   Test #388: test_attention_window_adoption
-2026-11-21T22:37:20.7839409Z   Test #389: test_disable_sliding_window
-2026-11-21T22:37:20.7839653Z   Test #390: test_cli_offload_config
-2026-11-21T22:37:20.7839882Z   Test #391: test_cli_kv_cache_dtype
-2026-11-21T22:37:20.7840120Z   Test #392: test_weight_offloader
-2026-11-21T22:37:20.7840349Z   Test #393: test_weight_offload_policy
-2026-11-21T22:37:20.7840586Z   Test #394: test_expert_slot_cache
-2026-11-21T22:37:20.7840809Z   Test #395: test_gguf_expert_span
-2026-11-21T22:37:20.7841034Z   Test #396: test_expert_streamer
-2026-11-21T22:37:20.7841259Z   Test #397: test_host_expert_slot_store
-2026-11-21T22:37:20.7841515Z   Test #398: test_device_expert_slot_store
-2026-11-21T22:37:20.7841767Z   Test #399: test_expert_stream_wiring
-2026-11-21T22:37:20.7842008Z   Test #400: test_expert_stream_mixed_slot
-2026-11-21T22:37:20.7842258Z   Test #401: test_expert_stream_device_slot
-2026-11-21T22:37:20.7842531Z   Test #402: test_resident_weight_host_addressable
-2026-11-21T22:37:20.7842823Z   Test #403: test_resident_weight_f32_copy_retires
-2026-11-21T22:37:20.7843267Z   Test #404: test_expert_stream_steps
-2026-11-21T22:37:20.7843511Z   Test #405: test_expert_stream_wide_logits
-2026-11-21T22:37:20.7843761Z   Test #406: test_expert_stream_capacity
-2026-11-21T22:37:20.7844003Z   Test #407: test_processing_limits
-2026-11-21T22:37:20.7844232Z   Test #408: test_request_queue
-2026-11-21T22:37:20.7844443Z   Test #409: test_sched_output
-2026-11-21T22:37:20.7844647Z   Test #410: test_scheduler
-2026-11-21T22:37:20.7844849Z   Test #411: test_scheduler_lpm
-2026-11-21T22:37:20.7845062Z   Test #412: test_async_scheduler
-2026-11-21T22:37:20.7845728Z   Test #413: test_scheduler_wave
-2026-11-21T22:37:20.7845985Z   Test #414: test_block_table
-2026-11-21T22:37:20.7846194Z   Test #415: test_input_batch
-2026-11-21T22:37:20.7846404Z   Test #416: test_sampling_metadata
-2026-11-21T22:37:20.7846632Z   Test #417: test_logits_processors
-2026-11-21T22:37:20.7846850Z   Test #418: test_sampler
-2026-11-21T22:37:20.7847055Z   Test #419: test_host_buffer_staging
-2026-11-21T22:37:20.7847314Z   Test #420: test_logits_processor_host_addressable
-2026-11-21T22:37:20.7847580Z   Test #421: test_prepare_inputs
-2026-11-21T22:37:20.7847796Z   Test #422: test_combine_tokens
-2026-11-21T22:37:20.7848178Z   Test #423: test_combine_row_predicate
-2026-11-21T22:37:20.7848417Z   Test #424: test_verify_route_predicate
-2026-11-21T22:37:20.7848649Z   Test #425: test_draft_fill
-2026-11-21T22:37:20.7848854Z   Test #426: test_committed_ids
-2026-11-21T22:37:20.7849063Z   Test #427: test_async_output
-2026-11-21T22:37:20.7849274Z   Test #428: test_async_runner_flag
-2026-11-21T22:37:20.7849516Z   Test #429: test_engine_scratch_steady_state
-2026-11-21T22:37:20.7849768Z   Test #430: test_runner
-2026-11-21T22:37:20.7849965Z   Test #431: test_runner_logit_dump
-2026-11-21T22:37:20.7850213Z   Test #432: test_runner_logit_dump_scratch_reset
-2026-11-21T22:37:20.7850496Z   Test #433: test_runner_logit_dump_scratch_make
-2026-11-21T22:37:20.7850756Z   Test #434: test_common_attn_metadata
-2026-11-21T22:37:20.7850992Z   Test #435: test_attn_backend_registry
-2026-11-21T22:37:20.7851241Z   Test #436: test_attn_validate_configuration
-2026-11-21T22:37:20.7851491Z   Test #437: test_spec_as_decode
-2026-11-21T22:37:20.7851711Z   Test #438: test_attention_window
-2026-11-21T22:37:20.7851948Z   Test #439: test_chunked_local_attention
-2026-11-21T22:37:20.7852194Z   Test #440: test_rotary_embedding
-2026-11-21T22:37:20.7852420Z   Test #441: test_linear_scaling_rope
-2026-11-21T22:37:20.7852645Z   Test #442: test_pooler
-2026-11-21T22:37:20.7852838Z   Test #443: test_pooler_heads
-2026-11-21T22:37:20.7853250Z   Test #444: test_pooling_runner
-2026-11-21T22:37:20.7853483Z   Test #445: test_gdn_metadata_builder
-2026-11-21T22:37:20.7853714Z   Test #446: test_mtp_speculator
-2026-11-21T22:37:20.7853922Z   Test #447: test_mtp_depth
-2026-11-21T22:37:20.7854154Z   Test #448: test_rejection_sampler
-2026-11-21T22:37:20.7854387Z   Test #449: test_prepare_prefill_inputs
-2026-11-21T22:37:20.7854641Z   Test #450: test_prepare_decode_inputs
-2026-11-21T22:37:20.7854875Z   Test #451: test_dflash_kvprep
-2026-11-21T22:37:20.7855090Z   Test #452: test_dflash_causality
-2026-11-21T22:37:20.7855312Z   Test #453: test_dflash_propose
-2026-11-21T22:37:20.7855536Z   Test #454: test_dflash2_argmax_guard
-2026-11-21T22:37:20.7855779Z   Test #455: test_dflash2_runner_reach
-2026-11-21T22:37:20.7856013Z   Test #456: test_dflash2_exl3_reach
-2026-11-21T22:37:20.7856252Z   Test #457: test_dflash2_draft_phase_trace
-2026-11-21T22:37:20.7856502Z   Test #458: test_dflash2_embed_dedup
-2026-11-21T22:37:20.7856745Z   Test #459: test_dflash2_embed_dedup_reach
-2026-11-21T22:37:20.7856997Z   Test #460: test_dflash2_ctx_capacity
-2026-11-21T22:37:20.7857236Z   Test #461: test_block_table_row_width
-2026-11-21T22:37:20.7857473Z   Test #462: test_dflash2_concurrency
-2026-11-21T22:37:20.7857711Z   Test #463: test_dflash2_prefix_cache
-2026-11-21T22:37:20.7857945Z   Test #464: test_ngram_proposer
-2026-11-21T22:37:20.7858167Z   Test #465: test_kolibri1_ngram_accept
-2026-11-21T22:37:20.7858413Z   Test #466: test_draft_model_proposer
-2026-11-21T22:37:20.7858651Z   Test #467: test_structured_output
-2026-11-21T22:37:20.7858888Z   Test #468: test_apply_grammar_bitmask
-2026-11-21T22:37:20.7859126Z   Test #469: test_backend_native
-2026-11-21T22:37:20.7859350Z   Test #470: test_backend_xgrammar
-2026-11-21T22:37:20.7859574Z   Test #471: test_jump_forward
-2026-11-21T22:37:20.7859788Z   Test #472: test_json_schema_to_gbnf
-2026-11-21T22:37:20.7860029Z   Test #473: test_response_format_e2e
-2026-11-21T22:37:20.7860258Z   Test #474: test_engine_types
-2026-11-21T22:37:20.7860471Z   Test #475: test_engine_core
-2026-11-21T22:37:20.7861010Z   Test #476: test_engine_core_proc
-2026-11-21T22:37:20.7861273Z   Test #477: test_async_admission_timing
-2026-11-21T22:37:20.7861515Z   Test #478: test_input_processor
-2026-11-21T22:37:20.7861737Z   Test #479: test_output_processor
-2026-11-21T22:37:20.7861957Z   Test #480: test_async_llm
-2026-11-21T22:37:20.7862156Z   Test #481: test_llm_engine
-2026-11-21T22:37:20.7862375Z   Test #482: test_loaded_engine_dense
-2026-11-21T22:37:20.7862603Z   Test #483: test_kv_pool_min_fit
-2026-11-21T22:37:20.7862823Z   Test #484: test_kv_cache_fp8_wiring
-2026-11-21T22:37:20.7863362Z   Test #485: test_dspark_block_size_guard
-2026-11-21T22:37:20.7863789Z   Test #486: test_dflash_draft_hf_cache
-2026-11-21T22:37:20.7864026Z   Test #487: test_drafter_chain_reach
-2026-11-21T22:37:20.7864253Z   Test #488: test_beam_search
-2026-11-21T22:37:20.7864455Z   Test #489: test_chat_mm
-2026-11-21T22:37:20.7864653Z   Test #490: test_openai_protocol
-2026-11-21T22:37:20.7864872Z   Test #491: test_openai_serving
-2026-11-21T22:37:20.7865097Z   Test #492: test_sse_keepalive
-2026-11-21T22:37:20.7865311Z   Test #493: test_openai_run_batch
-2026-11-21T22:37:20.7865549Z   Test #494: test_openai_serving_chat_stream
-2026-11-21T22:37:20.7865798Z   Test #495: test_openai_logprobs
-2026-11-21T22:37:20.7866017Z   Test #496: test_openai_utf8
-2026-11-21T22:37:20.7866246Z   Test #497: test_streaming_parser_engine
-2026-11-21T22:37:20.7866493Z   Test #498: test_parser_engine_assembly
-2026-11-21T22:37:20.7866733Z   Test #499: test_openai_tool_parsers
-2026-11-21T22:37:20.7866963Z   Test #500: test_tool_parser_detect
-2026-11-21T22:37:20.7867191Z   Test #501: test_protocol_tool_turns
-2026-11-21T22:37:20.7867438Z   Test #502: test_reasoning_parser_detect
-2026-11-21T22:37:20.7867690Z   Test #503: test_reasoning_think_auto
-2026-11-21T22:37:20.7867918Z   Test #504: test_deepseek
-2026-11-21T22:37:20.7868117Z   Test #505: test_deepseek_v32
-2026-11-21T22:37:20.7868329Z   Test #506: test_deepseek_v4
-2026-11-21T22:37:20.7868533Z   Test #507: test_longcat
-2026-11-21T22:37:20.7868727Z   Test #508: test_kimi_k2
-2026-11-21T22:37:20.7868936Z   Test #509: test_tool_parser_inkling
-2026-11-21T22:37:20.7869171Z   Test #510: test_granite_tool_parser
-2026-11-21T22:37:20.7869406Z   Test #511: test_granite4_tool_parser
-2026-11-21T22:37:20.7869652Z   Test #512: test_granite_20b_fc_tool_parser
-2026-11-21T22:37:20.7869903Z   Test #513: test_tool_parsers_llama
-2026-11-21T22:37:20.7870137Z   Test #514: test_tool_parsers_pythonic
-2026-11-21T22:37:20.7870396Z   Test #515: test_tool_parsers_llama4_pythonic
-2026-11-21T22:37:20.7870660Z   Test #516: test_tool_choice_grammar
-2026-11-21T22:37:20.7870896Z   Test #517: test_structural_tags
-2026-11-21T22:37:20.7871122Z   Test #518: test_tool_parser_mistral
-2026-11-21T22:37:20.7871365Z   Test #519: test_reasoning_base_thinking
-2026-11-21T22:37:20.7871610Z   Test #520: test_reasoning_deepseek_r1
-2026-11-21T22:37:20.7871851Z   Test #521: test_reasoning_mistral
-2026-11-21T22:37:20.7872086Z   Test #522: test_reasoning_minimax_m2
-2026-11-21T22:37:20.7872323Z   Test #523: test_reasoning_step3
-2026-11-21T22:37:20.7872551Z   Test #524: test_reasoning_olmo3
-2026-11-21T22:37:20.7872777Z   Test #525: test_reasoning_deepseek_v3
-2026-11-21T22:37:20.7873343Z   Test #526: test_reasoning_qwen3
-2026-11-21T22:37:20.7873610Z   Test #527: test_reasoning_kolibri1
-2026-11-21T22:37:20.7873844Z   Test #528: test_tool_parser_kolibri1
-2026-11-21T22:37:20.7874079Z   Test #529: test_kolibri1_chat_template
-2026-11-21T22:37:20.7874314Z   Test #530: test_tool_parser_xlam
-2026-11-21T22:37:20.7874541Z   Test #531: test_tool_parser_phi4mini
-2026-11-21T22:37:20.7874778Z   Test #532: test_tool_parser_internlm
-2026-11-21T22:37:20.7875021Z   Test #533: test_tool_parser_jamba
-2026-11-21T22:37:20.7875249Z   Test #534: test_tool_parser_step3
-2026-11-21T22:37:20.7875478Z   Test #535: test_tool_parser_step3p5
-2026-11-21T22:37:20.7875719Z   Test #536: test_tool_parser_qwen3_coder
-2026-11-21T22:37:20.7875966Z   Test #537: test_tool_parser_minicpm5
-2026-11-21T22:37:20.7876527Z   Test #538: test_tool_parser_hy_v3
-2026-11-21T22:37:20.7876777Z   Test #539: test_tool_parser_hunyuan_a13b
-2026-11-21T22:37:20.7877022Z   Test #540: test_tool_parser_apertus
-2026-11-21T22:37:20.7877255Z   Test #541: test_tool_parser_ernie45
-2026-11-21T22:37:20.7877486Z   Test #542: test_tool_parser_gigachat3
-2026-11-21T22:37:20.7877723Z   Test #543: test_tool_parser_olmo3
-2026-11-21T22:37:20.7877950Z   Test #544: test_tool_parser_lfm2
-2026-11-21T22:37:20.7878179Z   Test #545: test_tool_parser_poolside_v1
-2026-11-21T22:37:20.7878432Z   Test #546: test_tool_parser_functiongemma
-2026-11-21T22:37:20.7878674Z   Test #547: test_glm47
-2026-11-21T22:37:20.7879027Z   Test #548: test_minimax_m2_tool
-2026-11-21T22:37:20.7879248Z   Test #549: test_tool_parser_gemma4
-2026-11-21T22:37:20.7879480Z   Test #550: test_tool_parser_seed_oss
-2026-11-21T22:37:20.7879720Z   Test #551: test_tool_parser_muse_glimmer
-2026-11-21T22:37:20.7879968Z   Test #552: test_reasoning_muse_glimmer
-2026-11-21T22:37:20.7880209Z   Test #553: test_chat_template
-2026-11-21T22:37:20.7880416Z   Test #554: test_outputs
-2026-11-21T22:37:20.7880611Z   Test #555: test_bench
-2026-11-21T22:37:20.7880808Z   Test #556: test_bench_kv_cache_dtype
-2026-11-21T22:37:20.7881052Z   Test #557: test_bench_eos_chat_template
-2026-11-21T22:37:20.7881281Z   Test #558: test_capi
-2026-11-21T22:37:20.7881484Z   Test #559: test_capi_qwen35_full_attn_state
-2026-11-21T22:37:20.7881732Z   Test #560: test_chat_prompt
-2026-11-21T22:37:20.7881938Z   Test #561: test_dlopen
-2026-11-21T22:37:20.7882146Z   Test #562: capi_shared_exports_only_abi
-2026-11-21T22:37:20.7882385Z   Test #563: test_cuda_backend
-2026-11-21T22:37:20.7882601Z   Test #564: test_dropin_abi
-2026-11-21T22:37:20.7882806Z   Test #565: test_cuda_ops
-2026-11-21T22:37:20.7883202Z   Test #566: test_dtype
-2026-11-21T22:37:20.7883429Z   Test #567: test_backend
-2026-11-21T22:37:20.7883626Z   Test #568: test_vulkan_loader
-2026-11-21T22:37:20.7883842Z   Test #569: test_backend_cross_device
-2026-11-21T22:37:20.7884124Z   Test #570: test_backend_cross_device_vt_attn_decode_d128
-2026-11-21T22:37:20.7884406Z   Test #571: test_rocm_arch
-2026-11-21T22:37:20.7884608Z   Test #572: test_rocm_pinned_h2d
-2026-11-21T22:37:20.7884830Z   Test #573: test_rocm_f16_contract
-2026-11-21T22:37:20.7885064Z   Test #574: test_grow_only_stream_scratch
-2026-11-21T22:37:20.7885309Z   Test #575: test_rocm_norm_quant_bridge
-2026-11-21T22:37:20.7885554Z   Test #576: test_rocm_quant_dot
-2026-11-21T22:37:20.7885797Z   Test #577: test_ops_paged_attn_sharedk_wmma_p1
-2026-11-21T22:37:20.7886068Z   Test #578: test_triton_aot_arch_dispatch
-2026-11-21T22:37:20.7886307Z   Test #579: test_cpu_isa_x86
-2026-11-21T22:37:20.7886520Z   Test #580: test_cpu_isa_arm
-2026-11-21T22:37:20.7886721Z   Test #581: test_tensor
-2026-11-21T22:37:20.7886918Z   Test #582: test_op_provider
-2026-11-21T22:37:20.7887128Z   Test #583: test_reference_tier
-2026-11-21T22:37:20.7887344Z   Test #584: test_communicator
-2026-11-21T22:37:20.7887552Z   Test #585: test_tp_forward
-2026-11-21T22:37:20.7887765Z   Test #586: test_parallel_layout
-2026-11-21T22:37:20.7887994Z   Test #587: test_backend_multidevice
-2026-11-21T22:37:20.7888218Z   Test #588: test_arena
-2026-11-21T22:37:20.7888407Z   Test #589: test_ops_matmul
-2026-11-21T22:37:20.7888626Z   Test #590: test_ops_gemma4_prefill_peer
-2026-11-21T22:37:20.7888870Z   Test #591: test_ops_qkv_merge
-2026-11-21T22:37:20.7889086Z   Test #592: test_ops_qkv_merged_bias
-2026-11-21T22:37:20.7889319Z   Test #593: test_ops_quant_traits
-2026-11-21T22:37:20.7889551Z   Test #594: test_ops_embedding_quant
-2026-11-21T22:37:20.7889780Z   Test #595: test_ops_quant_dot
-2026-11-21T22:37:20.7889998Z   Test #596: test_neon_q4k_dot
-2026-11-21T22:37:20.7890210Z   Test #597: test_neon_q6k_dot
-2026-11-21T22:37:20.7890427Z   Test #598: test_exl3_dequant
-2026-11-21T22:37:20.7890636Z   Test #599: test_exl3_gemm
-2026-11-21T22:37:20.7890847Z   Test #600: test_exl3_matmul_dispatch
-2026-11-21T22:37:20.7891077Z   Test #601: test_exl3_gemv
-2026-11-21T22:37:20.7891275Z   Test #602: test_exl3_moe
-2026-11-21T22:37:20.7891795Z   Test #603: test_exl3_rocm
-2026-11-21T22:37:20.7892016Z   Test #604: test_exl3_vulkan
-2026-11-21T22:37:20.7892220Z   Test #605: test_cast_f16
-2026-11-21T22:37:20.7892421Z   Test #606: test_exl3_linear_method
-2026-11-21T22:37:20.7892648Z   Test #607: test_exl3_native_loader
-2026-11-21T22:37:20.7892874Z   Test #608: test_exl3_checkpoint
-2026-11-21T22:37:20.7893375Z   Test #609: test_exl3_real_decode
-2026-11-21T22:37:20.7893598Z   Test #610: test_llama_exl3_forward
-2026-11-21T22:37:20.7893820Z   Test #611: test_qwen35_exl3
-2026-11-21T22:37:20.7894032Z   Test #612: test_qwen3_dflash2_exl3
-2026-11-21T22:37:20.7894463Z   Test #613: test_qwen3_dflash2_nvfp4
-2026-11-21T22:37:20.7894693Z   Test #614: test_ops_quant_repack
-2026-11-21T22:37:20.7894912Z   Test #615: test_cuda_quant_dot
-2026-11-21T22:37:20.7895134Z   Test #616: test_cuda_embedding_quant
-2026-11-21T22:37:20.7895380Z   Test #617: test_capi_rocm_embedding_quant
-2026-11-21T22:37:20.7895633Z   Test #618: test_capi_rocm_quant_wmma
-2026-11-21T22:37:20.7895881Z   Test #619: test_rocm_embedding_quant
-2026-11-21T22:37:20.7896115Z   Test #620: test_ops_matmul_elem
-2026-11-21T22:37:20.7896335Z   Test #621: test_ops_matmul_batch
-2026-11-21T22:37:20.7896565Z   Test #622: test_ops_matmul_elem_mblock
-2026-11-21T22:37:20.7896802Z   Test #623: test_ops_matmul_mem
-2026-11-21T22:37:20.7897015Z   Test #624: test_gemm_algo_log
-2026-11-21T22:37:20.7897231Z   Test #625: test_fp8_plan_cache
-2026-11-21T22:37:20.7897446Z   Test #626: test_gemm_plan_cache
-2026-11-21T22:37:20.7897668Z   Test #627: test_gdn_packed_reg_tile
-2026-11-21T22:37:20.7897910Z   Test #628: test_gdn_packed_decode_triton
-2026-11-21T22:37:20.7898158Z   Test #629: test_gdn_decode_fused
-2026-11-21T22:37:20.7898390Z   Test #630: test_moe_router_warp_map
-2026-11-21T22:37:20.7898620Z   Test #631: test_fp4_quant_fast
-2026-11-21T22:37:20.7898842Z   Test #632: test_rmsnorm_decode_fast
-2026-11-21T22:37:20.7899077Z   Test #633: test_rmsnorm_gated_fast
-2026-11-21T22:37:20.7899311Z   Test #634: test_conv_update_fast
-2026-11-21T22:37:20.7899541Z   Test #635: test_gdn_prefill_conv
-2026-11-21T22:37:20.7899768Z   Test #636: test_breakable_graph
-2026-11-21T22:37:20.7899998Z   Test #637: test_persistent_step_input
-2026-11-21T22:37:20.7900238Z   Test #638: test_graph_safe_scratch
-2026-11-21T22:37:20.7900465Z   Test #639: test_graph_dedup
-2026-11-21T22:37:20.7900687Z   Test #640: test_graph_dedup_runtime
-2026-11-21T22:37:20.7900929Z   Test #641: test_graph_dedup_coarse_env
-2026-11-21T22:37:20.7901184Z   Test #642: test_graph_dedup_coarse_env_on
-2026-11-21T22:37:20.7901456Z   Test #643: test_graph_dedup_coarse_env_off_zero
-2026-11-21T22:37:20.7901751Z   Test #644: test_graph_dedup_coarse_env_off_ten
-2026-11-21T22:37:20.7902039Z   Test #645: test_graph_dedup_coarse_env_off_oh_one
-2026-11-21T22:37:20.7902330Z   Test #646: test_graph_dedup_coarse_env_off_one_x
-2026-11-21T22:37:20.7902618Z   Test #647: test_graph_dedup_coarse_env_off_true
-2026-11-21T22:37:20.7902907Z   Test #648: test_graph_dedup_coarse_env_off_empty
-2026-11-21T22:37:20.7903461Z   Test #649: test_graph_dedup_coarse_env_off_sibling_knob
-2026-11-21T22:37:20.7903756Z   Test #650: test_cpu_threadpool
-2026-11-21T22:37:20.7903974Z   Test #651: test_ops_nvfp4_matmul
-2026-11-21T22:37:20.7904194Z   Test #652: test_ops_nvfp4_fp4
-2026-11-21T22:37:20.7904413Z   Test #653: test_nvfp4_persistent_cache
-2026-11-21T22:37:20.7904652Z   Test #654: test_ops_fp8_cutlass
-2026-11-21T22:37:20.7904868Z   Test #655: test_ops_fp8_cpu
-2026-11-21T22:37:20.7905085Z   Test #656: test_ops_quant_fp8_group_cpu
-2026-11-21T22:37:20.7905335Z   Test #657: test_ops_matmul_fp8_block_cpu
-2026-11-21T22:37:20.7905596Z   Test #658: test_fp8_block_scaled_dispatch
-2026-11-21T22:37:20.7905850Z   Test #659: test_fp8_per_tensor_dispatch
-2026-11-21T22:37:20.7906106Z   Test #660: test_ops_matmul_fp8_block_cuda
-2026-11-21T22:37:20.7906404Z   Test #661: test_ops_fp8_cutlass_plan_cache_default_on
-2026-11-21T22:37:20.7906721Z   Test #662: test_ops_fp8_cutlass_plan_cache_rollback_off
-2026-11-21T22:37:20.7907340Z   Test #663: test_ops_fp8_alpha_vec_epilogue_on
-2026-11-21T22:37:20.7907620Z   Test #664: test_ops_moe_grouped
-2026-11-21T22:37:20.7907846Z   Test #665: test_moe_router_tie_stability
-2026-11-21T22:37:20.7908093Z   Test #666: test_ops_moe_grouped_bf16
-2026-11-21T22:37:20.7908330Z   Test #667: test_rocm_moe_grouped_bf16
-2026-11-21T22:37:20.7908562Z   Test #668: test_rocm_moe_upstream
-2026-11-21T22:37:20.7908791Z   Test #669: test_moe_bf16_native_contract
-2026-11-21T22:37:20.7909040Z   Test #670: test_rocm_moe_reference_set
-2026-11-21T22:37:20.7909300Z   Test #671: test_ops_moe_grouped_bf16_gate_up_silu
-2026-11-21T22:37:20.7909734Z   Test #672: test_ops_moe_nongated_relu2
-2026-11-21T22:37:20.7909967Z   Test #673: test_ops_rmsnorm
-2026-11-21T22:37:20.7910181Z   Test #674: test_ops_residual_rmsnorm
-2026-11-21T22:37:20.7910425Z   Test #675: test_ops_rmsnorm_weight_dtype
-2026-11-21T22:37:20.7910700Z   Test #676: test_ops_rmsnorm_quant_fp8_weight_dtype
-2026-11-21T22:37:20.7910970Z   Test #677: test_ops_fused_chain
-2026-11-21T22:37:20.7911192Z   Test #678: test_ops_layernorm
-2026-11-21T22:37:20.7911411Z   Test #679: test_fused_chain_additivity
-2026-11-21T22:37:20.7911648Z   Test #680: test_ops_activation
-2026-11-21T22:37:20.7911859Z   Test #681: test_ops_rope
-2026-11-21T22:37:20.7912057Z   Test #682: test_ops_rope_cache
-2026-11-21T22:37:20.7912274Z   Test #683: test_ops_fused_norm_rope
-2026-11-21T22:37:20.7912505Z   Test #684: test_compiled_gemma
-2026-11-21T22:37:20.7912715Z   Test #685: test_ops_gdn
-2026-11-21T22:37:20.7912914Z   Test #686: test_ops_kda_recurrence
-2026-11-21T22:37:20.7913452Z   Test #687: test_ops_kda_chunk_prefill
-2026-11-21T22:37:20.7913704Z   Test #688: test_ops_mamba2_ssd
-2026-11-21T22:37:20.7913928Z   Test #689: test_ops_mamba2_state_update
-2026-11-21T22:37:20.7914171Z   Test #690: test_ops_mamba2_gated_norm
-2026-11-21T22:37:20.7914413Z   Test #691: test_ops_rms_norm_group
-2026-11-21T22:37:20.7914644Z   Test #692: test_ops_rms_norm_group_cuda
-2026-11-21T22:37:20.7914874Z   Test #693: test_ops_moe
-2026-11-21T22:37:20.7915069Z   Test #694: test_ops_glue
-2026-11-21T22:37:20.7915271Z   Test #695: test_ops_attn_preamble
-2026-11-21T22:37:20.7915492Z   Test #696: test_ops_attention
-2026-11-21T22:37:20.7915712Z   Test #697: test_ops_attention_dense_fa2
-2026-11-21T22:37:20.7915956Z   Test #698: test_ops_attention_cross
-2026-11-21T22:37:20.7916202Z   Test #699: test_ops_attention_elem_dispatch
-2026-11-21T22:37:20.7916465Z   Test #700: test_ops_rmsnorm_elem_dispatch
-2026-11-21T22:37:20.7916716Z   Test #701: test_ops_dflash_block_attn
-2026-11-21T22:37:20.7916955Z   Test #702: test_dflash_attn_grid
-2026-11-21T22:37:20.7917178Z   Test #703: test_dflash_attn_mask
-2026-11-21T22:37:20.7917427Z   Test #704: test_ops_dflash_paged_block_attn
-2026-11-21T22:37:20.7917688Z   Test #705: test_ops_dflash2_grouped_conv
-2026-11-21T22:37:20.7917941Z   Test #706: test_ops_topk_values_indices
-2026-11-21T22:37:20.7918197Z   Test #707: test_ops_dflash2_selector_edges
-2026-11-21T22:37:20.7918456Z   Test #708: test_ops_dflash2_path_walk
-2026-11-21T22:37:20.7918696Z   Test #709: test_ops_reshape_cache
-2026-11-21T22:37:20.7918924Z   Test #710: test_ops_fp8_kv_cache
-2026-11-21T22:37:20.7919144Z   Test #711: test_cuda_fp8_kv_cache
-2026-11-21T22:37:20.7919374Z   Test #712: test_ops_mla_cache
-2026-11-21T22:37:20.7919585Z   Test #713: test_ops_ds_mla_cache
-2026-11-21T22:37:20.7919809Z   Test #714: test_ops_mla_attn
-2026-11-21T22:37:20.7920020Z   Test #715: test_ops_dsa_indexer
-2026-11-21T22:37:20.7920237Z   Test #716: test_ops_mla_prefill
-2026-11-21T22:37:20.7920466Z   Test #717: test_ops_mla_chunked_context
-2026-11-21T22:37:20.7920704Z   Test #718: test_ops_mla_absorb
-2026-11-21T22:37:20.7920934Z   Test #719: test_mla_attention_block
-2026-11-21T22:37:20.7921173Z   Test #720: test_ops_moe_router_grouped
-2026-11-21T22:37:20.7921408Z   Test #721: test_ops_conv2d
-2026-11-21T22:37:20.7921620Z   Test #722: test_ops_conv1d_depthwise
-2026-11-21T22:37:20.7921865Z   Test #723: test_ops_conv1d_general
-2026-11-21T22:37:20.7922090Z   Test #724: test_ops_conv3d
-2026-11-21T22:37:20.7922628Z   Test #725: test_ops_attn_relpos
-2026-11-21T22:37:20.7922873Z   Test #726: test_ops_paged_attn
-2026-11-21T22:37:20.7923404Z   Test #727: test_ops_paged_attn_neon
-2026-11-21T22:37:20.7923653Z   Test #728: test_paged_attn_route
-2026-11-21T22:37:20.7923877Z   Test #729: test_ops_paged_attn_dtype
-2026-11-21T22:37:20.7924107Z   Test #730: test_ops_sample
-2026-11-21T22:37:20.7924315Z   Test #731: test_rocm_sample_scratch
-2026-11-21T22:37:20.7924546Z   Test #732: test_gemma4_rocm_fp8_seams
-2026-11-21T22:37:20.7924781Z   Test #733: test_ops_getblas_dualslot
-2026-11-21T22:37:20.7925007Z   Test #734: test_ops_penalties
-2026-11-21T22:37:20.7925456Z   Test #735: test_npy
-2026-11-21T22:37:20.7925645Z   Test #736: test_tokenizer_parity
-2026-11-21T22:37:20.7925881Z   Test #737: test_tokenizer_parity_deepseek
-2026-11-21T22:37:20.7926136Z   Test #738: test_tokenizer_parity_mistral
-2026-11-21T22:37:20.7926386Z   Test #739: test_tokenizer_parity_gpt4o
-2026-11-21T22:37:20.7926651Z   Test #740: test_tokenizer_parity_deepseek_v3
-2026-11-21T22:37:20.7926905Z   Test #741: test_op_parity
-2026-11-21T22:37:20.7927112Z   Test #742: test_qwen36_paged_engine
-2026-11-21T22:37:20.7927344Z   Test #743: test_qwen36_async_serving
-2026-11-21T22:37:20.7927581Z   Test #744: test_qwen3_paged_engine
-2026-11-21T22:37:20.7927811Z   Test #745: test_qwen35_paged_engine
-2026-11-21T22:37:20.7928073Z   Test #746: test_qwen35_paged_engine_prerequisites
-2026-11-21T22:37:20.7928348Z   Test #747: test_qwen3_dense_async_serving
-2026-11-21T22:37:20.7928589Z   Test #748: test_qwen3_apc_e2e
-2026-11-21T22:37:20.7928801Z   Test #749: test_glm4_paged_engine
-2026-11-21T22:37:20.7929033Z   Test #750: test_olmo2_paged_engine
-2026-11-21T22:37:20.7929264Z   Test #751: test_gemma4_paged_engine
-2026-11-21T22:37:20.7929500Z   Test #752: test_granite_paged_engine
-2026-11-21T22:37:20.7929740Z   Test #753: test_minicpm_paged_engine
-2026-11-21T22:37:20.7929979Z   Test #754: test_minicpm3_paged_engine
-2026-11-21T22:37:20.7930222Z   Test #755: test_phi3_paged_engine
-2026-11-21T22:37:20.7930476Z   Test #756: test_muse_glimmer_gguf_paged_engine
-2026-11-21T22:37:20.7930744Z   Test #757: test_olmo3_paged_engine
-2026-11-21T22:37:20.7930982Z   Test #758: test_stablelm_paged_engine
-2026-11-21T22:37:20.7931230Z   Test #759: test_internlm2_paged_engine
-2026-11-21T22:37:20.7931478Z   Test #760: test_internlm3_paged_engine
-2026-11-21T22:37:20.7931721Z   Test #761: test_yi_paged_engine
-2026-11-21T22:37:20.7931949Z   Test #762: test_commandr_paged_engine
-2026-11-21T22:37:20.7932186Z   Test #763: test_phi_paged_engine
-2026-11-21T22:37:20.7932414Z   Test #764: test_qwen36_gguf_engine
-2026-11-21T22:37:20.7932658Z   Test #765: test_qwen27_gguf_nvfp4_compute
-2026-11-21T22:37:20.7932918Z   Test #766: test_qwen36_gguf_nvfp4_compute
-2026-11-21T22:37:20.7933451Z   Test #767: test_qwen27_paged_engine
-2026-11-21T22:37:20.7933717Z   Test #768: test_qwen27n_fp8_tower_paged_engine
-2026-11-21T22:37:20.7933983Z   Test #769: test_qwen27_dense_lmhead_fp4
-2026-11-21T22:37:20.7934243Z   Test #770: test_qwen3_dflash_draft_parity
-2026-11-21T22:37:20.7934502Z   Test #771: test_qwen3_dflash_kvprep_parity
-2026-11-21T22:37:20.7934758Z   Test #772: test_qwen35_gguf_spec_decode
-2026-11-21T22:37:20.7934999Z   Test #773: test_qwen27_spec_decode
-2026-11-21T22:37:20.7935238Z   Test #774: test_qwen27_dflash_spec_decode
-2026-11-21T22:37:20.7935493Z   Test #775: test_qwen38_dflash2_spec_decode
-2026-11-21T22:37:20.7935741Z   Test #776: test_qwen36_spec_decode
-2026-11-21T22:37:20.7935968Z   Test #777: test_hf_snapshot_pinning
-2026-11-21T22:37:20.7936208Z   Test #778: test_qwen27_ngram_spec_decode
-2026-11-21T22:37:20.7936475Z   Test #779: test_qwen27_spec_decode_concurrent
-2026-11-21T22:37:20.7936731Z   Test #780: test_moe_two_engines
-2026-11-21T22:37:20.7936958Z   Test #781: test_qwen3coder_paged_engine
-2026-11-21T22:37:20.7937194Z   Test #782: test_opt_load
-2026-11-21T22:37:20.7937400Z   Test #783: test_opt_paged_engine
-2026-11-21T22:37:20.7937634Z   Test #784: test_lmcache_output_invariance
-2026-11-21T22:37:20.7938205Z   Test #785: test_llama_load
-2026-11-21T22:37:20.7938484Z   Test #786: test_llama_paged_engine
-2026-11-21T22:37:20.7938712Z   Test #787: test_mistral_load
-2026-11-21T22:37:20.7938927Z   Test #788: test_mistral_paged_engine
-2026-11-21T22:37:20.7939165Z   Test #789: test_qwen3_32b_nvfp4a16_load
-2026-11-21T22:37:20.7939408Z   Test #790: test_qwen3_5_lm_head_dtypes
-2026-11-21T22:37:20.7939659Z   Test #791: test_qwen3_5_dense_load_residency
-2026-11-21T22:37:20.7939914Z   Test #792: test_qwen38_27b_nvfp4_arm
-2026-11-21T22:37:20.7940159Z   Test #793: test_qwen38_27b_modelopt_mtp_arm
-2026-11-21T22:37:20.7940431Z   Test #794: test_qwen3_32b_nvfp4a16_paged_engine
-2026-11-21T22:37:20.7940884Z   Test #795: test_registry_downcast_refusal
-2026-11-21T22:37:20.7941126Z   Test #796: test_qwen4_exp_qsa
-2026-11-21T22:37:20.7941335Z   Test #797: test_qwen4_exp_hc
-2026-11-21T22:37:20.7941549Z   Test #798: test_qwen4_exp_qsa_device
-2026-11-21T22:37:20.7941787Z   Test #799: test_qwen4_exp_qsa_block
-2026-11-21T22:37:20.7942025Z   Test #800: test_qwen4_exp_hc_device
-2026-11-21T22:37:20.7942257Z   Test #801: test_qwen4_exp_forward
-2026-11-21T22:37:20.7942480Z   Test #802: test_qwen4_exp_moe
-2026-11-21T22:37:20.7942693Z   Test #803: test_qwen4_exp_moe_sel_fp
-2026-11-21T22:37:20.7942929Z   Test #804: test_qwen35_moe_kq_device
-2026-11-21T22:37:20.7943468Z   Test #805: test_qwen35_moe_kq_device_ref
-2026-11-21T22:37:20.7943729Z   Test #806: test_qwen35_moe_kq_device_sel_fp
-2026-11-21T22:37:20.7943988Z   Test #807: test_rocm_qwen35_moe_kq_device
-2026-11-21T22:37:20.7944229Z   Test #808: test_qwen4_exp_ple
-2026-11-21T22:37:20.7944445Z   Test #809: test_qwen4_exp_ple_device
-2026-11-21T22:37:20.7944686Z   Test #810: test_qwen4_exp_ple_gate
-2026-11-21T22:37:20.7944911Z   Test #811: test_qwen4_exp_cuda
-2026-11-21T22:37:20.7945140Z   Test #812: test_qwen4_exp_cuda_reductions
-2026-11-21T22:37:20.7945393Z   Test #813: test_qwen4_exp_rocm_reductions
-2026-11-21T22:37:20.7945639Z   Test #814: test_qwen4_exp_ple_block
-2026-11-21T22:37:20.7945871Z   Test #815: test_qwen3_5_mrope
-2026-11-21T22:37:20.7946084Z   Test #816: test_glm_moe_dsa_config
-2026-11-21T22:37:20.7946318Z   Test #817: test_glm_moe_dsa_schedule
-2026-11-21T22:37:20.7946553Z   Test #818: test_glm_moe_dsa_gguf_census
-2026-11-21T22:37:20.7946791Z   Test #819: test_glm_moe_dsa_gguf_load
-2026-11-21T22:37:20.7947022Z   Test #820: test_glm_moe_dsa_forward
-2026-11-21T22:37:20.7947275Z   Test #821: test_qwen38_27b_radixark_w4a4_notice
-2026-11-21T22:37:20.7947538Z   Test #822: test_new_candidate_parsers
-2026-11-21T22:37:20.7947773Z   Test #823: test_olala_gguf_weights
+2026-11-21T22:37:20.7766382Z   Test no. 100: test_minimax_music3_quant_real
+2026-11-21T22:37:20.7766655Z   Test no. 101: test_minimax_music3_device_arm_real
+2026-11-21T22:37:20.7766933Z   Test no. 102: test_minimax_music3_depth_arm_real
+2026-11-21T22:37:20.7767191Z   Test no. 103: test_minimax_h3_video_fold
+2026-11-21T22:37:20.7767424Z   Test no. 104: test_video_engine
+2026-11-21T22:37:20.7767632Z   Test no. 105: test_render_phase_log
+2026-11-21T22:37:20.7767851Z   Test no. 106: test_ltx2_video
+2026-11-21T22:37:20.7768376Z   Test no. 107: test_ltx2_image_cond
+2026-11-21T22:37:20.7768632Z   Test no. 108: test_diffusion_device_seam
+2026-11-21T22:37:20.7768877Z   Test no. 109: test_ltx2_video_device_forward
+2026-11-21T22:37:20.7769112Z   Test no. 110: test_ltx2
+2026-11-21T22:37:20.7769296Z   Test no. 111: test_ltx2_device
+2026-11-21T22:37:20.7769496Z   Test no. 112: test_ltx2_vae
+2026-11-21T22:37:20.7769691Z   Test no. 113: test_ltx2_tiling
+2026-11-21T22:37:20.7769900Z   Test no. 114: test_ltx2_text_encoder
+2026-11-21T22:37:20.7770121Z   Test no. 115: test_ltx2_dfr
+2026-11-21T22:37:20.7770315Z   Test no. 116: test_ltx2_pipeline
+2026-11-21T22:37:20.7770724Z   Test no. 117: test_ltx2_iclora_reference
+2026-11-21T22:37:20.7770953Z   Test no. 118: test_ltx2_retake
+2026-11-21T22:37:20.7771155Z   Test no. 119: test_ltx2_lora
+2026-11-21T22:37:20.7771351Z   Test no. 120: test_ltx2_loader
+2026-11-21T22:37:20.7772026Z   Test no. 121: test_video_api
+2026-11-21T22:37:20.7772286Z   Test no. 122: test_speech_api
+2026-11-21T22:37:20.7772485Z   Test no. 123: test_platform
+2026-11-21T22:37:20.7772694Z   Test no. 124: test_cuda_arch_manifest
+2026-11-21T22:37:20.7772926Z   Test no. 125: test_device_selection
+2026-11-21T22:37:20.7773318Z   Test no. 126: test_gguf_device_fit
+2026-11-21T22:37:20.7773545Z   Test no. 127: test_gguf_device_fit_reach
+2026-11-21T22:37:20.7773782Z   Test no. 128: test_clip_mmproj_gguf
+2026-11-21T22:37:20.7774008Z   Test no. 129: test_gguf_mmproj_reach
+2026-11-21T22:37:20.7774239Z   Test no. 130: test_qwen38_27b_gguf_manifest
+2026-11-21T22:37:20.7774485Z   Test no. 131: test_gguf_accounting_reach
+2026-11-21T22:37:20.7774716Z   Test no. 132: test_fp8_block_quant
+2026-11-21T22:37:20.7774938Z   Test no. 133: test_fp8_block_weight_load
+2026-11-21T22:37:20.7775179Z   Test no. 134: test_fp8_block_linear
+2026-11-21T22:37:20.7775399Z   Test no. 135: test_fp8_block_merged
+2026-11-21T22:37:20.7775625Z   Test no. 136: test_fp8_block_numeric_bound
+2026-11-21T22:37:20.7775860Z   Test no. 137: test_linear_method
+2026-11-21T22:37:20.7776070Z   Test no. 138: test_qwen3_break_point
+2026-11-21T22:37:20.7776306Z   Test no. 139: test_qwen3_decode_graph_seam
+2026-11-21T22:37:20.7776561Z   Test no. 140: test_qwen3_moe_decode_graph_seam
+2026-11-21T22:37:20.7776816Z   Test no. 141: test_moe_async_device_ids
+2026-11-21T22:37:20.7777043Z   Test no. 142: test_rocm_moe_bf16
+2026-11-21T22:37:20.7777265Z   Test no. 143: test_voxtral_decode_graph_seam
+2026-11-21T22:37:20.7777532Z   Test no. 144: test_deepseek_v2_decode_graph_seam
+2026-11-21T22:37:20.7777806Z   Test no. 145: test_qwen3_5_decode_graph_seam
+2026-11-21T22:37:20.7778050Z   Test no. 146: test_qwen3_5_fa2_class
+2026-11-21T22:37:20.7778297Z   Test no. 147: test_qwen3_dflash_decode_graph_seam
+2026-11-21T22:37:20.7778565Z   Test no. 148: test_decode_graph_seam_g1_cuda
+2026-11-21T22:37:20.7778816Z   Test no. 149: test_decode_graph_sizes
+2026-11-21T22:37:20.7779047Z   Test no. 150: test_qwen35_paged_forward
+2026-11-21T22:37:20.7779286Z   Test no. 151: test_qwen35_zero_rope_unfused
+2026-11-21T22:37:20.7779551Z   Test no. 152: test_qwen35_paged_forward_gdn_out_f32
+2026-11-21T22:37:20.7779823Z   Test no. 153: test_qwen35_moe_gdn_ba_owner
+2026-11-21T22:37:20.7780066Z   Test no. 154: test_qwen3_5_moe_vision
+2026-11-21T22:37:20.7780302Z   Test no. 155: test_qwen3_5_dense_vision
+2026-11-21T22:37:20.7780537Z   Test no. 156: test_qwen3_5_gdn_spec_routing
+2026-11-21T22:37:20.7780775Z   Test no. 157: test_qwen3_5_gguf_mtp
+2026-11-21T22:37:20.7780998Z   Test no. 158: test_qwen3_dflash_gguf
+2026-11-21T22:37:20.7781226Z   Test no. 159: test_gdn_v_head_permute
+2026-11-21T22:37:20.7781454Z   Test no. 160: test_qwen27_dense_forward
+2026-11-21T22:37:20.7781717Z   Test no. 161: test_qwen27_dense_forward_glue_fuse_off
+2026-11-21T22:37:20.7782021Z   Test no. 162: test_qwen3_5_gdn_spec_routing_glue_fuse_off
+2026-11-21T22:37:20.7782352Z   Test no. 163: test_qwen3_5_gdn_spec_routing_fused_chain_off
+2026-11-21T22:37:20.7782652Z   Test no. 164: test_dense_gateup_fused_marlin
+2026-11-21T22:37:20.7783000Z   Test no. 165: test_dense_gateup_fused_marlin_off_vt_dense_marlin_gateup
+2026-11-21T22:37:20.7783620Z   Test no. 166: test_dense_gateup_fused_marlin_off_vt_nvfp4_marlin
+2026-11-21T22:37:20.7784287Z   Test no. 167: test_dense_gateup_fused_marlin_off_vt_moe_fused_w13
+2026-11-21T22:37:20.7784608Z   Test no. 168: test_qwen35_plain_weights
+2026-11-21T22:37:20.7784872Z   Test no. 169: test_loader_unaligned_offsets
+2026-11-21T22:37:20.7785112Z   Test no. 170: test_qwen3_8_text_only
+2026-11-21T22:37:20.7785332Z   Test no. 171: test_device_pool
+2026-11-21T22:37:20.7785549Z   Test no. 172: test_device_pool_concurrent
+2026-11-21T22:37:20.7785790Z   Test no. 173: test_moe_resident_lifetime
+2026-11-21T22:37:20.7786021Z   Test no. 174: test_qwen3_load
+2026-11-21T22:37:20.7786230Z   Test no. 175: test_qwen3_forward
+2026-11-21T22:37:20.7786443Z   Test no. 176: test_qwen3_dflash_forward
+2026-11-21T22:37:20.7786852Z   Test no. 177: test_qwen3_dflash_block_route
+2026-11-21T22:37:20.7787097Z   Test no. 178: test_qwen3_dflash2_draft
+2026-11-21T22:37:20.7787331Z   Test no. 179: test_qwen3_dflash2_gguf
+2026-11-21T22:37:20.7787567Z   Test no. 180: test_qwen38_dflash2_drafter_tt
+2026-11-21T22:37:20.7787812Z   Test no. 181: test_qwen3_dspark_markov
+2026-11-21T22:37:20.7788050Z   Test no. 182: test_qwen3_dspark_config
+2026-11-21T22:37:20.7788282Z   Test no. 183: test_qwen3_dspark_weights
+2026-11-21T22:37:20.7788518Z   Test no. 184: test_cudagraph_dispatch
+2026-11-21T22:37:20.7788741Z   Test no. 185: test_dspark_sample
+2026-11-21T22:37:20.7788953Z   Test no. 186: test_llama_forward
+2026-11-21T22:37:20.7789178Z   Test no. 187: test_dense_gate_up_seam_forward
+2026-11-21T22:37:20.7789429Z   Test no. 188: test_llama_embedding_fold
+2026-11-21T22:37:20.7789648Z   Test no. 189: test_kev
+2026-11-21T22:37:20.7789821Z   Test no. 190: test_clm
+2026-11-21T22:37:20.7790007Z   Test no. 191: test_gliner25_decide
+2026-11-21T22:37:20.7790252Z   Test no. 192: test_xor
+2026-11-21T22:37:20.7790429Z   Test no. 193: test_tev1
+2026-11-21T22:37:20.7790608Z   Test no. 194: test_nimble
+2026-11-21T22:37:20.7790805Z   Test no. 195: test_tev1_systemone
+2026-11-21T22:37:20.7791021Z   Test no. 196: test_mistral_forward
+2026-11-21T22:37:20.7791234Z   Test no. 197: test_gemma3_load
+2026-11-21T22:37:20.7791440Z   Test no. 198: test_gemma3_forward
+2026-11-21T22:37:20.7791655Z   Test no. 199: test_gemma2_load
+2026-11-21T22:37:20.7791864Z   Test no. 200: test_gemma2_forward
+2026-11-21T22:37:20.7792078Z   Test no. 201: test_gemma_load
+2026-11-21T22:37:20.7792283Z   Test no. 202: test_gemma_forward
+2026-11-21T22:37:20.7792492Z   Test no. 203: test_gemma4_honesty
+2026-11-21T22:37:20.7792722Z   Test no. 204: test_gemma4_moe_device_arm_guard
+2026-11-21T22:37:20.7792997Z   Test no. 205: test_gemma4_moe_fp8_native_arm_guard
+2026-11-21T22:37:20.7793566Z   Test no. 206: test_gemma4_indexed_max_t
+2026-11-21T22:37:20.7793805Z   Test no. 207: test_qwen3_moe_load
+2026-11-21T22:37:20.7794020Z   Test no. 208: test_qwen3_moe_forward
+2026-11-21T22:37:20.7794250Z   Test no. 209: test_flint_forward
+2026-11-21T22:37:20.7794457Z   Test no. 210: test_flint_paged
+2026-11-21T22:37:20.7794673Z   Test no. 211: test_flint_router_topk_equiv
+2026-11-21T22:37:20.7794920Z   Test no. 212: test_flint_paged_engine
+2026-11-21T22:37:20.7795141Z   Test no. 213: test_flint_gguf
+2026-11-21T22:37:20.7795349Z   Test no. 214: test_deepseek_v2_load
+2026-11-21T22:37:20.7795577Z   Test no. 215: test_deepseek_v2_forward
+2026-11-21T22:37:20.7795810Z   Test no. 216: test_deepseek_v4_scaffold
+2026-11-21T22:37:20.7796058Z   Test no. 217: test_deepseek_v4_fp8_ds_mla_bridge
+2026-11-21T22:37:20.7796320Z   Test no. 218: test_deepseek_v4_1_scaffold
+2026-11-21T22:37:20.7796556Z   Test no. 219: test_deepseek_v4_1_indexer
+2026-11-21T22:37:20.7796800Z   Test no. 220: test_deepseek_v4_pro_variant
+2026-11-21T22:37:20.7797037Z   Test no. 221: test_laguna_scaffold
+2026-11-21T22:37:20.7797263Z   Test no. 222: test_laguna_fused_gate_up
+2026-11-21T22:37:20.7797499Z   Test no. 223: test_laguna_nvfp4_loader
+2026-11-21T22:37:20.7797733Z   Test no. 224: test_laguna_gguf_load
+2026-11-21T22:37:20.7797956Z   Test no. 225: test_qwen3_gguf_weights
+2026-11-21T22:37:20.7798182Z   Test no. 226: test_deepseek_v4_dsa
+2026-11-21T22:37:20.7798407Z   Test no. 227: test_deepseek_v4_compressor
+2026-11-21T22:37:20.7798645Z   Test no. 228: test_deepseek_v4_mhc
+2026-11-21T22:37:20.7798868Z   Test no. 229: test_deepseek_v4_1_engram
+2026-11-21T22:37:20.7799516Z   Test no. 230: test_deepseek_v4_moe
+2026-11-21T22:37:20.7799769Z   Test no. 231: test_deepseek_v4_1_mxfp8
+2026-11-21T22:37:20.7799996Z   Test no. 232: test_deepseek_v4_forward
+2026-11-21T22:37:20.7800233Z   Test no. 233: test_deepseek_v4_gguf_load
+2026-11-21T22:37:20.7800465Z   Test no. 234: test_deepseek_v4_mtp
+2026-11-21T22:37:20.7800695Z   Test no. 235: test_deepseek_v4_mtp_inventory
+2026-11-21T22:37:20.7800947Z   Test no. 236: test_deepseek_v4_dspark_entry
+2026-11-21T22:37:20.7801193Z   Test no. 237: test_deepseek_v4_exl3_loader
+2026-11-21T22:37:20.7801434Z   Test no. 238: test_deepseek_v4_mm_loader
+2026-11-21T22:37:20.7801691Z   Test no. 239: test_deepseek_v4_exl3_device_residency
+2026-11-21T22:37:20.7802192Z   Test no. 240: test_deepseek_v4_exl3_forward
+2026-11-21T22:37:20.7802460Z   Test no. 241: test_deepseek_v4_exl3_forward_loop_arm
+2026-11-21T22:37:20.7802726Z   Test no. 242: test_cuda_deepseek_v4
+2026-11-21T22:37:20.7802957Z   Test no. 243: test_rocm_deepseek_v4_mhc
+2026-11-21T22:37:20.7803406Z   Test no. 244: test_kimi_k3_scaffold
+2026-11-21T22:37:20.7803646Z   Test no. 245: test_muse_glimmer_scaffold
+2026-11-21T22:37:20.7803885Z   Test no. 246: test_muse_glimmer_vision
+2026-11-21T22:37:20.7804124Z   Test no. 247: test_muse_glimmer_vision_real
+2026-11-21T22:37:20.7804371Z   Test no. 248: test_nano_nemotron_vl_vision
+2026-11-21T22:37:20.7804618Z   Test no. 249: test_nano_nemotron_vl_registry
+2026-11-21T22:37:20.7804857Z   Test no. 250: test_cohere2_moe
+2026-11-21T22:37:20.7805071Z   Test no. 251: test_cohere2_moe_registry
+2026-11-21T22:37:20.7805301Z   Test no. 252: test_muse_glimmer_text
+2026-11-21T22:37:20.7805540Z   Test no. 253: test_muse_glimmer_text_fallback
+2026-11-21T22:37:20.7805796Z   Test no. 254: test_muse_glimmer_wiring
+2026-11-21T22:37:20.7806021Z   Test no. 255: test_tower_skip
+2026-11-21T22:37:20.7806229Z   Test no. 256: test_vision_tower_dtype
+2026-11-21T22:37:20.7806467Z   Test no. 257: test_muse_glimmer_real_weights
+2026-11-21T22:37:20.7806711Z   Test no. 258: test_muse_glimmer_gguf
+2026-11-21T22:37:20.7806943Z   Test no. 259: test_qwen4_exp_gguf_load_plan
+2026-11-21T22:37:20.7807195Z   Test no. 260: test_qwen4_exp_gguf_weights
+2026-11-21T22:37:20.7807436Z   Test no. 261: test_kimi_linear_scaffold
+2026-11-21T22:37:20.7807669Z   Test no. 262: test_dots3_note_scaffold
+2026-11-21T22:37:20.7807903Z   Test no. 263: test_qwen4_exp_scaffold
+2026-11-21T22:37:20.7808136Z   Test no. 264: test_qwen4_exp_layer_loop
+2026-11-21T22:37:20.7808369Z   Test no. 265: test_qwen4_exp_runner
+2026-11-21T22:37:20.7808602Z   Test no. 266: test_qwen4_exp_matmul_bt_dtype
+2026-11-21T22:37:20.7808849Z   Test no. 267: test_qwen4_exp_kv_cache
+2026-11-21T22:37:20.7809086Z   Test no. 268: test_qwen4_exp_inject_residency
+2026-11-21T22:37:20.7809343Z   Test no. 269: test_glm5_next_scaffold
+2026-11-21T22:37:20.7809569Z   Test no. 270: test_glm5_next_gguf_load
+2026-11-21T22:37:20.7809797Z   Test no. 271: test_glm5_next_mhc
+2026-11-21T22:37:20.7810006Z   Test no. 272: test_glm5_next_dsa
+2026-11-21T22:37:20.7810222Z   Test no. 273: test_glm5_next_kpool_device
+2026-11-21T22:37:20.7810460Z   Test no. 274: test_glm5_next_moe
+2026-11-21T22:37:20.7810673Z   Test no. 275: test_glm5_next_layer
+2026-11-21T22:37:20.7810893Z   Test no. 276: test_glm5_next_attn
+2026-11-21T22:37:20.7811109Z   Test no. 277: test_glm5_next_bridge
+2026-11-21T22:37:20.7811330Z   Test no. 278: test_glm5_next_forward
+2026-11-21T22:37:20.7811560Z   Test no. 279: test_glm5_next_placement
+2026-11-21T22:37:20.7811808Z   Test no. 280: test_glm5_next_placement_default
+2026-11-21T22:37:20.7812071Z   Test no. 281: test_glm5_next_placement_off
+2026-11-21T22:37:20.7812331Z   Test no. 282: test_glm5_next_placement_nonexact
+2026-11-21T22:37:20.7812584Z   Test no. 283: test_dots3_note_attn
+2026-11-21T22:37:20.7812806Z   Test no. 284: test_dots3_note_vision
+2026-11-21T22:37:20.7813297Z   Test no. 285: test_dots3_note_audio
+2026-11-21T22:37:20.7813546Z   Test no. 286: test_nemotron_h_scaffold
+2026-11-21T22:37:20.7813779Z   Test no. 287: test_nemotron_h_forward
+2026-11-21T22:37:20.7814006Z   Test no. 288: test_nemotron_h_loader
+2026-11-21T22:37:20.7814245Z   Test no. 289: test_nemotron_h_quantized_forms
+2026-11-21T22:37:20.7814783Z   Test no. 290: test_nemotron_h_moe_device
+2026-11-21T22:37:20.7815039Z   Test no. 291: test_nemotron_h_paged_forward
+2026-11-21T22:37:20.7815287Z   Test no. 292: test_kimi_linear_forward
+2026-11-21T22:37:20.7815517Z   Test no. 293: test_kimi_linear_paged
+2026-11-21T22:37:20.7815744Z   Test no. 294: test_kimi_linear_fold_gate
+2026-11-21T22:37:20.7815976Z   Test no. 295: test_kimi_kda
+2026-11-21T22:37:20.7816173Z   Test no. 296: test_glm5_next_kda
+2026-11-21T22:37:20.7816401Z   Test no. 297: test_deepseek_v2_paged_engine
+2026-11-21T22:37:20.7816641Z   Test no. 298: test_glm4_moe_lite_load
+2026-11-21T22:37:20.7816879Z   Test no. 299: test_glm4_moe_lite_router_dtype
+2026-11-21T22:37:20.7817342Z   Test no. 300: test_glm4_moe_lite_paged_engine
+2026-11-21T22:37:20.7817601Z   Test no. 301: test_qwen27_paged_forward
+2026-11-21T22:37:20.7817838Z   Test no. 302: test_qwen35_gguf_logits_f32
+2026-11-21T22:37:20.7818094Z   Test no. 303: test_qwen35_gguf_q4km_dequant_dump
+2026-11-21T22:37:20.7818371Z   Test no. 304: test_qwen27_paged_forward_act_f32
+2026-11-21T22:37:20.7818651Z   Test no. 305: test_qwen27_paged_forward_act_dump
+2026-11-21T22:37:20.7819067Z   Test no. 306: test_unicode_data
+2026-11-21T22:37:20.7819280Z   Test no. 307: test_pretokenizer
+2026-11-21T22:37:20.7819509Z   Test no. 308: test_tokenizer_metaspace_split
+2026-11-21T22:37:20.7819748Z   Test no. 309: test_bpe
+2026-11-21T22:37:20.7819934Z   Test no. 310: test_bpe_equivalence
+2026-11-21T22:37:20.7820154Z   Test no. 311: test_detokenizer
+2026-11-21T22:37:20.7820358Z   Test no. 312: test_request
+2026-11-21T22:37:20.7820556Z   Test no. 313: test_kv_cache_utils
+2026-11-21T22:37:20.7820774Z   Test no. 314: test_kv_state_budget
+2026-11-21T22:37:20.7820999Z   Test no. 315: test_hybrid_kv_budget
+2026-11-21T22:37:20.7821229Z   Test no. 316: test_prefix_match_unit
+2026-11-21T22:37:20.7821459Z   Test no. 317: test_kv_cache_interface
+2026-11-21T22:37:20.7821685Z   Test no. 318: test_block_pool
+2026-11-21T22:37:20.7821886Z   Test no. 319: test_kv_events
+2026-11-21T22:37:20.7822106Z   Test no. 320: test_single_type_kv_cache_manager
+2026-11-21T22:37:20.7822369Z   Test no. 321: test_kv_cache_coordinator
+2026-11-21T22:37:20.7822607Z   Test no. 322: test_kv_cache_manager
+2026-11-21T22:37:20.7822833Z   Test no. 323: test_none_hash_determinism
+2026-11-21T22:37:20.7823283Z   Test no. 324: test_prefix_cache_stats
+2026-11-21T22:37:20.7823526Z   Test no. 325: test_prometheus_metrics
+2026-11-21T22:37:20.7823833Z   Test no. 326: test_kv_offload_cpu
+2026-11-21T22:37:20.7824051Z   Test no. 327: test_kv_offload_fs
+2026-11-21T22:37:20.7824266Z   Test no. 328: test_kv_offload_tiering
+2026-11-21T22:37:20.7824497Z   Test no. 329: test_kv_offload_connector
+2026-11-21T22:37:20.7824725Z   Test no. 330: test_lmcache_codec
+2026-11-21T22:37:20.7824950Z   Test no. 331: test_deepseek_v4_encoding
+2026-11-21T22:37:20.7825198Z   Test no. 332: test_deepseek_v4_image_processor
+2026-11-21T22:37:20.7825469Z   Test no. 333: test_deepseek_v4_vision
+2026-11-21T22:37:20.7825699Z   Test no. 334: test_deepseek_v4_mmproj
+2026-11-21T22:37:20.7825929Z   Test no. 335: test_deepseek_v4_mm_reach
+2026-11-21T22:37:20.7826176Z   Test no. 336: test_deepseek_v4_multigroup_kv
+2026-11-21T22:37:20.7826427Z   Test no. 337: test_qwen3vl_processor
+2026-11-21T22:37:20.7826650Z   Test no. 338: test_qwen3vl_tower
+2026-11-21T22:37:20.7826866Z   Test no. 339: test_gemma4_vision_tower
+2026-11-21T22:37:20.7827099Z   Test no. 340: test_gemma4_registry_e2e
+2026-11-21T22:37:20.7827330Z   Test no. 341: test_gemma4_audio_tower
+2026-11-21T22:37:20.7827557Z   Test no. 342: test_qwen3vl_text
+2026-11-21T22:37:20.7827764Z   Test no. 343: test_qwen3vl_e2e
+2026-11-21T22:37:20.7827978Z   Test no. 344: test_qwen3vl_registry_e2e
+2026-11-21T22:37:20.7828212Z   Test no. 345: test_qwen3_5_vl_e2e
+2026-11-21T22:37:20.7828435Z   Test no. 346: test_qwen3_5_moe_vision_hw
+2026-11-21T22:37:20.7828681Z   Test no. 347: bench_qwen3_5_vl_tower
+2026-11-21T22:37:20.7828915Z   Test no. 348: test_qwen3vl_video_processor
+2026-11-21T22:37:20.7829156Z   Test no. 349: test_qwen3vl_video_e2e
+2026-11-21T22:37:20.7829383Z   Test no. 350: test_audio_processor
+2026-11-21T22:37:20.7829614Z   Test no. 351: test_parakeet_audio_processor
+2026-11-21T22:37:20.7830184Z   Test no. 352: test_parakeet_encoder
+2026-11-21T22:37:20.7830438Z   Test no. 353: test_parakeet_ctc_engine
+2026-11-21T22:37:20.7830686Z   Test no. 354: test_parakeet_transcription_fold
+2026-11-21T22:37:20.7830944Z   Test no. 355: test_parakeet_transducer
+2026-11-21T22:37:20.7831175Z   Test no. 356: test_qwen3_5_vl_video_e2e
+2026-11-21T22:37:20.7831405Z   Test no. 357: test_whisper_audio
+2026-11-21T22:37:20.7831615Z   Test no. 358: test_voxtral_e2e
+2026-11-21T22:37:20.7831827Z   Test no. 359: test_encoder_cache_manager
+2026-11-21T22:37:20.7832059Z   Test no. 360: test_lmcache_client
+2026-11-21T22:37:20.7832273Z   Test no. 361: test_lmcache_connector
+2026-11-21T22:37:20.7832681Z   Test no. 362: test_lmcache_key_agreement
+2026-11-21T22:37:20.7832913Z   Test no. 363: test_scheduler_config
+2026-11-21T22:37:20.7833360Z   Test no. 364: test_speculative_draft_max_position_embeddings
+2026-11-21T22:37:20.7833657Z   Test no. 365: test_speculative_dspark
+2026-11-21T22:37:20.7833894Z   Test no. 366: test_dspark_draft_routing
+2026-11-21T22:37:20.7834135Z   Test no. 367: test_dflash2_draft_routing
+2026-11-21T22:37:20.7834384Z   Test no. 368: test_speculative_unknown_keys
+2026-11-21T22:37:20.7834642Z   Test no. 369: test_speculative_drafter_chain
+2026-11-21T22:37:20.7834893Z   Test no. 370: test_speculative_mtp_depth
+2026-11-21T22:37:20.7835129Z   Test no. 371: test_multimodal_config
+2026-11-21T22:37:20.7835353Z   Test no. 372: test_offload_config
+2026-11-21T22:37:20.7835582Z   Test no. 373: test_weight_residency_config
+2026-11-21T22:37:20.7835832Z   Test no. 374: test_deepseek_v4_paged_equiv
+2026-11-21T22:37:20.7836072Z   Test no. 375: test_multi_kv_refusal
+2026-11-21T22:37:20.7836344Z   Test no. 376: test_device_token_ids_refusal
+2026-11-21T22:37:20.7836603Z   Test no. 377: test_mm_embed_device_token_ids
+2026-11-21T22:37:20.7836849Z   Test no. 378: test_device_placement
+2026-11-21T22:37:20.7837076Z   Test no. 379: test_expert_stream_latch
+2026-11-21T22:37:20.7837313Z   Test no. 380: test_weight_residency_reach
+2026-11-21T22:37:20.7837551Z   Test no. 381: test_placement_reach
+2026-11-21T22:37:20.7837773Z   Test no. 382: test_tokenizer_subdir
+2026-11-21T22:37:20.7838006Z   Test no. 383: test_placement_dump_dtype
+2026-11-21T22:37:20.7838246Z   Test no. 384: test_placed_moe_roundtrip
+2026-11-21T22:37:20.7838473Z   Test no. 385: test_act_dump
+2026-11-21T22:37:20.7838678Z   Test no. 386: test_qwen3_moe_lm_head_bf16
+2026-11-21T22:37:20.7838912Z   Test no. 387: test_moe_fit_resolver
+2026-11-21T22:37:20.7839152Z   Test no. 388: test_attention_window_adoption
+2026-11-21T22:37:20.7839409Z   Test no. 389: test_disable_sliding_window
+2026-11-21T22:37:20.7839653Z   Test no. 390: test_cli_offload_config
+2026-11-21T22:37:20.7839882Z   Test no. 391: test_cli_kv_cache_dtype
+2026-11-21T22:37:20.7840120Z   Test no. 392: test_weight_offloader
+2026-11-21T22:37:20.7840349Z   Test no. 393: test_weight_offload_policy
+2026-11-21T22:37:20.7840586Z   Test no. 394: test_expert_slot_cache
+2026-11-21T22:37:20.7840809Z   Test no. 395: test_gguf_expert_span
+2026-11-21T22:37:20.7841034Z   Test no. 396: test_expert_streamer
+2026-11-21T22:37:20.7841259Z   Test no. 397: test_host_expert_slot_store
+2026-11-21T22:37:20.7841515Z   Test no. 398: test_device_expert_slot_store
+2026-11-21T22:37:20.7841767Z   Test no. 399: test_expert_stream_wiring
+2026-11-21T22:37:20.7842008Z   Test no. 400: test_expert_stream_mixed_slot
+2026-11-21T22:37:20.7842258Z   Test no. 401: test_expert_stream_device_slot
+2026-11-21T22:37:20.7842531Z   Test no. 402: test_resident_weight_host_addressable
+2026-11-21T22:37:20.7842823Z   Test no. 403: test_resident_weight_f32_copy_retires
+2026-11-21T22:37:20.7843267Z   Test no. 404: test_expert_stream_steps
+2026-11-21T22:37:20.7843511Z   Test no. 405: test_expert_stream_wide_logits
+2026-11-21T22:37:20.7843761Z   Test no. 406: test_expert_stream_capacity
+2026-11-21T22:37:20.7844003Z   Test no. 407: test_processing_limits
+2026-11-21T22:37:20.7844232Z   Test no. 408: test_request_queue
+2026-11-21T22:37:20.7844443Z   Test no. 409: test_sched_output
+2026-11-21T22:37:20.7844647Z   Test no. 410: test_scheduler
+2026-11-21T22:37:20.7844849Z   Test no. 411: test_scheduler_lpm
+2026-11-21T22:37:20.7845062Z   Test no. 412: test_async_scheduler
+2026-11-21T22:37:20.7845728Z   Test no. 413: test_scheduler_wave
+2026-11-21T22:37:20.7845985Z   Test no. 414: test_block_table
+2026-11-21T22:37:20.7846194Z   Test no. 415: test_input_batch
+2026-11-21T22:37:20.7846404Z   Test no. 416: test_sampling_metadata
+2026-11-21T22:37:20.7846632Z   Test no. 417: test_logits_processors
+2026-11-21T22:37:20.7846850Z   Test no. 418: test_sampler
+2026-11-21T22:37:20.7847055Z   Test no. 419: test_host_buffer_staging
+2026-11-21T22:37:20.7847314Z   Test no. 420: test_logits_processor_host_addressable
+2026-11-21T22:37:20.7847580Z   Test no. 421: test_prepare_inputs
+2026-11-21T22:37:20.7847796Z   Test no. 422: test_combine_tokens
+2026-11-21T22:37:20.7848178Z   Test no. 423: test_combine_row_predicate
+2026-11-21T22:37:20.7848417Z   Test no. 424: test_verify_route_predicate
+2026-11-21T22:37:20.7848649Z   Test no. 425: test_draft_fill
+2026-11-21T22:37:20.7848854Z   Test no. 426: test_committed_ids
+2026-11-21T22:37:20.7849063Z   Test no. 427: test_async_output
+2026-11-21T22:37:20.7849274Z   Test no. 428: test_async_runner_flag
+2026-11-21T22:37:20.7849516Z   Test no. 429: test_engine_scratch_steady_state
+2026-11-21T22:37:20.7849768Z   Test no. 430: test_runner
+2026-11-21T22:37:20.7849965Z   Test no. 431: test_runner_logit_dump
+2026-11-21T22:37:20.7850213Z   Test no. 432: test_runner_logit_dump_scratch_reset
+2026-11-21T22:37:20.7850496Z   Test no. 433: test_runner_logit_dump_scratch_make
+2026-11-21T22:37:20.7850756Z   Test no. 434: test_common_attn_metadata
+2026-11-21T22:37:20.7850992Z   Test no. 435: test_attn_backend_registry
+2026-11-21T22:37:20.7851241Z   Test no. 436: test_attn_validate_configuration
+2026-11-21T22:37:20.7851491Z   Test no. 437: test_spec_as_decode
+2026-11-21T22:37:20.7851711Z   Test no. 438: test_attention_window
+2026-11-21T22:37:20.7851948Z   Test no. 439: test_chunked_local_attention
+2026-11-21T22:37:20.7852194Z   Test no. 440: test_rotary_embedding
+2026-11-21T22:37:20.7852420Z   Test no. 441: test_linear_scaling_rope
+2026-11-21T22:37:20.7852645Z   Test no. 442: test_pooler
+2026-11-21T22:37:20.7852838Z   Test no. 443: test_pooler_heads
+2026-11-21T22:37:20.7853250Z   Test no. 444: test_pooling_runner
+2026-11-21T22:37:20.7853483Z   Test no. 445: test_gdn_metadata_builder
+2026-11-21T22:37:20.7853714Z   Test no. 446: test_mtp_speculator
+2026-11-21T22:37:20.7853922Z   Test no. 447: test_mtp_depth
+2026-11-21T22:37:20.7854154Z   Test no. 448: test_rejection_sampler
+2026-11-21T22:37:20.7854387Z   Test no. 449: test_prepare_prefill_inputs
+2026-11-21T22:37:20.7854641Z   Test no. 450: test_prepare_decode_inputs
+2026-11-21T22:37:20.7854875Z   Test no. 451: test_dflash_kvprep
+2026-11-21T22:37:20.7855090Z   Test no. 452: test_dflash_causality
+2026-11-21T22:37:20.7855312Z   Test no. 453: test_dflash_propose
+2026-11-21T22:37:20.7855536Z   Test no. 454: test_dflash2_argmax_guard
+2026-11-21T22:37:20.7855779Z   Test no. 455: test_dflash2_runner_reach
+2026-11-21T22:37:20.7856013Z   Test no. 456: test_dflash2_exl3_reach
+2026-11-21T22:37:20.7856252Z   Test no. 457: test_dflash2_draft_phase_trace
+2026-11-21T22:37:20.7856502Z   Test no. 458: test_dflash2_embed_dedup
+2026-11-21T22:37:20.7856745Z   Test no. 459: test_dflash2_embed_dedup_reach
+2026-11-21T22:37:20.7856997Z   Test no. 460: test_dflash2_ctx_capacity
+2026-11-21T22:37:20.7857236Z   Test no. 461: test_block_table_row_width
+2026-11-21T22:37:20.7857473Z   Test no. 462: test_dflash2_concurrency
+2026-11-21T22:37:20.7857711Z   Test no. 463: test_dflash2_prefix_cache
+2026-11-21T22:37:20.7857945Z   Test no. 464: test_ngram_proposer
+2026-11-21T22:37:20.7858167Z   Test no. 465: test_kolibri1_ngram_accept
+2026-11-21T22:37:20.7858413Z   Test no. 466: test_draft_model_proposer
+2026-11-21T22:37:20.7858651Z   Test no. 467: test_structured_output
+2026-11-21T22:37:20.7858888Z   Test no. 468: test_apply_grammar_bitmask
+2026-11-21T22:37:20.7859126Z   Test no. 469: test_backend_native
+2026-11-21T22:37:20.7859350Z   Test no. 470: test_backend_xgrammar
+2026-11-21T22:37:20.7859574Z   Test no. 471: test_jump_forward
+2026-11-21T22:37:20.7859788Z   Test no. 472: test_json_schema_to_gbnf
+2026-11-21T22:37:20.7860029Z   Test no. 473: test_response_format_e2e
+2026-11-21T22:37:20.7860258Z   Test no. 474: test_engine_types
+2026-11-21T22:37:20.7860471Z   Test no. 475: test_engine_core
+2026-11-21T22:37:20.7861010Z   Test no. 476: test_engine_core_proc
+2026-11-21T22:37:20.7861273Z   Test no. 477: test_async_admission_timing
+2026-11-21T22:37:20.7861515Z   Test no. 478: test_input_processor
+2026-11-21T22:37:20.7861737Z   Test no. 479: test_output_processor
+2026-11-21T22:37:20.7861957Z   Test no. 480: test_async_llm
+2026-11-21T22:37:20.7862156Z   Test no. 481: test_llm_engine
+2026-11-21T22:37:20.7862375Z   Test no. 482: test_loaded_engine_dense
+2026-11-21T22:37:20.7862603Z   Test no. 483: test_kv_pool_min_fit
+2026-11-21T22:37:20.7862823Z   Test no. 484: test_kv_cache_fp8_wiring
+2026-11-21T22:37:20.7863362Z   Test no. 485: test_dspark_block_size_guard
+2026-11-21T22:37:20.7863789Z   Test no. 486: test_dflash_draft_hf_cache
+2026-11-21T22:37:20.7864026Z   Test no. 487: test_drafter_chain_reach
+2026-11-21T22:37:20.7864253Z   Test no. 488: test_beam_search
+2026-11-21T22:37:20.7864455Z   Test no. 489: test_chat_mm
+2026-11-21T22:37:20.7864653Z   Test no. 490: test_openai_protocol
+2026-11-21T22:37:20.7864872Z   Test no. 491: test_openai_serving
+2026-11-21T22:37:20.7865097Z   Test no. 492: test_sse_keepalive
+2026-11-21T22:37:20.7865311Z   Test no. 493: test_openai_run_batch
+2026-11-21T22:37:20.7865549Z   Test no. 494: test_openai_serving_chat_stream
+2026-11-21T22:37:20.7865798Z   Test no. 495: test_openai_logprobs
+2026-11-21T22:37:20.7866017Z   Test no. 496: test_openai_utf8
+2026-11-21T22:37:20.7866246Z   Test no. 497: test_streaming_parser_engine
+2026-11-21T22:37:20.7866493Z   Test no. 498: test_parser_engine_assembly
+2026-11-21T22:37:20.7866733Z   Test no. 499: test_openai_tool_parsers
+2026-11-21T22:37:20.7866963Z   Test no. 500: test_tool_parser_detect
+2026-11-21T22:37:20.7867191Z   Test no. 501: test_protocol_tool_turns
+2026-11-21T22:37:20.7867438Z   Test no. 502: test_reasoning_parser_detect
+2026-11-21T22:37:20.7867690Z   Test no. 503: test_reasoning_think_auto
+2026-11-21T22:37:20.7867918Z   Test no. 504: test_deepseek
+2026-11-21T22:37:20.7868117Z   Test no. 505: test_deepseek_v32
+2026-11-21T22:37:20.7868329Z   Test no. 506: test_deepseek_v4
+2026-11-21T22:37:20.7868533Z   Test no. 507: test_longcat
+2026-11-21T22:37:20.7868727Z   Test no. 508: test_kimi_k2
+2026-11-21T22:37:20.7868936Z   Test no. 509: test_tool_parser_inkling
+2026-11-21T22:37:20.7869171Z   Test no. 510: test_granite_tool_parser
+2026-11-21T22:37:20.7869406Z   Test no. 511: test_granite4_tool_parser
+2026-11-21T22:37:20.7869652Z   Test no. 512: test_granite_20b_fc_tool_parser
+2026-11-21T22:37:20.7869903Z   Test no. 513: test_tool_parsers_llama
+2026-11-21T22:37:20.7870137Z   Test no. 514: test_tool_parsers_pythonic
+2026-11-21T22:37:20.7870396Z   Test no. 515: test_tool_parsers_llama4_pythonic
+2026-11-21T22:37:20.7870660Z   Test no. 516: test_tool_choice_grammar
+2026-11-21T22:37:20.7870896Z   Test no. 517: test_structural_tags
+2026-11-21T22:37:20.7871122Z   Test no. 518: test_tool_parser_mistral
+2026-11-21T22:37:20.7871365Z   Test no. 519: test_reasoning_base_thinking
+2026-11-21T22:37:20.7871610Z   Test no. 520: test_reasoning_deepseek_r1
+2026-11-21T22:37:20.7871851Z   Test no. 521: test_reasoning_mistral
+2026-11-21T22:37:20.7872086Z   Test no. 522: test_reasoning_minimax_m2
+2026-11-21T22:37:20.7872323Z   Test no. 523: test_reasoning_step3
+2026-11-21T22:37:20.7872551Z   Test no. 524: test_reasoning_olmo3
+2026-11-21T22:37:20.7872777Z   Test no. 525: test_reasoning_deepseek_v3
+2026-11-21T22:37:20.7873343Z   Test no. 526: test_reasoning_qwen3
+2026-11-21T22:37:20.7873610Z   Test no. 527: test_reasoning_kolibri1
+2026-11-21T22:37:20.7873844Z   Test no. 528: test_tool_parser_kolibri1
+2026-11-21T22:37:20.7874079Z   Test no. 529: test_kolibri1_chat_template
+2026-11-21T22:37:20.7874314Z   Test no. 530: test_tool_parser_xlam
+2026-11-21T22:37:20.7874541Z   Test no. 531: test_tool_parser_phi4mini
+2026-11-21T22:37:20.7874778Z   Test no. 532: test_tool_parser_internlm
+2026-11-21T22:37:20.7875021Z   Test no. 533: test_tool_parser_jamba
+2026-11-21T22:37:20.7875249Z   Test no. 534: test_tool_parser_step3
+2026-11-21T22:37:20.7875478Z   Test no. 535: test_tool_parser_step3p5
+2026-11-21T22:37:20.7875719Z   Test no. 536: test_tool_parser_qwen3_coder
+2026-11-21T22:37:20.7875966Z   Test no. 537: test_tool_parser_minicpm5
+2026-11-21T22:37:20.7876527Z   Test no. 538: test_tool_parser_hy_v3
+2026-11-21T22:37:20.7876777Z   Test no. 539: test_tool_parser_hunyuan_a13b
+2026-11-21T22:37:20.7877022Z   Test no. 540: test_tool_parser_apertus
+2026-11-21T22:37:20.7877255Z   Test no. 541: test_tool_parser_ernie45
+2026-11-21T22:37:20.7877486Z   Test no. 542: test_tool_parser_gigachat3
+2026-11-21T22:37:20.7877723Z   Test no. 543: test_tool_parser_olmo3
+2026-11-21T22:37:20.7877950Z   Test no. 544: test_tool_parser_lfm2
+2026-11-21T22:37:20.7878179Z   Test no. 545: test_tool_parser_poolside_v1
+2026-11-21T22:37:20.7878432Z   Test no. 546: test_tool_parser_functiongemma
+2026-11-21T22:37:20.7878674Z   Test no. 547: test_glm47
+2026-11-21T22:37:20.7879027Z   Test no. 548: test_minimax_m2_tool
+2026-11-21T22:37:20.7879248Z   Test no. 549: test_tool_parser_gemma4
+2026-11-21T22:37:20.7879480Z   Test no. 550: test_tool_parser_seed_oss
+2026-11-21T22:37:20.7879720Z   Test no. 551: test_tool_parser_muse_glimmer
+2026-11-21T22:37:20.7879968Z   Test no. 552: test_reasoning_muse_glimmer
+2026-11-21T22:37:20.7880209Z   Test no. 553: test_chat_template
+2026-11-21T22:37:20.7880416Z   Test no. 554: test_outputs
+2026-11-21T22:37:20.7880611Z   Test no. 555: test_bench
+2026-11-21T22:37:20.7880808Z   Test no. 556: test_bench_kv_cache_dtype
+2026-11-21T22:37:20.7881052Z   Test no. 557: test_bench_eos_chat_template
+2026-11-21T22:37:20.7881281Z   Test no. 558: test_capi
+2026-11-21T22:37:20.7881484Z   Test no. 559: test_capi_qwen35_full_attn_state
+2026-11-21T22:37:20.7881732Z   Test no. 560: test_chat_prompt
+2026-11-21T22:37:20.7881938Z   Test no. 561: test_dlopen
+2026-11-21T22:37:20.7882146Z   Test no. 562: capi_shared_exports_only_abi
+2026-11-21T22:37:20.7882385Z   Test no. 563: test_cuda_backend
+2026-11-21T22:37:20.7882601Z   Test no. 564: test_dropin_abi
+2026-11-21T22:37:20.7882806Z   Test no. 565: test_cuda_ops
+2026-11-21T22:37:20.7883202Z   Test no. 566: test_dtype
+2026-11-21T22:37:20.7883429Z   Test no. 567: test_backend
+2026-11-21T22:37:20.7883626Z   Test no. 568: test_vulkan_loader
+2026-11-21T22:37:20.7883842Z   Test no. 569: test_backend_cross_device
+2026-11-21T22:37:20.7884124Z   Test no. 570: test_backend_cross_device_vt_attn_decode_d128
+2026-11-21T22:37:20.7884406Z   Test no. 571: test_rocm_arch
+2026-11-21T22:37:20.7884608Z   Test no. 572: test_rocm_pinned_h2d
+2026-11-21T22:37:20.7884830Z   Test no. 573: test_rocm_f16_contract
+2026-11-21T22:37:20.7885064Z   Test no. 574: test_grow_only_stream_scratch
+2026-11-21T22:37:20.7885309Z   Test no. 575: test_rocm_norm_quant_bridge
+2026-11-21T22:37:20.7885554Z   Test no. 576: test_rocm_quant_dot
+2026-11-21T22:37:20.7885797Z   Test no. 577: test_ops_paged_attn_sharedk_wmma_p1
+2026-11-21T22:37:20.7886068Z   Test no. 578: test_triton_aot_arch_dispatch
+2026-11-21T22:37:20.7886307Z   Test no. 579: test_cpu_isa_x86
+2026-11-21T22:37:20.7886520Z   Test no. 580: test_cpu_isa_arm
+2026-11-21T22:37:20.7886721Z   Test no. 581: test_tensor
+2026-11-21T22:37:20.7886918Z   Test no. 582: test_op_provider
+2026-11-21T22:37:20.7887128Z   Test no. 583: test_reference_tier
+2026-11-21T22:37:20.7887344Z   Test no. 584: test_communicator
+2026-11-21T22:37:20.7887552Z   Test no. 585: test_tp_forward
+2026-11-21T22:37:20.7887765Z   Test no. 586: test_parallel_layout
+2026-11-21T22:37:20.7887994Z   Test no. 587: test_backend_multidevice
+2026-11-21T22:37:20.7888218Z   Test no. 588: test_arena
+2026-11-21T22:37:20.7888407Z   Test no. 589: test_ops_matmul
+2026-11-21T22:37:20.7888626Z   Test no. 590: test_ops_gemma4_prefill_peer
+2026-11-21T22:37:20.7888870Z   Test no. 591: test_ops_qkv_merge
+2026-11-21T22:37:20.7889086Z   Test no. 592: test_ops_qkv_merged_bias
+2026-11-21T22:37:20.7889319Z   Test no. 593: test_ops_quant_traits
+2026-11-21T22:37:20.7889551Z   Test no. 594: test_ops_embedding_quant
+2026-11-21T22:37:20.7889780Z   Test no. 595: test_ops_quant_dot
+2026-11-21T22:37:20.7889998Z   Test no. 596: test_neon_q4k_dot
+2026-11-21T22:37:20.7890210Z   Test no. 597: test_neon_q6k_dot
+2026-11-21T22:37:20.7890427Z   Test no. 598: test_exl3_dequant
+2026-11-21T22:37:20.7890636Z   Test no. 599: test_exl3_gemm
+2026-11-21T22:37:20.7890847Z   Test no. 600: test_exl3_matmul_dispatch
+2026-11-21T22:37:20.7891077Z   Test no. 601: test_exl3_gemv
+2026-11-21T22:37:20.7891275Z   Test no. 602: test_exl3_moe
+2026-11-21T22:37:20.7891795Z   Test no. 603: test_exl3_rocm
+2026-11-21T22:37:20.7892016Z   Test no. 604: test_exl3_vulkan
+2026-11-21T22:37:20.7892220Z   Test no. 605: test_cast_f16
+2026-11-21T22:37:20.7892421Z   Test no. 606: test_exl3_linear_method
+2026-11-21T22:37:20.7892648Z   Test no. 607: test_exl3_native_loader
+2026-11-21T22:37:20.7892874Z   Test no. 608: test_exl3_checkpoint
+2026-11-21T22:37:20.7893375Z   Test no. 609: test_exl3_real_decode
+2026-11-21T22:37:20.7893598Z   Test no. 610: test_llama_exl3_forward
+2026-11-21T22:37:20.7893820Z   Test no. 611: test_qwen35_exl3
+2026-11-21T22:37:20.7894032Z   Test no. 612: test_qwen3_dflash2_exl3
+2026-11-21T22:37:20.7894463Z   Test no. 613: test_qwen3_dflash2_nvfp4
+2026-11-21T22:37:20.7894693Z   Test no. 614: test_ops_quant_repack
+2026-11-21T22:37:20.7894912Z   Test no. 615: test_cuda_quant_dot
+2026-11-21T22:37:20.7895134Z   Test no. 616: test_cuda_embedding_quant
+2026-11-21T22:37:20.7895380Z   Test no. 617: test_capi_rocm_embedding_quant
+2026-11-21T22:37:20.7895633Z   Test no. 618: test_capi_rocm_quant_wmma
+2026-11-21T22:37:20.7895881Z   Test no. 619: test_rocm_embedding_quant
+2026-11-21T22:37:20.7896115Z   Test no. 620: test_ops_matmul_elem
+2026-11-21T22:37:20.7896335Z   Test no. 621: test_ops_matmul_batch
+2026-11-21T22:37:20.7896565Z   Test no. 622: test_ops_matmul_elem_mblock
+2026-11-21T22:37:20.7896802Z   Test no. 623: test_ops_matmul_mem
+2026-11-21T22:37:20.7897015Z   Test no. 624: test_gemm_algo_log
+2026-11-21T22:37:20.7897231Z   Test no. 625: test_fp8_plan_cache
+2026-11-21T22:37:20.7897446Z   Test no. 626: test_gemm_plan_cache
+2026-11-21T22:37:20.7897668Z   Test no. 627: test_gdn_packed_reg_tile
+2026-11-21T22:37:20.7897910Z   Test no. 628: test_gdn_packed_decode_triton
+2026-11-21T22:37:20.7898158Z   Test no. 629: test_gdn_decode_fused
+2026-11-21T22:37:20.7898390Z   Test no. 630: test_moe_router_warp_map
+2026-11-21T22:37:20.7898620Z   Test no. 631: test_fp4_quant_fast
+2026-11-21T22:37:20.7898842Z   Test no. 632: test_rmsnorm_decode_fast
+2026-11-21T22:37:20.7899077Z   Test no. 633: test_rmsnorm_gated_fast
+2026-11-21T22:37:20.7899311Z   Test no. 634: test_conv_update_fast
+2026-11-21T22:37:20.7899541Z   Test no. 635: test_gdn_prefill_conv
+2026-11-21T22:37:20.7899768Z   Test no. 636: test_breakable_graph
+2026-11-21T22:37:20.7899998Z   Test no. 637: test_persistent_step_input
+2026-11-21T22:37:20.7900238Z   Test no. 638: test_graph_safe_scratch
+2026-11-21T22:37:20.7900465Z   Test no. 639: test_graph_dedup
+2026-11-21T22:37:20.7900687Z   Test no. 640: test_graph_dedup_runtime
+2026-11-21T22:37:20.7900929Z   Test no. 641: test_graph_dedup_coarse_env
+2026-11-21T22:37:20.7901184Z   Test no. 642: test_graph_dedup_coarse_env_on
+2026-11-21T22:37:20.7901456Z   Test no. 643: test_graph_dedup_coarse_env_off_zero
+2026-11-21T22:37:20.7901751Z   Test no. 644: test_graph_dedup_coarse_env_off_ten
+2026-11-21T22:37:20.7902039Z   Test no. 645: test_graph_dedup_coarse_env_off_oh_one
+2026-11-21T22:37:20.7902330Z   Test no. 646: test_graph_dedup_coarse_env_off_one_x
+2026-11-21T22:37:20.7902618Z   Test no. 647: test_graph_dedup_coarse_env_off_true
+2026-11-21T22:37:20.7902907Z   Test no. 648: test_graph_dedup_coarse_env_off_empty
+2026-11-21T22:37:20.7903461Z   Test no. 649: test_graph_dedup_coarse_env_off_sibling_knob
+2026-11-21T22:37:20.7903756Z   Test no. 650: test_cpu_threadpool
+2026-11-21T22:37:20.7903974Z   Test no. 651: test_ops_nvfp4_matmul
+2026-11-21T22:37:20.7904194Z   Test no. 652: test_ops_nvfp4_fp4
+2026-11-21T22:37:20.7904413Z   Test no. 653: test_nvfp4_persistent_cache
+2026-11-21T22:37:20.7904652Z   Test no. 654: test_ops_fp8_cutlass
+2026-11-21T22:37:20.7904868Z   Test no. 655: test_ops_fp8_cpu
+2026-11-21T22:37:20.7905085Z   Test no. 656: test_ops_quant_fp8_group_cpu
+2026-11-21T22:37:20.7905335Z   Test no. 657: test_ops_matmul_fp8_block_cpu
+2026-11-21T22:37:20.7905596Z   Test no. 658: test_fp8_block_scaled_dispatch
+2026-11-21T22:37:20.7905850Z   Test no. 659: test_fp8_per_tensor_dispatch
+2026-11-21T22:37:20.7906106Z   Test no. 660: test_ops_matmul_fp8_block_cuda
+2026-11-21T22:37:20.7906404Z   Test no. 661: test_ops_fp8_cutlass_plan_cache_default_on
+2026-11-21T22:37:20.7906721Z   Test no. 662: test_ops_fp8_cutlass_plan_cache_rollback_off
+2026-11-21T22:37:20.7907340Z   Test no. 663: test_ops_fp8_alpha_vec_epilogue_on
+2026-11-21T22:37:20.7907620Z   Test no. 664: test_ops_moe_grouped
+2026-11-21T22:37:20.7907846Z   Test no. 665: test_moe_router_tie_stability
+2026-11-21T22:37:20.7908093Z   Test no. 666: test_ops_moe_grouped_bf16
+2026-11-21T22:37:20.7908330Z   Test no. 667: test_rocm_moe_grouped_bf16
+2026-11-21T22:37:20.7908562Z   Test no. 668: test_rocm_moe_upstream
+2026-11-21T22:37:20.7908791Z   Test no. 669: test_moe_bf16_native_contract
+2026-11-21T22:37:20.7909040Z   Test no. 670: test_rocm_moe_reference_set
+2026-11-21T22:37:20.7909300Z   Test no. 671: test_ops_moe_grouped_bf16_gate_up_silu
+2026-11-21T22:37:20.7909734Z   Test no. 672: test_ops_moe_nongated_relu2
+2026-11-21T22:37:20.7909967Z   Test no. 673: test_ops_rmsnorm
+2026-11-21T22:37:20.7910181Z   Test no. 674: test_ops_residual_rmsnorm
+2026-11-21T22:37:20.7910425Z   Test no. 675: test_ops_rmsnorm_weight_dtype
+2026-11-21T22:37:20.7910700Z   Test no. 676: test_ops_rmsnorm_quant_fp8_weight_dtype
+2026-11-21T22:37:20.7910970Z   Test no. 677: test_ops_fused_chain
+2026-11-21T22:37:20.7911192Z   Test no. 678: test_ops_layernorm
+2026-11-21T22:37:20.7911411Z   Test no. 679: test_fused_chain_additivity
+2026-11-21T22:37:20.7911648Z   Test no. 680: test_ops_activation
+2026-11-21T22:37:20.7911859Z   Test no. 681: test_ops_rope
+2026-11-21T22:37:20.7912057Z   Test no. 682: test_ops_rope_cache
+2026-11-21T22:37:20.7912274Z   Test no. 683: test_ops_fused_norm_rope
+2026-11-21T22:37:20.7912505Z   Test no. 684: test_compiled_gemma
+2026-11-21T22:37:20.7912715Z   Test no. 685: test_ops_gdn
+2026-11-21T22:37:20.7912914Z   Test no. 686: test_ops_kda_recurrence
+2026-11-21T22:37:20.7913452Z   Test no. 687: test_ops_kda_chunk_prefill
+2026-11-21T22:37:20.7913704Z   Test no. 688: test_ops_mamba2_ssd
+2026-11-21T22:37:20.7913928Z   Test no. 689: test_ops_mamba2_state_update
+2026-11-21T22:37:20.7914171Z   Test no. 690: test_ops_mamba2_gated_norm
+2026-11-21T22:37:20.7914413Z   Test no. 691: test_ops_rms_norm_group
+2026-11-21T22:37:20.7914644Z   Test no. 692: test_ops_rms_norm_group_cuda
+2026-11-21T22:37:20.7914874Z   Test no. 693: test_ops_moe
+2026-11-21T22:37:20.7915069Z   Test no. 694: test_ops_glue
+2026-11-21T22:37:20.7915271Z   Test no. 695: test_ops_attn_preamble
+2026-11-21T22:37:20.7915492Z   Test no. 696: test_ops_attention
+2026-11-21T22:37:20.7915712Z   Test no. 697: test_ops_attention_dense_fa2
+2026-11-21T22:37:20.7915956Z   Test no. 698: test_ops_attention_cross
+2026-11-21T22:37:20.7916202Z   Test no. 699: test_ops_attention_elem_dispatch
+2026-11-21T22:37:20.7916465Z   Test no. 700: test_ops_rmsnorm_elem_dispatch
+2026-11-21T22:37:20.7916716Z   Test no. 701: test_ops_dflash_block_attn
+2026-11-21T22:37:20.7916955Z   Test no. 702: test_dflash_attn_grid
+2026-11-21T22:37:20.7917178Z   Test no. 703: test_dflash_attn_mask
+2026-11-21T22:37:20.7917427Z   Test no. 704: test_ops_dflash_paged_block_attn
+2026-11-21T22:37:20.7917688Z   Test no. 705: test_ops_dflash2_grouped_conv
+2026-11-21T22:37:20.7917941Z   Test no. 706: test_ops_topk_values_indices
+2026-11-21T22:37:20.7918197Z   Test no. 707: test_ops_dflash2_selector_edges
+2026-11-21T22:37:20.7918456Z   Test no. 708: test_ops_dflash2_path_walk
+2026-11-21T22:37:20.7918696Z   Test no. 709: test_ops_reshape_cache
+2026-11-21T22:37:20.7918924Z   Test no. 710: test_ops_fp8_kv_cache
+2026-11-21T22:37:20.7919144Z   Test no. 711: test_cuda_fp8_kv_cache
+2026-11-21T22:37:20.7919374Z   Test no. 712: test_ops_mla_cache
+2026-11-21T22:37:20.7919585Z   Test no. 713: test_ops_ds_mla_cache
+2026-11-21T22:37:20.7919809Z   Test no. 714: test_ops_mla_attn
+2026-11-21T22:37:20.7920020Z   Test no. 715: test_ops_dsa_indexer
+2026-11-21T22:37:20.7920237Z   Test no. 716: test_ops_mla_prefill
+2026-11-21T22:37:20.7920466Z   Test no. 717: test_ops_mla_chunked_context
+2026-11-21T22:37:20.7920704Z   Test no. 718: test_ops_mla_absorb
+2026-11-21T22:37:20.7920934Z   Test no. 719: test_mla_attention_block
+2026-11-21T22:37:20.7921173Z   Test no. 720: test_ops_moe_router_grouped
+2026-11-21T22:37:20.7921408Z   Test no. 721: test_ops_conv2d
+2026-11-21T22:37:20.7921620Z   Test no. 722: test_ops_conv1d_depthwise
+2026-11-21T22:37:20.7921865Z   Test no. 723: test_ops_conv1d_general
+2026-11-21T22:37:20.7922090Z   Test no. 724: test_ops_conv3d
+2026-11-21T22:37:20.7922628Z   Test no. 725: test_ops_attn_relpos
+2026-11-21T22:37:20.7922873Z   Test no. 726: test_ops_paged_attn
+2026-11-21T22:37:20.7923404Z   Test no. 727: test_ops_paged_attn_neon
+2026-11-21T22:37:20.7923653Z   Test no. 728: test_paged_attn_route
+2026-11-21T22:37:20.7923877Z   Test no. 729: test_ops_paged_attn_dtype
+2026-11-21T22:37:20.7924107Z   Test no. 730: test_ops_sample
+2026-11-21T22:37:20.7924315Z   Test no. 731: test_rocm_sample_scratch
+2026-11-21T22:37:20.7924546Z   Test no. 732: test_gemma4_rocm_fp8_seams
+2026-11-21T22:37:20.7924781Z   Test no. 733: test_ops_getblas_dualslot
+2026-11-21T22:37:20.7925007Z   Test no. 734: test_ops_penalties
+2026-11-21T22:37:20.7925456Z   Test no. 735: test_npy
+2026-11-21T22:37:20.7925645Z   Test no. 736: test_tokenizer_parity
+2026-11-21T22:37:20.7925881Z   Test no. 737: test_tokenizer_parity_deepseek
+2026-11-21T22:37:20.7926136Z   Test no. 738: test_tokenizer_parity_mistral
+2026-11-21T22:37:20.7926386Z   Test no. 739: test_tokenizer_parity_gpt4o
+2026-11-21T22:37:20.7926651Z   Test no. 740: test_tokenizer_parity_deepseek_v3
+2026-11-21T22:37:20.7926905Z   Test no. 741: test_op_parity
+2026-11-21T22:37:20.7927112Z   Test no. 742: test_qwen36_paged_engine
+2026-11-21T22:37:20.7927344Z   Test no. 743: test_qwen36_async_serving
+2026-11-21T22:37:20.7927581Z   Test no. 744: test_qwen3_paged_engine
+2026-11-21T22:37:20.7927811Z   Test no. 745: test_qwen35_paged_engine
+2026-11-21T22:37:20.7928073Z   Test no. 746: test_qwen35_paged_engine_prerequisites
+2026-11-21T22:37:20.7928348Z   Test no. 747: test_qwen3_dense_async_serving
+2026-11-21T22:37:20.7928589Z   Test no. 748: test_qwen3_apc_e2e
+2026-11-21T22:37:20.7928801Z   Test no. 749: test_glm4_paged_engine
+2026-11-21T22:37:20.7929033Z   Test no. 750: test_olmo2_paged_engine
+2026-11-21T22:37:20.7929264Z   Test no. 751: test_gemma4_paged_engine
+2026-11-21T22:37:20.7929500Z   Test no. 752: test_granite_paged_engine
+2026-11-21T22:37:20.7929740Z   Test no. 753: test_minicpm_paged_engine
+2026-11-21T22:37:20.7929979Z   Test no. 754: test_minicpm3_paged_engine
+2026-11-21T22:37:20.7930222Z   Test no. 755: test_phi3_paged_engine
+2026-11-21T22:37:20.7930476Z   Test no. 756: test_muse_glimmer_gguf_paged_engine
+2026-11-21T22:37:20.7930744Z   Test no. 757: test_olmo3_paged_engine
+2026-11-21T22:37:20.7930982Z   Test no. 758: test_stablelm_paged_engine
+2026-11-21T22:37:20.7931230Z   Test no. 759: test_internlm2_paged_engine
+2026-11-21T22:37:20.7931478Z   Test no. 760: test_internlm3_paged_engine
+2026-11-21T22:37:20.7931721Z   Test no. 761: test_yi_paged_engine
+2026-11-21T22:37:20.7931949Z   Test no. 762: test_commandr_paged_engine
+2026-11-21T22:37:20.7932186Z   Test no. 763: test_phi_paged_engine
+2026-11-21T22:37:20.7932414Z   Test no. 764: test_qwen36_gguf_engine
+2026-11-21T22:37:20.7932658Z   Test no. 765: test_qwen27_gguf_nvfp4_compute
+2026-11-21T22:37:20.7932918Z   Test no. 766: test_qwen36_gguf_nvfp4_compute
+2026-11-21T22:37:20.7933451Z   Test no. 767: test_qwen27_paged_engine
+2026-11-21T22:37:20.7933717Z   Test no. 768: test_qwen27n_fp8_tower_paged_engine
+2026-11-21T22:37:20.7933983Z   Test no. 769: test_qwen27_dense_lmhead_fp4
+2026-11-21T22:37:20.7934243Z   Test no. 770: test_qwen3_dflash_draft_parity
+2026-11-21T22:37:20.7934502Z   Test no. 771: test_qwen3_dflash_kvprep_parity
+2026-11-21T22:37:20.7934758Z   Test no. 772: test_qwen35_gguf_spec_decode
+2026-11-21T22:37:20.7934999Z   Test no. 773: test_qwen27_spec_decode
+2026-11-21T22:37:20.7935238Z   Test no. 774: test_qwen27_dflash_spec_decode
+2026-11-21T22:37:20.7935493Z   Test no. 775: test_qwen38_dflash2_spec_decode
+2026-11-21T22:37:20.7935741Z   Test no. 776: test_qwen36_spec_decode
+2026-11-21T22:37:20.7935968Z   Test no. 777: test_hf_snapshot_pinning
+2026-11-21T22:37:20.7936208Z   Test no. 778: test_qwen27_ngram_spec_decode
+2026-11-21T22:37:20.7936475Z   Test no. 779: test_qwen27_spec_decode_concurrent
+2026-11-21T22:37:20.7936731Z   Test no. 780: test_moe_two_engines
+2026-11-21T22:37:20.7936958Z   Test no. 781: test_qwen3coder_paged_engine
+2026-11-21T22:37:20.7937194Z   Test no. 782: test_opt_load
+2026-11-21T22:37:20.7937400Z   Test no. 783: test_opt_paged_engine
+2026-11-21T22:37:20.7937634Z   Test no. 784: test_lmcache_output_invariance
+2026-11-21T22:37:20.7938205Z   Test no. 785: test_llama_load
+2026-11-21T22:37:20.7938484Z   Test no. 786: test_llama_paged_engine
+2026-11-21T22:37:20.7938712Z   Test no. 787: test_mistral_load
+2026-11-21T22:37:20.7938927Z   Test no. 788: test_mistral_paged_engine
+2026-11-21T22:37:20.7939165Z   Test no. 789: test_qwen3_32b_nvfp4a16_load
+2026-11-21T22:37:20.7939408Z   Test no. 790: test_qwen3_5_lm_head_dtypes
+2026-11-21T22:37:20.7939659Z   Test no. 791: test_qwen3_5_dense_load_residency
+2026-11-21T22:37:20.7939914Z   Test no. 792: test_qwen38_27b_nvfp4_arm
+2026-11-21T22:37:20.7940159Z   Test no. 793: test_qwen38_27b_modelopt_mtp_arm
+2026-11-21T22:37:20.7940431Z   Test no. 794: test_qwen3_32b_nvfp4a16_paged_engine
+2026-11-21T22:37:20.7940884Z   Test no. 795: test_registry_downcast_refusal
+2026-11-21T22:37:20.7941126Z   Test no. 796: test_qwen4_exp_qsa
+2026-11-21T22:37:20.7941335Z   Test no. 797: test_qwen4_exp_hc
+2026-11-21T22:37:20.7941549Z   Test no. 798: test_qwen4_exp_qsa_device
+2026-11-21T22:37:20.7941787Z   Test no. 799: test_qwen4_exp_qsa_block
+2026-11-21T22:37:20.7942025Z   Test no. 800: test_qwen4_exp_hc_device
+2026-11-21T22:37:20.7942257Z   Test no. 801: test_qwen4_exp_forward
+2026-11-21T22:37:20.7942480Z   Test no. 802: test_qwen4_exp_moe
+2026-11-21T22:37:20.7942693Z   Test no. 803: test_qwen4_exp_moe_sel_fp
+2026-11-21T22:37:20.7942929Z   Test no. 804: test_qwen35_moe_kq_device
+2026-11-21T22:37:20.7943468Z   Test no. 805: test_qwen35_moe_kq_device_ref
+2026-11-21T22:37:20.7943729Z   Test no. 806: test_qwen35_moe_kq_device_sel_fp
+2026-11-21T22:37:20.7943988Z   Test no. 807: test_rocm_qwen35_moe_kq_device
+2026-11-21T22:37:20.7944229Z   Test no. 808: test_qwen4_exp_ple
+2026-11-21T22:37:20.7944445Z   Test no. 809: test_qwen4_exp_ple_device
+2026-11-21T22:37:20.7944686Z   Test no. 810: test_qwen4_exp_ple_gate
+2026-11-21T22:37:20.7944911Z   Test no. 811: test_qwen4_exp_cuda
+2026-11-21T22:37:20.7945140Z   Test no. 812: test_qwen4_exp_cuda_reductions
+2026-11-21T22:37:20.7945393Z   Test no. 813: test_qwen4_exp_rocm_reductions
+2026-11-21T22:37:20.7945639Z   Test no. 814: test_qwen4_exp_ple_block
+2026-11-21T22:37:20.7945871Z   Test no. 815: test_qwen3_5_mrope
+2026-11-21T22:37:20.7946084Z   Test no. 816: test_glm_moe_dsa_config
+2026-11-21T22:37:20.7946318Z   Test no. 817: test_glm_moe_dsa_schedule
+2026-11-21T22:37:20.7946553Z   Test no. 818: test_glm_moe_dsa_gguf_census
+2026-11-21T22:37:20.7946791Z   Test no. 819: test_glm_moe_dsa_gguf_load
+2026-11-21T22:37:20.7947022Z   Test no. 820: test_glm_moe_dsa_forward
+2026-11-21T22:37:20.7947275Z   Test no. 821: test_qwen38_27b_radixark_w4a4_notice
+2026-11-21T22:37:20.7947538Z   Test no. 822: test_new_candidate_parsers
+2026-11-21T22:37:20.7947773Z   Test no. 823: test_olala_gguf_weights
 2026-11-21T22:37:20.7947938Z 
 2026-11-21T22:37:20.7948009Z Total Tests: 823
 2026-11-21T22:37:20.7948257Z ctest -N enumerated '823' CTest entries in build-arm-full
