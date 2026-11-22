@@ -113,16 +113,20 @@ std::vector<double> RefMoe(const std::vector<double>& x, int64_t hidden,
   };
   const float* gate = reinterpret_cast<const float*>(lw.router_weight.bytes.data());
   const float* eb = reinterpret_cast<const float*>(lw.router_bias.bytes.data());
-  std::vector<double> sc(E);
+  // Reference (:1510-1517): raw sigmoid scores of logits (NO bias); routing
+  // SELECTION is on sigmoid + expert_bias; the weights are the gathered RAW
+  // scores, normalized and scaled.
+  std::vector<double> sc(E), routing(E);
   for (int64_t e = 0; e < E; ++e) {
-    double s = eb[e];
+    double s = 0;
     for (int64_t i = 0; i < hidden; ++i) s += x[i] * gate[e * hidden + i];
     sc[e] = 1.0 / (1.0 + std::exp(-s));
+    routing[e] = sc[e] + eb[e];
   }
   std::vector<int64_t> idx(E);
   for (int64_t e = 0; e < E; ++e) idx[e] = e;
   std::stable_sort(idx.begin(), idx.end(),
-                   [&](int64_t a, int64_t b) { return sc[a] > sc[b]; });
+                   [&](int64_t a, int64_t b) { return routing[a] > routing[b]; });
   idx.resize(K);
   double psum = 0;
   for (int64_t k = 0; k < K; ++k) psum += sc[idx[k]];
@@ -315,7 +319,8 @@ std::vector<double> RefVAttention(const std::vector<double>& x,
     double s = 0;
     for (int64_t d = 0; d < D; ++d) s += y[base + d] * y[base + d];
     double inv = 1.0 / std::sqrt(s / D + 1e-6);
-    for (int64_t d = 0; d < D; ++d) y[base + d] = y[base + d] * inv * (1.0 + w[d]);
+    // GGUF stores the effective (1 + gamma) weight: multiply directly.
+    for (int64_t d = 0; d < D; ++d) y[base + d] = y[base + d] * inv * w[d];
   };
   const float* qn = reinterpret_cast<const float*>(lw.attn_q_norm.bytes.data());
   const float* kn = reinterpret_cast<const float*>(lw.attn_k_norm.bytes.data());
@@ -475,15 +480,21 @@ std::vector<double> RefMambaStep(RefMamba& st, const std::vector<double>& u,
   const float* cb = reinterpret_cast<const float*>(lw.ssm_c_bias.bytes.data());
   const float* kb = reinterpret_cast<const float*>(lw.ssm_b_bias.bytes.data());
   const float* Dv = reinterpret_cast<const float*>(lw.ssm_d.bytes.data());
+  // rank-3 [H, R, P]: element (h, r, pp) at ((h*R)+r)*P + pp (W2 would
+  // stride by shape[1]=R on this rank-3 tensor).
   auto proj = [&](const vllm::OwnedTensor& w, int64_t r, int64_t h, int64_t pp) {
-    return W2(w, h * R + r, pp);
+    int64_t off = (h * w.shape[1] + r) * w.shape[2] + pp;
+    if (w.dtype == vt::DType::kF32)
+      return double(reinterpret_cast<const float*>(w.bytes.data())[off]);
+    return Bf16Bits(reinterpret_cast<const uint16_t*>(w.bytes.data())[off]);
   };
   auto rms = [&](const std::vector<double>& in, const float* w) {
     double s = 0;
     for (size_t n = 0; n < in.size(); ++n) s += in[n] * in[n];
     double inv = 1.0 / std::sqrt(s / in.size() + 1e-6);
     std::vector<double> o(in.size());
-    for (size_t n = 0; n < in.size(); ++n) o[n] = in[n] * inv * (1.0 + w[n]);
+    // GGUF stores the effective (1 + gamma) weight: multiply directly.
+    for (size_t n = 0; n < in.size(); ++n) o[n] = in[n] * inv * w[n];
     return o;
   };
   std::vector<double> DT(H), al(H), be(H), ga(H);
@@ -515,22 +526,28 @@ std::vector<double> RefMambaStep(RefMamba& st, const std::vector<double>& u,
       na[a] = st.angle[h * A + a] + std::tanh(ang[a]) * DT[h] * vllm::kOlalaPi;
       st.angle[h * A + a] = std::fmod(na[a], 2 * vllm::kOlalaPi);
     }
-    for (int64_t r = 0; r < R; ++r)
-      for (int64_t n = 0; n < N; ++n) {
+    for (int64_t r = 0; r < R; ++r) {
+      // Halved rotary: group 0 [0,A) pairs with group 2 [N/2, N/2+A);
+      // groups 1 [A, N/2) and 3 [N/2+A, N) pass through UNROTATED.
+      for (int64_t n = 0; n < A; ++n) {
+        int64_t m = n + N / 2;
         double qv = Cn[(r * H + h) * N + n] + cb[(h * R + r) * N + n];
         double kv = Bn[(r * H + h) * N + n] + kb[(h * R + r) * N + n];
-        if (n < A) {
-          double q2 = Cn[(r * H + h) * N + (n + N / 2)] + cb[(h * R + r) * N + (n + N / 2)];
-          double k2 = Bn[(r * H + h) * N + (n + N / 2)] + kb[(h * R + r) * N + (n + N / 2)];
-          Q[(r * H + h) * N + n] = qv * std::cos(na[n]) - q2 * std::sin(na[n]);
-          Q[(r * H + h) * N + (n + N / 2)] = qv * std::sin(na[n]) + q2 * std::cos(na[n]);
-          K[(r * H + h) * N + n] = kv * std::cos(na[n]) - k2 * std::sin(na[n]);
-          K[(r * H + h) * N + (n + N / 2)] = kv * std::sin(na[n]) + k2 * std::cos(na[n]);
-        } else {
-          Q[(r * H + h) * N + n] = qv;
-          K[(r * H + h) * N + n] = kv;
-        }
+        double q2 = Cn[(r * H + h) * N + m] + cb[(h * R + r) * N + m];
+        double k2 = Bn[(r * H + h) * N + m] + kb[(h * R + r) * N + m];
+        Q[(r * H + h) * N + n] = qv * std::cos(na[n]) - q2 * std::sin(na[n]);
+        Q[(r * H + h) * N + m] = qv * std::sin(na[n]) + q2 * std::cos(na[n]);
+        K[(r * H + h) * N + n] = kv * std::cos(na[n]) - k2 * std::sin(na[n]);
+        K[(r * H + h) * N + m] = kv * std::sin(na[n]) + k2 * std::cos(na[n]);
       }
+      for (int64_t n = A; n < N / 2; ++n) {
+        int64_t m = n + N / 2;
+        Q[(r * H + h) * N + n] = Cn[(r * H + h) * N + n] + cb[(h * R + r) * N + n];
+        K[(r * H + h) * N + n] = Bn[(r * H + h) * N + n] + kb[(h * R + r) * N + n];
+        Q[(r * H + h) * N + m] = Cn[(r * H + h) * N + m] + cb[(h * R + r) * N + m];
+        K[(r * H + h) * N + m] = Bn[(r * H + h) * N + m] + kb[(h * R + r) * N + m];
+      }
+    }
   }
   std::vector<double> newssm(H * P * N);
   for (int64_t h = 0; h < H; ++h)
@@ -647,21 +664,29 @@ TEST_CASE("olala W2d: full forward smoke on the pinned bf16 artifact") {
   vllm::OlalaWeights w = vllm::LoadOlalaGgufWeights(gguf, cfg);
   vllm::OlalaParams p = vllm::ParseOlalaParams(cfg);
   REQUIRE(p.vocab > 0);
-  std::vector<int64_t> prompt = {151644, 872, 198, 9707, 151645};  // <|im_start|>user\n hi <|im_end|>-ish ids in vocab range
+  // Real fork-tokenized ids for "<|im_start|>user\n hi <|im_end|>" (see
+  // docs/bench-evidence/new-candidate-ports-olala-20261122/token-gate-bf16-20261122.txt).
+  const std::vector<int64_t> prompt = {151644, 872, 198, 15588, 220, 151645};
   for (auto tok : prompt) CHECK(tok < p.vocab);
   const int64_t n_gen = 6;
-  vllm::OlalaGenerateHost(w, p, prompt, n_gen);
-  REQUIRE(prompt.size() == static_cast<size_t>(5 + n_gen));
-  bool in_vocab = true, all_same = true;
-  for (size_t i = 5; i < prompt.size(); ++i) {
-    if (prompt[i] < 0 || prompt[i] >= p.vocab) in_vocab = false;
+  std::vector<int64_t> run_ids = prompt;
+  vllm::OlalaGenerateHost(w, p, run_ids, n_gen);
+  REQUIRE(run_ids.size() == static_cast<size_t>(6 + n_gen));
+  if (std::getenv("OLALA_STEP_DBG")) {
+    fprintf(stderr, "generated ids:");
+    for (size_t i = 6; i < run_ids.size(); ++i) fprintf(stderr, " %lld", (long long)run_ids[i]);
+    fprintf(stderr, "\n");
   }
-  for (size_t i = 6; i < prompt.size(); ++i)
-    if (prompt[i] != prompt[i - 1]) all_same = false;
+  bool in_vocab = true, all_same = true;
+  for (size_t i = 6; i < run_ids.size(); ++i) {
+    if (run_ids[i] < 0 || run_ids[i] >= p.vocab) in_vocab = false;
+  }
+  for (size_t i = 6; i < run_ids.size(); ++i)
+    if (run_ids[i] != run_ids[i - 1]) all_same = false;
   CHECK(in_vocab);
   CHECK_FALSE(all_same);
   // determinism: rerun
-  std::vector<int64_t> prompt2 = {151644, 872, 198, 9707, 151645};
+  std::vector<int64_t> prompt2(prompt.cbegin(), prompt.cend());
   vllm::OlalaGenerateHost(w, p, prompt2, n_gen);
-  CHECK(prompt2 == prompt);
+  CHECK(prompt2 == run_ids);
 }

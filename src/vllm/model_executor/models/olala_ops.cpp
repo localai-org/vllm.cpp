@@ -106,29 +106,34 @@ void OlalaMoeHost(float* out, const float* x, int64_t tokens, int64_t hidden,
   }
   const float* gate = F32Bytes(lw.router_weight, "router_weight");
   const float* ebias = F32Bytes(lw.router_bias, "router_bias");
-  std::vector<float> logits(E), scores(E), latent(L), out_lat(L, 0.0f);
+  std::vector<float> logits(E), scores(E), routing(E), latent(L), out_lat(L, 0.0f);
   std::vector<int64_t> idx(K);
   std::vector<float> probs(K);
   for (int64_t t = 0; t < tokens; ++t) {
     const float* xt = x + t * hidden;
+    // Router: logits = x @ gate^T (NO bias; :1510). Routing SELECTION uses
+    // sigmoid(logits) + expert_bias (:1512-1513), but the weights are the
+    // gathered RAW sigmoid scores of the selected experts, normalized and
+    // scaled (:1514-1517). Bias affects only which experts are picked.
     for (int64_t e = 0; e < E; ++e) {
-      double s = ebias[e];
+      double s = 0.0;
       for (int64_t i = 0; i < hidden; ++i) s += double(xt[i]) * gate[e * hidden + i];
       logits[e] = float(s);
       scores[e] = 1.0f / (1.0f + std::exp(-float(s)));
+      routing[e] = scores[e] + ebias[e];  // scores_for_routing (:1512)
     }
-    // top-K by score (stable: lowest index wins ties — torch.topk behavior on
-    // equal values is the lower index first for sorted=True; the reference
-    // uses torch.topk(scores, k) which returns the FIRST k in sorted order).
+    // top-K by routing score (stable: lowest index wins ties — torch.topk
+    // behavior on equal values is the lower index first for sorted=True).
     for (int64_t k = 0; k < K; ++k) {
       int64_t best = -1;
       for (int64_t e = 0; e < E; ++e) {
         if (std::find(idx.begin(), idx.begin() + k, e) != idx.begin() + k)
           continue;
-        if (best < 0 || scores[e] > scores[best]) best = e;
+        if (best < 0 || routing[e] > routing[best]) best = e;
       }
       idx[k] = best;
     }
+    // gather the RAW sigmoid scores of the winners, normalize, scale (:1514-1517)
     double psum = 0.0;
     for (int64_t k = 0; k < K; ++k) psum += scores[idx[k]];
     for (int64_t k = 0; k < K; ++k)
@@ -196,7 +201,10 @@ void RmsNormHead(float* y, const float* x, const float* w, int64_t n,
   double s = 0.0;
   for (int64_t i = 0; i < n; ++i) s += double(x[i]) * x[i];
   const double inv = 1.0 / std::sqrt(s / n + eps);
-  for (int64_t i = 0; i < n; ++i) y[i] = float(double(x[i]) * inv * (1.0 + w[i]));
+  // The GGUF stores the EFFECTIVE norm weight (1 + zero-centered gamma): the
+  // fork multiplies the rms-normed value by the tensor directly
+  // (olala.cpp:3754-3755), so no extra +1 here.
+  for (int64_t i = 0; i < n; ++i) y[i] = float(double(x[i]) * inv * w[i]);
 }
 
 }  // namespace
@@ -453,7 +461,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
       for (int64_t n = 0; n < N; ++n) s += double(Bv[r * N + n]) * Bv[r * N + n];
       const double inv = 1.0 / std::sqrt(s / N + 1e-6);
       for (int64_t n = 0; n < N; ++n) {
-        const double w = 1.0 + bn[n];
+        const double w = bn[n];  // stored weight is effective (1 + gamma)
         Bn[(r * H + h) * N + n] = float(double(Bv[r * N + n]) * inv * w);
       }
     }
@@ -462,7 +470,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
     const double inv = 1.0 / std::sqrt(s / N + 1e-6);
     for (int64_t h = 0; h < H; ++h)
       for (int64_t n = 0; n < N; ++n) {
-        const double w = 1.0 + cn[n];
+        const double w = cn[n];  // stored weight is effective (1 + gamma)
         Cn[(r * H + h) * N + n] = float(double(Cv[r * N + n]) * inv * w);
       }
   }
@@ -482,27 +490,41 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
     std::vector<double> cs(A), sn(A);
     for (int64_t a = 0; a < A; ++a) { cs[a] = std::cos(na[a]); sn[a] = std::sin(na[a]); }
     for (int64_t r = 0; r < R; ++r) {
-      for (int64_t n = 0; n < N; ++n) {
+      // Halved rotary (rotate_pairwise=False, modeling_olala.py:861-868 and
+      // fork olala.cpp apply_rotary: group 0 [0,A) pairs with group 2
+      // [N/2, N/2+A); groups 1 [A,N/2) and 3 [N/2+A,N) pass through
+      // UNROTATED (biased values only).
+      for (int64_t n = 0; n < A; ++n) {
+        const int64_t m = n + N / 2;
         double qv = Cn[(r * H + h) * N + n] + cb[(h * R + r) * N + n];
         double kv = Bn[(r * H + h) * N + n] + kb[(h * R + r) * N + n];
-        if (n < A) {
-          const double q2 = Cn[(r * H + h) * N + (n + N / 2)] + cb[(h * R + r) * N + (n + N / 2)];
-          const double k2 = Bn[(r * H + h) * N + (n + N / 2)] + kb[(h * R + r) * N + (n + N / 2)];
-          Q[(r * H + h) * N + n] = float(qv * cs[n] - q2 * sn[n]);
-          Q[(r * H + h) * N + (n + N / 2)] = float(qv * sn[n] + q2 * cs[n]);
-          K[(r * H + h) * N + n] = float(kv * cs[n] - k2 * sn[n]);
-          K[(r * H + h) * N + (n + N / 2)] = float(kv * sn[n] + k2 * cs[n]);
-        } else {
-          Q[(r * H + h) * N + n] = float(qv);
-          K[(r * H + h) * N + n] = float(kv);
-        }
+        double q2 = Cn[(r * H + h) * N + m] + cb[(h * R + r) * N + m];
+        double k2 = Bn[(r * H + h) * N + m] + kb[(h * R + r) * N + m];
+        Q[(r * H + h) * N + n] = float(qv * cs[n] - q2 * sn[n]);
+        Q[(r * H + h) * N + m] = float(qv * sn[n] + q2 * cs[n]);
+        K[(r * H + h) * N + n] = float(kv * cs[n] - k2 * sn[n]);
+        K[(r * H + h) * N + m] = float(kv * sn[n] + k2 * cs[n]);
+      }
+      // pass-through groups: [A, N/2) and [N/2 + A, N)
+      for (int64_t n = A; n < N / 2; ++n) {
+        Q[(r * H + h) * N + n] =
+            float(Cn[(r * H + h) * N + n] + cb[(h * R + r) * N + n]);
+        K[(r * H + h) * N + n] =
+            float(Bn[(r * H + h) * N + n] + kb[(h * R + r) * N + n]);
+        const int64_t m = n + N / 2;
+        Q[(r * H + h) * N + m] =
+            float(Cn[(r * H + h) * N + m] + cb[(h * R + r) * N + m]);
+        K[(r * H + h) * N + m] =
+            float(Bn[(r * H + h) * N + m] + kb[(h * R + r) * N + m]);
       }
     }
   }
   if (dbg) fprintf(stderr, "stage: rotary done\n");
-  // mimo projections (h, r, p) -> (r, h, p) (:1328-1330)
+  // mimo projections (h, r, p) -> (r, h, p) (:1328-1330). The tensors are
+  // rank-3 [H, R, P]; WAt would stride by shape[1]=R, so read with the rank-3
+  // accessor: element (h, r, pp) at ((h*R)+r)*P + pp.
   auto proj = [&](const OwnedTensor& w, int64_t r, int64_t h, int64_t pp) {
-    return WAt(w, h * R + r, pp, "mimo");  // [H, R, P] read as [h*R+r, p]
+    return W3At(w, h, r, pp, "mimo");  // [H, R, P]
   };
   // step (:871-889)
   const float* Dv = F32Bytes(lw.ssm_d, "D");
@@ -549,6 +571,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
         st.k_state[(r * H + h) * N + n] = K[(r * H + h) * N + n];
   for (int64_t h = 0; h < H; ++h)
     for (int64_t pp = 0; pp < P; ++pp) st.v_state[h * P + pp] = x[h * P + pp];
+
 }
 
 }  // namespace vllm
@@ -622,8 +645,12 @@ void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
       sa += WAt(lw.attn_shift_k, h, i, "shift_k") * x[i];
       sb += WAt(lw.attn_shift_v, h, i, "shift_v") * x[i];
     }
-    const float a_k = float(1.0 / (1.0 + std::exp(-sa)));
-    const float a_v = float(1.0 / (1.0 + std::exp(-sb)));
+    // Document start (pos==0): the shift alpha is masked to 0 (reference
+    // :636-637; fork v_shift_fused reads inp_pos), so the current raw k/v pass
+    // through unblended. Matches OlalaVAttentionHost's doc-start handling.
+    const bool doc_start = pos == 0;
+    const float a_k = doc_start ? 0.0f : float(1.0 / (1.0 + std::exp(-sa)));
+    const float a_v = doc_start ? 0.0f : float(1.0 / (1.0 + std::exp(-sb)));
     for (int64_t d = 0; d < D; ++d) {
       k[h * D + d] = a_k * raw_k_last[h * D + d] +
                      (1.0f - a_k) * kraw[h * D + d];
@@ -709,6 +736,24 @@ void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
       }
   }
 
+  // 8b. elementwise mixer gate: y *= silu(attn_gate @ x + gate_bias)
+  //     (modeling_olala.py:1777-1786; fork olala.cpp:3795-3799). Applied to
+  //     the combined differential output BEFORE mixer_proj.
+  {
+    const int64_t GD = SIG * D;  // 4608 gate rows == mixer output width
+    if (lw.attn_gate.rank != 2 || lw.attn_gate.shape[0] != GD ||
+        lw.attn_gate.shape[1] != p.hidden) {
+      throw std::runtime_error("olala v attn: attn_gate shape mismatch");
+    }
+    for (int64_t j = 0; j < GD; ++j) {
+      double s = p.gate_bias;
+      for (int64_t i = 0; i < p.hidden; ++i)
+        s += WAt(lw.attn_gate, j, i, "attn_gate") * x[i];
+      const double g = s / (1.0 + std::exp(-s));  // silu
+      out[j] = float(double(out[j]) * g);
+    }
+  }
+
   // 9. commit this token's post-shift post-norm k/v into cache row pos (the
   //    caller sized the cache to (pos+1)*KV*D) and re-cache the RAW k/v for
   //    the NEXT token's shift (:619, before qk-norm).
@@ -768,6 +813,7 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
   };
 
   const int64_t SIG_ALL = p.heads - p.kv_heads;  // signal heads
+  const char* dump_dir = std::getenv("OLALA_DUMP_DIR");
   const int64_t total = static_cast<int64_t>(token_ids.size()) + n_gen;
   std::vector<float> x(p.hidden), ymix;
   int64_t midx = 0, vidx = 0;  // M/V layer ordinals
@@ -779,12 +825,30 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
     for (int64_t l = 0; l < L; ++l) {
       const OlalaLayerWeights& lw = w.layers[static_cast<size_t>(l)];
       const bool is_m = p.layer_types[static_cast<size_t>(l)] == 'M';
+      if (dump_dir != nullptr) {
+        char path[512];
+        std::snprintf(path, sizeof path, "%s/block_%02lld_pos%lld.bin",
+                      dump_dir, (long long)l, (long long)t);
+        FILE* f = std::fopen(path, "wb");
+        if (f) { std::fwrite(x.data(), sizeof(float), static_cast<size_t>(p.hidden), f); std::fclose(f); }
+      }
       // MIXER (resize the scratch to this layer's mixer output dim:
       // M = 2*hidden, V = signal_heads*head_dim)
       ymix.assign(static_cast<size_t>(is_m ? 2 * p.hidden : SIG_ALL * D), 0.0f);
       if (is_m) {
         OlalaMambaStepHost(ymix.data(), mstates[static_cast<size_t>(midx)],
                            x.data(), lw, p);
+        if (dump_dir != nullptr) {
+          char mpath[512];
+          std::snprintf(mpath, sizeof mpath, "%s/m_%02lld_06_kernel_out_pos%lld.bin",
+                        dump_dir, (long long)l, (long long)t);
+          FILE* mf = std::fopen(mpath, "wb");
+          if (mf) {
+            std::fwrite(ymix.data(), sizeof(float),
+                        static_cast<size_t>(2 * p.hidden), mf);
+            std::fclose(mf);
+          }
+        }
         ++midx;
       } else {
         // grow the V cache by one row, then run the step against it
@@ -798,6 +862,17 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
             rk_last[static_cast<size_t>(vidx)].data(),
             rv_last[static_cast<size_t>(vidx)].data(),
             x.data(), t, lw, p, ymix.data());
+        if (dump_dir != nullptr) {
+          char vpath[512];
+          std::snprintf(vpath, sizeof vpath, "%s/vmix_%02lld_pos%lld.bin",
+                        dump_dir, (long long)l, (long long)t);
+          FILE* vf = std::fopen(vpath, "wb");
+          if (vf) {
+            std::fwrite(ymix.data(), sizeof(float),
+                        static_cast<size_t>(SIG_ALL * D), vf);
+            std::fclose(vf);
+          }
+        }
         ++vidx;
       }
       // mixer_proj: attn_output.weight [hidden, mixer_out] @ y
@@ -809,6 +884,13 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
           s += WAt(lw.attn_output, i, j, "attn_output") * ymix[static_cast<size_t>(j)];
         proj[static_cast<size_t>(i)] = float(s);
       }
+      if (dump_dir != nullptr && !is_m) {
+        char ppath[512];
+        std::snprintf(ppath, sizeof ppath, "%s/vproj_%02lld_pos%lld.bin",
+                      dump_dir, (long long)l, (long long)t);
+        FILE* pf = std::fopen(ppath, "wb");
+        if (pf) { std::fwrite(proj.data(), sizeof(float), static_cast<size_t>(p.hidden), pf); std::fclose(pf); }
+      }
       // geodesic_mixer
       std::vector<float> xg(p.hidden);
       OlalaGeodesicNormHost(xg.data(), x.data(), proj.data(), 1, p.hidden,
@@ -816,6 +898,13 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
                             F32Bytes(lw.geo_mixer_bias, "geo_mixer_bias")[0],
                             l);
       for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg[i];
+      if (dump_dir != nullptr) {
+        char gpath[512];
+        std::snprintf(gpath, sizeof gpath, "%s/geo_%02lld_pos%lld.bin",
+                      dump_dir, (long long)l, (long long)t);
+        FILE* gf2 = std::fopen(gpath, "wb");
+        if (gf2) { std::fwrite(x.data(), sizeof(float), static_cast<size_t>(p.hidden), gf2); std::fclose(gf2); }
+      }
       // MLP (latent MoE)
       std::vector<float> mo(p.hidden, 0.0f);
       OlalaMoeHost(mo.data(), x.data(), 1, p.hidden, lw, p);

@@ -44,6 +44,11 @@ struct OlalaParams {
   int64_t headdim = 0;         // olala.mamba_headdim
   int64_t tpa_rank = 0;        // olala.tpa_rank
   int64_t rope_angles = 0;     // olala.num_rope_angles
+  // elementwise mixer gate bias: silu(attn_gate @ x + gate_bias) scales the V
+  // mixer output before mixer_proj (modeling_olala.py:1777-1786, use_gate /
+  // gate_type "elementwise" / gate_bias = olala.gate_bias; fork
+  // olala.cpp:3795-3798 ggml_scale_bias(..., 1.0, gate_b) then ggml_silu)
+  double gate_bias = 0.0;      // olala.gate_bias
   // layer schedule: 'M'/'V' per layer, from olala.layer_types (carried verbatim
   // under config.raw["gguf_unmapped"]["olala.layer_types"]); the W1 tensor walk
   // (attn_q presence) agrees on the pinned artifact.
