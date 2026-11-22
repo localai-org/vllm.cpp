@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M80WA9T38SWMMWYDJ9T938K8
 Title: NEW-CANDIDATE-PORTS W0 (inkling2_loop): tabulate ggml Q4_1/Q5_1 in the GGUF reader and land the inkling2_loop parser + refusing loader row
 Row: NEW-CANDIDATE-PORTS
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-22
 Updated: 2026-11-22
-Closed: -
+Closed: 2026-11-22
 
 ## Problem
 
@@ -16,4 +16,4 @@ The pinned mudler/Inkling-2-Mini-APEX-GGUF Balanced artifact (arch inkling2_loop
 
 ## Resolution
 
--
+Landed on main 2026-11-22 via PR #3586, merge commit 7a4419e69. Tabulated ggml ids 3 (Q4_1, 32/20) and 7 (Q5_1, 32/21) in src/vllm/model_executor/model_loader/gguf_reader.cpp with a real-reader test over the pinned Inkling-2 APEX artifact (77-style skip when absent), and added the inkling2_loop config parser plus one loader row refusing at the forward boundary by name. Focused gate 11/11 cases and 72/72 assertions; ctest subset green; preflight --staged exit 0 with the native pwsh apphost; check-agent-record rot 0; PR body exit 0. Two fresh reviews and two independent operator gate reruns PASS; the loader-wiring and validation gaps found in review were repaired and mutation-proven. The vLLM pin advance past PR #69028 and the looped forward remain owed in .agents/specs/inkling2-loop-w0-gguf-types-and-parser.md.

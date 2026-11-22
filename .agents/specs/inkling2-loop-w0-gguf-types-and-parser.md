@@ -68,9 +68,15 @@ Stop and report `NEEDS_CONTEXT` if the artifact is absent AND no skip can be dem
 - Advance the vLLM pin past PR #69028 (merged 2026-11-21) and re-run the inkling2_loop parity gate; out of scope here. The local pin in `.agents/upstream-sync.md` is unchanged.
 - The looped forward, Q4_1/Q5_1 dequant kernels, name-map census, DSpark, and the full nested `text_config.loop_config` HF shape are port-row work.
 
+## Outcome
+
+- **Measured:** PR #3586 landed on main at merge commit `7a4419e69` on 2026-11-22 after two fresh reviews and two independent operator gate reruns. Focused gate 11 cases / 11 passed and 72 assertions / 72 passed; related ctest subset green; `scripts/agent-preflight.sh --staged` exit 0 with the native pwsh apphost on PATH; `check-agent-record.py --report` rot 0 (1032 anchors, 0 stale, 0 broken); `agent-pr-body.py --pr 3586` exit 0. Six mutation REDs proved the loader wiring and all three loop_config checks are protected; the re-review reproduced each at the final head.
+- **Rejected:** direct-helper unit tests as sufficient coverage. The first review deleted both loader call sites and the gate stayed green, so a hermetic `FromModelDir` production-path test was added. Similarly, "mirrors upstream validation" was rejected as unproven until `gate_rank`, core-range and fixed-pass checks were each mutated to always-false and shown to turn the gate red. The mounted 20 GB artifact was rejected for the production-path test in favour of an in-memory `GgufModelBuilder`, so the test runs without shared storage. The host's dotnet pwsh shim failure was not gated away; the native apphost path was used instead.
+- **Why the defaults hold:** ggml geometry comes from llama.cpp `GGML_QUANT_SIZES` (Q4_1 32/20, Q5_1 32/21), not from a guessed padding. No model-path buffer or GEMM output is widened to f32, so the inherited dtype stays unchanged. `SKIP_RETURN_CODE 77` keeps CI without `/mnt/models` honest rather than silently passing. The refusal text names `NEW-CANDIDATE-PORTS` so a premature forward is attributable to this row.
+
 ## Now
 
-ACTIVE — W0 implementation in `/tmp/vllm-inkling2-w0`; issue ISSUE-LOCAL-01M80WA9T38SWMMWYDJ9T938K8 open until the PR lands.
+DONE — W0 landed on main via PR #3586 (merge commit `7a4419e69`, 2026-11-22); issue ISSUE-LOCAL-01M80WA9T38SWMMWYDJ9T938K8 closed with dated resolution evidence. The parent row `NEW-CANDIDATE-PORTS` stays ACTIVE for the olala W2d and forward-port waves.
 
 ## Git integration
 
