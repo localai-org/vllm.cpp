@@ -65,3 +65,22 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
                         const OlalaLayerWeights& lw, const OlalaParams& p);
 
 }  // namespace vllm
+
+namespace vllm {
+
+// W2d: single-token V-layer attention step with the raw k_last/v_last cache
+// (modeling_olala.py:600-619 L==1 decode arm). k_last/v_last: [KV*D] in/out —
+// the RAW last k/v (the reference caches them BEFORE the shift, :619).
+void OlalaVAttentionStepHost(float* out, const float* attn_k_cache,
+                             const float* attn_v_cache, float* raw_k_last,
+                             float* raw_v_last, const float* x, int64_t pos,
+                             const OlalaLayerWeights& lw, const OlalaParams& p);
+
+// W2d: full-model greedy generation, host f32. token_ids: prompt in, prompt +
+// generated ids out (n_gen appended). Stepping per token: M layers via
+// OlalaMambaStepHost, V layers via OlalaVAttentionStepHost, both with
+// per-layer state. Deterministic; argmax over logits.
+void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
+                       std::vector<int64_t>& token_ids, int64_t n_gen);
+
+}  // namespace vllm

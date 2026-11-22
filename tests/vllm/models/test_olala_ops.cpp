@@ -15,6 +15,7 @@
 
 #include "vllm/model_executor/models/olala.h"
 #include "vllm/model_executor/models/olala_ops.h"
+#include "vllm/model_executor/models/olala_gguf_config.h"
 
 namespace vllm {
 constexpr double kOlalaPi = 3.14159265358979323846;  // the math constant PI is not portable to MSVC under that name
@@ -623,4 +624,43 @@ TEST_CASE("olala W2c-3: Mamba3-MIMO step matches the reference over 3 tokens") {
     CAPTURE(i);
     CHECK(std::fabs(st.ssm[i] - rst.ssm[i]) < 5e-4);
   }
+}
+
+// W2d: the assembled full forward on the REAL bf16 artifact. This smoke gates
+// ASSEMBLY (loads through LoadOlalaGgufWeights, all ops composed, deterministic
+// repeat, finite logits, ids in vocab) — NOT token exactness vs an oracle
+// (that is the W2d-2 gate vs llama-cpp-olala / olala-transformers). One known
+// recorded limitation: the V-layer attention cache is not yet threaded through
+// the step host (each decode step attends only the current k/v), so later
+// tokens cannot see earlier cross-token keys — assembly-stage only.
+#ifndef OLALA_BF16_PATH
+#define OLALA_BF16_PATH "/mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-bf16.gguf"
+#endif
+TEST_CASE("olala W2d: full forward smoke on the pinned bf16 artifact") {
+  if (!std::filesystem::exists(OLALA_BF16_PATH)) {
+    MESSAGE("SKIP: " << OLALA_BF16_PATH << " not mounted");
+    return;
+  }
+  vllm::GgufFile gguf = vllm::GgufFile::Open(OLALA_BF16_PATH);
+  vllm::HfConfig cfg = vllm::OlalaHfConfigFromGguf(gguf);
+  vllm::OlalaWeights w = vllm::LoadOlalaGgufWeights(gguf, cfg);
+  vllm::OlalaParams p = vllm::ParseOlalaParams(cfg);
+  REQUIRE(p.vocab > 0);
+  std::vector<int64_t> prompt = {151644, 872, 198, 9707, 151645};  // <|im_start|>user\n hi <|im_end|>-ish ids in vocab range
+  for (auto tok : prompt) CHECK(tok < p.vocab);
+  const int64_t n_gen = 6;
+  vllm::OlalaGenerateHost(w, p, prompt, n_gen);
+  REQUIRE(prompt.size() == static_cast<size_t>(5 + n_gen));
+  bool in_vocab = true, all_same = true;
+  for (size_t i = 5; i < prompt.size(); ++i) {
+    if (prompt[i] < 0 || prompt[i] >= p.vocab) in_vocab = false;
+  }
+  for (size_t i = 6; i < prompt.size(); ++i)
+    if (prompt[i] != prompt[i - 1]) all_same = false;
+  CHECK(in_vocab);
+  CHECK_FALSE(all_same);
+  // determinism: rerun
+  std::vector<int64_t> prompt2 = {151644, 872, 198, 9707, 151645};
+  vllm::OlalaGenerateHost(w, p, prompt2, n_gen);
+  CHECK(prompt2 == prompt);
 }
