@@ -1,0 +1,88 @@
+# Mutation repair evidence — NEW-CANDIDATE-PORTS W0 (inkling2_loop)
+
+Review of PR #3586 raised two findings. A fresh implementer added hermetic
+tests and re-applied the reviewer's mutations at head 288065cb8 to prove each
+new test detects the defect. All mutations were applied to byte-for-byte
+backups of the two production files; after EVERY mutation the file was copied
+back and `sha256sum` matched the original and `git status --porcelain` showed
+only the test file modified.
+
+Production files (unchanged at end):
+  src/vllm/entrypoints/model_loader.cpp
+    sha256 25f4e9078c071a6f4c19bff871231cd934b767745efa057e7ff0
+  src/vllm/model_executor/models/inkling2_loop_gguf_config.cpp
+    sha256 9627ddb611ccc0980b9c8ccc0b6e9ae18c3eb4363d07bac05f4f9182312147bc
+
+Build + run recipe (each mutation, CPU-only build dir already configured):
+  cmake --build /tmp/opencode/vllm-inkling2-build --target test_inkling2_loop_gguf -j4
+  /tmp/opencode/vllm-inkling2-build/tests/test_inkling2_loop_gguf
+
+Baseline before any mutation: 11 test cases, 72 assertions, all pass.
+
+## Finding 1 — dead-wiring test gap (production call sites)
+
+New production-path case:
+  tests/vllm/models/test_inkling2_loop_gguf.cpp:229
+  "inkling2_loop: FromModelDir reaches the loader row and refuses"
+It builds a minimal VALID inkling2_loop GGUF in memory (gguf_test::GgufModelBuilder,
+no mount), calls LoadedEngine::FromModelDir on the .gguf file, and asserts the
+thrown message contains "NEW-CANDIDATE-PORTS" and "forward boundary".
+
+  M1  delete the kGgufArchArms[] row
+      ({vllm::kInkling2LoopGgufArch, &vllm::Inkling2LoopHfConfigFromGguf},)
+      -> RED: 11 cases / 10 passed / 1 failed; 72 assertions / 70 passed / 2 failed
+      -> failing case "FromModelDir reaches the loader row and refuses"
+      -> both CHECK(NW-CANDIDATE-PORTS) and CHECK(forward boundary) is NOT correct
+      (the dispatch falls through to the generic "architecture not supported" text.)
+
+  M2  delete the `if (IsInkling2LoopGguf(gguf)) { throw ... }` block at ~:2923
+      -> RED: 11 / 10 passed / 1 failed; 72 / 70 passed / 2 failed
+      -> same failing case and same two substring checks
+      (the load continues to ModelRegistry::Resolve and refuses without the row text.)
+
+  M3  delete BOTH (the reviewer's exact mutation)
+      -> RED: 11 / 10 passed / 1 failed; 72 / 70 passed / 2 failed
+      -> same failing case and same two substring checks
+
+Before this case existed, all three mutations left the focused gate GREEN at
+7/7 and 67/67. After it, each turns the focused gate red.
+
+## Finding 2 — loop_config validation not mutation-proven
+
+New hermetic cases (all feed a synthetic GGUF built in memory, no mount; exactly
+one field is overridden from the valid default):
+
+  tests/vllm/models/test_inkling2_loop_gguf.cpp:247
+    "inkling2_loop: loop core layers outside the block count are refused"
+  tests/vllm/models/test_inkling2_loop_gguf.cpp:258
+    "inkling2_loop: gate_rank 0 is refused"
+  tests/vllm/models/test_inkling2_loop_gguf.cpp:268
+    "inkling2_loop: a single fixed-loop pass is refused"
+
+  M4  `if (gate_rank < 1)` -> `if (false)`
+      -> RED: 11 / 10 passed / 1 failed; 72 / 71 passed / 1 failed
+      -> "gate_rank 0 is refused": CHECK_THROWS_WITH did NOT throw at all
+
+  M5  core-range check -> always-false condition
+      (`if (core_start > core_end && core_start < core_end)`; the direct
+       `if (false)` form was rejected by -Werror=unused-value because it left
+       the old boolean expression as a no-effect statement)
+      -> RED: 11 / 10 passed / 1 failed; 72 / 71 passed / 1 failed
+      -> "loop core layers outside the block count are refused": did NOT throw
+
+  M6  `if (!is_varloop && num_passes < 2)` -> `if (false)`
+      -> RED: 11 / 10 passed / 1 failed; 72 / 71 passed / 1 failed
+      -> "a single fixed-loop pass is refused": did NOT throw
+
+Before these cases, the reviewer's M4 left the focused gate GREEN at 7/7 and
+67/67. After them, each of M4/M5/M6 turns the focused gate red.
+
+## Restoration
+
+After all six mutations both production files were copied back from their
+byte-for-byte backups. sha256sum matched the originals above, the focused
+binary was rebuilt, and the final run was GREEN:
+
+  [doctest] test cases: 11 | 11 passed | 0 failed | 0 skipped
+  [doctest] assertions: 72 | 72 passed | 0 failed
+  [doctest] Status: SUCCESS!

@@ -44,6 +44,7 @@ OUT: the looped forward and its kernels, the per-pass KV/conv caches, the messag
 2. Minimum change: add cases 3 and 7 to `FindGgmlTraits`; focused green for the type cases.
 3. Parser tests (same binary): field mapping, `loop_config` values + validation, unmapped carry (`sliding_window_pattern` bool array, `loop.*`, tokenizer.* all carried; mapped keys not carried), wrong-arch refusal (hermetic synthetic GGUF built with `tests/vllm/gguf_builder.h`), forward-refusal text. Port of upstream `test_loop_serving_options_validation` where applicable.
 4. `std::exit(77)` on a missing artifact (CTest `SKIP_RETURN_CODE 77`, wired by `vllm_cpp_add_test` at `tests/CMakeLists.txt:38`) so CI without `/mnt/models` reports Skipped, never a false green.
+5. Review repair: four hermetic cases built from `gguf_test::GgufModelBuilder` with no mount at `tests/vllm/models/test_inkling2_loop_gguf.cpp` — `FromModelDir reaches the loader row and refuses` (:229, the production-path reach test through `LoadedEngine::FromModelDir`), `loop core layers outside the block count are refused` (:247), `gate_rank 0 is refused` (:258), and `a single fixed-loop pass is refused` (:268). Each was mutation-proven red by disabling the guarantee it names; evidence in `docs/bench-evidence/new-candidate-inkling2-w0-20261122/mutation-repair.log`.
 
 ## Gates / evidence
 
