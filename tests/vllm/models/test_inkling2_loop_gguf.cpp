@@ -109,7 +109,8 @@ std::string TinyInkling2Gguf(const TinyInkling2& f = {}) {
 TEST_CASE("gguf: type ids 3 (Q4_1) and 7 (Q5_1) are tabulated") {
   // Geometry from llama.cpp ggml-common.h / gguf-py GGML_QUANT_SIZES:
   // block_q4_1 = f16 d + f16 m + 16 qs = 20 bytes per 32 elements;
-  // block_q5_1 = f16 d + f16 m + u8 qh + 16 qs = 21 bytes per 32 elements.
+  // block_q5_1 = f16 d + f16 m + u8 qh[4] + 16 qs = 24 bytes per 32 elements
+  // (ggml-common.h:237-249; qh is 4 bytes, one high bit per quant).
   const vllm::GgmlTypeTraits& q4_1 = vllm::GgmlTraits(3);
   CHECK(q4_1.block_elems == 32);
   CHECK(q4_1.block_bytes == 20);
@@ -117,7 +118,7 @@ TEST_CASE("gguf: type ids 3 (Q4_1) and 7 (Q5_1) are tabulated") {
 
   const vllm::GgmlTypeTraits& q5_1 = vllm::GgmlTraits(7);
   CHECK(q5_1.block_elems == 32);
-  CHECK(q5_1.block_bytes == 21);
+  CHECK(q5_1.block_bytes == 24);
   CHECK(std::string(q5_1.name) == "Q5_1");
 }
 
@@ -136,6 +137,12 @@ TEST_CASE("gguf: the APEX Balanced artifact opens with its 704 tensors") {
     if (t.ggml_type == 7) {
       ++type7;
       CHECK(t.name.find("ffn_down_exps.weight") != std::string::npos);
+      uint64_t numel = 1;
+      for (int64_t d : t.shape) numel *= static_cast<uint64_t>(d);
+      // The GGUF header offsets in apex-balanced-walk.txt confirm 24 bytes per
+      // 32-elem block: blk.10's ffn_down_exps ends 254,803,968 bytes after it
+      // starts (= numel/32 * 24), not the 222,953,472 that 21 would give.
+      CHECK(t.nbytes == numel / 32 * 24);
     }
   }
   // The committed walk records 14 type-7 tensors, all routed experts.

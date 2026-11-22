@@ -1,0 +1,23 @@
+Command: ctest --test-dir /tmp/opencode/vllm-q5fix-build -R '^(test_inkling2_loop_gguf|test_gguf)$' --output-on-failure
+Test project /tmp/opencode/vllm-q5fix-build
+    Start  18: test_gguf
+1/2 Test  #18: test_gguf ........................   Passed    0.01 sec
+    Start 824: test_inkling2_loop_gguf
+2/2 Test #824: test_inkling2_loop_gguf ..........   Passed    0.38 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.40 sec
+ctest rc=0
+=== direct focused ===
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases: 11 | 11 passed | 0 failed | 0 skipped
+[doctest] assertions: 86 | 86 passed | 0 failed |
+[doctest] Status: SUCCESS!
+=== skip check ===
+SKIP: /nonexistent/absent.gguf not mounted; CTest reports this as Skipped (exit 77)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+skip rc=77

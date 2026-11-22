@@ -604,7 +604,7 @@ TEST_CASE("ggml traits: unknown type id throws") {
   CHECK(vllm::GgmlTraits(3).block_elems == 32);
   CHECK(vllm::GgmlTraits(3).block_bytes == 20);
   CHECK(vllm::GgmlTraits(7).block_elems == 32);
-  CHECK(vllm::GgmlTraits(7).block_bytes == 21);
+  CHECK(vllm::GgmlTraits(7).block_bytes == 24);  // Q5_1, qh[4] is 4 bytes
 }
 
 #if !defined(_WIN32)

@@ -228,12 +228,15 @@ const GgmlTypeTraits* FindGgmlTraits(uint32_t type) {
       return &t;
     }
     case 7: {
-      // block_q5_1 (llama.cpp ggml-common.h): f16 d + f16 m + u8 qh
-      // + QK5_1/2 u8 qs = 2 + 2 + 1 + 16 = 21, QK5_1 = 32. The pinned
-      // mudler/Inkling-2-Mini-APEX-GGUF Balanced artifact stores 14
-      // `blk.N.ffn_down_exps.weight` tensors in it; without this row
+      // block_q5_1 (llama.cpp ggml-common.h:237-249): f16 d + f16 m
+      // + u8 qh[4] + QK5_1/2 u8 qs = 2 + 2 + 4 + 16 = 24, QK5_1 = 32.
+      // qh is FOUR bytes, not one: each of the 32 quants contributes its
+      // fifth high bit to one bit of qh. static_assert in ggml-common.h:
+      // sizeof(block_q5_1) == 2*sizeof(ggml_half) + sizeof(uint32_t) + QK5_1/2.
+      // The pinned mudler/Inkling-2-Mini-APEX-GGUF Balanced artifact stores
+      // 14 `blk.N.ffn_down_exps.weight` tensors in it; without this row
       // GgufFile::Open refused the whole 20 GB file over those 14 tensors.
-      static constexpr GgmlTypeTraits t{32, 21, "Q5_1"};
+      static constexpr GgmlTypeTraits t{32, 24, "Q5_1"};
       return &t;
     }
     case 8: {
