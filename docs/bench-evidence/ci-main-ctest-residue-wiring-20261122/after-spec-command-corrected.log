@@ -1,0 +1,14 @@
+test_a_skip_is_accounted_but_never_counted_as_executed (test_check_ctest_accounting.ParsingTests.test_a_skip_is_accounted_but_never_counted_as_executed) ... ok
+test_counts_each_terminal_kind (test_check_ctest_accounting.ParsingTests.test_counts_each_terminal_kind) ... ok
+test_duplicate_status_lines_are_refused (test_check_ctest_accounting.ParsingTests.test_duplicate_status_lines_are_refused) ... ok
+test_no_terminal_lines_is_a_failure (test_check_ctest_accounting.ParsingTests.test_no_terminal_lines_is_a_failure) ... ok
+test_failing_ctest_still_prints_its_output_and_reaches_the_guard (test_check_ctest_accounting.WorkflowGuardTests.test_failing_ctest_still_prints_its_output_and_reaches_the_guard) ... ok
+test_fully_accounted_passing_run_is_accepted (test_check_ctest_accounting.WorkflowGuardTests.test_fully_accounted_passing_run_is_accepted) ... ok
+test_genuine_ctest_failure_is_not_masked_by_clean_accounting (test_check_ctest_accounting.WorkflowGuardTests.test_genuine_ctest_failure_is_not_masked_by_clean_accounting) ... ok
+test_short_run_is_refused (test_check_ctest_accounting.WorkflowGuardTests.test_short_run_is_refused) ... ok
+test_skip_is_reported_as_not_executed_when_ctest_passes (test_check_ctest_accounting.WorkflowGuardTests.test_skip_is_reported_as_not_executed_when_ctest_passes) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.730s
+
+OK

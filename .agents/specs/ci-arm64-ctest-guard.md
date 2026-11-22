@@ -104,7 +104,7 @@ lines, and the "did not run" section.
 - `scripts/agent-preflight.sh` (all record gates and mutation suites) before
   each commit and before push.
 - `python3 scripts/check-agent-record.py --report` reports rot 0 before push.
-- `python3 -m unittest discover -s tests/scripts -p 'test_check_arm64_ctest_guard.py'`
+- `python3 -m unittest discover -s tests/scripts -p 'test_check_ctest_accounting.py'`
   stays green after the fix; the same command is RED before it.
 - `python3 scripts/check-commit-style.py` on the pushed range and
   `python3 scripts/check-commit-trailers.py --message-file` on each message.
