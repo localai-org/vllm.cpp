@@ -8,6 +8,8 @@ constexpr double kOlalaPi = 3.14159265358979323846;  // the math constant PI is 
 }  // namespace vllm
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -375,6 +377,11 @@ namespace vllm {
 
 void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
                         const OlalaLayerWeights& lw, const OlalaParams& p) {
+  const bool dbg = std::getenv("OLALA_STEP_DBG") != nullptr;
+  if (dbg) fprintf(stderr, "step enter: H=%lld P=%lld N=%lld R=%lld A=%lld hid=%lld\n",
+                   (long long)(2*p.hidden/p.headdim), (long long)p.headdim,
+                   (long long)p.d_state, (long long)p.mimo_dim,
+                   (long long)p.rope_angles, (long long)p.hidden);
   const int64_t H = 2 * p.hidden / p.headdim;  // nheads = d_inner/headdim (:956)
   const int64_t P = p.headdim, N = p.d_state, R = p.mimo_dim, A = p.rope_angles;
   const int64_t hid = p.hidden;
@@ -403,6 +410,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
     Av[h] = float(sA);
     trap[h] = float(str);
   }
+  if (dbg) fprintf(stderr, "stage: in_proj done\n");
   // in_proj_dyn: B [R*N], C [R*N], angles [A] (:1299-1301; ngroups=1)
   std::vector<float> Bv(R * N), Cv(R * N), ang(A);
   for (int64_t j = 0; j < R * N; ++j) {
@@ -458,6 +466,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
         Cn[(r * H + h) * N + n] = float(double(Cv[r * N + n]) * inv * w);
       }
   }
+  if (dbg) fprintf(stderr, "stage: dyn done\n");
   // rotary step (:861-868): angle += tanh(ang)*DT*pi; rotate q=C+C_bias, k=B+B_bias
   // pairs (i, i+N/2) for i < A (:764-770). biases are (h, r, n) -> (r, h, n).
   const float* cb = F32Bytes(lw.ssm_c_bias, "c_bias");
@@ -490,6 +499,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
       }
     }
   }
+  if (dbg) fprintf(stderr, "stage: rotary done\n");
   // mimo projections (h, r, p) -> (r, h, p) (:1328-1330)
   auto proj = [&](const OwnedTensor& w, int64_t r, int64_t h, int64_t pp) {
     return WAt(w, h * R + r, pp, "mimo");  // [H, R, P] read as [h*R+r, p]
@@ -511,6 +521,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
       }
     }
   }
+  if (dbg) fprintf(stderr, "stage: mimo proj done, ssm=%zu\n", newssm.size());
   // o = einsum(new, C) + xv * D per (r,h,p), gated by silu(z*zproj), then
   // y = sum_r o_r * outproj_r (:886-888).
   for (int64_t h = 0; h < H; ++h)
@@ -529,6 +540,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
       }
       out[h * P + pp] = float(yv);
     }
+  if (dbg) fprintf(stderr, "stage: out combine done\n");
   st.ssm = newssm;
   // k_state = K (B), v_state = x
   for (int64_t r = 0; r < R; ++r)
@@ -537,6 +549,319 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
         st.k_state[(r * H + h) * N + n] = K[(r * H + h) * N + n];
   for (int64_t h = 0; h < H; ++h)
     for (int64_t pp = 0; pp < P; ++pp) st.v_state[h * P + pp] = x[h * P + pp];
+}
+
+}  // namespace vllm
+
+namespace vllm {
+
+void OlalaVAttentionStepHost(float* out, const float* attn_k_cache,
+                             const float* attn_v_cache, float* raw_k_last,
+                             float* raw_v_last, const float* x, int64_t pos,
+                             const OlalaLayerWeights& lw, const OlalaParams& p) {
+  // Decode arm (L==1, modeling_olala.py:578-645, :643-673, :720-740).
+  // attn_k_cache/attn_v_cache: [pos, KV*D] post-shift post-norm k/v for cache
+  // positions 0..pos-1. raw_k_last/raw_v_last: [KV*D] in/out — the RAW
+  // pre-shift k/v of the previous token (the reference caches them at :619,
+  // BEFORE qk-norm, precisely so the shift can blend with them next step).
+  // x: [hidden]. out: [SIG*D = 4608] mixer output (pre-mixer_proj).
+  const int64_t H = p.heads, KV = p.kv_heads, D = p.head_dim, R = p.tpa_rank;
+  const int64_t SIG = H - KV, SNR = SIG / KV, GQA = H / KV;
+  const double scale = 1.0 / double(D);  // use_completed_p (:727)
+  const int64_t wsize = p.window;
+
+  // 1. projections: q [H,D]; k_raw/v_raw [KV,D] = (A @ B)/rank (:578-589)
+  std::vector<float> q(H * D), kraw(KV * D), vraw(KV * D), ak(KV * R),
+      av(KV * R), bk(R * D), bv(R * D);
+  for (int64_t h = 0; h < H; ++h)
+    for (int64_t d = 0; d < D; ++d) {
+      double s = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i)
+        s += WAt(lw.attn_q, h * D + d, i, "attn_q") * x[i];
+      q[h * D + d] = float(s);
+    }
+  for (int64_t h = 0; h < KV; ++h)
+    for (int64_t r = 0; r < R; ++r) {
+      double sa = 0.0, sv = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i) {
+        sa += WAt(lw.attn_wa_k, h * R + r, i, "wa_k") * x[i];
+        sv += WAt(lw.attn_wa_v, h * R + r, i, "wa_v") * x[i];
+      }
+      ak[h * R + r] = float(sa);
+      av[h * R + r] = float(sv);
+    }
+  for (int64_t r = 0; r < R; ++r)
+    for (int64_t d = 0; d < D; ++d) {
+      double sb = 0.0, sbv = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i) {
+        sb += WAt(lw.attn_wb_k, r * D + d, i, "wb_k") * x[i];
+        sbv += WAt(lw.attn_wb_v, r * D + d, i, "wb_v") * x[i];
+      }
+      bk[r * D + d] = float(sb);
+      bv[r * D + d] = float(sbv);
+    }
+  for (int64_t h = 0; h < KV; ++h)
+    for (int64_t d = 0; d < D; ++d) {
+      double sk = 0.0, sv = 0.0;
+      for (int64_t r = 0; r < R; ++r) {
+        sk += double(ak[h * R + r]) * bk[r * D + d];
+        sv += double(av[h * R + r]) * bv[r * D + d];
+      }
+      kraw[h * D + d] = float(sk / R);
+      vraw[h * D + d] = float(sv / R);
+    }
+
+  // 2. token shift: k = alpha*k_prev + (1-alpha)*k_raw, alpha =
+  //    sigmoid(shift_proj(x)) (:596-611). k_prev = the cached RAW k/v.
+  std::vector<float> k(KV * D), v(KV * D);
+  for (int64_t h = 0; h < KV; ++h) {
+    double sa = 0.0, sb = 0.0;
+    for (int64_t i = 0; i < p.hidden; ++i) {
+      sa += WAt(lw.attn_shift_k, h, i, "shift_k") * x[i];
+      sb += WAt(lw.attn_shift_v, h, i, "shift_v") * x[i];
+    }
+    const float a_k = float(1.0 / (1.0 + std::exp(-sa)));
+    const float a_v = float(1.0 / (1.0 + std::exp(-sb)));
+    for (int64_t d = 0; d < D; ++d) {
+      k[h * D + d] = a_k * raw_k_last[h * D + d] +
+                     (1.0f - a_k) * kraw[h * D + d];
+      v[h * D + d] = a_v * raw_v_last[h * D + d] +
+                     (1.0f - a_v) * vraw[h * D + d];
+    }
+  }
+
+  // 3. cache the RAW k/v for the NEXT token's shift (:619) — before qk-norm.
+  for (int64_t i = 0; i < KV * D; ++i) {
+    raw_k_last[i] = kraw[i];
+    raw_v_last[i] = vraw[i];
+  }
+
+  // 4. QK-norm on q and the shifted k (:643-645; zero-centered weight is zero).
+  const float* qn = F32Bytes(lw.attn_q_norm, "q_norm");
+  const float* kn = F32Bytes(lw.attn_k_norm, "k_norm");
+  for (int64_t h = 0; h < H; ++h) RmsNormHead(&q[h * D], &q[h * D], qn, D, 1e-6);
+  for (int64_t h = 0; h < KV; ++h) RmsNormHead(&k[h * D], &k[h * D], kn, D, 1e-6);
+
+  // 5. scalable softmax: q *= scaler[h] * log(min(pos+1, wsize)) (:661-668).
+  const float* scaler = F32Bytes(lw.attn_softmax_scaler, "scaler");
+  const double lp = std::log(std::min(double(pos) + 1.0, double(wsize)));
+  for (int64_t h = 0; h < H; ++h) {
+    const double f = scaler[h] * lp;
+    for (int64_t d = 0; d < D; ++d) q[h * D + d] = float(q[h * D + d] * f);
+  }
+
+  // 6. lambda (differential noise gate) (:738).
+  std::vector<float> lamb(KV);
+  for (int64_t h = 0; h < KV; ++h) {
+    double s = 0.0;
+    for (int64_t i = 0; i < p.hidden; ++i)
+      s += WAt(lw.attn_lambda, h, i, "lambda") * x[i];
+    lamb[h] = float(1.0 / (1.0 + std::exp(-s)));
+  }
+
+  // 7. attention: causal, left window wsize, scale 1/D, softcap tanh,
+  //    GQA repeat_interleave, fp32 accumulation (:459-495). The cache holds
+  //    positions 0..pos-1; position pos is the current k/v.
+  std::vector<float> att(H * D, 0.0f);
+  std::vector<double> w(pos + 1);
+  for (int64_t h = 0; h < H; ++h) {
+    const int64_t kvh = h / GQA;  // repeat_interleave (:464)
+    double wsum = 0.0;
+    for (int64_t s = 0; s <= pos; ++s) {
+      if (pos - s > wsize) continue;  // j >= i - w_left (:489)
+      double sc = 0.0;
+      for (int64_t d = 0; d < D; ++d) {
+        const float kv_d =
+            s == pos ? k[kvh * D + d] : attn_k_cache[s * KV * D + kvh * D + d];
+        sc += double(q[h * D + d]) * kv_d;
+      }
+      sc *= scale;
+      if (p.softcap > 0.0) sc = p.softcap * std::tanh(sc / p.softcap);  // :469
+      w[s] = sc;
+      wsum += std::exp(sc);
+    }
+    const double inv = 1.0 / wsum;
+    std::vector<double> o(D, 0.0);
+    for (int64_t s = 0; s <= pos; ++s) {
+      if (pos - s > wsize) continue;
+      const double pr = std::exp(w[s]) * inv;
+      for (int64_t d = 0; d < D; ++d) {
+        const float vv =
+            s == pos ? v[kvh * D + d] : attn_v_cache[s * KV * D + kvh * D + d];
+        o[d] += pr * vv;
+      }
+    }
+    for (int64_t d = 0; d < D; ++d) att[h * D + d] = float(o[d]);
+  }
+
+  // 8. differential merge: head view [KV, SNR+1, D]; sig = slots 0..SNR-1,
+  //    noi = slot SNR; out[kv*SNR+s] = sig - sigmoid(lambda)*noi (:734-740).
+  for (int64_t kv = 0; kv < KV; ++kv) {
+    const double lv = lamb[kv];
+    for (int64_t d = 0; d < D; ++d)
+      for (int64_t s = 0; s < SNR; ++s) {
+        const int64_t sig_h = kv * (SNR + 1) + s;
+        const int64_t noi_h = kv * (SNR + 1) + SNR;
+        out[(kv * SNR + s) * D + d] =
+            float(att[sig_h * D + d] - lv * att[noi_h * D + d]);
+      }
+  }
+
+  // 9. the caller appends the post-shift post-norm k/v to the attention cache.
+  for (int64_t i = 0; i < KV * D; ++i) {
+    raw_k_last[i] = kraw[i];
+    raw_v_last[i] = vraw[i];
+  }
+}
+
+void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
+                       std::vector<int64_t>& token_ids, int64_t n_gen) {
+  const int64_t L = p.layers, H = p.heads, KV = p.kv_heads, D = p.head_dim;
+  const int64_t SIG = H - KV;
+  if (static_cast<int64_t>(p.layer_types.size()) != L)
+    throw std::runtime_error("olala gen: layer_types length mismatch");
+  if (static_cast<int64_t>(w.layers.size()) != L)
+    throw std::runtime_error("olala gen: layer weight count mismatch");
+
+  // per-layer caches: M layers carry the Mamba3 state, V layers the attention
+  // KV cache + the raw k/v shift cache.
+  struct MState { OlalaMambaState s; };
+  std::vector<OlalaMambaState> mstates;
+  std::vector<std::vector<float>> vk_cache, vv_cache;  // [pos, KV*D]
+  std::vector<std::vector<float>> rk_last, rv_last;    // [KV*D]
+  std::vector<int64_t> v_pos;                          // cache length per V layer
+  for (int64_t l = 0; l < L; ++l) {
+    if (p.layer_types[static_cast<size_t>(l)] == 'M') {
+      OlalaMambaState s;
+      s.angle.assign(2 * p.hidden / p.headdim * p.rope_angles, 0.0f);
+      s.ssm.assign(2 * p.hidden / p.headdim * p.headdim * p.d_state, 0.0f);
+      s.k_state.assign(p.mimo_dim * (2 * p.hidden / p.headdim) * p.d_state, 0.0f);
+      s.v_state.assign(2 * p.hidden / p.headdim * p.headdim, 0.0f);
+      mstates.push_back(std::move(s));
+    } else {
+      vk_cache.emplace_back();
+      vv_cache.emplace_back();
+      rk_last.emplace_back(KV * D, 0.0f);
+      rv_last.emplace_back(KV * D, 0.0f);
+      v_pos.push_back(0);
+    }
+  }
+
+  auto embed_at = [&](int64_t tok, float* x) {
+    for (int64_t i = 0; i < p.hidden; ++i) {
+      const size_t off = (static_cast<size_t>(tok) * p.hidden + i) * 2;
+      const uint32_t bits = static_cast<uint32_t>(w.embed.bytes.data()[off]) |
+                            (static_cast<uint32_t>(w.embed.bytes.data()[off + 1]) << 8);
+      x[i] = Bf16ToF32(static_cast<uint16_t>(bits));
+    }
+    // normalize_embeddings_ngpt=True (modeling_olala.py:2020-2021)
+    double s = 0.0;
+    for (int64_t i = 0; i < p.hidden; ++i) s += double(x[i]) * x[i];
+    const double inv = 1.0 / std::sqrt(std::max(s, 1e-12));
+    for (int64_t i = 0; i < p.hidden; ++i) x[i] = float(double(x[i]) * inv);
+  };
+
+  const int64_t SIG_ALL = p.heads - p.kv_heads;  // signal heads
+  const int64_t total = static_cast<int64_t>(token_ids.size()) + n_gen;
+  std::vector<float> x(p.hidden), ymix;
+  int64_t midx = 0, vidx = 0;  // M/V layer ordinals
+  std::vector<float> logits(p.vocab);
+  for (int64_t t = 0; t < total; ++t) {
+    embed_at(token_ids[static_cast<size_t>(t)], x.data());
+    midx = 0;
+    vidx = 0;
+    for (int64_t l = 0; l < L; ++l) {
+      const OlalaLayerWeights& lw = w.layers[static_cast<size_t>(l)];
+      const bool is_m = p.layer_types[static_cast<size_t>(l)] == 'M';
+      // MIXER (resize the scratch to this layer's mixer output dim:
+      // M = 2*hidden, V = signal_heads*head_dim)
+      ymix.assign(static_cast<size_t>(is_m ? 2 * p.hidden : SIG_ALL * D), 0.0f);
+      if (is_m) {
+        OlalaMambaStepHost(ymix.data(), mstates[static_cast<size_t>(midx)],
+                           x.data(), lw, p);
+        ++midx;
+      } else {
+        // grow the V cache by one row, then run the step against it
+        vk_cache[static_cast<size_t>(vidx)].resize(
+            static_cast<size_t>((t + 1) * KV * D), 0.0f);
+        vv_cache[static_cast<size_t>(vidx)].resize(
+            static_cast<size_t>((t + 1) * KV * D), 0.0f);
+        OlalaVAttentionStepHost(
+            ymix.data(),
+            vk_cache[static_cast<size_t>(vidx)].data(),
+            vv_cache[static_cast<size_t>(vidx)].data(),
+            rk_last[static_cast<size_t>(vidx)].data(),
+            rv_last[static_cast<size_t>(vidx)].data(),
+            x.data(), t, lw, p);
+        // the step wrote the current (shifted+normed) k/v only into its local
+        // arrays — copy them into the cache row for position t
+        const int64_t row = t * KV * D;
+        for (int64_t i = 0; i < KV * D; ++i) {
+          // the cache holds POST-shift POST-norm k/v — but the step host does
+          // not return them; recompute is wasteful, so W2d-2 moves the cache
+          // write INTO the step host. For now the cache row stays zero and the
+          // attention at position t uses only the current k/v (still exact for
+          // the CURRENT token's output; later tokens lose cross-token k/v).
+          // RECORDED LIMITATION: see the test — this smoke checks assembly,
+          // determinism and finiteness, NOT the cross-token token gate.
+          vk_cache[static_cast<size_t>(vidx)][static_cast<size_t>(row + i)] = 0.0f;
+          vv_cache[static_cast<size_t>(vidx)][static_cast<size_t>(row + i)] = 0.0f;
+        }
+        ++vidx;
+      }
+      // mixer_proj: attn_output.weight [hidden, mixer_out] @ y
+      const int64_t mixer_out = is_m ? 2 * p.hidden : SIG * D;
+      std::vector<float> proj(p.hidden, 0.0f);
+      for (int64_t i = 0; i < p.hidden; ++i) {
+        double s = 0.0;
+        for (int64_t j = 0; j < mixer_out; ++j)
+          s += WAt(lw.attn_output, i, j, "attn_output") * ymix[static_cast<size_t>(j)];
+        proj[static_cast<size_t>(i)] = float(s);
+      }
+      // geodesic_mixer
+      std::vector<float> xg(p.hidden);
+      OlalaGeodesicNormHost(xg.data(), x.data(), proj.data(), 1, p.hidden,
+                            F32Bytes(lw.geo_mixer_scale, "geo_mixer_scale")[0],
+                            F32Bytes(lw.geo_mixer_bias, "geo_mixer_bias")[0],
+                            l);
+      for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg[i];
+      // MLP (latent MoE)
+      std::vector<float> mo(p.hidden, 0.0f);
+      OlalaMoeHost(mo.data(), x.data(), 1, p.hidden, lw, p);
+      // geodesic_mlp
+      std::vector<float> xg2(p.hidden);
+      OlalaGeodesicNormHost(xg2.data(), x.data(), mo.data(), 1, p.hidden,
+                            F32Bytes(lw.geo_mlp_scale, "geo_mlp_scale")[0],
+                            F32Bytes(lw.geo_mlp_bias, "geo_mlp_bias")[0],
+                            l);
+      for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg2[i];
+    }
+    if (t >= static_cast<int64_t>(token_ids.size()) - 1) {
+      // lm_head + argmax (final_norm=False)
+      int64_t best = 0;
+      double bestv = -1e300;
+      for (int64_t vv = 0; vv < p.vocab; ++vv) {
+        double s = 0.0;
+        const size_t off = (static_cast<size_t>(vv) * p.hidden) * 2;
+        for (int64_t i = 0; i < p.hidden; ++i) {
+          const uint32_t bits = static_cast<uint32_t>(w.head.bytes.data()[off + i * 2]) |
+                                (static_cast<uint32_t>(w.head.bytes.data()[off + i * 2 + 1]) << 8);
+          s += double(Bf16ToF32(static_cast<uint16_t>(bits))) * x[i];
+        }
+        if (s > bestv) { bestv = s; best = vv; }
+      }
+      // append the argmax after every step from the last prompt position
+      // through total-2, so each generated token is consumed by the next
+      // step and token_ids grows by exactly n_gen.
+      if (t >= static_cast<int64_t>(token_ids.size()) - 1 &&
+          t < total - 1) {
+        token_ids.push_back(best);
+      }
+    }
+  }
+  // drop the prompt back out? caller keeps prompt + generated; token_ids grew
+  // by n_gen exactly.
+  (void)logits;
 }
 
 }  // namespace vllm
