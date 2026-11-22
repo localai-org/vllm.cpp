@@ -16,6 +16,10 @@
 #include "vllm/model_executor/models/olala.h"
 #include "vllm/model_executor/models/olala_ops.h"
 
+namespace vllm {
+constexpr double kOlalaPi = 3.14159265358979323846;  // the math constant PI is not portable to MSVC under that name
+}  // namespace vllm
+
 namespace {
 
 vllm::OwnedTensor F32Tensor(std::vector<int64_t> shape, std::vector<float> vals) {
@@ -507,8 +511,8 @@ std::vector<double> RefMambaStep(RefMamba& st, const std::vector<double>& u,
   for (int64_t h = 0; h < H; ++h) {
     std::vector<double> na(A);
     for (int64_t a = 0; a < A; ++a) {
-      na[a] = st.angle[h * A + a] + std::tanh(ang[a]) * DT[h] * M_PI;
-      st.angle[h * A + a] = std::fmod(na[a], 2 * M_PI);
+      na[a] = st.angle[h * A + a] + std::tanh(ang[a]) * DT[h] * vllm::kOlalaPi;
+      st.angle[h * A + a] = std::fmod(na[a], 2 * vllm::kOlalaPi);
     }
     for (int64_t r = 0; r < R; ++r)
       for (int64_t n = 0; n < N; ++n) {
