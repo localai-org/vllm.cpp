@@ -145,9 +145,10 @@ base `cb0da7d66`.
 full forward, assembly smoke on the pinned bf16 artifact) are on branch
 `row/NEW-CANDIDATE-PORTS` in PR #3585, worktree `/tmp/olala-w2c`. The smoke
 run caught three assembly defects the per-op units missed (n_gen+1 append,
-GQA k/v indexing, empty ymix scratch) — all fixed in W2d-1. Next: W2d-2
-threads the V attention KV cache through the step host (the cache row stays
-zero in W2d-1, so later tokens cannot see earlier cross-token keys), then the
-token gate vs `llama-cpp-olala` on q6_k; the `olala-transformers` oracle run
-stays owed (gateable=no, evidence #3582). The quantized arms
+GQA k/v indexing, empty ymix scratch) — all fixed in W2d-1. W2d-2 landed
+(2026-11-22): the step host writes the post-shift post-norm k/v into the
+cache row at `pos`, so later tokens attend cross-token keys; suite 5/5 cases
+253/253 green in Release and bounds-checked Debug. Next: the token gate vs
+`llama-cpp-olala` on q6_k; the `olala-transformers` oracle run stays owed
+(gateable=no, evidence #3582). The quantized arms
 (q6_k/q5_k_m/q8_0-safe2 keep-quant decode) remain refused by name.
