@@ -17,6 +17,33 @@ The pinned artifact `mudler/Inkling-2-Mini-APEX-GGUF @ d85a58007995c3365eb2323b1
   - Upstream test `tests/models/inkling2/test_model.py::test_loop_serving_options_validation` (PR diff) is the applicable config test; its forward/GPU cases are port-row scope and NOT ported here.
 - GGML wire geometry: llama.cpp `ggml-common.h` `block_q4_1 = f16 d + f16 m + QK4_1/2 qs` = 2+2+16 = 20 bytes, QK4_1 = 32; `block_q5_1 = f16 d + f16 m + u8 qh + QK5_1/2 qs` = 2+2+1+16 = 21 bytes, QK5_1 = 32. (Same table the existing cases 2, 6, 8 cite at `gguf_reader.cpp:214-225`.) `GGML_QUANT_SIZES` in `gguf-py/gguf/constants.py` agrees.
 
+## Hazards — llama.cpp inkling2 oracle revisions
+
+- Every llama.cpp-based comparison or secondary-oracle run for `inkling2_loop`
+  must pin revision `690b87d88151dbd775bb6eff5581663688785928` or later. That
+  is ggml-org/llama.cpp PR #32704, "model : inkling2_loop re-share the loop
+  slots after the scale pass", merged 2026-11-21T11:10:39Z. Before the fix the
+  loop slots were copied from physical layers before the NVFP4 scale pass
+  attached them, so loop passes 2-3 across core layers 6-17 ran NVFP4 experts
+  without per-expert scales. The reported symptom on affected NVFP4 GGUFs is
+  PPL ~130-168 instead of ~7.65. llama.cpp began reading `inkling2_loop` at
+  b12600 (29b52d398, PR #32694), so the affected window is
+  `b12600 <= rev < 690b87d`.
+- The pinned artifact here, `mudler/Inkling-2-Mini-APEX-GGUF @ d85a5800…`
+  (20.68 GB Balanced), is a ggml quant: Q4_1 and Q5_1, with fourteen Q5_1
+  `ffn_down_exps` tensors. It is not in the NVFP4-affected class, so the scale
+  bug does not apply to this fixture. The fact is recorded beside the warning
+  so the two are not confused in a future parity run.
+- Other open llama.cpp inkling2 hazards were relayed with the warning and are
+  recorded for the port row, not fixed here: #32710, "Eval bug: inkling2_loop:
+  perplexity nan on CUDA", and #32755, garbage output when loop-layer experts
+  run on CPU with `--n-cpu-moe` and long prompts. Both are outside W0's
+  parse-only scope.
+- Pin check, 2026-11-22: this spec named no llama.cpp revision for inkling2
+  before this note, only unversioned `ggml-common.h` and `GGML_QUANT_SIZES`
+  geometry references. No stale pin needed advancing, and the vLLM pin in
+  `.agents/upstream-sync.md` is unchanged.
+
 ## Scope
 
 IN:
