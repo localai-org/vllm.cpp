@@ -1,0 +1,4 @@
+preflight trace rc: 0
+test scripts invoked: 91
+ctest_accounting invocations: ['tests/scripts/test_check_ctest_accounting.py']
+VERDICT: PRESENT - preflight now runs test_check_ctest_accounting.py

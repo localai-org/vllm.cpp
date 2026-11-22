@@ -1,0 +1,4 @@
+preflight trace rc: 0
+test scripts invoked: 90
+ctest_accounting invocations: []
+VERDICT: ABSENT - preflight does not run test_check_ctest_accounting.py

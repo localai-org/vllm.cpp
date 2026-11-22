@@ -1,0 +1,14 @@
+BASE rc: 0
+BASE: OK: required regression tests have executable + CTest registration, the configured tree matches the pinned label selection (-L gpu -> 2 [test_minimax_music3_depth_arm_real, test_minimax_music3_device_arm_real]), no test 
+
+MUTATION A - remove preflight SUITES line
+rc: 1
+names ctest: True
+diagnostic: ['ERROR: pinned suite test_check_ctest_accounting is missing from preflight SUITES']
+
+MUTATION B - remove CI agent-record command
+rc: 1
+names ctest: True
+diagnostic: ['ERROR: pinned suite test_check_ctest_accounting is missing from the CI suite lane']
+
+RESTORED byte-for-byte: True True

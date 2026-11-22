@@ -1,0 +1,6 @@
+--- preflight SUITES array: ctest_accounting occurrences ---
+ABSENT from scripts/agent-preflight.sh
+--- CI agent-record command occurrences ---
+ABSENT from .github/workflows/ci.yml
+--- REQUIRED_SUITE_REGISTRATIONS pin occurrences ---
+ABSENT from scripts/check-test-registration.py
