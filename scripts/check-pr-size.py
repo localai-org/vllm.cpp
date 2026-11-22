@@ -457,6 +457,10 @@ DISABLED_CREATION_CHECKER = (
     b'\"\"\"Deliberately disabled creation-contract mutation.\"\"\"\n'
 )
 CREATION_MUTATIONS = {
+    # CI-MAIN-CTEST-RESIDUE: created in this range. The suite loads the checker
+    # at import time and calls parse / evaluate / main on it, so a stub leaves
+    # every case red; the workflow test also runs the stub as the CI command.
+    "scripts/check-ctest-accounting.py": DISABLED_CREATION_CHECKER,
     "scripts/check-commit-trailers.py": (
         b"#!/usr/bin/env python3\n"
         b'"""Deliberately disabled creation-contract mutation."""\n'

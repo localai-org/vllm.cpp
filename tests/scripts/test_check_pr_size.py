@@ -857,6 +857,14 @@ class BudgetEnforcement(unittest.TestCase):
             # the disabled stub (exit 0, no output) turns every red-fixture case red;
             # the green cases pass, so the base run fails as the contract requires.
             "scripts/check-tt-public-surface.py",
+            # 2026-11-22: the arm64-full ctest accounting gate
+            # (ISSUE-LOCAL-01M80VZXFK7HRAC9WSQ5P5J51W). Created in this range,
+            # so it has no BASE version to mutate. Its suite loads the checker
+            # at import time and calls parse / evaluate, and it runs the
+            # workflow's own step with the checker as the accounting command;
+            # the disabled stub leaves those cases red. Measured with the stub:
+            # 9 tests, all red.
+            "scripts/check-ctest-accounting.py",
         }
         self.assertEqual(set(checker.CREATION_MUTATIONS), expected)
         for path, mutation in checker.CREATION_MUTATIONS.items():
