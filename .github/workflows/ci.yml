@@ -337,6 +337,18 @@ jobs:
         # Standard library only, no artifact and no GPU.
         run: |
           python3 tests/scripts/test_q4exp_layerfp_diff.py
+      - name: The arm64-full ctest accounting guard stays wired and honest
+        # Registered in TWO places, like the layer-fingerprint step above: here
+        # and in the `SUITES` array of `scripts/agent-preflight.sh`, and pinned in
+        # `REQUIRED_SUITE_REGISTRATIONS` so deleting either one reds
+        # `check-test-registration.py` rather than passing at rc=0 (#1833).
+        #
+        # It ran on NO gating lane when the fix landed (#3587). Its only
+        # execution path was the schedule-only, `continue-on-error` arm64-full
+        # job; the checker sweep SKIPped it as arg-requiring. Standard library
+        # only, CPU-only, no artifact and no GPU.
+        run: |
+          python3 tests/scripts/test_check_ctest_accounting.py
       - name: The docs site's content invariants hold
         # `hugo version` first, deliberately. It is the one line that fails
         # LEGIBLY when the setup step above stopped providing a binary, and it

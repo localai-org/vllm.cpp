@@ -1,0 +1,4 @@
+Record anchors in the `code` / `tests` cells of ACTIVE/ANCHOR-BACKFILL/BUILD-ONLY/DONE/GATING/PARTIAL/READY/UNTRACED rows:
+
+record anchors: ok=1032, stale=0, broken=0  -> rot 0
+agent record OK: ENGINE=179 MODEL=384 QUANT=88 KERNEL=61 BACKEND=94 ANCHOR-ROT=0

@@ -97,6 +97,9 @@ jobs:
       - name: The layer-fingerprint comparator parses every tap the instrument prints
         run: |
           python3 tests/scripts/test_q4exp_layerfp_diff.py
+      - name: The arm64-full ctest accounting guard stays honest
+        run: |
+          python3 tests/scripts/test_check_ctest_accounting.py
 """
 
 
@@ -108,6 +111,7 @@ SUITES=(
   test_sglang_lease_identity
   test_ltx2_oracle_goldens
   test_q4exp_layerfp_diff
+  test_check_ctest_accounting
 )
 for checker in "${CHECKERS[@]}"; do
   python3 "scripts/$checker.py"
@@ -517,6 +521,31 @@ class WiringMutationTests(unittest.TestCase):
             mutated,
             self.ci,
             "test_q4exp_layerfp_diff is missing from preflight SUITES",
+        )
+
+    # The FOURTH pinned suite (#3587), on the same pattern. The suite guarding
+    # the arm64-full ctest fix ran on no gating lane, so widening the pin without
+    # these cases would leave the two registration lines deletable at rc=0.
+    # Deleting one lane's registration must name THIS suite. Not `test_M*`, for
+    # the manifest-digest reason above.
+    def test_pinned_ctest_accounting_suite_absent_from_ci_is_named(self) -> None:
+        mutated = self.ci.replace(
+            "          python3 tests/scripts/test_check_ctest_accounting.py\n", ""
+        )
+        self.assertNotEqual(mutated, self.ci)
+        self.assert_wiring_error(
+            self.preflight,
+            mutated,
+            "test_check_ctest_accounting is missing from the CI suite lane",
+        )
+
+    def test_pinned_ctest_accounting_suite_absent_from_preflight_is_named(self) -> None:
+        mutated = self.preflight.replace("  test_check_ctest_accounting\n", "")
+        self.assertNotEqual(mutated, self.preflight)
+        self.assert_wiring_error(
+            mutated,
+            self.ci,
+            "test_check_ctest_accounting is missing from preflight SUITES",
         )
 
     def test_M18_ci_commands_behind_false_shell_branch_fail(self) -> None:

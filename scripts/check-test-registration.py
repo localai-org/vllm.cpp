@@ -149,6 +149,12 @@ REQUIRED_SUITE_REGISTRATIONS = {
     # the two named cases in the mutation suite are what make it a semantic
     # change rather than a fixture edit.
     "test_q4exp_layerfp_diff": "tests/scripts/test_q4exp_layerfp_diff.py",
+    # #3587, added in the review that found the suite guarding the arm64-full
+    # ctest fix ran on no gating lane. Adding it to the two fixtures alone is
+    # symmetric and additive, so the base checker stays green either way and the
+    # widening would carry no evidence; the two cases in the mutation suite below
+    # delete one registration each and name THIS suite.
+    "test_check_ctest_accounting": "tests/scripts/test_check_ctest_accounting.py",
 }
 
 def _without_line_comments(text: str) -> str:
