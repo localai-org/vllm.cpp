@@ -1,0 +1,170 @@
+﻿2026-11-21T15:47:39.7955879Z Current runner version: '2.338.2'
+2026-11-21T15:47:39.7980102Z ##[group]Runner Image Provisioner
+2026-11-21T15:47:39.7981040Z Hosted Compute Agent
+2026-11-21T15:47:39.7981672Z Version: 20261111.635
+2026-11-21T15:47:39.7982373Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+2026-11-21T15:47:39.7983382Z Build Date: 2026-11-11T01:49:01Z
+2026-11-21T15:47:39.7984134Z Worker ID: {511c437d-f45b-4841-bb3e-ddcb90869023}
+2026-11-21T15:47:39.7984885Z Region: westus3
+2026-11-21T15:47:39.7985512Z Cloud: Azure
+2026-11-21T15:47:39.7986057Z ##[endgroup]
+2026-11-21T15:47:39.7987679Z ##[group]Operating System
+2026-11-21T15:47:39.7988351Z Ubuntu
+2026-11-21T15:47:39.7988860Z 26.04.1
+2026-11-21T15:47:39.7989441Z LTS
+2026-11-21T15:47:39.7989962Z ##[endgroup]
+2026-11-21T15:47:39.7990583Z ##[group]Runner Image
+2026-11-21T15:47:39.7991264Z Image: ubuntu-26.04
+2026-11-21T15:47:39.7991835Z Version: 20261116.202.1
+2026-11-21T15:47:39.7993342Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261116.202/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-21T15:47:39.7995361Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261116.202
+2026-11-21T15:47:39.7996394Z ##[endgroup]
+2026-11-21T15:47:39.7997640Z ##[group]GITHUB_TOKEN Permissions
+2026-11-21T15:47:39.7999526Z Actions: read
+2026-11-21T15:47:39.8000165Z Contents: read
+2026-11-21T15:47:39.8000916Z Metadata: read
+2026-11-21T15:47:39.8001488Z ##[endgroup]
+2026-11-21T15:47:39.8004254Z Secret source: Actions
+2026-11-21T15:47:39.8005233Z Cache mode: write
+2026-11-21T15:47:39.8006265Z Prepare workflow directory
+2026-11-21T15:47:39.8357470Z Prepare all required actions
+2026-11-21T15:47:39.8405857Z Getting action download info
+2026-11-21T15:47:40.1498340Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-21T15:47:40.3409105Z Complete job name: baseline-summary
+2026-11-21T15:47:40.4357557Z ##[group]Run actions/checkout@v4
+2026-11-21T15:47:40.4358466Z with:
+2026-11-21T15:47:40.4358946Z   repository: localai-org/vllm.cpp
+2026-11-21T15:47:40.4362566Z   token: ***
+2026-11-21T15:47:40.4363197Z   ssh-strict: true
+2026-11-21T15:47:40.4363646Z   ssh-user: git
+2026-11-21T15:47:40.4364105Z   persist-credentials: true
+2026-11-21T15:47:40.4364597Z   clean: true
+2026-11-21T15:47:40.4365047Z   sparse-checkout-cone-mode: true
+2026-11-21T15:47:40.4365576Z   fetch-depth: 1
+2026-11-21T15:47:40.4366024Z   fetch-tags: false
+2026-11-21T15:47:40.4366481Z   show-progress: true
+2026-11-21T15:47:40.4366943Z   lfs: false
+2026-11-21T15:47:40.4367375Z   submodules: false
+2026-11-21T15:47:40.4367837Z   set-safe-directory: true
+2026-11-21T15:47:40.4368363Z   allow-unsafe-pr-checkout: false
+2026-11-21T15:47:40.4369251Z ##[endgroup]
+2026-11-21T15:47:40.7465530Z Syncing repository: localai-org/vllm.cpp
+2026-11-21T15:47:40.7468433Z ##[group]Getting Git version info
+2026-11-21T15:47:40.7469425Z Working directory is '/home/runner/work/vllm.cpp/vllm.cpp'
+2026-11-21T15:47:40.7470682Z [command]/usr/bin/git version
+2026-11-21T15:47:40.7473890Z git version 2.56.1
+2026-11-21T15:47:40.7504296Z ##[endgroup]
+2026-11-21T15:47:40.7519830Z Temporarily overriding HOME='/home/runner/work/_temp/bc1fd3af-82da-4e30-86ad-bc2190147c9e' before making global git config changes
+2026-11-21T15:47:40.7532925Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-21T15:47:40.7537152Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/vllm.cpp/vllm.cpp
+2026-11-21T15:47:40.7602056Z Deleting the contents of '/home/runner/work/vllm.cpp/vllm.cpp'
+2026-11-21T15:47:40.7607162Z ##[group]Initializing the repository
+2026-11-21T15:47:40.7612306Z [command]/usr/bin/git init /home/runner/work/vllm.cpp/vllm.cpp
+2026-11-21T15:47:40.7780136Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-21T15:47:40.7781298Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-21T15:47:40.7782453Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-21T15:47:40.7784397Z hint: call:
+2026-11-21T15:47:40.7784874Z hint:
+2026-11-21T15:47:40.7785454Z hint: 	git config --global init.defaultBranch <name>
+2026-11-21T15:47:40.7786129Z hint:
+2026-11-21T15:47:40.7786977Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-21T15:47:40.7788276Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-21T15:47:40.7789115Z hint:
+2026-11-21T15:47:40.7789905Z hint: 	git branch -m <name>
+2026-11-21T15:47:40.7790467Z hint:
+2026-11-21T15:47:40.7791160Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-21T15:47:40.7795481Z Initialized empty Git repository in /home/runner/work/vllm.cpp/vllm.cpp/.git/
+2026-11-21T15:47:40.7809660Z [command]/usr/bin/git remote add origin https://github.com/localai-org/vllm.cpp
+2026-11-21T15:47:40.7868287Z ##[endgroup]
+2026-11-21T15:47:40.7869186Z ##[group]Disabling automatic garbage collection
+2026-11-21T15:47:40.7872281Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-21T15:47:40.7907047Z ##[endgroup]
+2026-11-21T15:47:40.7907876Z ##[group]Setting up auth
+2026-11-21T15:47:40.7915163Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-21T15:47:40.7953420Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-21T15:47:40.8464616Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-21T15:47:40.8503308Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-21T15:47:40.8802152Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-21T15:47:40.8844459Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-21T15:47:40.9132849Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-21T15:47:40.9173580Z ##[endgroup]
+2026-11-21T15:47:40.9175303Z ##[group]Fetching the repository
+2026-11-21T15:47:40.9185199Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +cb0da7d66adadb1ed56bba963efe69efdd777d89:refs/remotes/origin/main
+2026-11-21T15:47:46.0080454Z From https://github.com/localai-org/vllm.cpp
+2026-11-21T15:47:46.0083707Z  * [new ref]         cb0da7d66adadb1ed56bba963efe69efdd777d89 -> origin/main
+2026-11-21T15:47:46.0087571Z ##[endgroup]
+2026-11-21T15:47:46.0088852Z ##[group]Determining the checkout info
+2026-11-21T15:47:46.0090302Z ##[endgroup]
+2026-11-21T15:47:46.0094418Z [command]/usr/bin/git sparse-checkout disable
+2026-11-21T15:47:46.0154426Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-21T15:47:46.0186591Z ##[group]Checking out the ref
+2026-11-21T15:47:46.0189673Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-21T15:47:47.0353696Z Updating files:  78% (7755/9932)
+2026-11-21T15:47:47.0535211Z Updating files:  79% (7847/9932)
+2026-11-21T15:47:47.0613323Z Updating files:  80% (7946/9932)
+2026-11-21T15:47:47.1905801Z Updating files:  81% (8045/9932)
+2026-11-21T15:47:47.2007786Z Updating files:  82% (8145/9932)
+2026-11-21T15:47:47.2129371Z Updating files:  83% (8244/9932)
+2026-11-21T15:47:47.2244868Z Updating files:  84% (8343/9932)
+2026-11-21T15:47:47.2369382Z Updating files:  85% (8443/9932)
+2026-11-21T15:47:47.2492770Z Updating files:  86% (8542/9932)
+2026-11-21T15:47:47.2535482Z Updating files:  87% (8641/9932)
+2026-11-21T15:47:47.2577749Z Updating files:  88% (8741/9932)
+2026-11-21T15:47:47.2659362Z Updating files:  89% (8840/9932)
+2026-11-21T15:47:47.3224703Z Updating files:  90% (8939/9932)
+2026-11-21T15:47:47.3378625Z Updating files:  91% (9039/9932)
+2026-11-21T15:47:47.3568792Z Updating files:  92% (9138/9932)
+2026-11-21T15:47:47.3827327Z Updating files:  93% (9237/9932)
+2026-11-21T15:47:47.6102210Z Updating files:  94% (9337/9932)
+2026-11-21T15:47:47.6216565Z Updating files:  95% (9436/9932)
+2026-11-21T15:47:47.6370682Z Updating files:  96% (9535/9932)
+2026-11-21T15:47:47.6572164Z Updating files:  97% (9635/9932)
+2026-11-21T15:47:47.6765505Z Updating files:  98% (9734/9932)
+2026-11-21T15:47:47.6839503Z Updating files:  99% (9833/9932)
+2026-11-21T15:47:47.6840162Z Updating files: 100% (9932/9932)
+2026-11-21T15:47:47.6840465Z Updating files: 100% (9932/9932), done.
+2026-11-21T15:47:47.6940927Z Switched to a new branch 'main'
+2026-11-21T15:47:47.6948175Z branch 'main' set up to track 'origin/main'.
+2026-11-21T15:47:47.7021874Z ##[endgroup]
+2026-11-21T15:47:47.7077573Z [command]/usr/bin/git log -1 --format=%H
+2026-11-21T15:47:47.7104029Z cb0da7d66adadb1ed56bba963efe69efdd777d89
+2026-11-21T15:47:47.7366441Z ##[group]Run python3 scripts/main-baseline.py \
+2026-11-21T15:47:47.7366927Z [36;1mpython3 scripts/main-baseline.py \[0m
+2026-11-21T15:47:47.7367300Z [36;1m  --run-id "44904678515" --emit-summary[0m
+2026-11-21T15:47:47.7404695Z shell: /usr/bin/bash -e {0}
+2026-11-21T15:47:47.7404963Z env:
+2026-11-21T15:47:47.7407914Z   GH_TOKEN: ***
+2026-11-21T15:47:47.7408132Z ##[endgroup]
+2026-11-21T15:47:50.0167047Z # main baseline: RED
+2026-11-21T15:47:50.0167490Z 
+2026-11-21T15:47:50.0168158Z - commit: `cb0da7d66adadb1ed56bba963efe69efdd777d89`
+2026-11-21T15:47:50.0168916Z - run: 44904678515
+2026-11-21T15:47:50.0169289Z - jobs covered: 16 of 13 expected
+2026-11-21T15:47:50.0169967Z - not run (skipped on this lane): pr-size, commit-protocol-tag, documentation-checkpoint
+2026-11-21T15:47:50.0170550Z 
+2026-11-21T15:47:50.0170676Z ## Failing
+2026-11-21T15:47:50.0170886Z 
+2026-11-21T15:47:50.0193449Z - `windows-msvc-cpu`
+2026-11-21T15:47:50.0208231Z - `build-test-cpu-arm64-full`
+2026-11-21T15:47:50.0213414Z - `windows-msvc-vulkan`
+2026-11-21T15:47:50.0213598Z 
+2026-11-21T15:47:50.0214001Z The verdict is per-job. `sanitize-cpu` is `continue-on-error`, so the run's own conclusion may still read `success`.
+2026-11-21T15:47:50.0214457Z 
+2026-11-21T15:47:50.0214770Z Read the history with `scripts/main-baseline.py` (issue #274, spec `.agents/specs/main-verifiability.md`).
+2026-11-21T15:47:50.0277957Z ##[error]Process completed with exit code 1.
+2026-11-21T15:47:50.0425979Z Post job cleanup.
+2026-11-21T15:47:50.1274199Z [command]/usr/bin/git version
+2026-11-21T15:47:50.1320098Z git version 2.56.1
+2026-11-21T15:47:50.1360532Z Temporarily overriding HOME='/home/runner/work/_temp/9f706cd4-1cf3-4523-ac0e-f7c618dd407b' before making global git config changes
+2026-11-21T15:47:50.1361864Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-21T15:47:50.1365665Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/vllm.cpp/vllm.cpp
+2026-11-21T15:47:50.1405253Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-21T15:47:50.1442883Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-21T15:47:50.1755528Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-21T15:47:50.1783192Z http.https://github.com/.extraheader
+2026-11-21T15:47:50.1795432Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-21T15:47:50.1904022Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-21T15:47:50.2167555Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-21T15:47:50.2204264Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-21T15:47:50.2660195Z Cleaning up orphan processes
+2026-11-21T15:47:50.3051761Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
