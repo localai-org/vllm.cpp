@@ -1,0 +1,28 @@
+olala bf16 token gate vs llama-cpp-olala — first measurement (2026-11-22)
+
+Oracle: OVHai-LLM/llama.cpp branch olala-master @ bd20ca9b471fdcb3f03b75f82d3cf575414bc573
+  (exact pin of .agents/oracles/llama-cpp-olala.md), CPU Release, greedy argmax
+  harness docs/bench-evidence/new-candidate-ports-olala-20261122/llama-fork-golden-harness.cpp
+  (no BOS, special-token parsing on, raw logits argmax).
+Artifact: /mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-bf16.gguf (same both sides).
+Prompt text: "<|im_start|>user\n hi <|im_end|>", fork-tokenized (matches ours exactly):
+  [151644, 872, 198, 15588, 220, 151645]
+
+oracle ids (prompt + 6 greedy):
+  [151644, 872, 198, 15588, 220, 151645, 151644, 77091, 151646, 34484, 151654, 1654]
+  decode: <|im_start|>assistant<|channel_start|>analysis<|content|>We  (coherent)
+
+ours (OlalaGenerateHost, same prompt, n_gen=6):
+  [151644, 872, 198, 15588, 220, 151645, 705, 1863, 705, 705, 705, 705]
+
+Diverges at the FIRST generated token (705 vs 151644) and our output is
+degenerate (repeating 705). Note: the test's earlier made-up prompt
+{151644, 872, 198, 9707, 151645} is NOT the tokenizer output; real ids above.
+Config checks that already pass: final_norm=False (no output_norm tensor in the
+GGUF walk), normalized embeddings (:2020), per-layer caches threaded (W2d-2).
+
+Next lever (parity-lever protocol): per-layer hidden-state traces on both
+sides at the last prompt position; fork side needs a dump hook, ours uses the
+OLALA_STEP_DBG stage traces. Suspects, in order: Mamba state update details,
+MoE routing/scaling, V differential attention cache content, bf16 matmul
+accumulation order (tie risk, unlikely to flip the FIRST token alone).
