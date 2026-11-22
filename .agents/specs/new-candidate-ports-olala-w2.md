@@ -138,11 +138,16 @@ One PR per wave (row claim answer recorded 2026-11-20 for NEW-CANDIDATE-PORTS).
 W2a in progress on branch `row/NEW-CANDIDATE-PORTS`, worktree `/tmp/port-olala2`,
 base `cb0da7d66`.
 
-## Now (W2c)
+## Now (W2c/W2d)
 
-2026-11-21: W2a/W2b landed (PR #3583). W2c in progress: ISSUE-LOCAL for W2c-1
-(geodesic norm + latent MoE host ops, unit-gated vs numpy transcription of
-modeling_olala.py formulas with file:line citations — no torch on this host;
-the transformers oracle stays gateable=no until measured). W2c-2 = V
-differential attention (:498-764), W2c-3 = Mamba3-MIMO (:933-1406), then the
-quant-matched token gate vs llama-cpp-olala on q6_k. Worktree /tmp/olala-w2c.
+2026-11-21: W2a/W2b landed (PR #3583). W2c-1 (geodesic + latent MoE), W2c-2
+(V differential attention), W2c-3 (Mamba3-MIMO step) and W2d-1 (the assembled
+full forward, assembly smoke on the pinned bf16 artifact) are on branch
+`row/NEW-CANDIDATE-PORTS` in PR #3585, worktree `/tmp/olala-w2c`. The smoke
+run caught three assembly defects the per-op units missed (n_gen+1 append,
+GQA k/v indexing, empty ymix scratch) — all fixed in W2d-1. Next: W2d-2
+threads the V attention KV cache through the step host (the cache row stays
+zero in W2d-1, so later tokens cannot see earlier cross-token keys), then the
+token gate vs `llama-cpp-olala` on q6_k; the `olala-transformers` oracle run
+stays owed (gateable=no, evidence #3582). The quantized arms
+(q6_k/q5_k_m/q8_0-safe2 keep-quant decode) remain refused by name.
