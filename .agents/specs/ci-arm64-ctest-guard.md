@@ -152,7 +152,7 @@ them locally with `-j 8` (the lane itself stays serial). It returned ctest's
 generic 8 and the checker reported `ACCOUNTED '817'`, `EXECUTED '797'` and 20
 skips. Six entries were killed by host load after 25 to 58 minutes; they are
 triage artifacts, not defects. Seven genuine failures and the 20 skip names
-are in [`docs/bench-evidence/44904678515/report.md`](../bench-evidence/44904678515/report.md).
+are in [`docs/bench-evidence/44904678515/report.md`](../../docs/bench-evidence/44904678515/report.md).
 None is a W1 pinned-path test: `test_new_candidate_parsers` and
 `test_olala_gguf_weights` both report `Passed` locally.
 

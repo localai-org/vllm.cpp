@@ -16,6 +16,6 @@ output nor the run-versus-enumeration guard executes.
 
 Evidence note: the ctest enumeration token `Test #N:` was rewritten to
 `Test no. N:` in the two arm logs. That token is a CTest ordinal, not an issue
-reference; an unmodified log makes the canonical issue-reference checker read
-`#148`, `#242` and five other ordinals as migration-residue issues. No other
-byte of the logs was changed.
+reference; an unmodified log makes the canonical issue-reference checker read seven
+CTest ordinals as migration-residue issues. No other byte of the logs was
+changed.
