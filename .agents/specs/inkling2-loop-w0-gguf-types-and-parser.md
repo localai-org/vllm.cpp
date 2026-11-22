@@ -104,6 +104,7 @@ Stop and report `NEEDS_CONTEXT` if the artifact is absent AND no skip can be dem
 ## Now
 
 DONE — W0 landed on main via PR #3586 (merge commit `7a4419e69`, 2026-11-22); issue ISSUE-LOCAL-01M80WA9T38SWMMWYDJ9T938K8 closed with dated resolution evidence. The parent row `NEW-CANDIDATE-PORTS` stays ACTIVE for the olala W2d and forward-port waves.
+PIN UNIT (2026-11-22) — the owed "vLLM pin advance past #69028" was scoped and recorded, not executed: specs/inkling2-vllm-pin-advance.md lands the reconciliation verdict (upstream `ab18334a4` IS a viable primary oracle for `inkling2_loop`; its config facts match this spec's GGUF walk field-for-field) and enumerates the obligations a full advance creates for rows anchored at `e126687a9a`. Gateability at that revision is `gateable = no` on this CPU-only host (the implementation is nvidia-only, no CPU path), owned by ISSUE-LOCAL-01M820H8MBH76MB67GE2ZPSM4P (GPU build+run probe). `.agents/upstream-sync.md` is unchanged; the pin advance itself stays owed.
 
 ## Git integration
 
