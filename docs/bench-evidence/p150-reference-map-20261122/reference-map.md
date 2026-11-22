@@ -14,10 +14,13 @@ claimed, not to publish a parity result.
   `runtime/inkling2/tt/NOTES-{model,spec,attention,longctx}.md`,
   `runtime/inkling2/tt/fast/NOTES-{attn,prefill}.md`, `evidence/lmx/summary.md`,
   `native/gptq/native_manifest.json` and `checkpoint/config.json`.
-- Our state: W28/W30/W31 evidence in
-  `../qwen38-dflash2-stage-c-{w28,w30,w31}-*/README.md`,
-  `.agents/specs/dflash2-spec-decode.md`,
-  `.agents/specs/tenstorrent-bfp-weight-residency.md`, and `docs/ENVIRONMENT.md`.
+- Our state: W28/W30/W31 evidence on branch
+  `row/QWEN38-DFLASH2-STAGE-C-HUNT-W31` at
+  `/tmp/tt-w31/docs/bench-evidence/qwen38-dflash2-stage-c-{w28-20261118,w30-20261120,w31-20261122}/README.md`
+  (not landed on main), `.agents/specs/dflash-spec-decode.md` (DFlash-v1
+  acceptance figures), `.agents/specs/dflash2-spec-decode.md` (DFlash2
+  acceptance figures), `.agents/specs/tenstorrent-bfp-weight-residency.md`,
+  and `docs/ENVIRONMENT.md`.
 
 **Caveat that governs every number below.** The two sides are different models,
 different quantizers and different runtimes. Lottolabs measures Inkling-2-Mini
@@ -99,10 +102,15 @@ on the prose bench because drafts are accepted too rarely there.
 
 ### Our DFlash2 state and the honest comparison shape
 
-Our DFlash2 acceptance has been measured at ~2.49 accepted draft tokens/step
-against vLLM's ~3.13 (~20% fewer), attributed by D6/D7/D8 to bf16-irreducible
-near-tie divergence, per-step context-KV recompute, and eager-vs-graphed draft
-launch. The W30 gate runs explicit drafter-ON and drafter-OFF arms on the same
+A DFlash-v1 measurement on GB10 with the 27B NVFP4 target and z-lab 27B draft
+reported ~2.49 accepted draft tokens/step against vLLM's ~3.13 (~20% fewer),
+attributed by D6/D7/D8 to bf16-irreducible near-tie divergence, per-step
+context-KV recompute, and eager-vs-graphed draft launch
+(`.agents/specs/dflash-spec-decode.md:419,426,450`). That is a DFlash-v1 GB10
+figure, not DFlash2 acceptance on our P150 Q4_K_M workload. The DFlash2 spec
+reports a separate H200 figure of 5.34 per-request acceptance against DSpark's
+4.27 (`.agents/specs/dflash2-spec-decode.md:256-257`); the two must not be
+conflated. The W30 gate runs explicit drafter-ON and drafter-OFF arms on the same
 binary: with the DNR repair armed, drafter-ON passes its band at 22/24 tokens
 equal to the recorded `d49c53d2` with one 3-token near-tie shift (a 500-mnat
 tie-band gate passes it, the corruption-class gate does not); drafter-OFF is
@@ -158,10 +166,10 @@ which their package never exercises.
 
 | Axis | Our current state (Qwen3.8-27B / DFlash2 / P150) | Lottolabs reference (Inkling-2-Mini / GPTQ-BFP4 / P150) | Unit that would produce the comparison |
 |---|---|---|---|
-| Traced decode step, 4K bucket | Not recorded per bucket; W30 uses TPOT over 12-token legs; untraced step ~6.65 s with DNR off | 68.4 ms traced at 4096, rising to 94.1 at 131072 | New P150 benchmark row: identical prompt, bucket and trace recipe, both arms |
+| Traced decode step, 4K bucket | Not recorded per bucket; W30 uses TPOT over 12-token legs; drafter-OFF TPOT 6647.67 ms with DNR armed; DNR-off proof leg 21612 ms, explicitly not comparable | 68.4 ms traced at 4096, rising to 94.1 at 131072 | New P150 benchmark row: identical prompt, bucket and trace recipe, both arms |
 | Decode vs context ladder | Q4_K_M KV64 and UD-Q6_K_XL KV8 arms; Q6_K_XL drafter-ON capacity-blocked | 0 -> 128K: 82.8 -> 58.4 tok/s (spec on), 82.8 -> 60.4 (off) | Same lmx matrix recipe on a ported model, ctx 0/4K/16K/32K/64K/128K, batch 1 |
 | TTFT / prefill | Not measured on P150 for this model | 0.119 s at 128 tokens, 9.123 s at 32768; prefill 1080 -> 3592 tok/s | P150 prefill row with same chunk schedule and KV profile |
-| Speculative speedup | DFlash2 acceptance ~2.49 vs vLLM 3.13; near-tie divergence; acceptance multiple ~3.73x from unfixed writer | greedy 87.1 -> 108.0 tok/s (1.24x); sampled T=1.0 1.16x | Spec row reporting acceptance tokens/step and tok/s separately, both drafter and both DNR arms |
+| Speculative speedup | DFlash-v1 GB10 figure ~2.49 vs vLLM ~3.13 draft-tok/step (not our P150 Q4_K_M workload); separate DFlash2 H200 figure 5.34 vs DSpark 4.27; near-tie divergence; acceptance multiple ~3.73x from unfixed writer | greedy 87.1 -> 108.0 tok/s (1.24x); sampled T=1.0 1.16x | Spec row reporting acceptance tokens/step and tok/s separately, both drafter and both DNR arms |
 | Token identity spec vs plain | DNR-armed 22/24 tokens vs golden with 3-token near-tie shift; drafter-OFF 6/6 byte identical | greedy spec == plain bitwise; seeded sampled spec == plain | Correctness gate on same golden, reporting near-tie margins |
 | Sampled decoding exactness | Not measured on device over full vocab | device full-vocab exact sampling; host fallback list | Sampling parity row with same seed/top_k/top_p grid |
 | Long context | Not served at 1M | 1,048,000-token prompt, 3/3 pass keys, 23.0 tok/s decode | Native-context row with same passkey procedure |
