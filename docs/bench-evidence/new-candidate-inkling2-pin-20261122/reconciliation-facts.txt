@@ -1,0 +1,30 @@
+inkling2 pin-advance reconciliation — raw facts, fetched 2026-11-22
+Target: vllm-project/vllm merge ab18334a4f60da74db7de89fe95594e5ed0cda36 (PR #69028, merged 2026-11-21T16:19:34Z)
+
+Files touched by the PR (from `gh pr view 69028 --repo vllm-project/vllm --json files`):
+- CUDA csrc: csrc/inkling2/{allreduce_conv_mix,conv_mix,seq_parallel}.cu, csrc/ops.h, csrc/torch_bindings.cpp
+- Model: vllm/models/inkling2/{__init__,configs,quant_config,speculator_config}.py
+  and vllm/models/inkling2/nvidia/{model,loop,attention,moe,ops/*,sconv,vision,lora,dspark?}.py
+- Registration: vllm/model_executor/models/registry.py, vllm/transformers_utils/config.py, vllm/config/{model,speculative,vllm}.py
+- Tests: tests/models/inkling2/{test_model,test_attention,test_moe,test_core_ops,test_dspark,test_vision,test_allreduce}.py, tests/models/{registry,test_initialization}.py
+- Also: vllm/renderers/inkling.py, vllm/model_executor/layers/fused_moe/routed_experts_capturer.py, rust/src/chat/* (Rust backend)
+
+Platform fact (nvidia/ops/__init__.py):
+  use_sm100_kernels() -> current_platform.is_device_capability_family(100)
+  Blackwell sm100: tml_fa4, tcgen05 attention, TRT-LLM-gen expert GEMMs, e2m1 conversions.
+  Hopper: Humming experts. SM12x: Triton experts, no tcgen05.
+  No CPU branch anywhere under vllm/models/inkling2/.
+
+HF checkpoint thinkingmachines/Inkling-2-Mini (API, 2026-11-22): gated=False, disabled=False
+  safetensors params: F32 247848, BF16 1927217664, F8_E4M3 4076863488, U8 20384317440; total 26388646440
+  files: model-00001-of-00001.safetensors (single shard), mtp.safetensors, hf_quant_config.json, tokenizer.json
+  config.json: architectures ["Inkling2LoopForConditionalGeneration"], model_type "inkling2_loop",
+    text_config.num_hidden_layers=24, loop_config {core_start:6, core_end:18, num_passes:3, gate_rank:64, is_varloop:false}
+  hf_quant_config.json: parameter_groups with per-tensor compute_dtype/output_dtype (float32/bfloat16/mxfp8/nvfp4)
+
+Agreement with our W0 GGUF walk (mudler/Inkling-2-Mini-APEX-GGUF @ d85a5800):
+  loop.start=6, loop.end=18, loop.count=3, loop.gate_rank=64, loop.varying=false — identical values.
+  24 blocks vs text_config.num_hidden_layers=24.
+
+Verdict: viable primary oracle (only end-to-end inkling2_loop reference); gateable=no on CPU-only host
+(nvidia-only forward, no CPU path). Probe owed on a leased GPU: ISSUE-LOCAL-01M820H8MBH76MB67GE2ZPSM4P.
