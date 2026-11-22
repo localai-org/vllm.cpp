@@ -88,7 +88,7 @@ same, and whether it transfers.
   (after capture) cost 77 MB per layer. One index per kind, allocated in the
   constructor, cut it to 154 MB total from up to 1.85 GB.
 - **What our class predicts.** Nothing specific. Our BFP8 staging seam
-  (`Bfp8TypecastInstall` in `src/vt/tenstorrent/tenstorrent_residency.cpp:953`)
+  (`EnsureBfp8WeightDevice` in `src/vt/tenstorrent/tenstorrent_residency.cpp:876`)
   allocates a fresh bf16 H2D temp and a typecast output per call; there is no
   per-layer gather index and W28 exonerated the allocator and the typecast.
 - **Same mechanism?** Only the "lazy allocation after a capture" half, which
@@ -152,7 +152,7 @@ same, and whether it transfers.
 
 ## Secondary — the P150 reference map for our benchmark ladder
 
-From the same package (NOTES-model.md, NOTES-attn.md, README.md); these are
+From the same package (NOTES-model.md, NOTES-attn.md, NOTES-longctx.md, README.md); these are
 reference numbers from a different model and quantizer, not gates for us.
 
 - **Decode buckets.** Power-of-two 4096..max_len, one trace and one
