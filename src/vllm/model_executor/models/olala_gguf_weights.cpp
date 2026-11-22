@@ -479,6 +479,7 @@ OlalaParams ParseOlalaParams(const HfConfig& c) {
   p.headdim = RawInt(c, "olala.mamba_headdim");
   p.tpa_rank = RawInt(c, "olala.tpa_rank");
   p.rope_angles = RawInt(c, "olala.num_rope_angles");
+  p.gate_bias = RawFloat(c, "olala.gate_bias", 0.0);
   p.layer_types = RawStr(c, "olala.layer_types");
   return p;
 }

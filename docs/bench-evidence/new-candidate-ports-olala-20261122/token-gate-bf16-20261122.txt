@@ -26,3 +26,13 @@ sides at the last prompt position; fork side needs a dump hook, ours uses the
 OLALA_STEP_DBG stage traces. Suspects, in order: Mamba state update details,
 MoE routing/scaling, V differential attention cache content, bf16 matmul
 accumulation order (tie risk, unlikely to flip the FIRST token alone).
+
+Re-measured 2026-11-22 after the fixes recorded in
+.agents/issues/NEW-CANDIDATE-PORTS/ISSUE-LOCAL-01M8116014KEPHC3R26VTVZDQG.md
+(V-mixer gate, Mamba rotary pass-through, MIMO projection stride, effective
+norm weights, MoE routing normalization, pos==0 shift mask):
+
+ours (OlalaGenerateHost, same prompt, n_gen=6):
+  [151644, 872, 198, 15588, 220, 151645, 151644, 77091, 151646, 34484, 151654, 1654]
+
+All 6 greedy ids match the oracle exactly.
