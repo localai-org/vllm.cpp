@@ -3,6 +3,10 @@
 // OwnedTensor (bf16 matmuls, f32 scalars) from LoadOlalaGgufWeights.
 #include "vllm/model_executor/models/olala_ops.h"
 
+namespace vllm {
+constexpr double kOlalaPi = 3.14159265358979323846;  // the math constant PI is not portable to MSVC under that name
+}  // namespace vllm
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -463,8 +467,8 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
     std::vector<double> na(A);
     for (int64_t a = 0; a < A; ++a) {
       const double prev = st.angle[h * A + a];
-      na[a] = prev + std::tanh(double(ang[a])) * DT[h] * M_PI;
-      st.angle[h * A + a] = float(std::fmod(na[a], 2 * M_PI));
+      na[a] = prev + std::tanh(double(ang[a])) * DT[h] * kOlalaPi;
+      st.angle[h * A + a] = float(std::fmod(na[a], 2 * kOlalaPi));
     }
     std::vector<double> cs(A), sn(A);
     for (int64_t a = 0; a < A; ++a) { cs[a] = std::cos(na[a]); sn[a] = std::sin(na[a]); }
