@@ -643,6 +643,100 @@ TEST_CASE("olala W2c-3: Mamba3-MIMO step matches the reference over 3 tokens") {
   }
 }
 
+// Reviewer FINDING 1 repair: the W2d-2 cache write had NO test — deleting the
+// attn_k_cache/attn_v_cache row commit left the whole suite green because the
+// W2d smoke checks assembly only. This test proves the step host both WRITES
+// cache row pos and READS earlier rows: perturbing row 0 must change the
+// position-1 output, and restoring it must reproduce the output exactly.
+TEST_CASE("olala W2d-2: step host writes and reads cross-token cache rows") {
+  vllm::OlalaParams p;
+  p.hidden = 8;
+  p.heads = 4;      // H
+  p.kv_heads = 2;   // KV
+  p.head_dim = 4;   // D
+  p.tpa_rank = 2;   // R
+  p.window = 3;
+  p.softcap = 30.0;
+  vllm::OlalaLayerWeights lw;
+  auto bf = [&](std::vector<int64_t> sh, float seed) {
+    int64_t n = 1;
+    for (auto d : sh) n *= d;
+    std::vector<float> vals(n);
+    for (int64_t i = 0; i < n; ++i) vals[i] = 0.08f * float(((int)(seed * 7 + i) % 7) - 3);
+    return Bf16Tensor(sh, vals);
+  };
+  lw.attn_q = bf({4 * 4, 8}, 1.0f);
+  lw.attn_wa_k = bf({2 * 2, 8}, 2.0f);
+  lw.attn_wb_k = bf({2 * 4, 8}, 3.0f);
+  lw.attn_wa_v = bf({2 * 2, 8}, 4.0f);
+  lw.attn_wb_v = bf({2 * 4, 8}, 5.0f);
+  lw.attn_shift_k = bf({2, 8}, 6.0f);
+  lw.attn_shift_v = bf({2, 8}, 7.0f);
+  lw.attn_lambda = bf({2, 8}, 8.0f);
+  lw.attn_gate = bf({2 * 4, 8}, 9.0f);  // SIG*D x hidden
+  lw.attn_q_norm = F32Tensor({4}, {0, 0, 0, 0});
+  lw.attn_k_norm = F32Tensor({4}, {0, 0, 0, 0});
+  lw.attn_softmax_scaler = F32Tensor({4}, {1.1f, 0.9f, 1.0f, 1.2f});
+
+  const int64_t KV = p.kv_heads, D = p.head_dim, SIG = p.heads - KV;
+  const int64_t row = KV * D;
+  std::vector<float> kcache(2 * row, 0.0f), vcache(2 * row, 0.0f);
+  std::vector<float> raw_k(row, 0.0f), raw_v(row, 0.0f);
+  std::vector<float> x0(8), x1(8);
+  for (int64_t i = 0; i < 8; ++i) {
+    x0[i] = 0.2f * float((i % 5) - 2);
+    x1[i] = 0.15f * float(((i + 2) % 7) - 3);
+  }
+  std::vector<float> out0(SIG * D, 0.0f), out1(SIG * D, 0.0f), out1b(SIG * D, 0.0f),
+      out1r(SIG * D, 0.0f);
+
+  vllm::OlalaVAttentionStepHost(kcache.data(), vcache.data(), raw_k.data(),
+                                raw_v.data(), x0.data(), 0, lw, p, out0.data());
+  // the step must commit its post-shift post-norm k/v into row 0
+  bool row0_empty = true;
+  for (int64_t i = 0; i < row; ++i) {
+    if (std::fabs(kcache[i]) > 1e-6f || std::fabs(vcache[i]) > 1e-6f)
+      row0_empty = false;
+  }
+  CHECK_FALSE(row0_empty);
+
+  std::vector<float> raw_k_snap = raw_k, raw_v_snap = raw_v;
+  std::vector<float> krow0(row), vrow0(row);
+  for (int64_t i = 0; i < row; ++i) {
+    krow0[i] = kcache[i];
+    vrow0[i] = vcache[i];
+  }
+
+  vllm::OlalaVAttentionStepHost(kcache.data(), vcache.data(), raw_k.data(),
+                                raw_v.data(), x1.data(), 1, lw, p, out1.data());
+  // perturb row 0 and rerun position 1 from the same raw-shift state: the
+  // cross-token attention MUST see the perturbation
+  for (int64_t i = 0; i < row; ++i) {
+    kcache[i] += 0.5f;
+    vcache[i] -= 0.5f;
+  }
+  std::vector<float> raw_k_b = raw_k_snap, raw_v_b = raw_v_snap;
+  vllm::OlalaVAttentionStepHost(kcache.data(), vcache.data(), raw_k_b.data(),
+                                raw_v_b.data(), x1.data(), 1, lw, p, out1b.data());
+  bool differs = false;
+  for (int64_t i = 0; i < SIG * D; ++i) {
+    if (std::fabs(out1[i] - out1b[i]) > 1e-6f) differs = true;
+  }
+  CHECK(differs);
+
+  // restore row 0 and rerun from the same state: identical output (determinism)
+  for (int64_t i = 0; i < row; ++i) {
+    kcache[i] = krow0[i];
+    vcache[i] = vrow0[i];
+  }
+  std::vector<float> raw_k_r = raw_k_snap, raw_v_r = raw_v_snap;
+  vllm::OlalaVAttentionStepHost(kcache.data(), vcache.data(), raw_k_r.data(),
+                                raw_v_r.data(), x1.data(), 1, lw, p, out1r.data());
+  for (int64_t i = 0; i < SIG * D; ++i) {
+    CAPTURE(i);
+    CHECK(std::fabs(out1[i] - out1r[i]) < 1e-6f);
+  }
+}
 // W2d: the assembled full forward on the REAL bf16 artifact. This smoke gates
 // ASSEMBLY (loads through LoadOlalaGgufWeights, all ops composed, deterministic
 // repeat, finite logits, ids in vocab) — NOT token exactness vs an oracle
