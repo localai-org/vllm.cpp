@@ -1,0 +1,53 @@
+Command: /tmp/opencode/vllm-inkling2-build/tests/test_inkling2_loop_gguf
+State: RED (deliberate TDD stub + missing ggml type table)
+
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:39:
+TEST CASE:  gguf: type ids 3 (Q4_1) and 7 (Q5_1) are tabulated
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:39: ERROR: test case THREW exception: gguf: unknown ggml type id 3
+
+===============================================================================
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:54:
+TEST CASE:  gguf: the APEX Balanced artifact opens with its 704 tensors
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:54: ERROR: test case THREW exception: gguf: tensor "blk.5.ffn_down_exps.weight" has unknown ggml type id 7 in /mnt/models/inkling2-mini-apex-gguf/Inkling-2-Mini-APEX-Balanced.gguf
+
+===============================================================================
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:80:
+TEST CASE:  inkling2_loop: the builder maps the pinned artifact's fields
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:80: ERROR: test case THREW exception: gguf: tensor "blk.5.ffn_down_exps.weight" has unknown ggml type id 7 in /mnt/models/inkling2-mini-apex-gguf/Inkling-2-Mini-APEX-Balanced.gguf
+
+===============================================================================
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:103:
+TEST CASE:  inkling2_loop: loop_config mirrors the upstream loop fields
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:103: ERROR: test case THREW exception: gguf: tensor "blk.5.ffn_down_exps.weight" has unknown ggml type id 7 in /mnt/models/inkling2-mini-apex-gguf/Inkling-2-Mini-APEX-Balanced.gguf
+
+===============================================================================
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:122:
+TEST CASE:  inkling2_loop: unmapped KVs are carried verbatim
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:122: ERROR: test case THREW exception: gguf: tensor "blk.5.ffn_down_exps.weight" has unknown ggml type id 7 in /mnt/models/inkling2-mini-apex-gguf/Inkling-2-Mini-APEX-Balanced.gguf
+
+===============================================================================
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:141:
+TEST CASE:  inkling2_loop: the forward refusal names the port row
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:143: ERROR: CHECK( r.find("Inkling2LoopHfConfigFromGguf") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:144: ERROR: CHECK( r.find("NEW-CANDIDATE-PORTS") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+./tests/vllm/models/test_inkling2_loop_gguf.cpp:145: ERROR: CHECK( r.find("forward boundary") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+===============================================================================
+[doctest] test cases: 7 | 1 passed | 6 failed | 0 skipped
+[doctest] assertions: 4 | 1 passed | 3 failed |
+[doctest] Status: FAILURE!
+exit=1

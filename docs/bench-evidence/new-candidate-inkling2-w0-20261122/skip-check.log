@@ -1,0 +1,12 @@
+=== default artifact present ===
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  7 |  7 passed | 0 failed | 0 skipped
+[doctest] assertions: 67 | 67 passed | 0 failed |
+[doctest] Status: SUCCESS!
+=== skip override: VT_INKLING2_APEX_GGUF_PATH=/nonexistent/absent.gguf ===
+SKIP: /nonexistent/absent.gguf not mounted; CTest reports this as Skipped (exit 77)
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+skip exit=77

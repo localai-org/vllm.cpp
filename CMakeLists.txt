@@ -824,6 +824,7 @@ add_library(vllm STATIC
   src/vllm/model_executor/models/olala_gguf_weights.cpp
   src/vllm/model_executor/models/olala_registry.cpp
   src/vllm/model_executor/models/hy_v4_flash_gguf_config.cpp
+  src/vllm/model_executor/models/inkling2_loop_gguf_config.cpp
   src/vllm/model_executor/models/maxwell_config.cpp
   src/vllm/model_executor/models/qwen4_exp_hc.cpp
   src/vllm/model_executor/models/deepseek_v2_registry.cpp
