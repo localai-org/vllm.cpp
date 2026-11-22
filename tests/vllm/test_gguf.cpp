@@ -595,9 +595,16 @@ TEST_CASE("gguf: synthetic NVFP4 tensor (fork type id 40) nbytes math") {
 TEST_CASE("ggml traits: unknown type id throws") {
   CHECK_THROWS_WITH_AS(vllm::GgmlTraits(999), doctest::Contains("999"),
                        std::runtime_error);
-  // Real ggml ids we have not tabulated (e.g. 7 = Q5_1) must also throw
-  // rather than return garbage size math.
-  CHECK_THROWS_AS(vllm::GgmlTraits(7), std::runtime_error);
+  // Real ggml ids we have not tabulated (e.g. 9 = Q8_1, removed ids 4/5)
+  // must also throw rather than return garbage size math. Ids 3 (Q4_1) and
+  // 7 (Q5_1) are NOW tabulated for the inkling2_loop APEX GGUF and are
+  // asserted in test_inkling2_loop_gguf.cpp.
+  CHECK_THROWS_WITH_AS(vllm::GgmlTraits(9), doctest::Contains("9"),
+                       std::runtime_error);
+  CHECK(vllm::GgmlTraits(3).block_elems == 32);
+  CHECK(vllm::GgmlTraits(3).block_bytes == 20);
+  CHECK(vllm::GgmlTraits(7).block_elems == 32);
+  CHECK(vllm::GgmlTraits(7).block_bytes == 21);
 }
 
 #if !defined(_WIN32)

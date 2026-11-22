@@ -1,0 +1,65 @@
+=== ctest: new test (artifact present) ===
+Test project /tmp/opencode/vllm-inkling2-build
+    Start 824: test_inkling2_loop_gguf
+1/1 Test #824: test_inkling2_loop_gguf ..........   Passed    0.42 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.44 sec
+ctest default rc=0
+=== ctest: new test with override (expect Skipped) ===
+Test project /tmp/opencode/vllm-inkling2-build
+    Start 824: test_inkling2_loop_gguf
+1/1 Test #824: test_inkling2_loop_gguf ..........***Skipped   0.00 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.01 sec
+
+The following tests did not run:
+	824 - test_inkling2_loop_gguf (Skipped)
+ctest skip rc=0
+=== related regression tests ===
+Test project /tmp/opencode/vllm-inkling2-build
+    Start  18: test_gguf
+1/3 Test  #18: test_gguf ........................***Failed    0.01 sec
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/test_gguf.cpp:595:
+TEST CASE:  ggml traits: unknown type id throws
+
+./tests/vllm/test_gguf.cpp:600: ERROR: CHECK_THROWS_AS( vllm::GgmlTraits(7), std::runtime_error ) did NOT throw at all!
+
+===============================================================================
+[doctest] test cases:  36 |  35 passed | 1 failed | 0 skipped
+[doctest] assertions: 133 | 132 passed | 1 failed |
+[doctest] Status: FAILURE!
+
+    Start 822: test_new_candidate_parsers
+2/3 Test #822: test_new_candidate_parsers .......   Passed    0.94 sec
+    Start 823: test_olala_gguf_weights
+3/3 Test #823: test_olala_gguf_weights ..........   Passed   57.09 sec
+
+67% tests passed, 1 tests failed out of 3
+
+Total Test time (real) =  58.05 sec
+
+The following tests FAILED:
+	 18 - test_gguf (Failed)
+related rc=8
+=== related regression tests (after fix) ===
+Test project /tmp/opencode/vllm-inkling2-build
+    Start  18: test_gguf
+1/4 Test  #18: test_gguf ........................   Passed    0.01 sec
+    Start 822: test_new_candidate_parsers
+2/4 Test #822: test_new_candidate_parsers .......   Passed    1.34 sec
+    Start 823: test_olala_gguf_weights
+3/4 Test #823: test_olala_gguf_weights ..........   Passed   73.67 sec
+    Start 824: test_inkling2_loop_gguf
+4/4 Test #824: test_inkling2_loop_gguf ..........   Passed    0.43 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =  75.46 sec
+rc=0

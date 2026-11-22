@@ -45,6 +45,7 @@
 #include "vllm/model_executor/models/olala_gguf_config.h"  // olala GGUF arm (parse-only)
 #include "vllm/model_executor/models/olala_gguf_weights.h"  // olala W1 census (NEW-CANDIDATE-PORTS)
 #include "vllm/model_executor/models/hy_v4_flash_gguf_config.h"  // hy_v4_flash GGUF arm (parse-only)
+#include "vllm/model_executor/models/inkling2_loop_gguf_config.h"  // inkling2_loop GGUF arm (parse-only, W0)
 #include "vllm/model_executor/models/maxwell_config.h"  // maxwell_moe config.json arm (parse-only)
 #include "vllm/model_executor/models/muse_glimmer_gguf_weights.h"  // muse-glimmer GGUF arm
 #include "vllm/model_executor/models/qwen4_exp_gguf_weights.h"  // qwen4exp GGUF arm
@@ -1264,6 +1265,11 @@ std::unique_ptr<vllm::v1::kv_offload::KVConnector> BuildKvConnector(
 //    docs/bench-evidence/new-candidates-parsers-20261119/), carries every
 //    unmapped KV verbatim, and the loader refuses at the forward boundary
 //    naming row NEW-CANDIDATE-PORTS -- the arch ports are their own rows.
+//  * `inkling2_loop` -> Inkling2LoopHfConfigFromGguf (row NEW-CANDIDATE-PORTS
+//    W0): PARSE-ONLY. The pinned APEX Balanced GGUF's 14 Q5_1 expert tensors
+//    needed two ggml type-table rows before this table could be reached at
+//    all. The builder mirrors vLLM PR #69028's model_type/architecture/
+//    loop_config naming; the forward refuses below naming the port row.
 //  * Maxwell (`maxwell_moe`, safetensors + remote-code config.json) has no row
 //    in THIS table -- it enters through the safetensors branch below, where
 //    MaxwellConfigFromJson parses and the same forward-boundary refusal fires.
@@ -1292,6 +1298,7 @@ constexpr GgufArchArm kGgufArchArms[] = {
     {vllm::kFlintGgufArch, &vllm::FlintHfConfigFromGguf},
     {"olala", &vllm::OlalaHfConfigFromGguf},
     {vllm::kHyV4FlashGgufArch, &vllm::HyV4FlashHfConfigFromGguf},
+    {vllm::kInkling2LoopGgufArch, &vllm::Inkling2LoopHfConfigFromGguf},
 };
 
 std::string SupportedGgufArchitectures() {
@@ -2912,6 +2919,14 @@ std::unique_ptr<LoadedEngine> LoadedEngine::FromModelDir(
     }
     if (vllm::IsHyV4FlashGguf(gguf)) {
       throw std::runtime_error(vllm::HyV4FlashForwardRefusal());
+    }
+    if (vllm::IsInkling2LoopGguf(gguf)) {
+      // NEW-CANDIDATE-PORTS W0: the builder above parsed the file (so the
+      // production entry point reaches it) and this is the forward boundary:
+      // the looped core (per-pass caches + gated message controllers) is owed
+      // to a later wave. Refuse HERE, before ModelRegistry::Resolve, so the
+      // message names the owning row instead of the registry's generic text.
+      throw std::runtime_error(vllm::Inkling2LoopForwardRefusal());
     }
     // Resolve before tokenizer/weight work so unsupported architecture errors
     // are deterministic and match registry.py rather than being masked by a

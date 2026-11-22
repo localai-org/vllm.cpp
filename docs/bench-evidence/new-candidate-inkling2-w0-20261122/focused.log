@@ -1,0 +1,10 @@
+Command: /tmp/opencode/vllm-inkling2-build/tests/test_inkling2_loop_gguf
+State: GREEN (focused)
+
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:  7 |  7 passed | 0 failed | 0 skipped
+[doctest] assertions: 67 | 67 passed | 0 failed |
+[doctest] Status: SUCCESS!
+exit=0

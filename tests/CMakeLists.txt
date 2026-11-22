@@ -4900,3 +4900,7 @@ target_include_directories(test_new_candidate_parsers PRIVATE ${CMAKE_SOURCE_DIR
 # bf16 + q6_k artifacts (checkpoint-gated, same skip-loudly pattern).
 vllm_cpp_add_test(test_olala_gguf_weights vllm/models/test_olala_gguf_weights.cpp)
 target_include_directories(test_olala_gguf_weights PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# NEW-CANDIDATE-PORTS W0: the ggml Q4_1/Q5_1 type table and the inkling2_loop
+# config builder over the pinned APEX Balanced GGUF (77-style skip when absent).
+vllm_cpp_add_test(test_inkling2_loop_gguf vllm/models/test_inkling2_loop_gguf.cpp)
+target_include_directories(test_inkling2_loop_gguf PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -211,6 +211,13 @@ const GgmlTypeTraits* FindGgmlTraits(uint32_t type) {
       static constexpr GgmlTypeTraits t{32, 18, "Q4_0"};
       return &t;
     }
+    case 3: {
+      // block_q4_1 (llama.cpp ggml-common.h): f16 d + f16 m + QK4_1/2 u8 qs
+      // = 2 + 2 + 16 = 20, QK4_1 = 32. A STANDARD ggml id (not a fork
+      // extension): tabulated here for completeness alongside Q5_1.
+      static constexpr GgmlTypeTraits t{32, 20, "Q4_1"};
+      return &t;
+    }
     case 6: {
       // block_q5_0 (llama.cpp @ b10451 ggml-common.h:229-235): f16 d
       // + u8 qh[4] + QK5_0/2 u8 qs = 2 + 4 + 16 = 22, QK5_0 = 32. Reachable
@@ -218,6 +225,15 @@ const GgmlTypeTraits* FindGgmlTraits(uint32_t type) {
       // tensor whose row is not a multiple of 256, which is every
       // `qwen4exp` expert row (640) and its per-layer table row (160).
       static constexpr GgmlTypeTraits t{32, 22, "Q5_0"};
+      return &t;
+    }
+    case 7: {
+      // block_q5_1 (llama.cpp ggml-common.h): f16 d + f16 m + u8 qh
+      // + QK5_1/2 u8 qs = 2 + 2 + 1 + 16 = 21, QK5_1 = 32. The pinned
+      // mudler/Inkling-2-Mini-APEX-GGUF Balanced artifact stores 14
+      // `blk.N.ffn_down_exps.weight` tensors in it; without this row
+      // GgufFile::Open refused the whole 20 GB file over those 14 tensors.
+      static constexpr GgmlTypeTraits t{32, 21, "Q5_1"};
       return &t;
     }
     case 8: {
