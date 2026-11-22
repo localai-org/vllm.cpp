@@ -1812,16 +1812,19 @@ jobs:
         # No pipe: `$?` after `cmd | tee` reports tee, not ctest.
         run: |
           set -u
-          ctest --test-dir build-arm-full --output-on-failure > ctest-run.txt 2>&1
-          status=$?
+          # GitHub runs this block with `bash -e`. A failing ctest used to abort
+          # the step here, so neither its output nor the guard below ran. A
+          # command in an `||` list is exempt from -e; keep ctest's status and
+          # let the accounting see the whole run before deciding.
+          status=0
+          ctest --test-dir build-arm-full --output-on-failure > ctest-run.txt 2>&1 || status=$?
           cat ctest-run.txt
-          ran=$(sed -n 's/^.*tests passed, .* out of \([0-9][0-9]*\)$/\1/p' ctest-run.txt | tail -1)
-          echo "ctest EXECUTED '${ran:-}' entries; ctest -N had enumerated '${{ steps.enumerate.outputs.count }}'"
-          if [ "${ran:-0}" != "${{ steps.enumerate.outputs.count }}" ]; then
-            echo "REFUSED: the run and the enumeration disagree, so the number" >&2
-            echo "of tests this lane actually executed is not the suite." >&2
-            exit 1
-          fi
+          # The old sed captured "out of N" from ctest's summary, which is the
+          # enumeration total, so it could never see a short or skipped run.
+          # Count the per-test terminal statuses instead: every enumerated
+          # entry must produce one, and a skip is never counted as executed.
+          python3 scripts/check-ctest-accounting.py \
+            --run ctest-run.txt --count '${{ steps.enumerate.outputs.count }}' || exit $?
           exit "${status}"
   sanitize-cpu:
     # The DYNAMIC detector lanes (VLLM_CPP_SANITIZE, see CMakeLists.txt). The
