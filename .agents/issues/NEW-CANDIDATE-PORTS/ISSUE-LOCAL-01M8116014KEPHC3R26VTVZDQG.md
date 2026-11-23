@@ -47,3 +47,12 @@ Greedy decode on the pinned bf16 artifact diverges from the llama-cpp-olala orac
   moe_shared_expert_gate checked: no shared_gate tensor in this GGUF and no
   config key, so the reference branch (:1543-1549) is disabled on this
   artifact; nothing to port.
+- 2026-11-23 records correction: the body of commit ccf038670 claimed that
+  commit also recorded the EXACT gate, the six porting errors, the real prompt
+  ids and the Finding 3 disposition in
+  `.agents/specs/new-candidate-ports-olala-w2.md`. It did not — that commit
+  touched only `tests/vllm/models/test_olala_ops.cpp`; the spec stayed at
+  5/5 cases 253/253 with no `## Owed`. The fresh re-review caught the
+  overclaim. The spec now carries those facts, the Finding 3 disposition and
+  an `## Owed` section, supplied by a follow-up records commit on this branch.
+  No history was rewritten.

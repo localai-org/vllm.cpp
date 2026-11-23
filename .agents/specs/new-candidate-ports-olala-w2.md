@@ -147,8 +147,41 @@ full forward, assembly smoke on the pinned bf16 artifact) are on branch
 run caught three assembly defects the per-op units missed (n_gen+1 append,
 GQA k/v indexing, empty ymix scratch) — all fixed in W2d-1. W2d-2 landed
 (2026-11-22): the step host writes the post-shift post-norm k/v into the
-cache row at `pos`, so later tokens attend cross-token keys; suite 5/5 cases
-253/253 green in Release and bounds-checked Debug. Next: the token gate vs
-`llama-cpp-olala` on q6_k; the `olala-transformers` oracle run stays owed
-(gateable=no, evidence #3582). The quantized arms
-(q6_k/q5_k_m/q8_0-safe2 keep-quant decode) remain refused by name.
+cache row at `pos`, so later tokens attend cross-token keys.
+
+2026-11-22: the bf16 greedy token gate is EXACT. After the parity task's
+commit 3046cb479 was cherry-picked as 03adc11e4, ours emits
+`[151644, 77091, 151646, 34484, 151654, 1654]` — all six ids equal the pinned
+`llama-cpp-olala` oracle in
+`docs/bench-evidence/new-candidate-ports-olala-20261122/token-gate-bf16-20261122.txt`,
+on the same bf16 GGUF and the real fork-tokenized prompt
+`[151644, 872, 198, 15588, 220, 151645]`. Six porting errors were fixed
+against the author's source: the V-mixer elementwise gate
+(`modeling_olala.py:1789-1790`), the Mamba3 halved-rotary pass-through
+(`_mamba3_rotate` :764-770), the MIMO rank-3 stride (:1328-1330), the
+effective norm weights (no extra `1+`), MoE routing normalization (:1518-1525),
+and the `pos==0` shift mask (:636). The two-position step-host test in
+`test_olala_ops.cpp` mutation-proves the cache write, and the fresh re-review's
+five previously-masked fixes were made unit-detectable (non-uniform
+`expert_bias`, a step-host V-gate test, rank-3 MIMO weights with a sizeable
+silu gate, rotary-half sensitivity, and a document-start case). Suite:
+8/8 cases, 273/273 assertions in Release and bounds-checked Debug.
+
+Finding 3 disposition: `OlalaGenerateHost` is the gate harness, not the
+production entry point. The production path is `OlalaPagedForward`, whose
+18/18 EXACT engine gate on the `olala-bench` branch (`row/NEW-CANDIDATE-PORTS-olala-bench`)
+is the capability proof; the exact greedy ids above are the arithmetic proof
+on the same step host. The batch/seq host is kept as the transcription
+reference for the per-op units; its keep-or-delete decision is owed at W2e+.
+
+## Owed
+
+- The `olala-transformers` oracle run (`gateable=no`, evidence #3582) and the
+  q6_k quant-matched token gate remain owed; the bf16 gate above does not
+  substitute for either.
+- Quantized arms q6_k / q5_k_m / q8_0-safe2 keep-quant decode are owed by name
+  and remain refused until W2e lands them.
+- Keep-or-delete decision for the production-dead batch/seq attention host,
+  owed at W2e+; until then it is a transcription reference only.
+- Batched decode, the CUDA arm, SWA block recycle and the safetensors arm
+  remain unimplemented and are refused by name.
