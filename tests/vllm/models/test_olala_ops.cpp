@@ -213,7 +213,11 @@ TEST_CASE("olala W2c-1: latent MoE matches the reference formula (bf16 experts, 
                                          0.4f, 0.1f, -0.3f, 0.2f, 0.0f, -0.1f,
                                          -0.2f, 0.5f, 0.1f, -0.4f, 0.3f, 0.1f,
                                          0.0f, -0.1f, 0.2f, 0.4f, -0.2f, 0.3f});
-  lw.router_bias = F32Tensor({4}, {0.05f, -0.1f, 0.2f, 0.0f});
+  // Non-uniform, sizeable expert bias: the router must SELECT on
+  // sigmoid(logit) + bias while the gathered RAW sigmoid scores are
+  // normalized. A near-zero bias makes the two rules numerically identical
+  // and leaves this unit blind to the normalization defect.
+  lw.router_bias = F32Tensor({4}, {1.1f, -0.9f, 0.5f, -0.4f});
   lw.ffn_latent_down = Bf16Tensor({3, 6}, {0.2f, -0.1f, 0.3f, 0.0f, 0.1f, -0.2f,
                                             0.1f, 0.2f, -0.3f, 0.4f, 0.0f, 0.1f,
                                             -0.2f, 0.0f, 0.1f, 0.3f, -0.1f, 0.2f});
@@ -609,9 +613,29 @@ TEST_CASE("olala W2c-3: Mamba3-MIMO step matches the reference over 3 tokens") {
   lw.ssm_c_norm = F32Tensor({8}, std::vector<float>(8, 0.0f));
   lw.ssm_dt_bias = F32Tensor({H}, {0.01f, -0.02f, 0.03f, 0.0f});
   lw.ssm_d = F32Tensor({H}, {1.0f, 0.9f, 1.1f, 1.0f});
-  lw.ssm_mimo_x = bf({H, 2, 4}, 3.0f);
-  lw.ssm_mimo_z = bf({H, 2, 4}, 4.0f);
-  lw.ssm_mimo_o = bf({H, 2, 4}, 5.0f);
+  // Rank-3 [H, R, P] with P=4 != R=2 and sizeable, non-uniform values. The
+  // old rank-2 stride read shape[1]=R instead of shape[2]=P, and the tiny
+  // bf16 values made the silu(z*zproj) gate ~0.0075, masking the stride and
+  // rotary defects below the CHECK tolerance. F32 keeps the arithmetic exact
+  // against the f64 reference while making both defects visible.
+  {
+    std::vector<float> v(H * 2 * 4);
+    for (size_t i = 0; i < v.size(); ++i)
+      v[i] = 0.32f * float(int((i * 3 + 1) % 7) - 3);
+    lw.ssm_mimo_x = F32Tensor({H, 2, 4}, v);
+  }
+  {
+    std::vector<float> v(H * 2 * 4);
+    for (size_t i = 0; i < v.size(); ++i)
+      v[i] = 0.45f * float(int((i * 5 + 2) % 7) - 3);
+    lw.ssm_mimo_z = F32Tensor({H, 2, 4}, v);
+  }
+  {
+    std::vector<float> v(H * 2 * 4);
+    for (size_t i = 0; i < v.size(); ++i)
+      v[i] = 0.27f * float(int((i * 7 + 3) % 7) - 3);
+    lw.ssm_mimo_o = F32Tensor({H, 2, 4}, v);
+  }
 
   vllm::OlalaMambaState st;
   st.angle.assign(H * 4, 0.1f);
@@ -737,6 +761,119 @@ TEST_CASE("olala W2d-2: step host writes and reads cross-token cache rows") {
     CHECK(std::fabs(out1[i] - out1r[i]) < 1e-6f);
   }
 }
+
+// Porting fix #1 repair: the V-mixer elementwise gate had no test at all.
+// Changing the gate bias must change the step host's output; with the gate
+// block deleted both runs return the same ungated value.
+TEST_CASE("olala W2c-2b: step host applies the elementwise V-mixer gate") {
+  vllm::OlalaParams p;
+  p.hidden = 8;
+  p.heads = 4;
+  p.kv_heads = 2;
+  p.head_dim = 4;
+  p.tpa_rank = 2;
+  p.window = 3;
+  p.softcap = 30.0;
+  vllm::OlalaLayerWeights lw;
+  auto bf = [&](std::vector<int64_t> sh, float seed) {
+    int64_t n = 1;
+    for (auto d : sh) n *= d;
+    std::vector<float> vals(n);
+    for (int64_t i = 0; i < n; ++i)
+      vals[i] = 0.08f * float(((int)(seed * 7 + i) % 7) - 3);
+    return Bf16Tensor(sh, vals);
+  };
+  lw.attn_q = bf({4 * 4, 8}, 1.0f);
+  lw.attn_wa_k = bf({2 * 2, 8}, 2.0f);
+  lw.attn_wb_k = bf({2 * 4, 8}, 3.0f);
+  lw.attn_wa_v = bf({2 * 2, 8}, 4.0f);
+  lw.attn_wb_v = bf({2 * 4, 8}, 5.0f);
+  lw.attn_shift_k = bf({2, 8}, 6.0f);
+  lw.attn_shift_v = bf({2, 8}, 7.0f);
+  lw.attn_lambda = bf({2, 8}, 8.0f);
+  lw.attn_gate = bf({2 * 4, 8}, 9.0f);
+  lw.attn_q_norm = F32Tensor({4}, {0, 0, 0, 0});
+  lw.attn_k_norm = F32Tensor({4}, {0, 0, 0, 0});
+  lw.attn_softmax_scaler = F32Tensor({4}, {1.1f, 0.9f, 1.0f, 1.2f});
+
+  const int64_t KV = p.kv_heads, D = p.head_dim, SIG = p.heads - KV;
+  const int64_t row = KV * D;
+  std::vector<float> x(8);
+  for (int64_t i = 0; i < 8; ++i) x[i] = 0.2f * float((i % 5) - 2);
+  auto run = [&](double bias, std::vector<float>& out) {
+    p.gate_bias = bias;
+    std::vector<float> kc(2 * row, 0.0f), vc(2 * row, 0.0f);
+    std::vector<float> rk(row, 0.0f), rv(row, 0.0f);
+    vllm::OlalaVAttentionStepHost(kc.data(), vc.data(), rk.data(), rv.data(),
+                                  x.data(), 0, lw, p, out.data());
+  };
+  std::vector<float> out_zero(SIG * D, 0.0f), out_big(SIG * D, 0.0f);
+  run(0.0, out_zero);
+  run(8.0, out_big);
+  bool differs = false;
+  for (int64_t i = 0; i < SIG * D; ++i)
+    if (std::fabs(out_zero[i] - out_big[i]) > 1e-4f) differs = true;
+  CHECK(differs);
+}
+
+// Porting fix #6 repair: at a document start (pos==0) the shift alpha is
+// masked to 0, so the committed cache row must not depend on the previous
+// raw k/v state. Removing the mask makes the two runs differ.
+TEST_CASE("olala W2c-2c: step host masks the V shift at document start") {
+  vllm::OlalaParams p;
+  p.hidden = 8;
+  p.heads = 4;
+  p.kv_heads = 2;
+  p.head_dim = 4;
+  p.tpa_rank = 2;
+  p.window = 3;
+  p.softcap = 30.0;
+  vllm::OlalaLayerWeights lw;
+  auto bf = [&](std::vector<int64_t> sh, float seed) {
+    int64_t n = 1;
+    for (auto d : sh) n *= d;
+    std::vector<float> vals(n);
+    for (int64_t i = 0; i < n; ++i)
+      vals[i] = 0.08f * float(((int)(seed * 7 + i) % 7) - 3);
+    return Bf16Tensor(sh, vals);
+  };
+  lw.attn_q = bf({4 * 4, 8}, 1.0f);
+  lw.attn_wa_k = bf({2 * 2, 8}, 2.0f);
+  lw.attn_wb_k = bf({2 * 4, 8}, 3.0f);
+  lw.attn_wa_v = bf({2 * 2, 8}, 4.0f);
+  lw.attn_wb_v = bf({2 * 4, 8}, 5.0f);
+  lw.attn_shift_k = bf({2, 8}, 6.0f);
+  lw.attn_shift_v = bf({2, 8}, 7.0f);
+  lw.attn_lambda = bf({2, 8}, 8.0f);
+  lw.attn_gate = bf({2 * 4, 8}, 9.0f);
+  // The GGUF stores the EFFECTIVE weight and we multiply by it directly, so
+  // zero here would zero the cached k/v and hide the shift entirely.
+  lw.attn_q_norm = F32Tensor({4}, {1.0f, 1.0f, 1.0f, 1.0f});
+  lw.attn_k_norm = F32Tensor({4}, {1.0f, 1.0f, 1.0f, 1.0f});
+  lw.attn_softmax_scaler = F32Tensor({4}, {1.1f, 0.9f, 1.0f, 1.2f});
+
+  const int64_t KV = p.kv_heads, D = p.head_dim, SIG = p.heads - KV;
+  const int64_t row = KV * D;
+  std::vector<float> x(8);
+  for (int64_t i = 0; i < 8; ++i) x[i] = 0.2f * float((i % 5) - 2);
+  auto run = [&](float prev, std::vector<float>& cache_row0) {
+    p.gate_bias = 0.0;
+    std::vector<float> kc(2 * row, 0.0f), vc(2 * row, 0.0f);
+    std::vector<float> rk(row, prev), rv(row, -prev);
+    std::vector<float> out(SIG * D, 0.0f);
+    vllm::OlalaVAttentionStepHost(kc.data(), vc.data(), rk.data(), rv.data(),
+                                  x.data(), 0, lw, p, out.data());
+    cache_row0.assign(kc.begin(), kc.begin() + row);
+  };
+  std::vector<float> clean, perturbed;
+  run(0.0f, clean);
+  run(1.0f, perturbed);
+  for (int64_t i = 0; i < row; ++i) {
+    CAPTURE(i);
+    CHECK(std::fabs(clean[i] - perturbed[i]) < 1e-6f);
+  }
+}
+
 // W2d: the assembled full forward on the REAL bf16 artifact. This smoke gates
 // ASSEMBLY (loads through LoadOlalaGgufWeights, all ops composed, deterministic
 // repeat, finite logits, ids in vocab) — NOT token exactness vs an oracle
