@@ -1,0 +1,20 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+===============================================================================
+./tests/vllm/models/test_kolibri11_gguf_guard.cpp:79:
+TEST CASE:  kolibri1 gguf: 1.1 marker KVs are refused by name on the production path
+
+./tests/vllm/models/test_kolibri11_gguf_guard.cpp:88: ERROR: CHECK( message.find("kolibri1_1") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+./tests/vllm/models/test_kolibri11_gguf_guard.cpp:89: ERROR: CHECK( message.find("MODEL-TEXT-kolibri-1-1") != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+./tests/vllm/models/test_kolibri11_gguf_guard.cpp:90: ERROR: CHECK( message.find(key) != std::string::npos ) is NOT correct!
+  values: CHECK( 18446744073709551615 != 18446744073709551615 )
+
+===============================================================================
+[doctest] test cases:  2 |  1 passed | 1 failed | 0 skipped
+[doctest] assertions: 27 | 24 passed | 3 failed |
+[doctest] Status: FAILURE!
