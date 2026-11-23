@@ -508,3 +508,11 @@ until a card exists.
    objects; it proves no TU has an `<sm_80` *compile* blocker beyond the two
    named, and nothing about undefined symbols, `__trap()` stubs reachable at
    link, or fatbin assembly. Do not quote 18/20 as "the library builds".
+## Owed
+
+- **`ISSUE-GH-148` — Volta (`sm_70`) and Turing (`sm_75`) support.** This lane
+  owns the fp16 / non-tensor-core breadth arc, and W1 shipped only the Turing
+  `sm_75` bf16-WMMA guard; the Volta and Turing runtime arms stay open. The
+  record predates the cutover and carries `Row: -`; no row, date, state or
+  resolution is invented for it. The owner is this spec because the architecture
+  scope is the spec's own.

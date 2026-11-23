@@ -98,7 +98,10 @@ A second, smaller breach of the same rule: #2350, #2354, #2356 and #2357, all cr
 
 ## Why nothing noticed
 
-`scripts/check-agent-record.py:2216-2222`: when a branch reference fails to resolve to a canonical record, the checker appends an error only if the reference is a stable-ID form. A bare `#<n>` hits `continue` and is silently accepted. The 169 in-tree `#<n>` citations into the hole therefore cost nothing today. The hazard is latent rather than live: every `ISSUE-GH-<n>` form citation into #2449-#3216 currently in the tree (#2987, #3094, #3103, #3116, #3153, #3155) does resolve, so no gate is red, but the first spec that writes `ISSUE-GH-` for a hole number reds the record gate on its own diff.
+The restructured checker's canonical-reference pass: when a branch reference fails to resolve to a canonical record, the pass appends an error only if the reference is a stable-ID form. A bare `#<n>` hits `continue` and is silently accepted. (The pass is
+`check_canonical_issue_references` in that restructured file; the pre-restructure
+`scripts/check-agent-record.py` that `main` carries has no canonical-reference pass at
+all.) The 169 in-tree `#<n>` citations into the hole therefore cost nothing today. The hazard is latent rather than live: every `ISSUE-GH-<n>` form citation into #2449-#3216 currently in the tree (#2987, #3094, #3103, #3116, #3153, #3155) does resolve, so no gate is red, but the first spec that writes `ISSUE-GH-` for a hole number reds the record gate on its own diff.
 
 ## No other gap of this size
 
