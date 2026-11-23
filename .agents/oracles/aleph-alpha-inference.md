@@ -63,3 +63,19 @@ recorded as open in the primary goldens' `vs_transcription_goldens` field.
 - Quantized arms are a standing requirement: the repo and plugin ship bf16 and
   fp8; the GGUF k-quant conversion is part of the port row, with the checkpoint
   revision + sha256 pinned in docs/USAGE.md.
+
+## Kolibri-1.1 and plugin v2.0.0 (recorded 2026-11-23, NOT a pin advance)
+
+Aleph Alpha shipped Kolibri-1.1 (`Kolibri1_1ForCausalLM`, `model_type
+kolibri1_1`) and plugin v2.0.0 the same day. The pin above stays v1.0.0
+(`049a6a7bd240`): v2.0.0 changes the supported vLLM minor (0.29 → 0.33), needs
+transformers ≥ 5.16.1, and its Kolibri-1.1 kernels are CUDA-only (SM90/SM100,
+NVFP4 KV cache + FlashAttention 4, TP=1), so the v1 CPU gateability evidence
+does not carry. Wheel sha256
+`9c98c2610be03dce0c541b40461a4a4ef232cb52a9c5bee7e5201e6b1c3c9102`
+(PyPI, uploaded 2026-11-23 14:45 UTC); the GitHub revision for v2.0.0 was not
+recorded at write time and is owed with the pin advance. Until that advance
+(a CUDA-lease measurement, likely under row
+`MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm`), kolibri1_1 has NO gateable
+plugin oracle and v1.0.0 remains the record for kolibri-1. Assessment detail:
+docs/bench-evidence/kolibri11-assessment-20261123/ASSESSMENT.md.
