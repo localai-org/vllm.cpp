@@ -95,9 +95,11 @@ struct OlalaWeights {
   std::vector<OlalaLayerWeights> layers;
 };
 
-// W2b: loads the bf16/F32 arm of a census-validated olala GGUF. Block-quant
-// tensors (the q6_k/q5_k_m/q8_0-safe2 arms) refuse BY NAME here — the
-// keep-quant decode arm is W2c work. Throws on any census-unmapped tensor.
+// W2b: loads a census-validated olala GGUF. W2e: F32/F16/BF16 keep the W2b
+// handling, and the Q8_0/Q5_K/Q6_K block encodings (the set the q6_k/q5_k_m/
+// q8_0-safe2 arms carry) stay resident as raw ggml blocks (keep-quant) — the
+// host ops dequantize each row on the fly. Any other block encoding refuses
+// BY NAME. Throws on any census-unmapped tensor.
 OlalaWeights LoadOlalaGgufWeights(const GgufFile& gguf, const HfConfig& config);
 
 // The forward boundary text for W2b: weights load, the forward refuses naming

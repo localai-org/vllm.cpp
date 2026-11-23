@@ -330,6 +330,7 @@ void ValidateOlalaGguf(const GgufFile& gguf, const HfConfig& cfg) {
 // ---------------------------------------------------------------------------
 #include "vllm/model_executor/model_loader/gguf_dequant.h"
 #include "vllm/model_executor/models/olala.h"
+#include "vt/dtype.h"
 
 namespace vllm {
 namespace {
@@ -377,19 +378,46 @@ OwnedTensor MakeOwned(vt::DType dt, const std::vector<int64_t>& shape) {
   return o;
 }
 
-// Load one tensor as owned bytes of its own dtype, but ONLY for the scalar
-// ggml types the W2b bf16/F32 arm carries (BF16, F16, F32). Block-quant types
-// refuse by name — the keep-quant decode arm is W2c.
+// OwnedTensor with raw block-quant bytes: the blocks stay in their ggml
+// encoding (keep-quant, W2e). `bytes` is rows * RowSizeBytes(dt, K) with
+// K = the last (contiguous) dim; vt::SizeOf is unusable on block dtypes by
+// design (storage-only), so the sizing goes through RowSizeBytes.
+OwnedTensor MakeOwnedQuant(vt::DType dt, const std::vector<int64_t>& shape) {
+  OwnedTensor o;
+  o.dtype = dt;
+  o.rank = static_cast<int>(shape.size());
+  VT_CHECK(o.rank <= vt::kMaxRank, "olala: rank exceeds kMaxRank");
+  VT_CHECK(vt::IsBlockQuant(dt), "olala: MakeOwnedQuant needs a block dtype");
+  int64_t rows = 1;
+  for (int i = 0; i + 1 < o.rank; ++i) {
+    o.shape[i] = shape[i];
+    rows *= shape[i];
+  }
+  o.shape[o.rank - 1] = shape.back();
+  o.bytes.resize(rows * vt::RowSizeBytes(dt, shape.back()));
+  return o;
+}
+
+// Load one tensor as owned bytes of its own dtype (W2e keep-quant). Scalar
+// ggml types keep the W2b handling (F32 stays F32, F16/BF16 -> BF16);
+// block-quant types (Q8_0/Q5_K/Q6_K — the set the three quantized artifacts
+// carry) stay in their ggml encoding as raw blocks. Any OTHER block encoding
+// still refuses by name.
 OwnedTensor OwnScalar(const GgufFile& g, const std::string& name) {
   const GgufTensorInfo& t = g.Get(name);
   const GgmlTypeTraits& tr = GgmlTraits(t.ggml_type);
   if (tr.block_elems != 1) {
-    throw std::runtime_error(
-        "olala: tensor '" + name + "' is block-quantized (ggml type " +
-        std::to_string(t.ggml_type) + "); the quantized arms (q6_k/q5_k_m/"
-        "q8_0-safe2) refuse BY NAME and are owed to NEW-CANDIDATE-PORTS W2c "
-        "(keep-quant decode against the llama-cpp-olala floor). Load the bf16 "
-        "arm instead.");
+    vt::DType qdt;
+    if (!vt::BlockDTypeFromGgmlTypeId(t.ggml_type, &qdt)) {
+      throw std::runtime_error(
+          "olala: tensor '" + name + "' uses ggml type " +
+          std::to_string(t.ggml_type) +
+          ", which the olala keep-quant arm does not decode (supported: "
+          "Q8_0/Q5_K/Q6_K/F32/BF16); refusing BY NAME.");
+    }
+    OwnedTensor o = MakeOwnedQuant(qdt, t.shape);
+    std::memcpy(o.bytes.data(), t.data, o.bytes.size());
+    return o;
   }
   const int64_t n = t.nbytes / tr.block_bytes;
   if (t.ggml_type == 0) {  // F32

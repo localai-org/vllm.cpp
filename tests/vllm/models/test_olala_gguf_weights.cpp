@@ -209,13 +209,26 @@ TEST_CASE("olala W2b: weights land in the struct with the census shapes; layer k
   CHECK(m0.attn_output.shape[1] == 3072);
 }
 
-TEST_CASE("olala W2b: the q6_k arm refuses by name at load (keep-quant decode owed to W2c)") {
+TEST_CASE("olala W2e: the q6_k arm loads keep-quant (blocks stay resident)") {
   if (!Present(OLALA_Q6K_PATH)) {
     MESSAGE("SKIP: " << OLALA_Q6K_PATH << " not mounted");
     return;
   }
   vllm::GgufFile gguf = vllm::GgufFile::Open(OLALA_Q6K_PATH);
   vllm::HfConfig cfg = vllm::OlalaHfConfigFromGguf(gguf);
-  CHECK_THROWS_WITH(vllm::LoadOlalaGgufWeights(gguf, cfg),
-                    doctest::Contains("refuse BY NAME"));
+  vllm::OlalaWeights w = vllm::LoadOlalaGgufWeights(gguf, cfg);
+  // W2e inverted the W2b refusal: the quantized matmuls stay in their ggml
+  // encoding (keep-quant), F32 scalars keep the W2b handling, BF16 latent_up
+  // stays BF16. Spot-check one of each per the W2e walk
+  // (docs/bench-evidence/new-candidate-ports-olala-w2e-20261122/).
+  CHECK(w.layers[0].attn_output.dtype == vt::DType::kQ6_K);
+  CHECK(w.layers[0].ffn_up_exps.dtype == vt::DType::kQ8_0);
+  CHECK(w.layers[0].ffn_latent_up.dtype == vt::DType::kBF16);
+  CHECK(w.layers[0].router_weight.dtype == vt::DType::kF32);
+  CHECK(w.embed.dtype == vt::DType::kQ6_K);
+  CHECK(w.head.dtype == vt::DType::kQ6_K);
+  // Owned size: Q6_K rows are K=3072 elements = 12 blocks of 256 = 2520 bytes.
+  const int64_t rows0 = w.layers[0].attn_output.shape[0];
+  const size_t expect = static_cast<size_t>(rows0) * 2520;
+  CHECK(w.layers[0].attn_output.bytes.size() == expect);
 }
