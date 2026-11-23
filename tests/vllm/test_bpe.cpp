@@ -1075,9 +1075,28 @@ class TempTokenizerDir {
   std::string tokenizer_path() const {
     return (dir_ / "tokenizer.json").string();
   }
+  const std::filesystem::path& dir() const { return dir_; }
+
 
  private:
   std::filesystem::path dir_;
+};
+
+// Holds the process working directory inside `new_cwd` for the enclosing
+// scope: FromHfJson("tokenizer.json") resolves a BARE filename against the
+// CWD, and its sibling lookup must follow the same resolution (PR #3363).
+// Declared AFTER the TempTokenizerDir it scopes so destruction order restores
+// the CWD before the directory is removed.
+class ScopedCwd {
+ public:
+  explicit ScopedCwd(const std::filesystem::path& new_cwd)
+      : saved_(std::filesystem::current_path()) {
+    std::filesystem::current_path(new_cwd);
+  }
+  ~ScopedCwd() { std::filesystem::current_path(saved_); }
+
+ private:
+  std::filesystem::path saved_;
 };
 
 // NOTE: there is deliberately no `kTinySpecialId` constant here. It named
@@ -1089,13 +1108,24 @@ class TempTokenizerDir {
 
 }  // namespace
 
-TEST_CASE("tokenizer_config.json add_bos_token is NOT applied (DeepSeek-V2 shape)") {
-  SUBCASE("the exact DeepSeek-V2 shape adds no BOS") {
+TEST_CASE("tokenizer_config.json add_bos_token is NOT applied, but the "
+          "bos/eos NAMES resolve (DeepSeek-V2 shape)") {
+  SUBCASE("the exact DeepSeek-V2 shape adds no BOS but the name resolves") {
     // Byte-for-byte the DeepSeek-V2-Lite situation: an AddedToken OBJECT for
     // bos_token, `add_bos_token: true`, `tokenizer_class: LlamaTokenizerFast`,
     // and a tokenizer.json whose post_processor is a plain ByteLevel. HF's
-    // resolved tokenizer adds NOTHING here (measured — see the block comment
-    // above), so neither may we.
+    // resolved tokenizer adds NOTHING to an encode here (measured — see the
+    // block comment above), so neither may we.
+    //
+    // What CHANGED (ISSUE-LOCAL-01M3RY20H90NMK37V74EH34Z77): `add_bos_token`
+    // remains ignored, but the NAME resolves. HF's resolved
+    // `tokenizer.bos_token_id` is the config-named token's id even when
+    // `add_bos_token` resolves False — measured 2026-09-30 with transformers
+    // 5.17.0 on a checkpoint whose tokenizer_config.json declares bos_token as
+    // an AddedToken object (bos_token_id=248046 while add_bos_token=False and
+    // no BOS is prepended). BosId() naming that id is HF-faithful AND what
+    // lets InputProcessor stop on it; encoding is still the post_processor's
+    // alone.
     const TempTokenizerDir d(kTinyJson, R"json({
       "tokenizer_class": "LlamaTokenizerFast",
       "add_bos_token": true,
@@ -1103,7 +1133,7 @@ TEST_CASE("tokenizer_config.json add_bos_token is NOT applied (DeepSeek-V2 shape
       "bos_token": {"__type": "AddedToken", "content": "<|end|>", "normalized": true}
     })json");
     const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
-    CHECK(t.BosId() == -1);
+    CHECK(t.BosId() == 19);  // the config-NAMED id; HF resolves it too
     CHECK(t.EncodeWithSpecialTokens("hello world") == t.Encode("hello world"));
   }
 
@@ -1112,6 +1142,7 @@ TEST_CASE("tokenizer_config.json add_bos_token is NOT applied (DeepSeek-V2 shape
       "add_bos_token": false, "add_eos_token": true, "eos_token": "<|end|>"
     })json");
     const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == 19);  // name resolves even though nothing is appended
     CHECK(t.EncodeWithSpecialTokens("hello") == t.Encode("hello"));
   }
 
@@ -1139,5 +1170,100 @@ TEST_CASE("tokenizer_config.json add_bos_token is NOT applied (DeepSeek-V2 shape
     const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
     CHECK(t.BosId() == 20);  // the post_processor's token; 19 is never used
     CHECK(t.EncodeWithSpecialTokens("hello world")[0] == 20);
+  }
+}
+
+TEST_CASE("tokenizer_config.json eos_token/bos_token NAMES resolve when the "
+          "post_processor declares none (ISSUE-LOCAL-01M3RY20H90NMK37V74EH34Z77)") {
+  // The Qwen3.5-9B-EXL3 shape: a ByteLevel post_processor (no TemplateProcessing
+  // ids) plus tokenizer_config.json naming eos_token. HF resolves
+  // eos_token_id from that name -- AutoTokenizer on the real checkpoint
+  // returns 248046 for "<|im_end|>" (measured 2026-09-30, transformers
+  // 5.17.0) -- so InputProcessor's tokenizer fallback must see it too.
+  // Without this the request carries NO eos id and <|im_end|> is generated
+  // then ignored.
+  SUBCASE("string-form eos_token resolves to the added-token id") {
+    const TempTokenizerDir d(kTinyJson, R"json({
+      "eos_token": "<|end|>",
+      "bos_token": "<tool>"
+    })json");
+    const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == 19);
+    CHECK(t.BosId() == 20);
+    // Encoding is untouched: the names set the reported ids only, and the
+    // post_processor still owns what gets added to a prompt.
+    CHECK(t.EncodeWithSpecialTokens("hello world") ==
+          t.Encode("hello world"));
+  }
+
+  SUBCASE("AddedToken object form resolves identically") {
+    const TempTokenizerDir d(kTinyJson, R"json({
+      "eos_token": {"__type": "AddedToken", "content": "<|end|>",
+                    "lstrip": false, "normalized": false, "rstrip": false,
+                    "single_word": false, "special": true}
+    })json");
+    const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == 19);
+  }
+
+  SUBCASE("special_tokens_map.json names resolve too") {
+    const TempTokenizerDir d(kTinyJson, R"json({})json");
+    // TempTokenizerDir only writes tokenizer_config.json; drop the map file
+    // beside it manually for the older-file arm.
+    std::filesystem::path dir =
+        std::filesystem::path(d.tokenizer_path()).parent_path();
+    std::ofstream(dir / "special_tokens_map.json", std::ios::binary)
+        << R"json({"eos_token": "<|end|>"})json";
+    const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == 19);
+  }
+
+  SUBCASE("tokenizer_config.json overrides special_tokens_map.json") {
+    // HF from_pretrained applies the config file's kwargs AFTER the map file
+    // has been consumed, so the config name must win when both declare eos.
+    // Map says <|missing|> (unresolvable); config says <|end|> (19).
+    const TempTokenizerDir d(kTinyJson, R"json({"eos_token": "<|end|>"})json");
+    std::filesystem::path dir =
+        std::filesystem::path(d.tokenizer_path()).parent_path();
+    std::ofstream(dir / "special_tokens_map.json", std::ios::binary)
+        << R"json({"eos_token": "<|missing|>"})json";
+    const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == 19);
+  }
+
+  SUBCASE("a post_processor id keeps precedence over the config name") {
+    // Same OPT shape as the pin above, mirrored on eos: TemplateProcessing
+    // says <tool> (20), the config says <|end|> (19); the post_processor wins.
+    const std::string tpl_json = ReplaceOnce(
+        kTinyJson,
+        R"("post_processor": {"type": "ByteLevel", "add_prefix_space": false, "trim_offsets": false, "use_regex": false})",
+        R"("post_processor": {"type": "TemplateProcessing",
+            "single": [{"Sequence": {"id": "A", "type_id": 0}},
+                       {"SpecialToken": {"id": "<tool>", "type_id": 0}}],
+            "pair": [], "special_tokens": {"<tool>": {"id": "<tool>", "ids": [20], "tokens": ["<tool>"]}}})");
+    const TempTokenizerDir d(tpl_json, R"json({"eos_token": "<|end|>"})json");
+    const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == 20);
+    CHECK(t.BosId() == -1);  // template's front is Sequence A -> -1, and the
+                             // config names no bos_token, so it stays unset
+  }
+
+  SUBCASE("an unresolvable name leaves the id unset") {
+    const TempTokenizerDir d(kTinyJson, R"json({"eos_token": "<|missing|>"})json");
+    const Tokenizer t = Tokenizer::FromHfJson(d.tokenizer_path());
+    CHECK(t.EosId() == -1);
+  }
+
+  SUBCASE("a bare filename resolves siblings from the CWD too (PR #3363)") {
+    // parent_path() of "tokenizer.json" is empty; the sibling join must still
+    // find tokenizer_config.json in the CWD. The unfixed `!dir.empty()` guard
+    // skipped the lookup on this spelling and left EosId() at -1 while
+    // "./tokenizer.json" resolved 19.
+    const TempTokenizerDir d(kTinyJson, R"json({"eos_token": "<|end|>"})json");
+    const ScopedCwd cwd(d.dir());
+    const Tokenizer bare = Tokenizer::FromHfJson("tokenizer.json");
+    CHECK(bare.EosId() == 19);
+    const Tokenizer dotted = Tokenizer::FromHfJson("./tokenizer.json");
+    CHECK(dotted.EosId() == 19);
   }
 }
