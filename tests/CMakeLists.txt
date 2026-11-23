@@ -211,6 +211,11 @@ if(KOLIBRI1_GGUF_PATH)
   target_compile_definitions(test_kolibri1_gguf PRIVATE
     KOLIBRI1_GGUF_PATH="${KOLIBRI1_GGUF_PATH}")
 endif()
+# Kolibri-1.1 U1: hermetic arch-collision guard. No mounted artifact; the
+# production-path case drives LoadedEngine::FromModelDir so the loader row is
+# protected as well as the guard itself.
+vllm_cpp_add_test(test_kolibri11_gguf_guard vllm/models/test_kolibri11_gguf_guard.cpp)
+target_include_directories(test_kolibri11_gguf_guard PRIVATE ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_kolibri1_decode_bench vllm/models/test_kolibri1_decode_bench.cpp)
 target_include_directories(test_kolibri1_decode_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # Kolibri-1 three-way numerics capture (row/kolibri-three-way): inert without

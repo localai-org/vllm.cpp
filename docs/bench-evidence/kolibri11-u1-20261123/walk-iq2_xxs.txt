@@ -1,0 +1,966 @@
+file: Kolibri-1.1-IQ2_XXS-GSQ-RCO-2.00bpw.gguf
+size: 18941665728
+endianess: 0  data_offset: 4885952
+tensor_count: 875  kv_count: 56
+--- metadata KVs ---
+GGUF.kv_count [type 10] = 53
+GGUF.tensor_count [type 10] = 875
+GGUF.version [type 4] = 3
+general.architecture [type 8] = kolibri1
+general.file_type [type 4] = 7
+general.name [type 8] = Kolibri 1.1
+general.quantization_version [type 4] = 2
+general.sampling.min_p [type 6] = 0.0
+general.sampling.temp [type 6] = 1.0
+general.sampling.top_k [type 5] = 128
+general.sampling.top_p [type 6] = 0.9900000095367432
+general.size_label [type 8] = 384x2.8B
+general.type [type 8] = model
+kolibri1.attention.head_count [type 4] = 48
+kolibri1.attention.head_count_kv [type 4] = 4
+kolibri1.attention.indexer.candidate_block_size [type 4] = 16
+kolibri1.attention.indexer.candidate_top_k_blocks [type 4] = 1024
+kolibri1.attention.indexer.top_k [type 4] = 2048
+kolibri1.attention.indexer.types [type 9] = [... len=50] [False, False, False, False, True, False, False, False] ... [False, False, False, False]
+kolibri1.attention.key_length [type 4] = 128
+kolibri1.attention.kv_source_map [type 9] = [... len=50] [0, 1, 2, 3, 4, 5, 6, 7] ... [46, 47, 48, 4]
+kolibri1.attention.layer_norm_rms_epsilon [type 6] = 9.999999974752427e-07
+kolibri1.attention.sliding_window [type 4] = 513
+kolibri1.attention.sliding_window_pattern [type 9] = [... len=50] [True, True, True, True, False, True, True, True] ... [True, True, True, False]
+kolibri1.attention.value_length [type 4] = 128
+kolibri1.block_count [type 4] = 50
+kolibri1.context_length [type 4] = 262144
+kolibri1.embedding_length [type 4] = 2560
+kolibri1.expert_count [type 4] = 384
+kolibri1.expert_feed_forward_length [type 4] = 512
+kolibri1.expert_gating_func [type 4] = 2
+kolibri1.expert_shared_count [type 4] = 1
+kolibri1.expert_shared_feed_forward_length [type 4] = 512
+kolibri1.expert_used_count [type 4] = 6
+kolibri1.expert_weights_norm [type 7] = False
+kolibri1.feed_forward_length [type 4] = 3584
+kolibri1.leading_dense_block_count [type 4] = 2
+kolibri1.rope.dimension_count [type 4] = 128
+kolibri1.rope.freq_base [type 6] = 10000.0
+kolibri1.vocab_size [type 4] = 128000
+quantize.imatrix.chunks_count [type 4] = 280
+quantize.imatrix.dataset [type 8] = imatrix.txt
+quantize.imatrix.entries_count [type 4] = 530
+quantize.imatrix.file [type 8] = imatrix.gguf
+tokenizer.chat_template [type 8] = {%- set _sv_reasoning_effort = reasoning_effort | default(none) -%}
+{%- set _sv_thinking_disabled = false -%}
+{%- if _sv_reasoning_effort is not none -%}
+    {%- set _sv_thinking_disabled = _sv_reasoning_effort == 'none' -%}
+{%- elif enable_thinking is defined and enable_thinking is false -%}
+    {%- set _sv_thinking_disabled = true -%}
+{%- endif -%}
+{%- set _sv_no_reasoning_sentence = "Reasoning ...
+tokenizer.ggml.add_bos_token [type 7] = False
+tokenizer.ggml.add_eos_token [type 7] = False
+tokenizer.ggml.add_space_prefix [type 7] = False
+tokenizer.ggml.clean_spaces [type 7] = False
+tokenizer.ggml.eos_token_id [type 4] = 127906
+tokenizer.ggml.merges [type 9] = [... len=127644] ['t h', 'c h', 'i n', 'in g', 'â Ģ', 'th e', 'Ġ the', 'Ċ Ċ'] ... ['SS A', 'r ungen', 'ĠKonflikt s', 'es ac']
+tokenizer.ggml.model [type 8] = gpt2
+tokenizer.ggml.padding_token_id [type 4] = 127901
+tokenizer.ggml.pre [type 8] = qwen2
+tokenizer.ggml.token_type [type 9] = [... len=128000] [1, 1, 1, 1, 1, 1, 1, 1] ... [3, 3, 5, 5]
+tokenizer.ggml.tokens [type 9] = [... len=128000] ['Ā', 'ā', 'Ă', 'ă', 'Ą', 'ą', 'Ć', 'ć'] ... ['<|reserved-token-75|>', '<|reserved-token-76|>', '[PAD127998]', '[PAD127999]']
+--- type-id names ---
+type 13: Q5_K
+type 0: F32
+type 14: Q6_K
+type 19: IQ1_S
+type 8: Q8_0
+type 29: IQ1_M
+type 16: IQ2_XXS
+type 17: IQ2_XS
+type 22: IQ2_S
+--- tensor census ---
+type 0: 391 tensors
+type 8: 56 tensors
+type 13: 209 tensors
+type 14: 75 tensors
+type 16: 45 tensors
+type 17: 12 tensors
+type 19: 61 tensors
+type 22: 9 tensors
+type 29: 17 tensors
+--- tensor names/types (all) ---
+output.weight shape=[np.uint64(2560), np.uint64(128000)] type=13 offset=4885952
+output_norm.weight shape=[np.uint64(2560)] type=0 offset=230165952
+token_embd.weight shape=[np.uint64(2560), np.uint64(128000)] type=13 offset=230176192
+blk.0.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=455456192
+blk.0.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=456357312
+blk.0.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=456357824
+blk.0.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=456368064
+blk.0.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=467181504
+blk.0.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=477994944
+blk.0.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=477995456
+blk.0.ffn_down.weight shape=[np.uint64(3584), np.uint64(2560)] type=13 offset=478896576
+blk.0.ffn_gate.weight shape=[np.uint64(2560), np.uint64(3584)] type=14 offset=485204416
+blk.0.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=492730816
+blk.0.ffn_up.weight shape=[np.uint64(2560), np.uint64(3584)] type=13 offset=492741056
+blk.0.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=499048896
+blk.0.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=499059136
+blk.1.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=499069376
+blk.1.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=499970496
+blk.1.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=499971008
+blk.1.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=499981248
+blk.1.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=510794688
+blk.1.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=521608128
+blk.1.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=521608640
+blk.1.ffn_down.weight shape=[np.uint64(3584), np.uint64(2560)] type=13 offset=522509760
+blk.1.ffn_gate.weight shape=[np.uint64(2560), np.uint64(3584)] type=13 offset=528817600
+blk.1.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=535125440
+blk.1.ffn_up.weight shape=[np.uint64(2560), np.uint64(3584)] type=13 offset=535135680
+blk.1.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=541443520
+blk.1.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=541453760
+blk.2.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=541464000
+blk.2.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=542365120
+blk.2.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=542365632
+blk.2.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=542375872
+blk.2.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=553189312
+blk.2.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=564002752
+blk.2.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=564003264
+blk.2.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=564904384
+blk.2.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=564905920
+blk.2.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=663209920
+blk.2.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=664602560
+blk.2.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=762906560
+blk.2.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=766838720
+blk.2.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=767913920
+blk.2.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=767924160
+blk.2.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=866228160
+blk.2.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=867303360
+blk.2.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=867313600
+blk.3.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=867323840
+blk.3.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=868224960
+blk.3.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=868225472
+blk.3.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=868235712
+blk.3.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=879049152
+blk.3.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=889862592
+blk.3.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=889863104
+blk.3.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=891255744
+blk.3.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=29 offset=891257280
+blk.3.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=1001357760
+blk.3.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1002432960
+blk.3.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=1100736960
+blk.3.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1104669120
+blk.3.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=1105570240
+blk.3.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1105580480
+blk.3.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1203884480
+blk.3.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=1204785600
+blk.3.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=1204795840
+blk.4.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=1204806080
+blk.4.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=1205881280
+blk.4.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=1205881792
+blk.4.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=1205892032
+blk.4.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=1216705472
+blk.4.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=1227518912
+blk.4.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=1227519424
+blk.4.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=1228912064
+blk.4.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=1228913600
+blk.4.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=1327217600
+blk.4.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1328610240
+blk.4.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=1426914240
+blk.4.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1430846400
+blk.4.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=1431747520
+blk.4.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1431757760
+blk.4.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1530061760
+blk.4.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=1530962880
+blk.4.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=1530973120
+blk.5.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1530983360
+blk.5.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=1531884480
+blk.5.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=1531884992
+blk.5.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=1531895232
+blk.5.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=1542708672
+blk.5.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=1553522112
+blk.5.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=1553522624
+blk.5.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=1554915264
+blk.5.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=1554916800
+blk.5.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=1653220800
+blk.5.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1654121920
+blk.5.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=1752425920
+blk.5.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1756358080
+blk.5.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=1757259200
+blk.5.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1757269440
+blk.5.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1855573440
+blk.5.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=1856474560
+blk.5.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=1856484800
+blk.6.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=1856495040
+blk.6.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=1857396160
+blk.6.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=1857396672
+blk.6.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=1857406912
+blk.6.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=1868220352
+blk.6.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=1879033792
+blk.6.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=1879034304
+blk.6.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=1880426944
+blk.6.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=1880428480
+blk.6.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=1978732480
+blk.6.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=1979633600
+blk.6.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=2077937600
+blk.6.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=2081869760
+blk.6.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=2082770880
+blk.6.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=2082781120
+blk.6.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=2181085120
+blk.6.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=2182477760
+blk.6.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=2182488000
+blk.7.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=2182498240
+blk.7.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=2183399360
+blk.7.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=2183399872
+blk.7.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=2183410112
+blk.7.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=2194223552
+blk.7.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=2205036992
+blk.7.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=2205037504
+blk.7.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=2206430144
+blk.7.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=2206431680
+blk.7.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=2304735680
+blk.7.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=2305636800
+blk.7.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=2403940800
+blk.7.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=2407872960
+blk.7.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=2408774080
+blk.7.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=2408784320
+blk.7.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=2507088320
+blk.7.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=2507989440
+blk.7.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=2507999680
+blk.8.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=2508009920
+blk.8.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=2508911040
+blk.8.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=2508911552
+blk.8.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=2508921792
+blk.8.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=2519735232
+blk.8.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=2530548672
+blk.8.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=2530549184
+blk.8.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=2531941824
+blk.8.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=2531943360
+blk.8.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=2630247360
+blk.8.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=2631148480
+blk.8.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=2729452480
+blk.8.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=2733384640
+blk.8.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=2734285760
+blk.8.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=2734296000
+blk.8.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=2832600000
+blk.8.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=2833675200
+blk.8.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=2833685440
+blk.9.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=2833695680
+blk.9.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=2833705920
+blk.9.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=2844519360
+blk.9.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=2855332800
+blk.9.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=2855333312
+blk.9.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=2855334848
+blk.9.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=2953638848
+blk.9.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=2954539968
+blk.9.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=3052843968
+blk.9.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3056776128
+blk.9.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=3057677248
+blk.9.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=3057687488
+blk.9.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=3155991488
+blk.9.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=3157066688
+blk.9.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=3157076928
+blk.10.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3157087168
+blk.10.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=3157988288
+blk.10.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=3157988800
+blk.10.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=3157999040
+blk.10.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=3168812480
+blk.10.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=3179625920
+blk.10.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=3179626432
+blk.10.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=3181019072
+blk.10.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=29 offset=3181020608
+blk.10.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=3291121088
+blk.10.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=3292022208
+blk.10.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=3390326208
+blk.10.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3394258368
+blk.10.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=3395159488
+blk.10.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=3395169728
+blk.10.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=3493473728
+blk.10.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=3494548928
+blk.10.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=3494559168
+blk.11.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3494569408
+blk.11.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=3495470528
+blk.11.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=3495471040
+blk.11.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=3495481280
+blk.11.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=3506294720
+blk.11.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=3517108160
+blk.11.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=3517108672
+blk.11.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=3518183872
+blk.11.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=3518185408
+blk.11.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=3647946688
+blk.11.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=3648847808
+blk.11.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=3747151808
+blk.11.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3751083968
+blk.11.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=3751985088
+blk.11.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=3751995328
+blk.11.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3850299328
+blk.11.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=3851200448
+blk.11.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=3851210688
+blk.12.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3851220928
+blk.12.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=3852122048
+blk.12.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=3852122560
+blk.12.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=3852132800
+blk.12.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=3862946240
+blk.12.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=3873759680
+blk.12.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=3873760192
+blk.12.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=3874661312
+blk.12.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=3874662848
+blk.12.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=3972966848
+blk.12.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=3973867968
+blk.12.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=4072171968
+blk.12.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=4076104128
+blk.12.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=4077005248
+blk.12.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=4077015488
+blk.12.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=4175319488
+blk.12.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=4176394688
+blk.12.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=4176404928
+blk.13.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=4176415168
+blk.13.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=4177316288
+blk.13.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=4177316800
+blk.13.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=4177327040
+blk.13.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=4188140480
+blk.13.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=4198953920
+blk.13.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=4198954432
+blk.13.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=4200347072
+blk.13.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=4200348608
+blk.13.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=4330109888
+blk.13.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=4331011008
+blk.13.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=4429315008
+blk.13.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=4433247168
+blk.13.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=4434148288
+blk.13.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=4434158528
+blk.13.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=4532462528
+blk.13.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=4533537728
+blk.13.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=4533547968
+blk.14.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=4533558208
+blk.14.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=4533568448
+blk.14.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=4544381888
+blk.14.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=4555195328
+blk.14.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=4555195840
+blk.14.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=4555197376
+blk.14.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=4684958656
+blk.14.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=4686033856
+blk.14.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=4784337856
+blk.14.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=4788270016
+blk.14.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=4789171136
+blk.14.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=4789181376
+blk.14.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=4887485376
+blk.14.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=4888386496
+blk.14.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=4888396736
+blk.15.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=4888406976
+blk.15.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=4889308096
+blk.15.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=4889308608
+blk.15.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=4889318848
+blk.15.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=4900132288
+blk.15.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=4910945728
+blk.15.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=4910946240
+blk.15.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=4912021440
+blk.15.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=4912022976
+blk.15.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=5010326976
+blk.15.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=5011402176
+blk.15.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=5109706176
+blk.15.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5113638336
+blk.15.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=5114539456
+blk.15.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=5114549696
+blk.15.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5212853696
+blk.15.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=5213754816
+blk.15.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=5213765056
+blk.16.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5213775296
+blk.16.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=5214676416
+blk.16.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=5214676928
+blk.16.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=5214687168
+blk.16.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=5225500608
+blk.16.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=5236314048
+blk.16.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=5236314560
+blk.16.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=5237707200
+blk.16.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=29 offset=5237708736
+blk.16.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=5347809216
+blk.16.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=5348710336
+blk.16.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=5447014336
+blk.16.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5450946496
+blk.16.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=5451847616
+blk.16.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=5451857856
+blk.16.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5550161856
+blk.16.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=5551062976
+blk.16.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=5551073216
+blk.17.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=5551083456
+blk.17.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=5552158656
+blk.17.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=5552159168
+blk.17.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=5552169408
+blk.17.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=5562982848
+blk.17.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=5573796288
+blk.17.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5573796800
+blk.17.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=5574697920
+blk.17.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=5574699456
+blk.17.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=5673003456
+blk.17.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=5674078656
+blk.17.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=5772382656
+blk.17.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5776314816
+blk.17.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=5777215936
+blk.17.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=5777226176
+blk.17.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=5887326656
+blk.17.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=5888227776
+blk.17.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=5888238016
+blk.18.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=5888248256
+blk.18.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=5889323456
+blk.18.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=5889323968
+blk.18.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=5889334208
+blk.18.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=5900147648
+blk.18.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=5910961088
+blk.18.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=5910961600
+blk.18.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=5912354240
+blk.18.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=5912355776
+blk.18.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=6010659776
+blk.18.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=6012052416
+blk.18.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=6110356416
+blk.18.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=6114288576
+blk.18.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=6115189696
+blk.18.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=6115199936
+blk.18.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=6213503936
+blk.18.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=6214405056
+blk.18.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=6214415296
+blk.19.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=6214425536
+blk.19.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=6215326656
+blk.19.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=6215327168
+blk.19.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=6215337408
+blk.19.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=6226150848
+blk.19.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=6236964288
+blk.19.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=6236964800
+blk.19.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=6238357440
+blk.19.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=6238358976
+blk.19.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=6368120256
+blk.19.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=6369195456
+blk.19.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=6479295936
+blk.19.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=6483228096
+blk.19.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=6484620736
+blk.19.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=6484630976
+blk.19.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=6582934976
+blk.19.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=6583836096
+blk.19.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=6583846336
+blk.20.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=6583856576
+blk.20.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=6584931776
+blk.20.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=6584932288
+blk.20.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=6584942528
+blk.20.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=6595755968
+blk.20.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=6606569408
+blk.20.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=6606569920
+blk.20.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=6607962560
+blk.20.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=6607964096
+blk.20.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=6737725376
+blk.20.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=6739118016
+blk.20.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=6837422016
+blk.20.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=6841354176
+blk.20.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=6842429376
+blk.20.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=6842439616
+blk.20.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=6940743616
+blk.20.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=6941644736
+blk.20.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=6941654976
+blk.21.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=6941665216
+blk.21.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=6942566336
+blk.21.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=6942566848
+blk.21.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=6942577088
+blk.21.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=6955479488
+blk.21.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=6966292928
+blk.21.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=6966293440
+blk.21.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=6967368640
+blk.21.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=6967370176
+blk.21.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=7097131456
+blk.21.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=7098524096
+blk.21.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=7196828096
+blk.21.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=7200760256
+blk.21.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=7201835456
+blk.21.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=7201845696
+blk.21.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=7311946176
+blk.21.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=7313021376
+blk.21.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=7313031616
+blk.22.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=7313041856
+blk.22.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=7313942976
+blk.22.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=7313943488
+blk.22.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=7313953728
+blk.22.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=7326856128
+blk.22.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=7337669568
+blk.22.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=7337670080
+blk.22.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=7339062720
+blk.22.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=7339064256
+blk.22.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=7484554176
+blk.22.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=7485629376
+blk.22.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=7583933376
+blk.22.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=7587865536
+blk.22.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=7588766656
+blk.22.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=7588776896
+blk.22.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=7687080896
+blk.22.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=7687982016
+blk.22.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=7687992256
+blk.23.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=7688002496
+blk.23.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=7688903616
+blk.23.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=7688904128
+blk.23.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=7688914368
+blk.23.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=7701816768
+blk.23.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=7712630208
+blk.23.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=7712630720
+blk.23.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=7714023360
+blk.23.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=22 offset=7714024896
+blk.23.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=7875243456
+blk.23.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=7876636096
+blk.23.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=7986736576
+blk.23.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=7990668736
+blk.23.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=7991569856
+blk.23.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=7991580096
+blk.23.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=8121341376
+blk.23.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=8122734016
+blk.23.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=8122744256
+blk.24.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=8122754496
+blk.24.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=8124147136
+blk.24.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=8124147648
+blk.24.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=8124157888
+blk.24.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=14 offset=8137060288
+blk.24.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=8149962688
+blk.24.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=8149963200
+blk.24.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=8151355840
+blk.24.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=8151357376
+blk.24.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=8296847296
+blk.24.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=17 offset=8297922496
+blk.24.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=8443412416
+blk.24.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=8447344576
+blk.24.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=8448737216
+blk.24.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=22 offset=8448747456
+blk.24.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=8609966016
+blk.24.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=8611358656
+blk.24.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=8611368896
+blk.25.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=8611379136
+blk.25.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=8612454336
+blk.25.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=8612454848
+blk.25.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=8612465088
+blk.25.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=8623278528
+blk.25.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=8634091968
+blk.25.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=8634092480
+blk.25.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=8635485120
+blk.25.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=8635486656
+blk.25.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=8780976576
+blk.25.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=8782369216
+blk.25.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=8912130496
+blk.25.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=8916062656
+blk.25.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=8917137856
+blk.25.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=8917148096
+blk.25.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=9046909376
+blk.25.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=9048302016
+blk.25.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=9048312256
+blk.26.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=9048322496
+blk.26.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=9049715136
+blk.26.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=9049715648
+blk.26.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=9049725888
+blk.26.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=9062628288
+blk.26.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=9073441728
+blk.26.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=9073442240
+blk.26.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=9074834880
+blk.26.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=9074836416
+blk.26.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=9204597696
+blk.26.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=9205498816
+blk.26.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=9335260096
+blk.26.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=9339192256
+blk.26.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=9340093376
+blk.26.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=9340103616
+blk.26.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=9469864896
+blk.26.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=9470940096
+blk.26.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=9470950336
+blk.27.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=9470960576
+blk.27.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=9472353216
+blk.27.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=9472353728
+blk.27.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=9472363968
+blk.27.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=9485266368
+blk.27.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=9496079808
+blk.27.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=9496080320
+blk.27.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=9496981440
+blk.27.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=9496982976
+blk.27.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=9642472896
+blk.27.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=9643548096
+blk.27.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=9753648576
+blk.27.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=9757580736
+blk.27.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=9758973376
+blk.27.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=9758983616
+blk.27.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=9869084096
+blk.27.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=9869985216
+blk.27.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=9869995456
+blk.28.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=9870005696
+blk.28.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=9871080896
+blk.28.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=9871081408
+blk.28.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=9871091648
+blk.28.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=9881905088
+blk.28.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=9892718528
+blk.28.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=9892719040
+blk.28.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=9894111680
+blk.28.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=9894113216
+blk.28.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=10023874496
+blk.28.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=10025267136
+blk.28.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=10123571136
+blk.28.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=10127503296
+blk.28.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=10128578496
+blk.28.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=10128588736
+blk.28.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=10258350016
+blk.28.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=10259251136
+blk.28.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=10259261376
+blk.29.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=10259271616
+blk.29.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=10260346816
+blk.29.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=10260347328
+blk.29.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=10260357568
+blk.29.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=10273259968
+blk.29.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=10284073408
+blk.29.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=10284073920
+blk.29.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=10285466560
+blk.29.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=10285468096
+blk.29.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=10430958016
+blk.29.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=10431859136
+blk.29.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=10530163136
+blk.29.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=10534095296
+blk.29.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=10535170496
+blk.29.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=10535180736
+blk.29.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=10664942016
+blk.29.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=10666017216
+blk.29.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=10666027456
+blk.30.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=10666037696
+blk.30.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=10667112896
+blk.30.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=10667113408
+blk.30.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=10667123648
+blk.30.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=10680026048
+blk.30.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=10690839488
+blk.30.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=10690840000
+blk.30.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=10692232640
+blk.30.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=10692234176
+blk.30.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=10821995456
+blk.30.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=22 offset=10823070656
+blk.30.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=10984289216
+blk.30.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=10988221376
+blk.30.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=10989296576
+blk.30.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=10989306816
+blk.30.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=11087610816
+blk.30.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=11089003456
+blk.30.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=11089013696
+blk.31.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=11089023936
+blk.31.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=11090099136
+blk.31.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=11090099648
+blk.31.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=11090109888
+blk.31.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=11103012288
+blk.31.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=11113825728
+blk.31.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=11113826240
+blk.31.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=11114727360
+blk.31.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=22 offset=11114728896
+blk.31.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=11275947456
+blk.31.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=11277340096
+blk.31.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=11407101376
+blk.31.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=11411033536
+blk.31.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=11411934656
+blk.31.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=11411944896
+blk.31.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=11522045376
+blk.31.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=11522946496
+blk.31.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=11522956736
+blk.32.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=11522966976
+blk.32.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=11524042176
+blk.32.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=11524042688
+blk.32.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=11524052928
+blk.32.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=11534866368
+blk.32.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=11545679808
+blk.32.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=11545680320
+blk.32.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=11547072960
+blk.32.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=11547074496
+blk.32.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=11676835776
+blk.32.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=11677736896
+blk.32.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=11807498176
+blk.32.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=11811430336
+blk.32.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=11812505536
+blk.32.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=11812515776
+blk.32.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=11942277056
+blk.32.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=11943669696
+blk.32.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=11943679936
+blk.33.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=11943690176
+blk.33.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=11944765376
+blk.33.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=11944765888
+blk.33.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=11944776128
+blk.33.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=11955589568
+blk.33.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=11966403008
+blk.33.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=11966403520
+blk.33.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=11967304640
+blk.33.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=11967306176
+blk.33.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=12112796096
+blk.33.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=12113871296
+blk.33.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=12243632576
+blk.33.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=12247564736
+blk.33.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=12248957376
+blk.33.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=12248967616
+blk.33.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=12378728896
+blk.33.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=12379804096
+blk.33.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=12379814336
+blk.34.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=12379824576
+blk.34.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=12379834816
+blk.34.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=12390648256
+blk.34.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=12401461696
+blk.34.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=12401462208
+blk.34.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=12401463744
+blk.34.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=12531225024
+blk.34.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=12532617664
+blk.34.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=12630921664
+blk.34.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=12634853824
+blk.34.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=12635754944
+blk.34.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=12635765184
+blk.34.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=12745865664
+blk.34.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=12746766784
+blk.34.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=12746777024
+blk.35.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=12746787264
+blk.35.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=12747688384
+blk.35.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=12747688896
+blk.35.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=14 offset=12747699136
+blk.35.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=12760601536
+blk.35.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=12771414976
+blk.35.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=12771415488
+blk.35.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=12772490688
+blk.35.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=12772492224
+blk.35.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=12917982144
+blk.35.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=17 offset=12919057344
+blk.35.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=13064547264
+blk.35.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=13068479424
+blk.35.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=13069380544
+blk.35.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=13069390784
+blk.35.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=13179491264
+blk.35.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=13180566464
+blk.35.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=13180576704
+blk.36.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=13180586944
+blk.36.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=13181488064
+blk.36.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=13181488576
+blk.36.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=13181498816
+blk.36.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=13192312256
+blk.36.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=13203125696
+blk.36.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=13203126208
+blk.36.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=13204518848
+blk.36.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=13204520384
+blk.36.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=13334281664
+blk.36.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=13335356864
+blk.36.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=13465118144
+blk.36.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=13469050304
+blk.36.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=13470125504
+blk.36.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=13470135744
+blk.36.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=13599897024
+blk.36.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=13600972224
+blk.36.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=13600982464
+blk.37.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=13600992704
+blk.37.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=13601893824
+blk.37.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=13601894336
+blk.37.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=13601904576
+blk.37.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=13612718016
+blk.37.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=13623531456
+blk.37.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=13623531968
+blk.37.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=13624433088
+blk.37.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=13624434624
+blk.37.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=13754195904
+blk.37.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=13755271104
+blk.37.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=13885032384
+blk.37.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=13888964544
+blk.37.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=13890357184
+blk.37.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=13890367424
+blk.37.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14020128704
+blk.37.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=14021029824
+blk.37.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=14021040064
+blk.38.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14021050304
+blk.38.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=14021951424
+blk.38.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=14021951936
+blk.38.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=14021962176
+blk.38.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=14032775616
+blk.38.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=14043589056
+blk.38.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14043589568
+blk.38.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=14044490688
+blk.38.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=22 offset=14044492224
+blk.38.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=13 offset=14205710784
+blk.38.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=14206611904
+blk.38.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=14316712384
+blk.38.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=14320644544
+blk.38.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=14321719744
+blk.38.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=14321729984
+blk.38.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14451491264
+blk.38.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=14452392384
+blk.38.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=14452402624
+blk.39.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=14452412864
+blk.39.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=14452423104
+blk.39.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=14463236544
+blk.39.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=14474049984
+blk.39.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=14474050496
+blk.39.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=14474052032
+blk.39.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=14603813312
+blk.39.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=14604888512
+blk.39.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=14703192512
+blk.39.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14707124672
+blk.39.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=14708025792
+blk.39.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=14708036032
+blk.39.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14806340032
+blk.39.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=14807241152
+blk.39.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=14807251392
+blk.40.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=14807261632
+blk.40.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=14808336832
+blk.40.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=14808337344
+blk.40.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=14808347584
+blk.40.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=14819161024
+blk.40.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=14829974464
+blk.40.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=14829974976
+blk.40.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=14830876096
+blk.40.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=22 offset=14830877632
+blk.40.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=14992096192
+blk.40.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=14993171392
+blk.40.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=15103271872
+blk.40.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=15107204032
+blk.40.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=15108105152
+blk.40.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=15108115392
+blk.40.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=15206419392
+blk.40.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=15207812032
+blk.40.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=15207822272
+blk.41.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=15207832512
+blk.41.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=15208733632
+blk.41.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=15208734144
+blk.41.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=15208744384
+blk.41.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=15219557824
+blk.41.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=15230371264
+blk.41.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=15230371776
+blk.41.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=15231272896
+blk.41.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=15231274432
+blk.41.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=15361035712
+blk.41.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=15362110912
+blk.41.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=15460414912
+blk.41.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=15464347072
+blk.41.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=15465248192
+blk.41.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=22 offset=15465258432
+blk.41.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=15626476992
+blk.41.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=15627869632
+blk.41.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=15627879872
+blk.42.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=15627890112
+blk.42.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=15629282752
+blk.42.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=15629283264
+blk.42.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=15629293504
+blk.42.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=15640106944
+blk.42.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=15650920384
+blk.42.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=15650920896
+blk.42.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=15652313536
+blk.42.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=29 offset=15652315072
+blk.42.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=15762415552
+blk.42.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=22 offset=15763808192
+blk.42.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=15925026752
+blk.42.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=15928958912
+blk.42.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=15929860032
+blk.42.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=15929870272
+blk.42.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16059631552
+blk.42.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=16060532672
+blk.42.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=16060542912
+blk.43.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=16060553152
+blk.43.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=16061628352
+blk.43.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=16061628864
+blk.43.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=16061639104
+blk.43.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=16072452544
+blk.43.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=16083265984
+blk.43.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16083266496
+blk.43.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=16084167616
+blk.43.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=16084169152
+blk.43.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=16182473152
+blk.43.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=16183548352
+blk.43.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=16313309632
+blk.43.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16317241792
+blk.43.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=16318142912
+blk.43.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=16318153152
+blk.43.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16447914432
+blk.43.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=16448815552
+blk.43.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=16448825792
+blk.44.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=16448836032
+blk.44.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=16448846272
+blk.44.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=16459659712
+blk.44.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=16470473152
+blk.44.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=16470473664
+blk.44.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=16470475200
+blk.44.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=16600236480
+blk.44.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=19 offset=16601311680
+blk.44.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=16699615680
+blk.44.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16703547840
+blk.44.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=16704448960
+blk.44.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=16704459200
+blk.44.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16834220480
+blk.44.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=16835121600
+blk.44.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=16835131840
+blk.45.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16835142080
+blk.45.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=16836043200
+blk.45.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=16836043712
+blk.45.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=16836053952
+blk.45.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=16846867392
+blk.45.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=16857680832
+blk.45.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=16857681344
+blk.45.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=16858582464
+blk.45.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=16858584000
+blk.45.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=16988345280
+blk.45.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=16989737920
+blk.45.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=17119499200
+blk.45.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17123431360
+blk.45.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=17124332480
+blk.45.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=17124342720
+blk.45.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17254104000
+blk.45.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=17255005120
+blk.45.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=17255015360
+blk.46.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=17255025600
+blk.46.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=17256100800
+blk.46.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=17256101312
+blk.46.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=17256111552
+blk.46.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=17266924992
+blk.46.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=17277738432
+blk.46.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17277738944
+blk.46.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=17278640064
+blk.46.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=19 offset=17278641600
+blk.46.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=14 offset=17376945600
+blk.46.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=17378020800
+blk.46.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=17507782080
+blk.46.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17511714240
+blk.46.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=17512615360
+blk.46.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=17 offset=17512625600
+blk.46.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17658115520
+blk.46.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=17659016640
+blk.46.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=17659026880
+blk.47.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17659037120
+blk.47.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=17659938240
+blk.47.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=17659938752
+blk.47.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=17659948992
+blk.47.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=17670762432
+blk.47.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=17681575872
+blk.47.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17681576384
+blk.47.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=17682477504
+blk.47.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=17 offset=17682479040
+blk.47.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=17827968960
+blk.47.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=17829361600
+blk.47.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=17959122880
+blk.47.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=17963055040
+blk.47.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=17963956160
+blk.47.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=17963966400
+blk.47.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=18074066880
+blk.47.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=18074968000
+blk.47.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=18074978240
+blk.48.attn_k.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=18074988480
+blk.48.attn_k_norm.weight shape=[np.uint64(128)] type=0 offset=18076063680
+blk.48.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=18076064192
+blk.48.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=18076074432
+blk.48.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=18086887872
+blk.48.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=18097701312
+blk.48.attn_v.weight shape=[np.uint64(2560), np.uint64(512)] type=8 offset=18097701824
+blk.48.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=18099094464
+blk.48.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=18099096000
+blk.48.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=18228857280
+blk.48.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=29 offset=18230249920
+blk.48.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=18340350400
+blk.48.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=18344282560
+blk.48.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=18345357760
+blk.48.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=16 offset=18345368000
+blk.48.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=18475129280
+blk.48.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=18476204480
+blk.48.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=18476214720
+blk.49.attn_norm.weight shape=[np.uint64(2560)] type=0 offset=18476224960
+blk.49.attn_output.weight shape=[np.uint64(6144), np.uint64(2560)] type=13 offset=18476235200
+blk.49.attn_q.weight shape=[np.uint64(2560), np.uint64(6144)] type=13 offset=18487048640
+blk.49.attn_q_norm.weight shape=[np.uint64(128)] type=0 offset=18497862080
+blk.49.exp_probs_b.bias shape=[np.uint64(384)] type=0 offset=18497862592
+blk.49.ffn_down_exps.weight shape=[np.uint64(512), np.uint64(2560), np.uint64(384)] type=16 offset=18497864128
+blk.49.ffn_down_shexp.weight shape=[np.uint64(512), np.uint64(2560)] type=8 offset=18627625408
+blk.49.ffn_gate_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=22 offset=18629018048
+blk.49.ffn_gate_inp.weight shape=[np.uint64(2560), np.uint64(384)] type=0 offset=18790236608
+blk.49.ffn_gate_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=13 offset=18794168768
+blk.49.ffn_norm.weight shape=[np.uint64(2560)] type=0 offset=18795069888
+blk.49.ffn_up_exps.weight shape=[np.uint64(2560), np.uint64(512), np.uint64(384)] type=17 offset=18795080128
+blk.49.ffn_up_shexp.weight shape=[np.uint64(2560), np.uint64(512)] type=14 offset=18940570048
+blk.49.post_attention_norm.weight shape=[np.uint64(2560)] type=0 offset=18941645248
+blk.49.post_ffw_norm.weight shape=[np.uint64(2560)] type=0 offset=18941655488
+--- summary ---
+{"tensors": 875, "types": {"0": 391, "8": 56, "13": 209, "14": 75, "16": 45, "17": 12, "19": 61, "22": 9, "29": 17}}

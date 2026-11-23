@@ -186,6 +186,31 @@ bool IsKolibri1Gguf(const GgufFile& gguf) {
          std::get<std::string>(v->v) == kKolibri1GgufArch;
 }
 
+// U1 trap guard (ISSUE-LOCAL-01M84HPYRT3BNNF61BKGNRQ740). llama.cpp's
+// Kolibri-1.1 converter writes general.architecture = "kolibri1" for 1.1
+// files, so the arch string alone cannot distinguish them. These KVs are
+// carried by 1.1 and absent from 1.0; a 1.0 arm that reads only kolibri1 KVs
+// would silently claim the file. Refuse by name before any other metadata is
+// read, so the message is deterministic even on a file missing 1.0 KVs.
+void RefuseKolibri11MarkerKvs(const GgufFile& gguf) {
+  static constexpr const char* kMarkers[] = {
+      "kolibri1.attention.indexer.top_k",
+      "kolibri1.attention.indexer.types",
+      "kolibri1.attention.kv_source_map",
+      "kolibri1.attention.indexer.candidate_block_size",
+      "kolibri1.attention.indexer.candidate_top_k_blocks",
+      "kolibri1.leading_dense_block_count",
+  };
+  for (const char* key : kMarkers) {
+    if (gguf.FindKv(key) != nullptr) {
+      throw std::runtime_error(
+          std::string("kolibri1 gguf: metadata key '") + key +
+          "' belongs to Kolibri-1.1; kolibri1_1 support is missing "
+          "(row MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm)");
+    }
+  }
+}
+
 std::vector<Kolibri1Tensor> EnumerateKolibri1GgufTensors(
     const Kolibri1Params& p) {
   std::vector<Kolibri1Tensor> out;
@@ -220,6 +245,7 @@ HfConfig Kolibri1HfConfigFromGguf(const GgufFile& gguf) {
   VT_CHECK(IsKolibri1Gguf(gguf),
            "kolibri1 gguf: general.architecture must be '" +
                std::string(kKolibri1GgufArch) + "'");
+  RefuseKolibri11MarkerKvs(gguf);
   const std::string p = "kolibri1.";
 
   HfConfig c;
@@ -291,6 +317,7 @@ HfConfig Kolibri1HfConfigFromGguf(const GgufFile& gguf) {
 
 Kolibri1Weights LoadKolibri1FromGguf(const GgufFile& gguf,
                                      const HfConfig& config) {
+  RefuseKolibri11MarkerKvs(gguf);
   VT_CHECK(IsKolibri1Gguf(gguf),
            "kolibri1 gguf: general.architecture must be '" +
                std::string(kKolibri1GgufArch) + "'");

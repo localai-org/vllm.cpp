@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M84HPYRT3BNNF61BKGNRQ740
 Title: kolibri1 GGUF arm must refuse a Kolibri-1.1 GGUF by name (arch-string collision)
 Row: MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-23
 Updated: 2026-11-23
-Closed: -
+Closed: 2026-11-23
 
 ## Problem
 
@@ -16,4 +16,4 @@ llama.cpp's Kolibri-1.1 converter (conversion/kolibri1.py in PR ggml-org/llama.c
 
 ## Resolution
 
--
+Landed in wave U1 on branch row/MODEL-TEXT-kolibri-1-1-U1 (spec commit a71f5a44, implementation commit pending). Kolibri1HfConfigFromGguf and LoadKolibri1FromGguf now refuse any kolibri1 GGUF carrying a Kolibri-1.1 marker KV (indexer.top_k, indexer.types, kv_source_map, indexer.candidate_block_size, indexer.candidate_top_k_blocks, leading_dense_block_count) with a message naming kolibri1_1 support and this row. Hermetic test through LoadedEngine::FromModelDir covers all six markers plus a 1.0 control; focused gate 2 cases / 27 assertions green. Mutation proofs captured: removing the guard, removing the kGgufArchArms loader row, and removing one marker each turn the gate red; production files restored byte-for-byte. The four official GGUF arms were downloaded at revision 90116812a166 and verified against their HF LFS sha256; all four carry the marker KVs and omit attn_k/attn_v/attn_k_norm on layers 9/14/34/39/44/49. Walks are in docs/bench-evidence/kolibri11-u1-20261123/. No token parity is claimed: there is no gateable CPU oracle for kolibri1_1 today.
