@@ -50,8 +50,9 @@ IN:
 3. The trap guard: `Kolibri1HfConfigFromGguf` (or `IsKolibri1Gguf`) refuses a
    `kolibri1` GGUF that carries any Kolibri-1.1 marker KV:
    `kolibri1.attention.indexer.top_k`, `kolibri1.attention.indexer.types`,
-   `kolibri1.attention.kv_source_map`, `kolibri1.attention.indexer.candidate_block_size`
-   or `...candidate_top_k_blocks`. The message names the missing `kolibri1_1`
+   `kolibri1.attention.kv_source_map`, `kolibri1.attention.indexer.candidate_block_size`,
+   `kolibri1.attention.indexer.candidate_top_k_blocks` or
+   `kolibri1.leading_dense_block_count`. The message names the missing `kolibri1_1`
    support and this row, per AGENTS.md "Refuse an unimplemented arm with a
    message that names the missing part".
 4. A red-first, mutation-proven unit test over a hermetic synthetic GGUF header
@@ -126,10 +127,30 @@ One PR on `row/MODEL-TEXT-kolibri-1-1-U1` to `localai-org/vllm.cpp:main`, push
 only to `mine`. Trailers and PR body per AGENTS.md. Fresh reviewer must PASS
 before the unit is called merge-ready. Never merge or close a PR here.
 
+## Outcome
+
+- **Measured:** all four pinned arms verified against their HF LFS sha256
+  (`verify-all-four.log`, 4x OK) and walked (`walk-*.txt`, 875 tensors each).
+  The focused guard gate is 2 cases / 27 assertions green with a 1.0 control.
+  Three mutations were re-executed by a fresh reviewer in a scratch tree:
+  removing both guard calls, removing the `kGgufArchArms` loader row, and
+  removing a marker each turn the gate red; each restore was byte-for-byte.
+- **Rejected:** an arch-string-only reader. All four real artifacts declare
+  `general.architecture=kolibri1`, so the guard keys on the six 1.1 marker KVs
+  instead. No token-parity claim was attempted: there is no gateable CPU oracle
+  for `kolibri1_1` today (llama.cpp PR #32891 unmerged, the v2 plugin is
+  CUDA-only, and transformers lacks the architecture).
+- **Why the values hold:** the fit evidence comes from the verified Q4_K_M
+  byte census (42.38 GiB total, 40.75 GiB routed experts), not from an estimate.
+  Every type id in the four arms is already tabulated and dequantizable, so the
+  next barrier is the architecture rather than a new quant decoder.
+
 ## Now
 
-SPEC — download in progress; no walk or guard written yet. Implementation waits
-for per-arm sha256 verification.
+DONE — U1 landed on branch `row/MODEL-TEXT-kolibri-1-1-U1` (spec `a71f5a44`,
+implementation `da6a458ff`); trap-guard issue
+ISSUE-LOCAL-01M84HPYRT3BNNF61BKGNRQ740 closed with dated resolution. Fresh
+review PASS. Later waves (U2-U6) remain owed.
 
 ## Owed
 
