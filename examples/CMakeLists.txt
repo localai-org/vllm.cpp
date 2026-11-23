@@ -447,3 +447,11 @@ vllm_cpp_set_warnings(parakeet-transcribe)
 add_executable(minimax-music3-gen minimax_music3_gen/main.cpp)
 target_link_libraries(minimax-music3-gen PRIVATE vllm::shared)
 vllm_cpp_set_warnings(minimax-music3-gen)
+
+# olala-bench: the p150-olala-bf16 axis A/B driver (spec
+# .agents/specs/p150-benchmark-axes.md). Drives the production paged-engine
+# decode path (FromModelDir → LLMEngine → ForwardOlalaForCausalLM) and reports
+# prompt-eval / decode throughput for the identical-workload greedy battery.
+add_executable(olala-bench olala_bench/main.cpp)
+target_link_libraries(olala-bench PRIVATE vllm::vllm)
+vllm_cpp_set_warnings(olala-bench)

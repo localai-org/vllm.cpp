@@ -1,0 +1,2 @@
+engine: device placement: --fit resolved NO placement: the device memory budget is UNKNOWN (the platform reports no total), so there is nothing to fit against; placing nothing rather than placing everything against a budget of zero
+vllm.cpp: Asynchronous scheduling is enabled (max_concurrent_batches=2)

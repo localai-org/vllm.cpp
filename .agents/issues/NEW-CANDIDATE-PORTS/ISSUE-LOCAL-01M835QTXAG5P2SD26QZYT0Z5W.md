@@ -45,3 +45,18 @@ host-block example would not be a thin client of include/vllm.h.
   test_olala_ops 10/10, test_olala_gguf_weights 7/7). The token gates are
   unchanged (the shared per-token tails were extracted verbatim from the
   generate host). Axis p150-olala-bf16 can leave PENDING.
+
+## Resolution evidence (2026-11-23, benchmark unit)
+
+- The p150-olala-bf16 axis left PENDING in this same change: identical-workload
+  greedy battery (prompt ids [151644, 872, 198, 15588, 220, 151645], n=64, same
+  bf16 GGUF sha256 b266da8e…) run on both arms, 3 sequential legs each on an
+  idle-normalized host. Our production path (`FromModelDir(kCPU)` →
+  `OlalaPagedForward`) measured 0.4579 tok/s prompt-eval / 0.3990 tok/s decode;
+  the llama-cpp-olala @ bd20ca9b denominator 2.615 / 2.158 tok/s — 5.41x decode
+  gap recorded as an OPEN GAP with four named hypotheses, no ceiling. Greedy
+  streams identical through generated index 57, diverge at 58 (fp drift; the
+  binding token gate stays EXACT 18/18).
+- Evidence: docs/bench-evidence/olala-bf16-cpu-ab-20261123/; published cell:
+  docs/benchmarks/p150-olala-bf16.md + the docs/BENCHMARKS.md index row.
+  The issue itself stays OPEN until the wiring change passes fresh review.
