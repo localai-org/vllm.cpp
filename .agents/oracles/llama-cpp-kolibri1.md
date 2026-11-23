@@ -139,3 +139,19 @@ every gate recorded against `62318cd57`/`b11709` left attributed to it. This
 record stays, and keeps its own pin, because the checker admits one pin per
 file and this file's scope stays one architecture. Nothing in this file's
 numbers changes; they were measured at `b11709` and say so.
+
+## This pin does NOT cover Kolibri-1.1 (recorded 2026-11-23)
+
+Kolibri-1.1 (`Kolibri1_1ForCausalLM`) shipped 2026-11-23. Its llama.cpp
+implementation is PR
+[#32891](https://github.com/ggml-org/llama.cpp/pull/32891), head
+`5f4d222898dd` against master `a0677c341ba6`, and it was UNMERGED at check
+time — no release carries it, so neither the `llama-cpp` stock pin (`9df0b73c`,
+b11765) nor this file's scoped kolibri-1 pin speaks for kolibri1_1. The PR
+extends the SAME `kolibri1` GGUF architecture (sparse attention, shared K/V,
+dense prefix, a new `GGML_OP_ROUND_NVFP4`), so a merge silently widens what
+"kolibri1" means in both pins above; the pin advance after the merge must
+re-state both records in the same change. Until then, a llama.cpp PR-head build
+used as a Kolibri-1.1 denominator is a SCRATCH implementation by the porting
+inventory's meaning. Assessment:
+docs/bench-evidence/kolibri11-assessment-20261123/ASSESSMENT.md.
