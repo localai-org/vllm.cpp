@@ -18,7 +18,6 @@
 #include "vt/dtype.h"
 
 namespace vllm {
-
 // Geometry the forward consumes, read from the parsed HfConfig (the GGUF
 // builder maps the standard fields; the rest ride in config.raw under
 // gguf_unmapped with their GGUF spelling).
@@ -56,6 +55,16 @@ struct OlalaParams {
 };
 
 OlalaParams ParseOlalaParams(const HfConfig& config);
+
+// The one derivation of a layer's KV-cache name — the builder
+// (MakeOlalaForCausalLMKVCache) and the paged forward's by-name cache lookup
+// (olala_paged.cpp) both read it, so the publisher and the consumer cannot
+// drift (the qwen4_exp rule: two derivations of one name set is the shape
+// that can disagree).
+inline std::string OlalaLayerKvName(const OlalaParams& p, int64_t l) {
+  return "model.layers." + std::to_string(l) + "." +
+         (p.layer_types[static_cast<size_t>(l)] == 'M' ? "mixer" : "self_attn");
+}
 
 // Per-layer weights. Every tensor the W1 census maps lands here; the layer
 // kind comes from layer_types (V = differential attention, M = Mamba3-MIMO).

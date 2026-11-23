@@ -808,6 +808,74 @@ void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
   }
 }
 
+void OlalaEmbedRowHost(const OwnedTensor& t, int64_t row, float* x,
+                       int64_t n) {
+  if (vt::IsBlockQuant(t.dtype)) {
+    const int64_t rb = vt::RowSizeBytes(t.dtype, n);
+    std::vector<float> dq = DequantGgufRowToF32(
+        vt::GgmlTypeId(t.dtype), t.bytes.data() + row * rb, n);
+    for (int64_t i = 0; i < n; ++i) x[i] = dq[static_cast<size_t>(i)];
+    return;
+  }
+  if (t.dtype == vt::DType::kF32) {
+    const float* r =
+        reinterpret_cast<const float*>(t.bytes.data() + row * n * 4);
+    for (int64_t i = 0; i < n; ++i) x[i] = r[i];
+    return;
+  }
+  const uint8_t* r = t.bytes.data() + static_cast<size_t>(row) * n * 2;
+  for (int64_t i = 0; i < n; ++i) {
+    const uint32_t bits = static_cast<uint32_t>(r[i * 2]) |
+                          (static_cast<uint32_t>(r[i * 2 + 1]) << 8);
+    x[i] = Bf16ToF32(static_cast<uint16_t>(bits));
+  }
+}
+
+void OlalaLayerTailHost(const OlalaLayerWeights& lw, const OlalaParams& p,
+                        int64_t layer_idx, const float* ymix,
+                        int64_t mixer_out, float* x) {
+  // mixer_proj: attn_output.weight [hidden, mixer_out] @ y
+  std::vector<float> proj(static_cast<size_t>(p.hidden), 0.0f);
+  for (int64_t i = 0; i < p.hidden; ++i) {
+    double s = 0.0;
+    for (int64_t j = 0; j < mixer_out; ++j)
+      s += WAt(lw.attn_output, i, j, "attn_output") * ymix[static_cast<size_t>(j)];
+    proj[static_cast<size_t>(i)] = float(s);
+  }
+  // geodesic_mixer
+  std::vector<float> xg(static_cast<size_t>(p.hidden));
+  OlalaGeodesicNormHost(xg.data(), x, proj.data(), 1, p.hidden,
+                        F32Bytes(lw.geo_mixer_scale, "geo_mixer_scale")[0],
+                        F32Bytes(lw.geo_mixer_bias, "geo_mixer_bias")[0],
+                        layer_idx);
+  for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg[static_cast<size_t>(i)];
+  // MLP (latent MoE)
+  std::vector<float> mo(static_cast<size_t>(p.hidden), 0.0f);
+  OlalaMoeHost(mo.data(), x, 1, p.hidden, lw, p);
+  // geodesic_mlp
+  std::vector<float> xg2(static_cast<size_t>(p.hidden));
+  OlalaGeodesicNormHost(xg2.data(), x, mo.data(), 1, p.hidden,
+                        F32Bytes(lw.geo_mlp_scale, "geo_mlp_scale")[0],
+                        F32Bytes(lw.geo_mlp_bias, "geo_mlp_bias")[0],
+                        layer_idx);
+  for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg2[static_cast<size_t>(i)];
+}
+
+void OlalaLmHeadHost(const OlalaWeights& w, const OlalaParams& p,
+                     const float* x, float* logits) {
+  // final_norm=False. The head row is dequantized per vocab row (same helper
+  // as the embedding gather), one dequant per row.
+  std::vector<float> hrow(static_cast<size_t>(p.hidden));
+  for (int64_t vv = 0; vv < p.vocab; ++vv) {
+    OlalaEmbedRowHost(w.head, vv, hrow.data(), p.hidden);
+    double s = 0.0;
+    for (int64_t i = 0; i < p.hidden; ++i)
+      s += double(hrow[static_cast<size_t>(i)]) * x[i];
+    logits[static_cast<size_t>(vv)] = float(s);
+  }
+}
+
+
 void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
                        std::vector<int64_t>& token_ids, int64_t n_gen) {
   const int64_t L = p.layers, H = p.heads, KV = p.kv_heads, D = p.head_dim;
@@ -846,31 +914,10 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
   // row, exactly llama.cpp's ggml_compute_forward_get_rows_q). On the bf16 arm
   // this reads the identical bytes through the identical Bf16ToF32, so the
   // W2d bf16 token gate is unchanged.
-  auto embed_row = [](const OwnedTensor& t, int64_t row, float* x,
-                      int64_t n) {
-    if (vt::IsBlockQuant(t.dtype)) {
-      const int64_t rb = vt::RowSizeBytes(t.dtype, n);
-      std::vector<float> dq = DequantGgufRowToF32(
-          vt::GgmlTypeId(t.dtype), t.bytes.data() + row * rb, n);
-      for (int64_t i = 0; i < n; ++i) x[i] = dq[static_cast<size_t>(i)];
-      return;
-    }
-    if (t.dtype == vt::DType::kF32) {
-      const float* r = reinterpret_cast<const float*>(
-          t.bytes.data() + row * n * 4);
-      for (int64_t i = 0; i < n; ++i) x[i] = r[i];
-      return;
-    }
-    const uint8_t* r = t.bytes.data() + static_cast<size_t>(row) * n * 2;
-    for (int64_t i = 0; i < n; ++i) {
-      const uint32_t bits = static_cast<uint32_t>(r[i * 2]) |
-                            (static_cast<uint32_t>(r[i * 2 + 1]) << 8);
-      x[i] = Bf16ToF32(static_cast<uint16_t>(bits));
-    }
-  };
-
+  // W2f: the row reader is the SHARED OlalaEmbedRowHost — byte-identical to
+  // the lambda it replaces, now also the paged forward's reader.
   auto embed_at = [&](int64_t tok, float* x) {
-    embed_row(w.embed, tok, x, p.hidden);
+    OlalaEmbedRowHost(w.embed, tok, x, p.hidden);
     // normalize_embeddings_ngpt=True (modeling_olala.py:2020-2021)
     double s = 0.0;
     for (int64_t i = 0; i < p.hidden; ++i) s += double(x[i]) * x[i];
@@ -941,57 +988,21 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
         }
         ++vidx;
       }
-      // mixer_proj: attn_output.weight [hidden, mixer_out] @ y
+      // W2f: the tail below the mixer (mixer_proj → geodesic_mixer → latent
+      // MoE → geodesic_mlp) is the SHARED OlalaLayerTailHost, byte-identical
+      // to the inline code it replaces and also the paged forward's tail. The
+      // per-block vproj dump is dropped: no consumer reads it.
       const int64_t mixer_out = is_m ? 2 * p.hidden : SIG * D;
-      std::vector<float> proj(p.hidden, 0.0f);
-      for (int64_t i = 0; i < p.hidden; ++i) {
-        double s = 0.0;
-        for (int64_t j = 0; j < mixer_out; ++j)
-          s += WAt(lw.attn_output, i, j, "attn_output") * ymix[static_cast<size_t>(j)];
-        proj[static_cast<size_t>(i)] = float(s);
-      }
-      if (dump_dir != nullptr && !is_m) {
-        char ppath[512];
-        std::snprintf(ppath, sizeof ppath, "%s/vproj_%02lld_pos%lld.bin",
-                      dump_dir, (long long)l, (long long)t);
-        FILE* pf = std::fopen(ppath, "wb");
-        if (pf) { std::fwrite(proj.data(), sizeof(float), static_cast<size_t>(p.hidden), pf); std::fclose(pf); }
-      }
-      // geodesic_mixer
-      std::vector<float> xg(p.hidden);
-      OlalaGeodesicNormHost(xg.data(), x.data(), proj.data(), 1, p.hidden,
-                            F32Bytes(lw.geo_mixer_scale, "geo_mixer_scale")[0],
-                            F32Bytes(lw.geo_mixer_bias, "geo_mixer_bias")[0],
-                            l);
-      for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg[i];
-      if (dump_dir != nullptr) {
-        char gpath[512];
-        std::snprintf(gpath, sizeof gpath, "%s/geo_%02lld_pos%lld.bin",
-                      dump_dir, (long long)l, (long long)t);
-        FILE* gf2 = std::fopen(gpath, "wb");
-        if (gf2) { std::fwrite(x.data(), sizeof(float), static_cast<size_t>(p.hidden), gf2); std::fclose(gf2); }
-      }
-      // MLP (latent MoE)
-      std::vector<float> mo(p.hidden, 0.0f);
-      OlalaMoeHost(mo.data(), x.data(), 1, p.hidden, lw, p);
-      // geodesic_mlp
-      std::vector<float> xg2(p.hidden);
-      OlalaGeodesicNormHost(xg2.data(), x.data(), mo.data(), 1, p.hidden,
-                            F32Bytes(lw.geo_mlp_scale, "geo_mlp_scale")[0],
-                            F32Bytes(lw.geo_mlp_bias, "geo_mlp_bias")[0],
-                            l);
-      for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg2[i];
+      OlalaLayerTailHost(lw, p, l, ymix.data(), mixer_out, x.data());
     }
     if (t >= static_cast<int64_t>(token_ids.size()) - 1) {
-      // lm_head + argmax (final_norm=False). The head row is dequantized per
-      // vocab row (same helper as the embedding gather), one dequant per row.
-      std::vector<float> hrow(p.hidden);
+      // lm_head + argmax (final_norm=False) through the SHARED OlalaLmHeadHost
+      // (byte-identical per-row arithmetic); argmax stays local.
+      OlalaLmHeadHost(w, p, x.data(), logits.data());
       int64_t best = 0;
       double bestv = -1e300;
       for (int64_t vv = 0; vv < p.vocab; ++vv) {
-        embed_row(w.head, vv, hrow.data(), p.hidden);
-        double s = 0.0;
-        for (int64_t i = 0; i < p.hidden; ++i) s += double(hrow[i]) * x[i];
+        const double s = logits[static_cast<size_t>(vv)];
         if (s > bestv) { bestv = s; best = vv; }
       }
       // append the argmax after every step from the last prompt position
