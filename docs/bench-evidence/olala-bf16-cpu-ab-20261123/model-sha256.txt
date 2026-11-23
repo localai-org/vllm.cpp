@@ -1,0 +1,1 @@
+b266da8e292fb502b161ef0af413242f40c3d5736ebbcb5153fbf9c16bef5747  /mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-bf16.gguf
