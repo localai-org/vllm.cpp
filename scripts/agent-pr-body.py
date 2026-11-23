@@ -31,7 +31,7 @@ THIS IS NOT A CHECKER. It reaches the network, so no gate may depend on it and
 ``--body-file``, which validates a message already on disk and never invokes
 ``gh``; that is the half the suite drives.
 
-    scripts/agent-pr-body.py --pr 1263          # read the live body
+    scripts/agent-pr-body.py --pr 1263          # read the live body, origin then upstream
     scripts/agent-pr-body.py --body-file draft  # the same contract, offline
 
 Exit statuses: 0 the body will land clean, 1 the body was read and fails the
@@ -84,22 +84,51 @@ def _load_ready():
     return module
 
 
-def repository() -> str:
-    """``owner/name`` for ``origin``, so the answer never depends on the cwd."""
+REMOTES = ("origin", "upstream")
+
+
+def repositories() -> list[str]:
+    """Candidate ``owner/name`` for ``--pr``, in the order they are asked.
+
+    ``origin`` first, then ``upstream``. A pull request number is unique inside
+    one repository and means nothing outside it: on a fork checkout ``origin``
+    is the fork, which carries none of the numbers that land upstream, so the
+    fork's answer is ``Could not resolve`` for a pull request that exists one
+    remote away.
+
+    ``origin`` leads because an invocation that works today must keep meaning
+    what it meant: a maintainer whose ``origin`` is canonical never spends a
+    call on a remote that may be somebody else's fork, and a number present in
+    both repositories is still read from the one this clone was made from. A
+    checkout with no ``origin`` at all stays the refusal it always was, rather
+    than being silently re-pointed at whatever other remote happens to exist.
+
+    The identity is derived by ``agent-ready.py``, so the two commands cannot
+    disagree about what a remote URL names.
+    """
 
     ready = _load_ready()
-    result = subprocess.run(
-        ["git", "-C", str(ROOT), "remote", "get-url", "origin"],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    if result.returncode:
-        raise Unverified(
-            f"REMOTE_UNVERIFIED: {result.stderr.strip() or 'no origin remote'}"
+    candidates: list[str] = []
+    for remote in REMOTES:
+        result = subprocess.run(
+            ["git", "-C", str(ROOT), "remote", "get-url", remote],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-    try:
-        return ready.repository_identity(result.stdout.strip())
-    except ready.RemoteUnverified as exc:
-        raise Unverified(f"REMOTE_UNVERIFIED: {exc}") from exc
+        if result.returncode:
+            if remote == REMOTES[0]:
+                raise Unverified(
+                    f"REMOTE_UNVERIFIED: {result.stderr.strip() or 'no origin remote'}"
+                )
+            continue
+        try:
+            identity = ready.repository_identity(result.stdout.strip())
+        except ready.RemoteUnverified as exc:
+            if remote == REMOTES[0]:
+                raise Unverified(f"REMOTE_UNVERIFIED: {exc}") from exc
+            continue
+        if identity not in candidates:
+            candidates.append(identity)
+    return candidates
 
 
 def fetch_body(repo: str, number: int) -> str:
@@ -128,6 +157,39 @@ def fetch_body(repo: str, number: int) -> str:
     if not isinstance(payload, dict) or not isinstance(payload.get("body"), str):
         raise Unverified("REMOTE_UNVERIFIED: gh returned no body field for this pull request")
     return payload["body"]
+
+
+def fetch_live_body(number: int) -> str:
+    """The body from the first candidate repository that carries ``number``.
+
+    The first repository that answers is the answer, and a fallback is named on
+    stderr: a body is judged as the bytes of one repository's pull request, so
+    the operator has to be able to see which one produced them.
+
+    No candidate answering is ``REMOTE_UNVERIFIED`` and never "this pull
+    request does not exist". Only a ``Could not resolve`` reply proves absence,
+    and any other failure may be a forge that did not answer, so every failure
+    is carried with the repository that produced it.
+    """
+
+    candidates = repositories()
+    failures: list[str] = []
+    for repo in candidates:
+        try:
+            body = fetch_body(repo, number)
+        except Unverified as exc:
+            failures.append(f"{repo}: {exc}")
+            continue
+        if repo != candidates[0]:
+            print(
+                f"NOTE: #{number} is not in {candidates[0]}; reading it from {repo}",
+                file=sys.stderr,
+            )
+        return body
+    raise Unverified(
+        "REMOTE_UNVERIFIED: no candidate repository returned this pull request.\n  "
+        + "\n  ".join(failures)
+    )
 
 
 def read_body_file(path: Path) -> str:
@@ -221,7 +283,10 @@ def main() -> int:
     parser.add_argument(
         "--body-file", type=Path, help="validate a message already on disk, offline"
     )
-    parser.add_argument("--repo", help="owner/name; derived from origin when omitted")
+    parser.add_argument(
+        "--repo",
+        help="owner/name; when omitted, origin then upstream are asked in that order",
+    )
     args = parser.parse_args()
 
     if (args.pr is None) == (args.body_file is None):
@@ -234,8 +299,10 @@ def main() -> int:
     try:
         if args.body_file is not None:
             body = read_body_file(args.body_file)
+        elif args.repo is not None:
+            body = fetch_body(args.repo, args.pr)
         else:
-            body = fetch_body(args.repo or repository(), args.pr)
+            body = fetch_live_body(args.pr)
         return validate(body)
     except Unverified as exc:
         print(exc, file=sys.stderr)
