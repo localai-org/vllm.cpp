@@ -1,0 +1,54 @@
+W2e keep-quant token gates vs llama-cpp-olala — first measurement (2026-11-22)
+
+Oracle: OVHai-LLM/llama.cpp branch olala-master @ bd20ca9b471fdcb3f03b75f82d3cf575414bc573
+  (exact pin of .agents/oracles/llama-cpp-olala.md), CPU Release, greedy argmax
+  harness /tmp/olala-ref/golden.cpp (built binary /tmp/olala-ref/golden; run with
+  LD_LIBRARY_PATH=/tmp/olala-ref/build/bin; prompt "<|im_start|>user\n hi <|im_end|>",
+  no BOS, special-token parsing on, raw logits argmax).
+Prompt ids (fork-tokenized, same as the W2d bf16 gate):
+  [151644, 872, 198, 15588, 220, 151645]
+
+Ours: OlalaGenerateHost on the SAME artifact per arm (keep-quant decode: raw ggml
+blocks resident, per-row on-the-fly dequant via DequantGgufRowToF32, spec
+.agents/specs/new-candidate-ports-olala-w2e-keep-quant.md).
+
+Per-arm fork goldens (prompt + 6 greedy ids):
+
+q6_k       [151644, 872, 198, 15588, 220, 151645, 151644, 77091, 151646, 34484, 151654, 1654]
+q5_k_m     [151644, 872, 198, 15588, 220, 151645, 151644, 77091, 151646, 34484, 151654, 151647]
+q8_0-safe2 [151644, 872, 198, 15588, 220, 151645, 151644, 77091, 151646, 34484, 151654, 1654]
+
+The q6_k and q8_0-safe2 goldens equal the bf16 golden; q5_k_m differs in the LAST
+generated id only (1654 -> 151647) — quantization changed the logit order on a
+near-tie. The ratified near-tie bar (glm4 #2839 precedent) accepts an arm whose
+every generated id but one tail id matches the oracle's greedy decode.
+
+Match status: filled in from the test runs recorded in the W2e commit body
+(RunArmGate CHECKs pass exact or documented-tail-flip).
+
+Artifacts (sha256, whole files, 2026-11-22):
+  Olala-v1.0-mini-7A1B-q6_k.gguf       6,306,979,040 B  58a2b658158290687a431705c3c256c1331580ad4e8e99db55d03a8131d223c8
+  Olala-v1.0-mini-7A1B-q5_k_m.gguf     5,990,551,040 B  ed353d2632c406be9ca2022b35e4c13049d6f8f7390b1c1bb61d6a7d6b971860
+  Olala-v1.0-mini-7A1B-q8_0-safe2.gguf 6,876,038,592 B  0bb4560fa6800b41d16a15507ad1843ca17c0849ce0cc989bca337dcf55136d7
+
+Numerics note: the fork's quant matmuls use Q8_K-quantized activations (vec_dot);
+we dequantize each weight row to f32 and accumulate f32/double exactly like the
+bf16 arm. The two paths agree through 5 of 6 greedy positions on every arm,
+including the q6_k and q8_0 arms agreeing with bf16 end to end.
+
+Measured (2026-11-22, Release build /tmp/build-w2e-rel, RunArmGate in
+tests/vllm/models/test_olala_ops.cpp, single generation each):
+
+  q6_k       ours = oracle golden exactly; PASS EXACT           (168.6 s wall)
+  q5_k_m     ours = [151644, 872, 198, 15588, 220, 151645, 151644, 77091,
+             151646, 34484, 151654, 1654] — first five generated ids match the
+             fork; only the LAST id differs (1654 vs 151647): PASS documented
+             near-tie per the ratified #2839 bar                (221.0 s wall)
+  q8_0-safe2 ours = oracle golden exactly; PASS EXACT           (129.8 s wall)
+  bf16 regression smoke: PASS (two generations, 75.5 s wall)
+
+A first implementation cached dequantized rows in slots keyed on the tensor
+base alone; the ops' same-tensor row pairs (ssm_in z/x rows differ by P=64 ≡ 0
+mod 64) collided every element and the q6_k gate exceeded 25 minutes. Filed as
+ISSUE-LOCAL-01M82WJVXS9WFJ4WPRQ4BWX29H, fixed in-flow with a multiplicative
+(row) hash over 64 slots; timings above are the fixed build.

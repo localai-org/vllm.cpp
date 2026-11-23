@@ -1,7 +1,10 @@
 // vllm.cpp ORIGINAL — the `olala` host ops (W2c-1). See olala_ops.h for the
 // reference citations. All compute is f32 on host bytes; the weights arrive as
-// OwnedTensor (bf16 matmuls, f32 scalars) from LoadOlalaGgufWeights.
+// OwnedTensor (bf16 matmuls, f32 scalars) from LoadOlalaGgufWeights. W2e: a
+// block-quant weight (keep-quant) dequantizes its containing row on the fly.
+#include "vllm/model_executor/model_loader/gguf_dequant.h"
 #include "vllm/model_executor/models/olala_ops.h"
+#include "vt/dtype.h"
 
 namespace vllm {
 constexpr double kOlalaPi = 3.14159265358979323846;  // the math constant PI is not portable to MSVC under that name
@@ -25,6 +28,42 @@ float Bf16ToF32(uint16_t h) {
   return f;
 }
 
+// W2e keep-quant: dequantize ONE row of a block-quant weight to f32 and cache
+// it, so the per-element accessors (WAt/W3At, embed/head gathers) cost the
+// same f32 read the bf16 arm does. 64-slot direct-mapped thread_local cache
+// keyed on (tensor base, row) — the ops alternate rows of the SAME tensor per
+// element (ssm_in z/x pairs, shift_k/shift_v), so a base-only key would
+// thrash to a full row dequant per element. A miss dequantizes via
+// DequantGgufRowToF32 (llama.cpp @ 237ad9b9 block format), a hit is free, and
+// eviction is always correct (the cache is a performance device only, never a
+// semantic one). Ops are documented single-threaded host code.
+struct QuantRowCache {
+  const void* base = nullptr;
+  int64_t row = -1;
+  std::vector<float> vals;
+};
+
+thread_local QuantRowCache kQuantRow[64];
+
+const float* QuantRowF32(const OwnedTensor& w, int64_t row, const char* what) {
+  VT_CHECK(vt::IsBlockQuant(w.dtype),
+           std::string("olala op: ") + what + " needs a block dtype");
+  const int64_t k = w.shape[w.rank - 1];
+  const int64_t row_bytes = vt::RowSizeBytes(w.dtype, k);
+  const size_t slot =
+      ((reinterpret_cast<uintptr_t>(w.bytes.data()) >> 6) ^
+       (static_cast<uintptr_t>(row) * 0x9E3779B97F4A7C15ull >> 11)) &
+      63;
+  QuantRowCache& c = kQuantRow[slot];
+  if (c.base != w.bytes.data() || c.row != row) {
+    const uint32_t gtype = vt::GgmlTypeId(w.dtype);
+    c.vals = DequantGgufRowToF32(gtype, w.bytes.data() + row * row_bytes, k);
+    c.base = w.bytes.data();
+    c.row = row;
+  }
+  return c.vals.data();
+}
+
 const float* F32Bytes(const OwnedTensor& t, const char* what) {
   if (t.dtype != vt::DType::kF32) {
     throw std::runtime_error(std::string("olala op: ") + what +
@@ -33,7 +72,8 @@ const float* F32Bytes(const OwnedTensor& t, const char* what) {
   return reinterpret_cast<const float*>(t.bytes.data());
 }
 
-// A [out, in] row-major weight as f32 on the fly: out[j*in + i].
+// A [out, in] row-major weight as f32 on the fly: out[j*in + i]. W2e: a
+// block-quant weight (keep-quant) dequantizes its containing row on the fly.
 float WAt(const OwnedTensor& w, int64_t j, int64_t i, const char* what) {
   if (w.dtype == vt::DType::kF32) {
     return reinterpret_cast<const float*>(w.bytes.data())[j * w.shape[1] + i];
@@ -42,11 +82,11 @@ float WAt(const OwnedTensor& w, int64_t j, int64_t i, const char* what) {
     return Bf16ToF32(
         reinterpret_cast<const uint16_t*>(w.bytes.data())[j * w.shape[1] + i]);
   }
-  throw std::runtime_error(std::string("olala op: ") + what +
-                           " must be F32 or BF16");
+  return QuantRowF32(w, j, what)[i];
 }
 
-// Rank-3 expert weight [experts, out, in]: element (e, j, i).
+// Rank-3 expert weight [experts, out, in]: element (e, j, i). W2e: quant arm
+// as in WAt — each expert occupies whole rows, so (e, j) indexes rows directly.
 float W3At(const OwnedTensor& w, int64_t e, int64_t j, int64_t i,
            const char* what) {
   if (w.rank != 3) {
@@ -58,7 +98,10 @@ float W3At(const OwnedTensor& w, int64_t e, int64_t j, int64_t i,
   if (w.dtype == vt::DType::kF32) {
     return reinterpret_cast<const float*>(w.bytes.data())[off];
   }
-  return Bf16ToF32(reinterpret_cast<const uint16_t*>(w.bytes.data())[off]);
+  if (w.dtype == vt::DType::kBF16) {
+    return Bf16ToF32(reinterpret_cast<const uint16_t*>(w.bytes.data())[off]);
+  }
+  return QuantRowF32(w, e * w.shape[1] + j, what)[i];
 }
 
 }  // namespace
@@ -798,13 +841,36 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
     }
   }
 
-  auto embed_at = [&](int64_t tok, float* x) {
-    for (int64_t i = 0; i < p.hidden; ++i) {
-      const size_t off = (static_cast<size_t>(tok) * p.hidden + i) * 2;
-      const uint32_t bits = static_cast<uint32_t>(w.embed.bytes.data()[off]) |
-                            (static_cast<uint32_t>(w.embed.bytes.data()[off + 1]) << 8);
+  // W2e: the embedding row reader works for every residency the loader can
+  // produce — F32, BF16, or a keep-quant block dtype (dequantize the gathered
+  // row, exactly llama.cpp's ggml_compute_forward_get_rows_q). On the bf16 arm
+  // this reads the identical bytes through the identical Bf16ToF32, so the
+  // W2d bf16 token gate is unchanged.
+  auto embed_row = [](const OwnedTensor& t, int64_t row, float* x,
+                      int64_t n) {
+    if (vt::IsBlockQuant(t.dtype)) {
+      const int64_t rb = vt::RowSizeBytes(t.dtype, n);
+      std::vector<float> dq = DequantGgufRowToF32(
+          vt::GgmlTypeId(t.dtype), t.bytes.data() + row * rb, n);
+      for (int64_t i = 0; i < n; ++i) x[i] = dq[static_cast<size_t>(i)];
+      return;
+    }
+    if (t.dtype == vt::DType::kF32) {
+      const float* r = reinterpret_cast<const float*>(
+          t.bytes.data() + row * n * 4);
+      for (int64_t i = 0; i < n; ++i) x[i] = r[i];
+      return;
+    }
+    const uint8_t* r = t.bytes.data() + static_cast<size_t>(row) * n * 2;
+    for (int64_t i = 0; i < n; ++i) {
+      const uint32_t bits = static_cast<uint32_t>(r[i * 2]) |
+                            (static_cast<uint32_t>(r[i * 2 + 1]) << 8);
       x[i] = Bf16ToF32(static_cast<uint16_t>(bits));
     }
+  };
+
+  auto embed_at = [&](int64_t tok, float* x) {
+    embed_row(w.embed, tok, x, p.hidden);
     // normalize_embeddings_ngpt=True (modeling_olala.py:2020-2021)
     double s = 0.0;
     for (int64_t i = 0; i < p.hidden; ++i) s += double(x[i]) * x[i];
@@ -917,17 +983,15 @@ void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
       for (int64_t i = 0; i < p.hidden; ++i) x[i] = xg2[i];
     }
     if (t >= static_cast<int64_t>(token_ids.size()) - 1) {
-      // lm_head + argmax (final_norm=False)
+      // lm_head + argmax (final_norm=False). The head row is dequantized per
+      // vocab row (same helper as the embedding gather), one dequant per row.
+      std::vector<float> hrow(p.hidden);
       int64_t best = 0;
       double bestv = -1e300;
       for (int64_t vv = 0; vv < p.vocab; ++vv) {
+        embed_row(w.head, vv, hrow.data(), p.hidden);
         double s = 0.0;
-        const size_t off = (static_cast<size_t>(vv) * p.hidden) * 2;
-        for (int64_t i = 0; i < p.hidden; ++i) {
-          const uint32_t bits = static_cast<uint32_t>(w.head.bytes.data()[off + i * 2]) |
-                                (static_cast<uint32_t>(w.head.bytes.data()[off + i * 2 + 1]) << 8);
-          s += double(Bf16ToF32(static_cast<uint16_t>(bits))) * x[i];
-        }
+        for (int64_t i = 0; i < p.hidden; ++i) s += double(hrow[i]) * x[i];
         if (s > bestv) { bestv = s; best = vv; }
       }
       // append the argmax after every step from the last prompt position

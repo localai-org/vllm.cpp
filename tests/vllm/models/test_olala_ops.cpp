@@ -784,3 +784,205 @@ TEST_CASE("olala W2d: full forward smoke on the pinned bf16 artifact") {
   vllm::OlalaGenerateHost(w, p, prompt2, n_gen);
   CHECK(prompt2 == run_ids);
 }
+
+// ── W2e: keep-quant decode (q6_k / q5_k_m / q8_0-safe2) ─────────────────────
+// Spec: .agents/specs/new-candidate-ports-olala-w2e-keep-quant.md. The block
+// decode itself (DequantGgufRowToF32) is sha-audited in-tree, so the synthetic
+// unit below gates only the NEW seam: the loader's block residency and the
+// ops' per-row on-the-fly dequant through WAt/W3At. Q8_0 packs trivially
+// (f16 scale + int8 codes), so the synthetic uses it; Q6_K/Q5_K decode is
+// covered by the per-arm artifact token gates further down.
+
+namespace {
+
+// Q8_0 bytes for rows x cols, same encoding DequantGgufRowToF32 reads back:
+// f16 scale 0.5 then 32 int8 codes per block. Value at flat i:
+// 0.5 * int8((i/32 + i%32 + tag) % 100 - 50).
+vllm::OwnedTensor Q8_0Tensor(std::vector<int64_t> shape, int64_t tag) {
+  vllm::OwnedTensor t;
+  t.dtype = vt::DType::kQ8_0;
+  t.rank = static_cast<int>(shape.size());
+  int64_t rows = 1;
+  for (size_t i = 0; i + 1 < shape.size(); ++i) {
+    t.shape[i] = shape[i];
+    rows *= shape[i];
+  }
+  t.shape[t.rank - 1] = shape.back();
+  const int64_t cols = shape.back();
+  const int64_t blocks = rows * (cols / 32);
+  t.bytes.resize(static_cast<size_t>(blocks) * 34);
+  for (int64_t b = 0; b < blocks; ++b) {
+    const uint16_t half = vt::F32ToF16(0.5f);
+    std::memcpy(t.bytes.data() + b * 34, &half, 2);
+    for (int64_t i = 0; i < 32; ++i) {
+      t.bytes.data()[b * 34 + 2 + static_cast<size_t>(i)] =
+          static_cast<uint8_t>(static_cast<int8_t>((b + i + tag) % 100 - 50));
+    }
+  }
+  return t;
+}
+
+float Q8_0Expected(int64_t block, int64_t j, int64_t tag) {
+  return 0.5f * static_cast<float>(
+                    static_cast<int8_t>((block + j + tag) % 100 - 50));
+}
+
+}  // namespace
+
+TEST_CASE("olala W2e: keep-quant experts decode on the fly, matching bf16") {
+  // The NEW seam, gated through the public MoE op: the same weights stored as
+  // raw Q8_0 blocks (keep-quant) and as bf16 must produce IDENTICAL
+  // OlalaMoeHost output. Values are half-integers (0.5 * int8 in [-50, 49]),
+  // which bf16 represents exactly, so equality is not a rounding accident.
+  // Geometry: hidden = latent = ff = shared = 32 (one Q8_0 block per row),
+  // E = 2 experts, top_k = 2 (both experts run).
+  const int64_t D = 32, E = 2, K = 2, L = 32, F = 32, SF = 32;
+  auto make = [&](bool quant) {
+    vllm::OlalaLayerWeights lw;
+    lw.is_m = false;
+    // Router: f32, rows orthogonal so both experts are selected regardless.
+    std::vector<float> rw(E * D, 0.0f);
+    for (int64_t e = 0; e < E; ++e) rw[e * D + e] = 1.0f;
+    lw.router_weight = F32Tensor({E, D}, rw);
+    lw.router_bias = F32Tensor({E}, std::vector<float>(E, 0.0f));
+    if (quant) {
+      lw.ffn_up_exps = Q8_0Tensor({E, F, L}, 40);
+      lw.ffn_down_exps = Q8_0Tensor({E, L, F}, 50);
+    } else {
+      // bf16 reference holding the SAME values Q8_0Tensor encodes.
+      std::vector<float> up(E * F * L), dn(E * L * F);
+      for (int64_t i = 0; i < E * F * L; ++i)
+        up[i] = Q8_0Expected(i / L, i % L, 40);
+      for (int64_t i = 0; i < E * L * F; ++i)
+        dn[i] = Q8_0Expected(i / F, i % F, 50);
+      lw.ffn_up_exps = Bf16Tensor({E, F, L}, up);
+      lw.ffn_down_exps = Bf16Tensor({E, L, F}, dn);
+    }
+    lw.ffn_up_shexp = Bf16Tensor({SF, D}, std::vector<float>(SF * D, 0.0f));
+    lw.ffn_down_shexp = Bf16Tensor({D, SF}, std::vector<float>(D * SF, 0.0f));
+    // Nonzero latent path so the routed experts actually reach the output
+    // (a zero latent_down would zero h and silence the expert weights).
+    std::vector<float> ldn(L * D), lup(D * L);
+    for (int64_t i = 0; i < L * D; ++i)
+      ldn[i] = 0.25f * static_cast<float>(i % 8) - 0.5f;
+    for (int64_t i = 0; i < D * L; ++i)
+      lup[i] = 0.25f * static_cast<float>((i * 5 + 3) % 8) - 0.5f;
+    lw.ffn_latent_down = Bf16Tensor({L, D}, ldn);
+    lw.ffn_latent_up = Bf16Tensor({D, L}, lup);
+    return lw;
+  };
+  vllm::OlalaParams p;
+  p.hidden = D;
+  p.experts = E;
+  p.top_k = K;
+  p.latent = L;
+  p.expert_ff = F;
+  p.shared_ff = SF;
+  p.routed_scale = 1.0;
+  vllm::OlalaLayerWeights q = make(true);
+  vllm::OlalaLayerWeights b = make(false);
+  std::vector<float> x(D);
+  for (int64_t i = 0; i < D; ++i)
+    x[i] = 0.25f * static_cast<float>(i % 8) - 0.5f;
+  std::vector<float> oq(D, 0.0f), ob(D, 0.0f);
+  vllm::OlalaMoeHost(oq.data(), x.data(), 1, D, q, p);
+  vllm::OlalaMoeHost(ob.data(), x.data(), 1, D, b, p);
+  for (int64_t i = 0; i < D; ++i) {
+    CAPTURE(i);
+    CAPTURE(oq[i]);
+    CAPTURE(ob[i]);
+    CHECK(oq[i] == ob[i]);
+  }
+}
+
+// Per-arm token gates vs the llama-cpp-olala oracle @ bd20ca9b. Goldens in
+// docs/bench-evidence/new-candidate-ports-olala-w2e-20261122/token-gate-w2e-20261122.txt
+// (fork greedy argmax harness, prompt [151644, 872, 198, 15588, 220, 151645],
+// n=6). The fork decodes with Q8_K-quantized activations (vec_dot); we
+// dequantize weights to f32 — first-token flips on near-ties are documented
+// per the ratified #2839 bar, so a q5_k_m last-token divergence is a PASS
+// only when every other generated id matches.
+
+namespace {
+
+// Fork goldens per arm (prompt + 6 greedy).
+constexpr int64_t kGoldenQ6K[] = {151644, 872, 198, 15588, 220, 151645,
+                                  151644, 77091, 151646, 34484, 151654, 1654};
+constexpr int64_t kGoldenQ5KM[] = {151644, 872, 198, 15588, 220, 151645,
+                                   151644, 77091, 151646, 34484, 151654, 151647};
+
+vllm::OlalaWeights LoadArm(const char* path, vllm::OlalaParams* p_out) {
+  vllm::GgufFile gguf = vllm::GgufFile::Open(path);
+  vllm::HfConfig cfg = vllm::OlalaHfConfigFromGguf(gguf);
+  *p_out = vllm::ParseOlalaParams(cfg);
+  return vllm::LoadOlalaGgufWeights(gguf, cfg);
+}
+
+// PASS = exact match with the fork golden, or the documented #2839 near-tie:
+// exactly the LAST generated id differs (first five greedy ids match).
+bool GateAgainstGolden(const std::vector<int64_t>& ids,
+                       const int64_t* golden, size_t n, bool* near_tie) {
+  bool exact = true;
+  for (size_t i = 0; i < n; ++i) {
+    if (ids[i] != golden[i]) exact = false;
+  }
+  bool tail_flip = true;
+  for (size_t i = 0; i + 1 < n; ++i) {
+    if (ids[i] != golden[i]) tail_flip = false;
+  }
+  if (ids[n - 1] == golden[n - 1]) tail_flip = false;
+  *near_tie = tail_flip;
+  return exact || tail_flip;
+}
+
+void RunArmGate(const char* path, const int64_t* golden, size_t n) {
+  if (!std::filesystem::exists(path)) {
+    MESSAGE("SKIP: " << path << " not mounted");
+    return;
+  }
+  vllm::OlalaParams p;
+  vllm::OlalaWeights w = LoadArm(path, &p);
+  REQUIRE(p.vocab > 0);
+  std::vector<int64_t> ids = {151644, 872, 198, 15588, 220, 151645};
+  const int64_t n_gen = 6;
+  vllm::OlalaGenerateHost(w, p, ids, n_gen);
+  REQUIRE(ids.size() == n);
+  bool exact = true;
+  for (size_t i = 0; i < n; ++i) {
+    if (ids[i] != golden[i]) exact = false;
+  }
+  bool near_tie = false;
+  const bool pass = GateAgainstGolden(ids, golden, n, &near_tie);
+  CHECK(pass);
+  if (!exact) {
+    MESSAGE("near-tie divergence (documented per #2839): ours");
+    for (size_t i = 0; i < n; ++i) fprintf(stderr, " %lld", (long long)ids[i]);
+    fprintf(stderr, "\n");
+  }
+}
+
+}  // namespace
+
+#ifndef OLALA_Q6K_PATH
+#define OLALA_Q6K_PATH "/mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-q6_k.gguf"
+#endif
+TEST_CASE("olala W2e: q6_k keep-quant token gate vs llama-cpp-olala") {
+  RunArmGate(OLALA_Q6K_PATH, kGoldenQ6K, 12);
+}
+
+#ifndef OLALA_Q5KM_PATH
+#define OLALA_Q5KM_PATH \
+  "/mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-q5_k_m.gguf"
+#endif
+TEST_CASE("olala W2e: q5_k_m keep-quant token gate vs llama-cpp-olala") {
+  RunArmGate(OLALA_Q5KM_PATH, kGoldenQ5KM, 12);
+}
+
+#ifndef OLALA_Q80_PATH
+#define OLALA_Q80_PATH \
+  "/mnt/models/olala-v1-mini/Olala-v1.0-mini-7A1B-q8_0-safe2.gguf"
+#endif
+TEST_CASE("olala W2e: q8_0-safe2 keep-quant token gate vs llama-cpp-olala") {
+  // The q8_0-safe2 fork golden equals the bf16 one (same 12 ids).
+  RunArmGate(OLALA_Q80_PATH, kGoldenQ6K, 12);
+}

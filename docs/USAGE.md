@@ -405,13 +405,35 @@ tokens quietly.
 | Architecture | Why it refuses |
 |---|---|
 | `KimiK3ForConditionalGeneration` | Needs ~1.56 TB (MXFP4); no host here can run it |
-| `OlalaForCausalLM` (`olala` GGUF) | PARSES + GGUF LOADER CENSUS (row NEW-CANDIDATE-PORTS W1): `OlalaHfConfigFromGguf` parses the pinned GGUF; `ValidateOlalaGguf` maps all 989 tensors to roles and checks counts/shapes against the config on the production load path; the loader still refuses at the forward boundary naming row NEW-CANDIDATE-PORTS (the mamba-hybrid forward is W2+). [KV walk](bench-evidence/new-candidates-parsers-20261119/olala-kvs.txt), [W1 name-map census](bench-evidence/new-candidate-ports-olala-20261120/olala-namemap.md) |
+| `OlalaForCausalLM` (`olala` GGUF) | LOADS AND FORWARDS on the pinned bf16 arm (row NEW-CANDIDATE-PORTS W2b-W2d: 989-tensor census, hybrid forward, greedy token gate EXACT vs `llama-cpp-olala` @ `bd20ca9b`) and, since W2e, on the q6_k / q5_k_m / q8_0-safe2 keep-quant arms (raw ggml blocks stay resident; every matmul dequantizes the containing row on the fly). Any other block encoding still refuses by name. [KV walk](bench-evidence/new-candidates-parsers-20261119/olala-kvs.txt), [W1 name-map census](bench-evidence/new-candidate-ports-olala-20261120/olala-namemap.md), [W2e spec](../.agents/specs/new-candidate-ports-olala-w2e-keep-quant.md) |
 | `HyV4FlashForCausalLM` (`hy_v4_flash` GGUF) | PARSE-ONLY (row NEW-CANDIDATE-PARSERS): `HyV4FlashHfConfigFromGguf` parses shard 1's header (shard 2 carries a fork-specific ggml type 43 the reader does not yet tabulate — port-row work) and refuses at the forward boundary naming row NEW-CANDIDATE-PORTS. [KV walk](bench-evidence/new-candidates-parsers-20261119/hy4-kvs.txt) |
 | `MaxwellMoeForCausalLM` (`maxwell_moe` safetensors) | PARSE-ONLY (row NEW-CANDIDATE-PARSERS): `MaxwellConfigFromJson` validates config.json plus every shard's safetensors header; the remote code in its `auto_map` is NEVER executed, and the forward refuses naming row NEW-CANDIDATE-PORTS. [Field map + header walk](bench-evidence/new-candidates-parsers-20261119/maxwell-fields.txt) |
 | `Inkling2LoopForConditionalGeneration` (`inkling2_loop` GGUF) | PARSE-ONLY W0 (row NEW-CANDIDATE-PORTS): the reader tabulates ggml ids 3 (Q4_1) and 7 (Q5_1) — the APEX Balanced file's 14 Q5_1 `ffn_down_exps` tensors previously refused the whole 20 GB file — and `Inkling2LoopHfConfigFromGguf` parses all 59 KVs, mirroring vLLM PR #69028's model_type/architecture/loop_config names; the loader refuses at the forward boundary naming row NEW-CANDIDATE-PORTS. Hazard: llama.cpp inkling2 oracle runs must pin `690b87d88151dbd775bb6eff5581663688785928` or later (PR #32704); earlier builds copy loop slots before the NVFP4 scale pass and lose per-expert scales on passes 2-3. This ggml-quant artifact is in the unaffected class. [KV/tensor walk](bench-evidence/new-candidate-inkling2-20261121/apex-balanced-walk.txt) |
 
 This is a deliberate state, not a bug: registering the architecture is what lets
 the config parse and weight-name mapping be tested before the forward exists.
+
+### Olala-v1.0-mini-7A1B: the checkpoints each arm was gated against
+
+Row NEW-CANDIDATE-PORTS (W2b-W2e). All arms come from HF
+`OVHaiLLM/Olala-v1.0-mini-7A1B-GGUF` @ snapshot `b9f5d20a` (the recorded pin in
+`.agents/specs/new-candidate-ports-olala.md`); local copies live under
+`/mnt/models/olala-v1-mini/`. Quantized arms carry a whole-file sha256 (a repo
+id alone is not a pin). Gates: greedy token gate vs `llama-cpp-olala`
+(`OVHai-LLM/llama.cpp` branch `olala-master` @ `bd20ca9b`) on the identical
+artifact — bf16 EXACT (W2d); q6_k and q8_0-safe2 EXACT; q5_k_m a documented
+near-tie (last generated id flips on a logit near-tie; ratified #2839 bar).
+Evidence: [bench-evidence/new-candidate-ports-olala-w2e-20261122/](bench-evidence/new-candidate-ports-olala-w2e-20261122/).
+
+| Arm | Checkpoint | Size | sha256 | Status |
+|---|---|---|---|---|
+| bf16 | `Olala-v1.0-mini-7A1B-bf16.gguf` | 13,594,188,096 B | (W1 evidence, 20261120 walk) | loads and forwards; token gate EXACT |
+| q6_k | `Olala-v1.0-mini-7A1B-q6_k.gguf` | 6,306,979,040 B | `58a2b658158290687a431705c3c256c1331580ad4e8e99db55d03a8131d223c8` | keep-quant loads and forwards; token gate EXACT |
+| q5_k_m | `Olala-v1.0-mini-7A1B-q5_k_m.gguf` | 5,990,551,040 B | `ed353d2632c406be9ca2022b35e4c13049d6f8f7390b1c1bb61d6a7d6b971860` | keep-quant loads and forwards; token gate near-tie (documented) |
+| q8_0-safe2 | `Olala-v1.0-mini-7A1B-q8_0-safe2.gguf` | 6,876,038,592 B | `0bb4560fa6800b41d16a15507ad1843ca17c0849ce0cc989bca337dcf55136d7` | keep-quant loads and forwards; token gate EXACT |
+
+Refused arms: any other ggml block encoding refuses by name at load; the
+safetensors (HF bf16) arm is not a registered load path (GGUF-only loader).
 
 ### Muse Glimmer: exactly what has been checked
 

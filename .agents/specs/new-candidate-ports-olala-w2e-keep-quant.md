@@ -60,7 +60,7 @@ olala forward is all-host f32 (`WAt`/`W3At` funnel every weight read,
 2. **Decode** (`olala_ops.cpp`): `WAt`/`W3At` gain a quant arm —
    dequantize the CONTAINING ROW to f32 with `DequantGgufRowToF32` (ported
    from llama.cpp @ 237ad9b9, already in-tree and sha-audited) and cache it in
-   a small (4-slot direct-mapped, thread_local) row cache keyed on
+   a 64-slot direct-mapped thread_local row cache (multiplicative row hash; a base-only key collides the ops' same-tensor row pairs, see ISSUE-LOCAL-01M82WJVXS9WFJ4WPRQ4BWX29H) keyed on
    (tensor bytes base, row). Element access is then the same f32 read the
    bf16 arm does. The cache is a performance device only: a miss dequantizes,
    a hit is free, and eviction is always correct.
