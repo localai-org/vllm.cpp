@@ -43,7 +43,8 @@ quant encoding is needed to read any selected arm. The first implementation
 barrier is the architecture, not the quantization.
 
 All four files carry the 1.1 marker KVs:
-`kolibri1.attention.indexer.top_k`, `.types`, `.kv_source_map` and
+`kolibri1.attention.indexer.top_k`, `.types`, `.kv_source_map`,
+`.candidate_block_size`, `.candidate_top_k_blocks` and
 `kolibri1.leading_dense_block_count`. All four omit `attn_k.weight`,
 `attn_v.weight` and `attn_k_norm.weight` on exactly layers 9, 14, 34, 39, 44
 and 49. The official `general.architecture` is `kolibri1` on every arm — the
