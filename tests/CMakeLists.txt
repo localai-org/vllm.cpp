@@ -4253,6 +4253,14 @@ target_compile_definitions(test_muse_glimmer_gguf_paged_engine PRIVATE
   PARITY_GOLDENS_DIR="${CMAKE_SOURCE_DIR}/tests/parity/goldens")
 target_include_directories(test_muse_glimmer_gguf_paged_engine PRIVATE
   ${CMAKE_SOURCE_DIR}/tests/parity ${CMAKE_SOURCE_DIR}/src)
+# The olala paged-engine greedy REACHABILITY gate (NEW-CANDIDATE-PORTS wiring
+# unit, ISSUE-LOCAL-01M835QTXAG5P2SD26QZYT0Z5W): the registered production
+# decode path (FromModelDir → ForwardOlalaForCausalLM → OlalaPagedForward)
+# must reproduce the W2d EXACT bf16 token-gate sequence. Checkpoint-gated on
+# OLALA_BF16_PARITY (default the mounted pinned bf16 GGUF).
+vllm_cpp_add_test(test_olala_paged_engine parity/test_olala_paged_engine.cpp)
+target_include_directories(test_olala_paged_engine PRIVATE
+  ${CMAKE_SOURCE_DIR}/src)
 vllm_cpp_add_test(test_olmo3_paged_engine parity/test_olmo3_paged_engine.cpp)
 target_compile_definitions(test_olmo3_paged_engine PRIVATE
   PARITY_GOLDENS_DIR="${CMAKE_SOURCE_DIR}/tests/parity/goldens")

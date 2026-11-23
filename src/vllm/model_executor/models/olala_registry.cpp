@@ -21,6 +21,7 @@
 #include "vllm/model_executor/models/olala.h"
 #include "vllm/model_executor/models/olala_gguf_config.h"
 #include "vllm/model_executor/models/olala_gguf_weights.h"
+#include "vllm/model_executor/models/olala_paged.h"
 #include "vllm/model_executor/models/qwen3_5.h"  // ForwardLogits (shared carrier)
 #include "vllm/v1/kv_cache_dtype.h"
 #include "vllm/v1/kv_cache_interface.h"
@@ -90,18 +91,36 @@ void PrepareOlalaForCausalLM(LoadedModel& model, const HfConfig& config,
 
 ForwardLogits ForwardOlalaForCausalLM(LoadedModel& model,
                                       const ModelForwardInput& input) {
-  (void)model;
-  (void)input;
-  // Refuse-by-name stub: the runner-routing drift scan SKIPs a VT_CHECK(false)
-  // forward (it decodes nothing), so this registers cleanly while W2c ports
-  // the ops. The message names each missing op.
-  VT_CHECK(false, OlalaForwardRefusalOps());
+  // W2f (ISSUE-LOCAL-01M835QTXAG5P2SD26QZYT0Z5W): the production decode path.
+  // The runner supplies its paged KV + recurrent caches on EVERY engine step,
+  // so a non-empty cache pair routes to the paged forward (olala_paged.cpp) —
+  // the same selection NemotronH (nemotron_h_registry.cpp:200-202) and
+  // Kimi-Linear (kimi_linear_registry.cpp:99-102) make. Direct callers with no
+  // runner caches refuse by name: the block generate host (OlalaGenerateHost)
+  // stays the test/oracle operand, not an engine seam.
+  auto& olala = ModelAs<OlalaLoadedModel>(model, "OlalaForCausalLM");
+  if (!input.attn_kv.empty() && !input.gdn_state.empty()) {
+    return OlalaPagedForward(olala.weights(), ParseOlalaParams(input.config),
+                             input);
+  }
+  VT_CHECK(false,
+           "olala: the host block generate (OlalaGenerateHost) is the "
+           "test/oracle operand; engine decode runs through the paged forward "
+           "with runner-allocated caches. Direct forward calls without caches "
+           "are not a supported path.");
 }
 
 v1::KVCacheConfig MakeOlalaForCausalLMKVCache(const HfConfig& config,
                                               int block_size, int num_blocks) {
   const OlalaParams p = ParseOlalaParams(config);
-  const vt::DType kv_dtype = v1::ResolveKvCacheDType();
+  // W2f: f32, NOT ResolveKvCacheDType(). The W2d bf16 token gate is EXACT
+  // against llama-cpp-olala, whose cache is f32; the V-layer shift recurrence
+  // (each token's k_prev is the previous token's RAW pre-shift k/v) and the
+  // Mamba3 state would both bf16-round in a model-dtype cache and buy a
+  // plausible near-tie drift into the production path. The page is small
+  // (7 V layers × window × 2·KV·D). This is the annotated f32 exception
+  // AGENTS.md asks for on a model-path buffer.
+  const vt::DType kv_dtype = vt::DType::kF32;
 
   v1::KVCacheConfig kv;
   kv.num_blocks = num_blocks;
@@ -110,11 +129,11 @@ v1::KVCacheConfig MakeOlalaForCausalLMKVCache(const HfConfig& config,
   std::vector<std::string> v_layers;
   // M layers (Mamba3-MIMO): one MambaSpec recurrent-state group. State shapes
   // per modeling_olala.py:1372-1404 (allocate_inference_cache): ssm_state
-  // [nheads, headdim, d_state] f32, k_state [mimo, nheads, d_state], v_state
-  // [nheads, headdim], angle state [nheads, num_rope_angles] f32. nheads =
-  // 2*hidden/headdim = 48 on the pinned artifact. The exact per-tensor dtype
-  // split is pinned by W2c against the reference; W2b publishes the f32 state
-  // and the model-dtype k/v state.
+  // [nheads, headdim, d_state], k_state [mimo, nheads, d_state], v_state
+  // [nheads, headdim], angle state [nheads, num_rope_angles]. All four rows
+  // are f32 (see the kv_dtype note above): the paged forward scatters the
+  // step host's f32 state back verbatim, so the engine path is bit-identical
+  // to the W2d EXACT host gate.
   std::vector<std::string> m_layers;
   const int64_t nheads = 2 * p.hidden / p.headdim;
   for (int64_t l = 0; l < p.layers; ++l) {
@@ -128,11 +147,18 @@ v1::KVCacheConfig MakeOlalaForCausalLMKVCache(const HfConfig& config,
     }
   }
   if (!v_layers.empty()) {
+    // W2f: TWO head planes (2·kv_heads). Heads [0, KV) hold the post-shift
+    // post-norm k/v the attention reads; heads [KV, 2·KV) hold that token's
+    // RAW pre-shift k/v — the shift recurrence's k_prev/v_prev
+    // (modeling_olala.py:619). Storing the raw rows per token keeps the whole
+    // V-layer recurrence in the paged cache, so the forward carries no
+    // private per-request state. olala_paged.cpp is the only consumer.
     kv.kv_cache_groups.emplace_back(
         std::move(v_layers),
         std::make_shared<v1::SlidingWindowSpec>(
-            block_size, static_cast<int>(p.kv_heads), static_cast<int>(p.head_dim),
-            kv_dtype, static_cast<int>(p.window)));
+            block_size, static_cast<int>(2 * p.kv_heads),
+            static_cast<int>(p.head_dim), kv_dtype,
+            static_cast<int>(p.window)));
   }
   if (!m_layers.empty()) {
     kv.kv_cache_groups.emplace_back(
@@ -144,8 +170,8 @@ v1::KVCacheConfig MakeOlalaForCausalLMKVCache(const HfConfig& config,
                 {p.mimo_dim, nheads, p.d_state},              // k_state
                 {nheads, p.headdim},                          // v_state
                 {nheads, p.rope_angles}},                     // angle state, f32
-            std::vector<vt::DType>{vt::DType::kF32, vt::DType::kBF16,
-                                   vt::DType::kBF16, vt::DType::kF32}));
+            std::vector<vt::DType>{vt::DType::kF32, vt::DType::kF32,
+                                   vt::DType::kF32, vt::DType::kF32}));
   }
   return kv;
 }

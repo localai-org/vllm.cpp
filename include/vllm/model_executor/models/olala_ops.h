@@ -86,4 +86,27 @@ void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
 void OlalaGenerateHost(const OlalaWeights& w, const OlalaParams& p,
                        std::vector<int64_t>& token_ids, int64_t n_gen);
 
+// ── W2f: the pieces the paged engine forward (olala_paged.cpp) shares with
+// OlalaGenerateHost. Extracted VERBATIM from the generate host's token loop so
+// both hosts compose the identical arithmetic; the W2d bf16 EXACT gate proves
+// the extraction moved nothing.
+
+// One dequantizing embedding-row read: F32, BF16, or a keep-quant block dtype
+// (dequantize the gathered row, exactly llama.cpp's
+// ggml_compute_forward_get_rows_q). The SAME reader the head gather uses.
+void OlalaEmbedRowHost(const OwnedTensor& t, int64_t row, float* x, int64_t n);
+
+// The per-layer tail both hosts share: mixer_proj (attn_output @ ymix) →
+// geodesic_mixer, then the latent-MoE MLP → geodesic_mlp. x is the residual
+// stream, updated in place; ymix is this layer's mixer output (M: [2*hidden],
+// V: [SIG*D]); mixer_out is ymix's width.
+void OlalaLayerTailHost(const OlalaLayerWeights& lw, const OlalaParams& p,
+                        int64_t layer_idx, const float* ymix,
+                        int64_t mixer_out, float* x);
+
+// lm_head over ONE hidden row: per-vocab-row dequantizing dot (same reader as
+// the embedding gather), final_norm=False. logits: [vocab], caller-owned.
+void OlalaLmHeadHost(const OlalaWeights& w, const OlalaParams& p,
+                     const float* x, float* logits);
+
 }  // namespace vllm

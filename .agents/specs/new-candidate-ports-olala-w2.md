@@ -185,3 +185,23 @@ reference for the per-op units; its keep-or-delete decision is owed at W2e+.
   owed at W2e+; until then it is a transcription reference only.
 - Batched decode, the CUDA arm, SWA block recycle and the safetensors arm
   remain unimplemented and are refused by name.
+## Now (W2f wiring)
+
+2026-11-23: the production decode path is wired (issue
+ISSUE-LOCAL-01M835QTXAG5P2SD26QZYT0Z5W, branch
+`row/NEW-CANDIDATE-PORTS-olala-bench`, worktree `/tmp/olala-bench-axis`).
+`ForwardOlalaForCausalLM` routes every engine step with runner caches to
+`OlalaPagedForward` (olala_paged.cpp): the paged fold NemotronH's A2-P took.
+State lives entirely in the runner-owned caches — the M layers' four f32
+recurrent rows and, per V layer, a second head plane in the sliding-window
+page carrying each token's RAW pre-shift k/v (the shift recurrence's
+k_prev/v_prev); pages and states are f32 so the engine path is bit-identical
+to the W2d EXACT host gate. The shared per-token tails (embed row reader,
+layer tail, lm_head) were extracted verbatim from `OlalaGenerateHost`, whose
+token gates are unchanged. Reachability gate
+`tests/parity/test_olala_paged_engine.cpp`: FromModelDir(kCPU) on the pinned
+bf16 GGUF → 6 generated ids EXACT against BOTH the llama-cpp-olala golden
+and the in-process host reference, Release and bounds-checked Debug. Owed:
+batched decode (refused by name), CUDA engine arm (refused by name),
+window-slide block recycle past `sliding_window` (refused by name), the
+safetensors arm (W2c).
