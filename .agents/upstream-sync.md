@@ -4,10 +4,11 @@ The reference checkout, fetch remote and eligible gate host come from the
 untracked `developer-preferences.md`. The parity pin and classification rules
 are repository-wide; machine paths are not.
 
-**Active pin (advanced 2026-09-03):** current parity pin `e126687a9a` (vLLM
-0.28.1rc1.dev132 + Torch 2.13.0, FlashInfer 0.6.18, CUTLASS DSL 4.6.2,
-`transformers` floor `>= 5.10.4`), vllm#53896, 2026-08-31, the revision that
-registers `Qwen4ExpForCausalLM`. 1465 commits past the prior `555967922` pin. See
+**Active pin:** the authoritative pin, runtime strings and gate constraints are
+the `parity-pin` block in this file (line 101); that block is what `tools/bench/`
+reads and it was advanced to `a7c23ac96d` on 2026-09-26. Older prose here named
+the 2026-09-03 `e126687a9a` advance as current, which is no longer true; its
+history stays in
 [specs/upstream-pin-advance-e126687.md](specs/upstream-pin-advance-e126687.md)
 and [`sync/2026-09-03-e126687-advance.md`](sync/2026-09-03-e126687-advance.md)
 ([#2817](https://github.com/mudler/vllm.cpp/issues/2817)).

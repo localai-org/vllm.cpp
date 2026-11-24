@@ -349,6 +349,13 @@ jobs:
         # only, CPU-only, no artifact and no GPU.
         run: |
           python3 tests/scripts/test_check_ctest_accounting.py
+      - name: The sanitize-cpu(thread) runner-death discriminator stays honest
+        # Executes the thread lane's own `run:` block with a fake ctest, so a
+        # retry that hides a real finding or a missing retry on runner death
+        # reds here rather than only on an 80-minute CI run. Standard library
+        # only, CPU-only, no artifact and no GPU.
+        run: |
+          python3 tests/scripts/test_ctest_run_complete.py
       - name: The docs site's content invariants hold
         # `hugo version` first, deliberately. It is the one line that fails
         # LEGIBLY when the setup step above stopped providing a binary, and it
@@ -1886,6 +1893,7 @@ jobs:
       - name: Build
         run: cmake --build build-sanitize -j 2
       - name: Test
+        if: matrix.lane != 'thread'
         # ctest runs the suite serially: the sanitizer runtimes multiply peak RSS,
         # and a parallel run OOM-kills the runner before it reports a finding.
         env:
@@ -1896,6 +1904,44 @@ jobs:
           # distinguish that cache from a leak and can see use-after-free.
           VT_POOL_BYPASS: "1"
         run: ctest --test-dir build-sanitize --output-on-failure
+      - name: Test (thread, sharded with runner-death retry)
+        if: matrix.lane == 'thread'
+        # TSan's two long cases lose the whole serial run when the runner dies.
+        # Put each in its own ctest process and retry ONCE only when ctest never
+        # printed a terminal summary. A test that failed has a summary and keeps
+        # its status — no finding is retried into green and no test is skipped.
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          VT_POOL_BYPASS: "1"
+        run: |
+          run_shard() {
+            label="$1"; shift
+            log="ctest-${label}.txt"
+            attempt=1
+            while :; do
+              set +e
+              "$@" > "$log" 2>&1
+              status=$?
+              set -e
+              cat "$log"
+              if python3 scripts/ctest-run-complete.py "$log"; then
+                return "$status"
+              fi
+              if [ "$attempt" -ge 2 ]; then
+                echo "no ctest summary after retry ($label): runner death, failing"
+                return "$status"
+              fi
+              echo "no ctest summary ($label): runner death suspected, retrying once"
+              attempt=$((attempt + 1))
+            done
+          }
+          run_shard main ctest --test-dir build-sanitize --output-on-failure \
+            -E '^(test_ltx2_video|test_dots3_note_scaffold)$'
+          run_shard ltx2 ctest --test-dir build-sanitize --output-on-failure \
+            -R '^test_ltx2_video$'
+          run_shard dots3 ctest --test-dir build-sanitize --output-on-failure \
+            -R '^test_dots3_note_scaffold$'
   macos-metal-mlx:
     # THE ONLY BUILD OF THE FOUR METAL TRANSLATION UNITS OUTSIDE A RELEASE
     # (GATE-METAL-MLX-COMPILE wave 2, issue #1765), and since #1692 the only

@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M864Q3642P4D1Z7Z3JH6QYSN
 Title: CI: sanitize-cpu(thread) runner-death retry and shard the heavy tests; stale pin prose
 Row: CI-FLAKINESS-AND-LINK-FIXES
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-24
 Updated: 2026-11-24
-Closed: -
+Closed: 2026-11-24
 
 ## Problem
 
@@ -16,4 +16,23 @@ sanitize-cpu (thread) flips fail/pass on main within the same day: a runner deat
 
 ## Resolution
 
--
+- 2026-11-24: `sanitize-cpu (thread)` now runs the suite in three shards in
+  `.github/workflows/ci.yml` — everything except the two heavy TSan cases, then
+  `test_ltx2_video`, then `test_dots3_note_scaffold`. Each shard goes through a
+  one-attempt runner-death retry gated by
+  `scripts/ctest-run-complete.py`: a completed ctest run (pass OR fail) keeps
+  its own status; only a run with no terminal summary is retried, once. The
+  address/undefined lane keeps its original single Test step, and no test,
+  assertion, sanitizer flag or `continue-on-error` setting was changed.
+  `tests/scripts/test_ctest_run_complete.py` executes the workflow's own run
+  block with a fake ctest: 7/7 green; mutating the detector to accept any
+  non-empty log and mutating the retry to never fire each red two cases.
+- 2026-11-24: `.agents/upstream-sync.md:7` prose now points at the
+  authoritative `parity-pin` block (line 101, `a7c23ac96d`) instead of naming
+  the superseded `e126687a9a` advance as current.
+- 2026-11-24: the relayed `DeviceAvailable()` item is CLOSED BY EVIDENCE, not
+  re-fixed: commit `3abacff58` (2026-11-18) wrapped all three unguarded
+  `vt::tenstorrent::DeviceAvailable()` sites in qwen3_5.cpp — two inside
+  `GdnBlockPaged` — in `#ifdef VLLM_CPP_TENSTORRENT`, which is the current
+  tree. Post-landing CI evidence for the thread lane is recorded as owed in
+  the spec; the reliability claim is not made from local tests alone.
