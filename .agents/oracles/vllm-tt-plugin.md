@@ -17,9 +17,9 @@ id = vllm-tt-plugin
 role = secondary
 upstream = https://github.com/tenstorrent/vllm-tt-plugin
 scope = the qwen35 (Qwen3.5/3.6) architecture and the other TT-prefixed architectures the plugin registers, served on Tenstorrent mesh devices through hand-written TTNN implementations that ship in tt-metal; the weights are HF checkpoints, so this is NOT a GGUF-decode reference
-pin = 7250ddfaa988cc7417f518266dce52e425745472
-pin_label = main HEAD, 2026-09-21
-pinned_on = 2026-09-21
+pin = 6a3482a660bd31b51b49b5079e7050d58a453b05
+pin_label = main HEAD, 2026-11-24; source read only, not built or served
+pinned_on = 2026-11-24
 gateable = no
 evidence = #3261
 ```
@@ -41,15 +41,16 @@ evidence = #3261
   plugin denominates is the ARCHITECTURE on the device: graph correctness at
   bf16 residency, per-layer logits, scheduling, sampling, and speed.
 - **Setup is from source**: a vLLM build with `VLLM_TARGET_DEVICE=empty`
-  against vLLM 0.26.0 inside a tt-metal environment, then the plugin install
+  against vLLM 0.26.0 at `7250ddfaa9`, and against vLLM 0.32.0 at the
+  current pin, inside a tt-metal environment, then the plugin install
   script (blog, "Try it out"). `TTPlatform` selects only when `ttnn` imports,
   so the install cannot hijack a CUDA/ROCm environment.
 
 ## First gateability attempt (2026-09-21, FAILED — reproducible warmup hang)
 
 Environment assembled on the row's own aarch64 host: vLLM 0.26.0
-(`VLLM_TARGET_DEVICE=empty`) + torchvision 0.26.0 CPU + the plugin at the
-pinned HEAD in the tt-metal python_env; Qwen/Qwen3.5-9B downloaded
+(`VLLM_TARGET_DEVICE=empty`) + torchvision 0.26.0 CPU + the plugin at
+`7250ddfaa9`, the pin at that date, in the tt-metal python_env; Qwen/Qwen3.5-9B downloaded
 (17 GB); `TTQwen3_5ForConditionalGeneration` registers and the TT platform
 activates; the serve reaches tt-metal's qwen36 TTNN model, loads all
 weights, compiles the decode trace, and then HANGS in
@@ -106,3 +107,38 @@ build is refreshed past the deadlock, hugepages are provisioned (needs
 root; the warning names it), or upstream (tenstorrent/vllm-tt-plugin or
 tt-metal) confirms a known fix. The stack capture above is the repro for
 that report.
+
+## Pin update (2026-11-24, source read only)
+
+The pin moves from `7250ddfaa988cc7417f518266dce52e425745472` to
+`6a3482a660bd31b51b49b5079e7050d58a453b05`, 81 commits later. Nothing was
+built or served at the new pin: the developer disallowed the TT serve on this
+host. Every measurement in this file above was taken at the earlier pin.
+
+- **vLLM target.** The README and the install script target vLLM 0.32.0
+  (`__version__ = "0.32.0"` in `src/vllm_tt_plugin/__init__.py`). Python must
+  be 3.11 to 3.13. The `compat/vllm-0.25.1` and `compat/vllm-0.24.0` tags hold
+  the last plugin state for those vLLM versions.
+- **Model families registered at the new pin.** Llama 3.1, 3.2 and 3.3; Qwen
+  2.5 and 3; Qwen 3.5; Qwen 2.5-VL and 3-VL; Mistral and Mistral 3; Gemma 3
+  and 4; DiffusionGemma; DeepSeek V3; GPT-OSS.
+- **No Inkling architecture.** `src/vllm_tt_plugin/platform.py`,
+  `src/vllm_tt_plugin/model_registry.py`, `docs/MODEL_CAPABILITIES.md` and
+  `README.md` contain no match for `inkling` at this pin. This covers Inkling-2
+  and Inkling-2-Mini.
+- **Kolibri-1 is partly present.** `src/vllm_tt_plugin/parsers/kolibri1.py`
+  is a reasoning and tool-call parser, and `platform.py` registers
+  `model_type: kolibri1` with `AutoConfig` so the config loads. Kolibri-1 is
+  not in the README's list of supported model families.
+- **Out-of-tree models.** `EXTRA_MODELS_DIR` registers a model from a bundle
+  folder at startup, each holding a `vllm_metadata.json` and an adapter class.
+  Inkling-2-Mini reaches a P150 this way: `Lottolabs/Inkling-2-Mini-TT-Mixed-BFP4-BFP8-P150`
+  ships its own model code, a `vllm-tt-plugin-eligible.patch`, and a Docker
+  image. That package is a third-party release, not a plugin feature. Its
+  weights are BFP4 and BFP8, so it denominates that quantization on the
+  device, not BF16.
+- **Gateability is unchanged.** `gateable = no` still stands, and
+  ISSUE-LOCAL-01M32FVCE8XBW2PDTE48ZD8TWN (#3261) still owns the first served
+  token at a pinned plugin revision.
+
+ISSUE-LOCAL-01M87G9R15Y8D7FQD9YC2V8J8X owns this update.
