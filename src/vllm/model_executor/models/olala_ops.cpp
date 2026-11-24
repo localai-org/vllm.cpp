@@ -44,7 +44,8 @@ float Bf16ToF32(uint16_t h) {
 // and the parallel result is bit-identical to the serial loop. Workers block
 // on a condition variable between tasks — no busy-wait barrier spinning (the
 // 127-worker spin lesson). The pool is capped by OLALA_HOST_THREADS, default
-// min(16, hardware concurrency). Tasks go through a shared FIFO queue, so
+// min(96, hardware concurrency) — 96 is the swept optimum on the 128-core
+// measurement host. Tasks go through a shared FIFO queue, so
 // concurrent callers (the engine runs asynchronous scheduling) cannot lose a
 // dispatch; each call blocks only on its own completion counter.
 class HostRowPool {
@@ -115,7 +116,7 @@ class HostRowPool {
     }
     const int64_t hw = static_cast<int64_t>(std::thread::hardware_concurrency());
     if (hw > 0 && want > hw) want = hw;
-    workers_ = static_cast<int>(std::min<int64_t>(want, 64));
+    workers_ = static_cast<int>(want);  // want is already capped by hardware_concurrency above
     for (int w = 1; w < workers_; ++w) {
       std::thread([this] { Worker(); }).detach();
     }

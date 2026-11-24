@@ -12,8 +12,8 @@ sampling as the baseline leg; only the vllm.cpp side changed.
 | Stage | Commit | Decode tok/s | Prompt-eval tok/s | Step delta |
 |---|---|---:|---:|---|
 | Published baseline | `6e5500d62` | 0.3990 | 0.4579 | — |
-| Lever 1+2: bounded worker pool + output-row-parallel GEMVs | `9b19441b0` | 1.8053 | 1.9247 | **4.52x / 4.20x** |
-| Lever 3: profiled waste removal (dead dot, B/C-rms hoist, mimo tables, prefill attention row-parallel) | `47f16b159` | 1.8908 | 2.0534 | **1.048x / 1.067x** |
+| Lever 1+2: bounded worker pool + output-row-parallel GEMVs | `d02eff903` | 1.8053 | 1.9247 | **4.52x / 4.20x** |
+| Lever 3: profiled waste removal (dead dot, B/C-rms hoist, mimo tables, prefill attention row-parallel) | `9a720e64e` | 1.8908 | 2.0534 | **1.048x / 1.067x** |
 | Cumulative | | **1.8908** | **2.0534** | **4.74x / 4.49x** |
 
 Fork (llama.cpp OVHai olala @ `bd20ca9b`): 2.158 decode / 2.615 prefill.
