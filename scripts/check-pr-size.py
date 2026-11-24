@@ -318,8 +318,15 @@ BENCH_EVIDENCE = re.compile(r"(?:benchmarks/(?:demo|media)|docs/bench-evidence)/
 # suffix licence.
 BENCH_EVIDENCE_RUN = re.compile(
     r"docs/bench-evidence/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
-    r"\.(?:txt|log|gz|sh|cu|cpp|py|jsonl|rc)\Z"
+    r"\.(?:txt|log|err|gz|sh|cu|cpp|py|jsonl|rc)\Z"
 )
+# `err` joined 2026-11-24 (eighth instance of the fail-closed class after
+# #856, #668, #989, #1448, #2316, #2629 and #2497): the olala bf16 A/B leg's
+# per-run directory carries gb-1/2/3.err and a contaminated-token stream, the
+# fork golden's raw instrument output. `.err` is the job's own output exactly
+# as `.log` is, inside a per-run directory only -- a flat docs/bench-evidence
+# *.err still fails closed, so the suffix is not a general licence. Same repair
+# as every prior instance: name the surface, do not widen a rule.
 # `cpp` joined 2026-10-04: the tt-matmul/tt-trace/tt-ttm retention per-run
 # directories carry repro_*.cpp instruments. A repro source is the recipe that
 # produced the number -- the same claim the `.sh`/`.py` arms make -- and

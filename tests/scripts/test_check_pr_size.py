@@ -252,6 +252,34 @@ class PathClassification(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(checker.classify_path(path), "evidence")
 
+    def test_err_raw_instrument_streams_are_evidence(self) -> None:
+        """The olala bf16 A/B leg archived its fork golden's raw instrument
+        streams as `.err` (gb-1/2/3 and a contaminated-token stream) inside its
+        per-run directory. `.err` is the job's own output exactly as `.log` is,
+        so it takes the BENCH_EVIDENCE_RUN class. RED before `.err` joins that
+        extension list: classify_path fails closed on both paths."""
+        for path in (
+            "docs/bench-evidence/olala-bf16-cpu-ab-20261123/gb-1.err",
+            "docs/bench-evidence/olala-bf16-cpu-ab-20261123/gb-2.err",
+            "docs/bench-evidence/olala-bf16-cpu-ab-20261123/gb-3.err",
+            "docs/bench-evidence/olala-bf16-cpu-ab-20261123/llama-simple-contaminated-19tok.err",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(checker.classify_path(path), "evidence")
+
+    def test_a_cpp_recipe_in_a_per_run_evidence_dir_is_evidence(self) -> None:
+        """The olala A/B leg's fork timing harness is a `.cpp` recipe inside a
+        per-run directory, the same class as the TT `repro_*.cpp` instruments
+        already covered by BENCH_EVIDENCE_RUN. The narrow claim holds: nothing
+        outside docs/ builds, installs or executes a bench-evidence `.cpp`.
+        Guarded here so a future removal of the `.cpp` arm reds."""
+        for path in (
+            "docs/bench-evidence/olala-bf16-cpu-ab-20261123/golden-bench.cpp",
+            "docs/bench-evidence/new-candidate-ports-olala-20261122/llama-fork-golden-harness.cpp",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(checker.classify_path(path), "evidence")
+
     def test_a_python_file_outside_a_per_run_evidence_dir_fails_closed(self) -> None:
         """The suffix is not a licence, and this is the arm that keeps a product
         or checker script from taking the evidence class by being spelled `.py`.
