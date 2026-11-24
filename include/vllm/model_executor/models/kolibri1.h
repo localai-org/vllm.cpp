@@ -105,4 +105,9 @@ void ParseKolibri1Config(const HfConfig& config);
 v1::KVCacheConfig MakeKolibri1KVCache(const HfConfig& config, int block_size,
                                       int num_blocks);
 
+// Named refusal for the Kolibri-1.1 sparse forward (U3 work). Exposed so the
+// refusal policy is unit-testable without constructing a loaded model; the
+// production forward calls it before any device dispatch.
+void RefuseKolibri11SparseForward(const Kolibri1Params& p);
+
 }  // namespace vllm

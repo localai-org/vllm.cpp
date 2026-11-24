@@ -5,8 +5,8 @@ Issue: ISSUE-LOCAL-01M861BE22E3VJNM13ZFW19NX1. No token-parity claim.
 
 ## Gates
 
-- Focused `test_kolibri11_u2`: **6 cases / 88 assertions / SUCCESS**
-  (`focused-green.log`).
+- Focused `test_kolibri11_u2`: **7 cases / 89 assertions / SUCCESS**
+  (`focused-green.log`), after adding the named sparse-forward refusal case.
 - Related ctest `test_kolibri1`, `test_kolibri11_gguf_guard`,
   `test_kolibri11_u2`: **3/3 passed** (`related-ctest.log`). The 1.0 W1
   KV-group and parse tests still pass, so the new path is byte-neutral for 1.0.
@@ -18,6 +18,7 @@ Issue: ISSUE-LOCAL-01M861BE22E3VJNM13ZFW19NX1. No token-parity claim.
 | Remove `indexed_attention` from the allowed layer kinds | 5 cases / 3 assertions RED (`mutation-remove-indexed-kind.log`) |
 | Force `IsDenseLayer(l)` false in tensor enumeration | 1 case / 1 assertion RED (`mutation-remove-dense-prefix.log`) |
 | Replace `KvSourceLayer(i)` with `i` in KV group construction | 1 case / 2 assertions RED (`mutation-remove-kv-source.log`) |
+| Disable the sparse-forward refusal policy | 1 case / 1 assertion RED (`mutation-remove-forward-refusal.log`) |
 
 The third mutation initially stayed green. Investigation showed the first
 implementation accumulated every layer into two broad full/SWA buckets, so

@@ -27,6 +27,7 @@ using vllm::Kolibri1Weights;
 using vllm::MakeKolibri1KVCache;
 using vllm::ModelRegistry;
 using vllm::ParseKolibri1Params;
+using vllm::RefuseKolibri11SparseForward;
 
 namespace {
 
@@ -193,6 +194,15 @@ TEST_CASE("kolibri1_1: KV groups share the source and keep SWA separate") {
   CHECK(share_29);
   CHECK_FALSE(group_of_9.empty());
   CHECK_FALSE(group_of_34.empty());
+}
+
+TEST_CASE("kolibri1_1: the sparse forward is refused by name") {
+  CHECK_THROWS_WITH(
+      RefuseKolibri11SparseForward(ParseKolibri1Params(Config11())),
+      doctest::Contains(
+          "indexed_attention (Kolibri-1.1) forward is not implemented"));
+  // Control: the 1.0 path must not be refused.
+  RefuseKolibri11SparseForward(ParseKolibri1Params(BaseConfig()));
 }
 
 TEST_CASE("kolibri1_1: the registry factory reaches the new KV path") {

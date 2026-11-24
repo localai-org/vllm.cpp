@@ -387,6 +387,16 @@ std::unique_ptr<LoadedModel> LoadKolibri1ForCausalLM(
   if (source.safetensors == nullptr) {
     throw std::runtime_error("safetensors model source is empty");
   }
+  // U2 changed the 1.1 tensor MAP, not the safetensors materializer: it still
+  // reads the 1.0 projection set. Refuse a 1.1 checkpoint by name rather than
+  // surfacing a misleading missing-tensor error.
+  const Kolibri1Params shape = ParseKolibri1Params(config);
+  if (!shape.index_layers.empty() || !shape.mlp_only_layers.empty()) {
+    throw std::runtime_error(
+        "Kolibri1ForCausalLM: Kolibri-1.1 safetensors loading is not "
+        "implemented; U2 provides config, tensor-map and KV-group plumbing "
+        "only (row MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm)");
+  }
   return std::make_unique<Kolibri1LoadedModel>(
       registration, LoadKolibri1Weights(*source.safetensors, config));
 }
@@ -404,19 +414,22 @@ void PrepareKolibri1ForCausalLM(LoadedModel& model, const HfConfig& config,
   (void)m.tt_context(queue);
 }
 
-ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
-                                         const ModelForwardInput& input) {
-  auto& m = ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM");
-  // U2 is parse/accounting/KV-group plumbing only. A 1.1 config carries
-  // indexed layers; their lightning-indexer mask and NVFP4 KV cache belong to
-  // U3. Refuse by name rather than running them as full-attention layers.
-  if (!m.weights().params.index_layers.empty()) {
+void RefuseKolibri11SparseForward(const Kolibri1Params& p) {
+  if (!p.index_layers.empty()) {
     throw std::runtime_error(
         "Kolibri1ForCausalLM: indexed_attention (Kolibri-1.1) forward is not "
         "implemented; the sparse mask and NVFP4 KV cache are owed to U3 "
         "(row MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm). U2 parsed the "
         "config, tensor map and KV groups only");
   }
+}
+
+ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
+                                         const ModelForwardInput& input) {
+  auto& m = ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM");
+  // U2 is parse/accounting/KV-group plumbing only; refuse the sparse path by
+  // name before any device dispatch rather than running it as full attention.
+  RefuseKolibri11SparseForward(m.weights().params);
   // The device dispatch: the CPU row owns the CPU arm (unchanged); the
   // Tenstorrent B2b-i dense-resident slice owns the TT arm; every other
   // device is refused by name here, before any model code runs.
