@@ -99,7 +99,7 @@ push only to `mine`; the user merges. No merge or force on main.
 
 ## Now
 
-ACTIVE — spec-first, implementation pending.
+Implementation landed; post-landing `sanitize-cpu (thread)` CI evidence still owed. The stale pin prose is corrected and the falsified DeviceAvailable item is closed with its commit evidence. Fresh review pending before merge-ready.
 
 ## Owed
 
