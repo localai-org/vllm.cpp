@@ -1,0 +1,12 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:199:
+TEST CASE:  kolibri1_1: the sparse forward is refused by name
+
+./tests/vllm/models/test_kolibri11_u2.cpp:200: ERROR: CHECK_THROWS_WITH( RefuseKolibri11SparseForward(ParseKolibri1Params(Config11())), "indexed_attention (Kolibri-1.1) forward is not implemented" ) did NOT throw at all!
+
+===============================================================================
+[doctest] test cases:  7 |  6 passed | 1 failed | 0 skipped
+[doctest] assertions: 89 | 88 passed | 1 failed |
+[doctest] Status: FAILURE!

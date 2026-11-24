@@ -20,7 +20,7 @@ in two ways that the current tree cannot represent:
    `Kolibri1Params` comment still says "every layer is MoE (no dense layers)"
    and `EnumerateKolibri1Tensors` expects eight MoE tensors on every layer.
 2. `layer_types` contains a third kind, `indexed_attention`, and
-   `kv_source_layers` makes ten layers read another layer's K/V. Today
+   `kv_source_layers` makes six layers read another layer's K/V. Today
    `ParseKolibri1Params` refuses any kind other than sliding/full, and
    `IsSlidingLayer()` would silently classify `indexed_attention` as full.
 
