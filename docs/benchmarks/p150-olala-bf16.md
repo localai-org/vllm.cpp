@@ -7,23 +7,27 @@
 | Identical workload | Prompt ids `[151644, 872, 198, 15588, 220, 151645]` (the W2d token-gate prompt, verified identical on both arms), greedy, 64 output tokens, batch 1, no BOS, context 512, same GGUF artifact sha256 `b266da8e…bef5747` |
 | Denominator | llama.cpp OVHai olala fork @ `bd20ca9b`, CPU, raw ids via a timed golden harness (llama-bench does not know the `olala` arch; `llama-cli` `-st` wraps the prompt in the chat template and is rejected) |
 | Precondition | `PUBLISHABLE-AFTER-W2E-ARMS` — W2e landed (`048c6b22d`); production reachability landed (`6ce35000c`, `test_olala_paged_engine.cpp` 18/18 EXACT vs the fork) |
-| Evidence | [bench-evidence/olala-bf16-cpu-ab-20261123](../bench-evidence/olala-bf16-cpu-ab-20261123/README.md) |
+| Evidence | [bench-evidence/olala-cpu-opt-20261123](../bench-evidence/olala-cpu-opt-20261123/README.md) (current); baseline leg: [bench-evidence/olala-bf16-cpu-ab-20261123](../bench-evidence/olala-bf16-cpu-ab-20261123/README.md) |
 
 Host: Ampere-1a, 128 threads, sequential legs on an idle-normalized box
-(<0.03 load per core), 3 legs per arm, median + spread. Same artifact, same
+(<0.08 load per core), 3 legs per arm, median + spread. Same artifact, same
 prompt, same sampling both arms.
 
-| Axis | vllm.cpp (host ops, scalar f32) | llama.cpp fork | Ratio | Result |
+| Axis | vllm.cpp (host ops, 96-thread pool, row-parallel GEMVs) | llama.cpp fork | Ratio | Result |
 |---|---:|---:|---:|---|
-| Prompt-eval (6-token prefill) | 0.4579 tok/s | 2.615 tok/s | 0.175x | **OPEN GAP** — 5.71x behind |
-| Decode (64 tokens) | 0.3990 tok/s | 2.158 tok/s | 0.185x | **OPEN GAP** — 5.41x behind |
-| Greedy-stream identity | 58 of the first 64 generated tokens identical; divergence at index 58 (fork `576`, ours `2055`) | — | — | expected greedy fp drift; binding token gate EXACT (18/18) |
+| Prompt-eval (6-token prefill) | 2.0534 tok/s | 2.615 tok/s | 0.785x | **OPEN GAP** — 1.27x behind |
+| Decode (64 tokens) | 1.8908 tok/s | 2.158 tok/s | 0.876x | **OPEN GAP** — 1.14x behind |
+| Greedy-stream identity | 58 of the first 64 generated tokens identical; divergence at index 58 (fork `576`, ours `2055`) — byte-identical to the baseline leg's stream | — | — | expected greedy fp drift; binding token gate EXACT (18/18) |
 
-This is the honest first baseline of the olala host-ops path, not a ceiling.
-The decode gap names four traceable hypotheses in the evidence README: scalar
-non-vectorized GEMV vs ggml's blocked kernels, per-step dispatch overhead (the
-6-token prefill costing 13.1 s points at a large fixed per-call cost), no
-bf16-native host path, and unlogged thread-pool configuration.
+History: the published baseline leg measured 0.4579/0.3990 tok/s
+(5.71x/5.41x behind the fork); the gap closed 4.49x/4.74x via two commits —
+a bounded 96-thread worker pool with output-row-parallel GEMVs (`9b19441b0`,
+4.20x/4.52x) and profiled waste removal including the row-parallel prefill
+attention (`47f16b159`, 1.067x/1.048x). Per-lever deltas, the rejected
+barrier-fusion experiment, and the thread-count sweep are in the evidence
+README. The remaining gap's next traceable hypothesis is the per-row serial
+double-FADD dependency chain, which cannot be reordered without breaking the
+bit-identical id gate.
 
 | Cell | State |
 |---|---|
