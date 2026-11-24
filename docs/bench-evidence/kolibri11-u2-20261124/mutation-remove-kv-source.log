@@ -1,0 +1,16 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:163:
+TEST CASE:  kolibri1_1: KV groups share the source and keep SWA separate
+
+./tests/vllm/models/test_kolibri11_u2.cpp:192: ERROR: CHECK( share_4 ) is NOT correct!
+  values: CHECK( false )
+
+./tests/vllm/models/test_kolibri11_u2.cpp:193: ERROR: CHECK( share_29 ) is NOT correct!
+  values: CHECK( false )
+
+===============================================================================
+[doctest] test cases:  6 |  5 passed | 1 failed | 0 skipped
+[doctest] assertions: 88 | 86 passed | 2 failed |
+[doctest] Status: FAILURE!

@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M861BE22E3VJNM13ZFW19NX1
 Title: Kolibri-1.1 U2+U4: dense prefix and shared-KV layer plumbing
 Row: MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm
-State: OPEN
+State: CLOSED
 Kind: task
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-24
 Updated: 2026-11-24
-Closed: -
+Closed: 2026-11-24
 
 ## Problem
 
@@ -16,4 +16,4 @@ Wave W2 of the accepted Kolibri-1.1 assessment combines U2 (sliding layers onto 
 
 ## Resolution
 
--
+Landed in wave W2 (U2+U4) on branch row/MODEL-TEXT-kolibri-1-1-U2 (spec 4baefceb6, implementation commit pending). Kolibri1Params now carries index_layers, kv_source_layers, mlp_only_layers and mlp_only_intermediate_size plus IsIndexedLayer/IsDenseLayer/KvSourceLayer; the parser accepts indexed_attention and validates all lengths/ranges by name; tensor enumeration accepts the dense FFN prefix on layers 0-1 and the missing K/V tensors on the six shared-KV layers; MakeKolibri1KVCache builds one group per KV source with a byte-neutral 1.0 fast path; the forward refuses the unimplemented sparse path by name. Focused gate 6 cases / 88 assertions green; related ctest 3/3. Three mutations are red with byte-for-byte restoration (indexed kind, dense prefix, KV source). The unrelated 1.0 Q2_K token gate failure was proven byte-identical on unmodified base 92ea7d3a8, so it is pre-existing. Evidence in docs/bench-evidence/kolibri11-u2-20261124/. No token parity claimed: no gateable CPU oracle exists.

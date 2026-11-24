@@ -219,10 +219,15 @@ std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(
     out.push_back({base + "post_attention_layernorm.weight", layer});
     out.push_back({base + "post_ffn_norm.weight", layer});
     out.push_back({base + "self_attn.q_norm.weight", layer});
-    out.push_back({base + "self_attn.k_norm.weight", layer});
+    // Kolibri-1.1 shared-KV layers carry only wq: the converter drops
+    // k/v/norm from layers whose K/V is read from a source layer.
+    const bool shared_kv = p.KvSourceLayer(l) != l;
+    if (!shared_kv) out.push_back({base + "self_attn.k_norm.weight", layer});
     AppendLinear(out, base + "self_attn.q_proj", layer, scheme);
-    AppendLinear(out, base + "self_attn.k_proj", layer, scheme);
-    AppendLinear(out, base + "self_attn.v_proj", layer, scheme);
+    if (!shared_kv) {
+      AppendLinear(out, base + "self_attn.k_proj", layer, scheme);
+      AppendLinear(out, base + "self_attn.v_proj", layer, scheme);
+    }
     AppendLinear(out, base + "self_attn.o_proj", layer, scheme);
     // The router gate is bf16 (modules_to_not_convert): weight only. The
     // router bias lives at layers.N.moe.router.expert_bias — NOTE the REAL
@@ -231,22 +236,30 @@ std::vector<Kolibri1Tensor> EnumerateKolibri1Tensors(
     // (".moe.router.expert_bias") both suggest; the mapper's substring match
     // renames either spelling. Captured against the real index in the W1
     // manifest test.
-    out.push_back({base + "mlp.gate.weight", layer});
-    out.push_back({base + "moe.router.expert_bias", layer});
-    for (int64_t e = 0; e < p.num_experts; ++e) {
-      // NOTE the REAL checkpoint's layout, captured in the W1 manifest: the
-      // routed experts sit at mlp.experts.N and the shared expert at
-      // mlp.shared_experts — NOT under mlp.moe.* as the spec's inventory
-      // recorded. Only the router bias lives outside mlp (moe.router.).
-      const std::string expert = base + "mlp.experts." +
-                                 std::to_string(e);
-      AppendLinear(out, expert + ".gate_proj", layer, scheme);
-      AppendLinear(out, expert + ".up_proj", layer, scheme);
-      AppendLinear(out, expert + ".down_proj", layer, scheme);
+    if (p.IsDenseLayer(l)) {
+      // Kolibri-1.1 dense prefix: layers in mlp_only_layers replace the eight
+      // MoE tensors per layer with one dense FFN (gate/up/down).
+      AppendLinear(out, base + "mlp.gate_proj", layer, scheme);
+      AppendLinear(out, base + "mlp.up_proj", layer, scheme);
+      AppendLinear(out, base + "mlp.down_proj", layer, scheme);
+    } else {
+      out.push_back({base + "mlp.gate.weight", layer});
+      out.push_back({base + "moe.router.expert_bias", layer});
+      for (int64_t e = 0; e < p.num_experts; ++e) {
+        // NOTE the REAL checkpoint's layout, captured in the W1 manifest:
+        // the routed experts sit at mlp.experts.N and the shared expert at
+        // mlp.shared_experts — NOT under mlp.moe.* as the spec's inventory
+        // recorded. Only the router bias lives outside mlp (moe.router.).
+        const std::string expert = base + "mlp.experts." +
+                                   std::to_string(e);
+        AppendLinear(out, expert + ".gate_proj", layer, scheme);
+        AppendLinear(out, expert + ".up_proj", layer, scheme);
+        AppendLinear(out, expert + ".down_proj", layer, scheme);
+      }
+      AppendLinear(out, base + "mlp.shared_experts.gate_proj", layer, scheme);
+      AppendLinear(out, base + "mlp.shared_experts.up_proj", layer, scheme);
+      AppendLinear(out, base + "mlp.shared_experts.down_proj", layer, scheme);
     }
-    AppendLinear(out, base + "mlp.shared_experts.gate_proj", layer, scheme);
-    AppendLinear(out, base + "mlp.shared_experts.up_proj", layer, scheme);
-    AppendLinear(out, base + "mlp.shared_experts.down_proj", layer, scheme);
   }
   return out;
 }

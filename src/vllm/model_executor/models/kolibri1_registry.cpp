@@ -21,6 +21,7 @@
 #include "vllm/v1/kv_cache_dtype.h"  // ResolveKvCacheDType
 #include "vllm/v1/kv_cache_interface.h"
 
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -58,6 +59,22 @@ std::string GetString(const nlohmann::json& j, const char* key,
   return def;
 }
 
+// Kolibri-1.1 integer arrays. Absent => empty for 1.0; a present but
+// malformed array is refused rather than silently truncated.
+std::vector<int64_t> GetIntArray(const nlohmann::json& j, const char* key) {
+  std::vector<int64_t> out;
+  const auto it = j.find(key);
+  if (it == j.end()) return out;
+  VT_CHECK(it->is_array(), "kolibri1: " + std::string(key) +
+                               " must be an integer array");
+  for (const auto& e : *it) {
+    VT_CHECK(e.is_number_integer(),
+             "kolibri1: " + std::string(key) + " has a non-integer element");
+    out.push_back(e.get<int64_t>());
+  }
+  return out;
+}
+
 }  // namespace
 
 Kolibri1Params ParseKolibri1Params(const HfConfig& config) {
@@ -75,19 +92,52 @@ Kolibri1Params ParseKolibri1Params(const HfConfig& config) {
   p.sliding_window = GetInt(raw, "sliding_window", 0);
   p.use_sliding_window = GetBool(raw, "use_sliding_window", false);
 
-  // Hybrid layer kinds: "sliding_attention" / "full_attention" per layer.
-  // RNoPE (kolibri1.py:81-95): RoPE lives ONLY on the sliding layers. Any
-  // other string is refused rather than mapped to a guess.
+  // Hybrid layer kinds: "sliding_attention" / "full_attention" for 1.0;
+  // Kolibri-1.1 adds "indexed_attention" (the sparse NoPE layers). RNoPE:
+  // RoPE lives ONLY on the sliding layers. Any other string is refused rather
+  // than mapped to a guess.
   if (const auto it = raw.find("layer_types"); it != raw.end() && it->is_array()) {
     for (const auto& el : *it) {
       VT_CHECK(el.is_string(),
                "kolibri1: layer_types entries must be strings");
       const std::string kind = el.get<std::string>();
-      VT_CHECK(kind == "sliding_attention" || kind == "full_attention",
+      VT_CHECK(kind == "sliding_attention" || kind == "full_attention" ||
+                   kind == "indexed_attention",
                "kolibri1: layer_types entry '" + kind +
-                   "' is neither sliding_attention nor full_attention");
+                   "' is neither sliding_attention, full_attention nor "
+                   "indexed_attention");
       p.layer_types.push_back(kind);
     }
+  }
+
+  // Kolibri-1.1 shape fields. All absent for 1.0, so parsing stays byte-neutral.
+  p.index_layers = GetIntArray(raw, "index_layers");
+  p.kv_source_layers = GetIntArray(raw, "kv_source_layers");
+  p.mlp_only_layers = GetIntArray(raw, "mlp_only_layers");
+  p.mlp_only_intermediate_size = GetInt(raw, "mlp_only_intermediate_size", 0);
+  const int64_t layers = p.num_hidden_layers;
+  if (!p.kv_source_layers.empty()) {
+    VT_CHECK(static_cast<int64_t>(p.kv_source_layers.size()) == layers,
+             "kolibri1: kv_source_layers length must equal num_hidden_layers");
+    for (int64_t src : p.kv_source_layers) {
+      VT_CHECK(src >= 0 && src < layers,
+               "kolibri1: kv_source_layers entry out of range");
+    }
+  }
+  for (int64_t l : p.index_layers) {
+    VT_CHECK(l >= 0 && l < layers, "kolibri1: index_layers entry out of range");
+    VT_CHECK(l < static_cast<int64_t>(p.layer_types.size()) &&
+                 p.IsIndexedLayer(l),
+             "kolibri1: index_layers entry is not an indexed_attention layer");
+  }
+  for (int64_t l : p.mlp_only_layers) {
+    VT_CHECK(l >= 0 && l < layers,
+             "kolibri1: mlp_only_layers entry out of range");
+  }
+  if (!p.mlp_only_layers.empty()) {
+    VT_CHECK(p.mlp_only_intermediate_size > 0,
+             "kolibri1: mlp_only_intermediate_size must be positive when "
+             "mlp_only_layers is present");
   }
 
   // RoPE (R2): the checkpoint ships a flat rope_theta; the plugin reads the
@@ -197,32 +247,67 @@ v1::KVCacheConfig MakeKolibri1KVCache(const HfConfig& config, int block_size,
   // Two KV-cache groups: full-attention (RNoPE — no rope, full span) and
   // sliding-window (window 513). Uniform head_dim 128 and 4 KV heads across
   // both groups.
-  std::vector<std::string> full_layer_names;
-  std::vector<std::string> swa_layer_names;
-  for (int64_t i = 0; i < static_cast<int64_t>(p.layer_types.size()); ++i) {
-    const std::string name =
-        "model.layers." + std::to_string(i) + ".self_attn";
-    if (p.IsSlidingLayer(i)) {
-      swa_layer_names.push_back(name);
-    } else {
-      full_layer_names.push_back(name);
+  const bool is_11 = !p.kv_source_layers.empty() || !p.index_layers.empty() ||
+                     !p.mlp_only_layers.empty();
+  if (!is_11) {
+    // 1.0 fast path: byte-identical group order and membership to the
+    // original two-group construction.
+    std::vector<std::string> full_layer_names;
+    std::vector<std::string> swa_layer_names;
+    for (int64_t i = 0; i < static_cast<int64_t>(p.layer_types.size()); ++i) {
+      const std::string name =
+          "model.layers." + std::to_string(i) + ".self_attn";
+      if (p.IsSlidingLayer(i)) {
+        swa_layer_names.push_back(name);
+      } else {
+        full_layer_names.push_back(name);
+      }
     }
+    if (!full_layer_names.empty()) {
+      kv.kv_cache_groups.emplace_back(
+          std::move(full_layer_names),
+          std::make_shared<v1::FullAttentionSpec>(
+              block_size, static_cast<int>(p.num_key_value_heads),
+              static_cast<int>(p.head_dim), dtype));
+    }
+    if (!swa_layer_names.empty()) {
+      kv.kv_cache_groups.emplace_back(
+          std::move(swa_layer_names),
+          std::make_shared<v1::SlidingWindowSpec>(
+              block_size, static_cast<int>(p.num_key_value_heads),
+              static_cast<int>(p.head_dim), dtype,
+              static_cast<int>(p.sliding_window)));
+    }
+    return kv;
   }
 
-  if (!full_layer_names.empty()) {
-    kv.kv_cache_groups.emplace_back(
-        std::move(full_layer_names),
-        std::make_shared<v1::FullAttentionSpec>(
-            block_size, static_cast<int>(p.num_key_value_heads),
-            static_cast<int>(p.head_dim), dtype));
-  }
-  if (!swa_layer_names.empty()) {
-    kv.kv_cache_groups.emplace_back(
-        std::move(swa_layer_names),
-        std::make_shared<v1::SlidingWindowSpec>(
-            block_size, static_cast<int>(p.num_key_value_heads),
-            static_cast<int>(p.head_dim), dtype,
-            static_cast<int>(p.sliding_window)));
+  // 1.1: ONE GROUP PER KV SOURCE. A consumer and its source must be in the
+  // same group; merging them into two broad buckets would not share any KV.
+  // Indexed layers are NoPE full-span, so a mixed source group stays full.
+  std::map<int64_t, std::vector<int64_t>> by_source;
+  for (int64_t i = 0; i < static_cast<int64_t>(p.layer_types.size()); ++i)
+    by_source[p.KvSourceLayer(i)].push_back(i);
+  for (const auto& entry : by_source) {
+    std::vector<std::string> names;
+    bool all_sliding = true;
+    for (int64_t layer : entry.second) {
+      all_sliding = all_sliding && p.IsSlidingLayer(layer);
+      names.push_back("model.layers." + std::to_string(layer) + ".self_attn");
+    }
+    if (all_sliding) {
+      kv.kv_cache_groups.emplace_back(
+          std::move(names), std::make_shared<v1::SlidingWindowSpec>(
+                                block_size,
+                                static_cast<int>(p.num_key_value_heads),
+                                static_cast<int>(p.head_dim), dtype,
+                                static_cast<int>(p.sliding_window)));
+    } else {
+      kv.kv_cache_groups.emplace_back(
+          std::move(names), std::make_shared<v1::FullAttentionSpec>(
+                                block_size,
+                                static_cast<int>(p.num_key_value_heads),
+                                static_cast<int>(p.head_dim), dtype));
+    }
   }
   return kv;
 }
@@ -322,6 +407,16 @@ void PrepareKolibri1ForCausalLM(LoadedModel& model, const HfConfig& config,
 ForwardLogits ForwardKolibri1ForCausalLM(LoadedModel& model,
                                          const ModelForwardInput& input) {
   auto& m = ModelAs<Kolibri1LoadedModel>(model, "Kolibri1ForCausalLM");
+  // U2 is parse/accounting/KV-group plumbing only. A 1.1 config carries
+  // indexed layers; their lightning-indexer mask and NVFP4 KV cache belong to
+  // U3. Refuse by name rather than running them as full-attention layers.
+  if (!m.weights().params.index_layers.empty()) {
+    throw std::runtime_error(
+        "Kolibri1ForCausalLM: indexed_attention (Kolibri-1.1) forward is not "
+        "implemented; the sparse mask and NVFP4 KV cache are owed to U3 "
+        "(row MODEL-TEXT-kolibri-1-1-kolibri1-1-for-causal-lm). U2 parsed the "
+        "config, tensor map and KV groups only");
+  }
   // The device dispatch: the CPU row owns the CPU arm (unchanged); the
   // Tenstorrent B2b-i dense-resident slice owns the TT arm; every other
   // device is refused by name here, before any model code runs.
