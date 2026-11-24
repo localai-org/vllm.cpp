@@ -21,10 +21,12 @@ Two smaller record items ride in the same unit:
   file (line 101) holds `a7c23ac96d7806e7c7e7d862eadbce5a33529b94`
   (`0.3.0.dev267`, pinned 2026-09-26, advanced by commit `4f11dfc10`).
 - The relayed "unguarded `DeviceAvailable()` in qwen3_5.cpp `GdnBlockPaged`"
-  item is **falsified by the tree**: commit `3abacff58` (2026-11-18) wrapped all
-  three unguarded `vt::tenstorrent::DeviceAvailable()` call sites — two inside
-  `GdnBlockPaged` — in `#ifdef VLLM_CPP_TENSTORRENT`. It is closed with that
-  evidence here and is NOT re-fixed.
+  item is **falsified by the tree**: commit `3abacff58` (2026-11-18) wrapped
+  the two then-unguarded `vt::tenstorrent::DeviceAvailable()` call sites — one
+  inside `GdnBlockPaged` (the GDN-spec debug dump) and one in
+  `DenseForwardLayers` (the `tt_lbl` pre label) — in `#ifdef
+  VLLM_CPP_TENSTORRENT`; the third site at the prior `:10556` label was already
+  guarded. It is closed with that evidence here and is NOT re-fixed.
 
 ## Scope
 
@@ -81,6 +83,10 @@ unchanged Test step.
   skipped or allowlisted.
 - Sharding changes process boundaries but not the test bodies, env or serial
   ordering; the two heavy tests still run under the same TSan configuration.
+- A `-R` pattern matching zero tests would produce a summary-less log with
+  status 0 and be returned green after retry. The anchored patterns match the
+  tests registered at `tests/CMakeLists.txt:633` and `:1488`, so the edge is
+  not reachable in this tree; a future rename of either test must revisit it.
 - `upstream-sync.md` is a shared record; the edit is a scoped one-paragraph
   replacement with all other lines byte-identical.
 

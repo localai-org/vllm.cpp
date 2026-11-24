@@ -31,8 +31,14 @@ sanitize-cpu (thread) flips fail/pass on main within the same day: a runner deat
   authoritative `parity-pin` block (line 101, `a7c23ac96d`) instead of naming
   the superseded `e126687a9a` advance as current.
 - 2026-11-24: the relayed `DeviceAvailable()` item is CLOSED BY EVIDENCE, not
-  re-fixed: commit `3abacff58` (2026-11-18) wrapped all three unguarded
-  `vt::tenstorrent::DeviceAvailable()` sites in qwen3_5.cpp — two inside
-  `GdnBlockPaged` — in `#ifdef VLLM_CPP_TENSTORRENT`, which is the current
-  tree. Post-landing CI evidence for the thread lane is recorded as owed in
-  the spec; the reliability claim is not made from local tests alone.
+  re-fixed: commit `3abacff58` (2026-11-18) wrapped the two then-unguarded
+  `vt::tenstorrent::DeviceAvailable()` sites in qwen3_5.cpp — one inside
+  `GdnBlockPaged` (GDN-spec debug dump) and one in `DenseForwardLayers`
+  (`tt_lbl` pre label) — in `#ifdef VLLM_CPP_TENSTORRENT`; the third site at
+  the prior `:10556` label was already guarded. That is the current tree.
+  Post-landing CI evidence for the thread lane is recorded as owed in the
+  spec; the reliability claim is not made from local tests alone.
+- 2026-11-24 record correction after fresh review: the earlier wording in
+  this resolution said "all three unguarded" and "two inside GdnBlockPaged";
+  the commit diff shows two newly guarded call sites, one in GdnBlockPaged,
+  and one site already guarded. The falsification conclusion is unchanged.
