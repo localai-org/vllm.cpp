@@ -1,0 +1,11 @@
+Test project /tmp/opencode/kolibri11-u2-build
+    Start 33: test_kolibri1
+1/3 Test #33: test_kolibri1 ....................   Passed    1.64 sec
+    Start 41: test_kolibri11_gguf_guard
+2/3 Test #41: test_kolibri11_gguf_guard ........   Passed    0.01 sec
+    Start 42: test_kolibri11_u2
+3/3 Test #42: test_kolibri11_u2 ................   Passed    0.13 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   1.78 sec

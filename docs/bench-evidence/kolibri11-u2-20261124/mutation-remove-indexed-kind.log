@@ -1,0 +1,40 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:101:
+TEST CASE:  kolibri1_1: the 1.1 fields parse into the named shape
+
+./tests/vllm/models/test_kolibri11_u2.cpp:101: ERROR: test case THREW exception: vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104
+
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:117:
+TEST CASE:  kolibri1_1: malformed 1.1 fields are refused by name
+
+./tests/vllm/models/test_kolibri11_u2.cpp:120: ERROR: CHECK_THROWS_WITH( ParseKolibri1Params(bad), "kv_source_layers length" ) threw a DIFFERENT exception: "vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104"
+
+./tests/vllm/models/test_kolibri11_u2.cpp:125: ERROR: CHECK_THROWS_WITH( ParseKolibri1Params(bad), "index_layers entry" ) threw a DIFFERENT exception: "vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104"
+
+./tests/vllm/models/test_kolibri11_u2.cpp:130: ERROR: CHECK_THROWS_WITH( ParseKolibri1Params(bad), "mlp_only_intermediate_size" ) threw a DIFFERENT exception: "vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104"
+
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:134:
+TEST CASE:  kolibri1_1: tensor map accepts the dense prefix and shared-KV omissions
+
+./tests/vllm/models/test_kolibri11_u2.cpp:134: ERROR: test case THREW exception: vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104
+
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:163:
+TEST CASE:  kolibri1_1: KV groups share the source and keep SWA separate
+
+./tests/vllm/models/test_kolibri11_u2.cpp:163: ERROR: test case THREW exception: vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104
+
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:195:
+TEST CASE:  kolibri1_1: the registry factory reaches the new KV path
+
+./tests/vllm/models/test_kolibri11_u2.cpp:195: ERROR: test case THREW exception: vt: kolibri1: layer_types entry 'indexed_attention' is neither sliding_attention nor full_attention at ./src/vllm/model_executor/models/kolibri1_registry.cpp:104
+
+===============================================================================
+[doctest] test cases:  6 | 1 passed | 5 failed | 0 skipped
+[doctest] assertions: 12 | 9 passed | 3 failed |
+[doctest] Status: FAILURE!

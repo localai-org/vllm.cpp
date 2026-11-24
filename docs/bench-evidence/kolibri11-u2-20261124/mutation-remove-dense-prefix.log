@@ -1,0 +1,13 @@
+[doctest] doctest version is "2.5.2"
+[doctest] run with "--help" for options
+===============================================================================
+./tests/vllm/models/test_kolibri11_u2.cpp:134:
+TEST CASE:  kolibri1_1: tensor map accepts the dense prefix and shared-KV omissions
+
+./tests/vllm/models/test_kolibri11_u2.cpp:148: ERROR: CHECK( dense_proj ) is NOT correct!
+  values: CHECK( false )
+
+===============================================================================
+[doctest] test cases:  6 |  5 passed | 1 failed | 0 skipped
+[doctest] assertions: 87 | 86 passed | 1 failed |
+[doctest] Status: FAILURE!

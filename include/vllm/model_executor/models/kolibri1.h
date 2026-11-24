@@ -36,7 +36,32 @@ struct Kolibri1Params {
   // or "full_attention". Length == num_hidden_layers. RNoPE: RoPE lives ONLY
   // on the sliding layers.
   std::vector<std::string> layer_types;
+
+  // Kolibri-1.1 additions. Empty (or zero) for 1.0, so every existing arm
+  // keeps its exact current behaviour. `indexed_attention` is a THIRD layer
+  // kind, deliberately not folded into IsSlidingLayer.
+  std::vector<int64_t> index_layers;
+  std::vector<int64_t> kv_source_layers;
+  std::vector<int64_t> mlp_only_layers;
+  int64_t mlp_only_intermediate_size = 0;
+
   bool IsSlidingLayer(int64_t i) const { return layer_types[i] == "sliding_attention"; }
+  bool IsIndexedLayer(int64_t i) const {
+    return i >= 0 && i < static_cast<int64_t>(layer_types.size()) &&
+           layer_types[static_cast<size_t>(i)] == "indexed_attention";
+  }
+  bool IsDenseLayer(int64_t i) const {
+    for (int64_t l : mlp_only_layers) {
+      if (l == i) return true;
+    }
+    return false;
+  }
+  // Effective KV owner of layer i: itself for 1.0, the mapped source for 1.1.
+  int64_t KvSourceLayer(int64_t i) const {
+    if (i >= 0 && i < static_cast<int64_t>(kv_source_layers.size()))
+      return kv_source_layers[static_cast<size_t>(i)];
+    return i;
+  }
 
   // RoPE: flat rope_theta (R2 — the plugin reads
   // rope_parameters["rope_theta"] through the transformers Qwen3MoeConfig
