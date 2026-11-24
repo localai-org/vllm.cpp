@@ -17,9 +17,9 @@ The published p150-olala-bf16 CPU baseline decodes at 0.3990 tok/s vs the llama.
 ## Resolution
 
 2026-11-24: landed in two commits on row/NEW-CANDIDATE-PORTS-olala-bench —
-`9b19441b0` (bounded 96-thread blocking worker pool + output-row-parallel
+`d02eff903` (bounded 96-thread blocking worker pool + output-row-parallel
 GEMVs at the profiled sites; decode 0.3990 -> 1.8053 tok/s, prefill 0.4579 ->
-1.9247) and `47f16b159` (profiled waste removal: dead prefill placeholder
+1.9247) and `9a720e64e` (profiled waste removal: dead prefill placeholder
 dot, hoisted B/C rms and mimo coefficient tables, row-parallel prefill
 attention; decode -> 1.8908, prefill -> 2.0534; cumulative 4.74x/4.49x vs the
 published baseline). The 64-id greedy stream is byte-identical at every

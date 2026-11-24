@@ -21,9 +21,9 @@ prompt, same sampling both arms.
 
 History: the published baseline leg measured 0.4579/0.3990 tok/s
 (5.71x/5.41x behind the fork); the gap closed 4.49x/4.74x via two commits —
-a bounded 96-thread worker pool with output-row-parallel GEMVs (`9b19441b0`,
+a bounded 96-thread worker pool with output-row-parallel GEMVs (`d02eff903`,
 4.20x/4.52x) and profiled waste removal including the row-parallel prefill
-attention (`47f16b159`, 1.067x/1.048x). Per-lever deltas, the rejected
+attention (`9a720e64e`, 1.067x/1.048x). Per-lever deltas, the rejected
 barrier-fusion experiment, and the thread-count sweep are in the evidence
 README. The remaining gap's next traceable hypothesis is the per-row serial
 double-FADD dependency chain, which cannot be reordered without breaking the
