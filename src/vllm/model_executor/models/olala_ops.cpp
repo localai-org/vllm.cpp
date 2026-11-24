@@ -398,71 +398,73 @@ void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
 
   // Projections (:578-589): q [L,H,D]; A_k [L,KV,R], B_k [L,R,D] -> k =
   // (A_k @ B_k)/R [L,KV,D]; same for v.
+  // Perf wave: every projection below is a set of whole-row serial dots, so
+  // the row split across the pool is bit-identical to the serial loop. The
+  // dead per-head placeholder dot the serial loop ran before each q row is
+  // dropped (its result was discarded), which removes one of the D+1 full
+  // hidden dots per q row set.
   std::vector<float> q(len * H * D), ak(len * KV * R), bk(len * R * D),
-      av(len * KV * R), bv(len * R * D);
-  for (int64_t t = 0; t < len; ++t) {
-    const float* xt = x + t * p.hidden;
-    for (int64_t h = 0; h < H; ++h) {
+      av(len * KV * R), bv(len * R * D), k(len * KV * D), v(len * KV * D);
+  HostRowPool::Get().Run(len * H * D, [&](int64_t qb, int64_t qe) {
+    for (int64_t j = qb; j < qe; ++j) {
+      const int64_t t = j / (H * D), r = j % (H * D);
+      const float* xt = x + t * p.hidden;
       double s = 0.0;
       for (int64_t i = 0; i < p.hidden; ++i)
-        s += WAt(lw.attn_q, h * D, i, "attn_q") * xt[i];
-      q[(t * H + h) * D + 0] = 0.0f;  // placeholder to keep layout; fill below
-      for (int64_t d = 0; d < D; ++d) {
-        double sd = 0.0;
-        for (int64_t i = 0; i < p.hidden; ++i)
-          sd += WAt(lw.attn_q, h * D + d, i, "attn_q") * xt[i];
-        q[(t * H + h) * D + d] = float(sd);
-      }
-      (void)s;
+        s += WAt(lw.attn_q, r, i, "attn_q") * xt[i];
+      q[j] = float(s);
     }
-    for (int64_t h = 0; h < KV; ++h)
+  });
+  HostRowPool::Get().Run(len * KV * R, [&](int64_t ab, int64_t ae) {
+    for (int64_t j = ab; j < ae; ++j) {
+      const int64_t t = j / (KV * R), hr = j % (KV * R);
+      const float* xt = x + t * p.hidden;
+      double s = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i)
+        s += WAt(lw.attn_wa_k, hr, i, "wa_k") * xt[i];
+      ak[j] = float(s);
+      s = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i)
+        s += WAt(lw.attn_wa_v, hr, i, "wa_v") * xt[i];
+      av[j] = float(s);
+    }
+  });
+  HostRowPool::Get().Run(len * R * D, [&](int64_t bb, int64_t be) {
+    for (int64_t j = bb; j < be; ++j) {
+      const int64_t t = j / (R * D), rd = j % (R * D);
+      const float* xt = x + t * p.hidden;
+      double s = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i)
+        s += WAt(lw.attn_wb_k, rd, i, "wb_k") * xt[i];
+      bk[j] = float(s);
+      s = 0.0;
+      for (int64_t i = 0; i < p.hidden; ++i)
+        s += WAt(lw.attn_wb_v, rd, i, "wb_v") * xt[i];
+      bv[j] = float(s);
+    }
+  });
+  HostRowPool::Get().Run(len * KV * D, [&](int64_t kb, int64_t ke) {
+    for (int64_t j = kb; j < ke; ++j) {
+      const int64_t t = j / (KV * D), hd = j % (KV * D), hq = hd / D, dq = hd % D;
+      double sk = 0.0, sv = 0.0;
       for (int64_t r = 0; r < R; ++r) {
-        double s = 0.0;
-        for (int64_t i = 0; i < p.hidden; ++i)
-          s += WAt(lw.attn_wa_k, h * R + r, i, "wa_k") * xt[i];
-        ak[(t * KV + h) * R + r] = float(s);
+        sk += double(ak[(t * KV + hq) * R + r]) * bk[(t * R + r) * D + dq];
+        sv += double(av[(t * KV + hq) * R + r]) * bv[(t * R + r) * D + dq];
       }
-    for (int64_t r = 0; r < R; ++r)
-      for (int64_t d = 0; d < D; ++d) {
-        double s = 0.0;
-        for (int64_t i = 0; i < p.hidden; ++i)
-          s += WAt(lw.attn_wb_k, r * D + d, i, "wb_k") * xt[i];
-        bk[(t * R + r) * D + d] = float(s);
-      }
-    for (int64_t h = 0; h < KV; ++h)
-      for (int64_t r = 0; r < R; ++r) {
-        double s = 0.0;
-        for (int64_t i = 0; i < p.hidden; ++i)
-          s += WAt(lw.attn_wa_v, h * R + r, i, "wa_v") * xt[i];
-        av[(t * KV + h) * R + r] = float(s);
-      }
-    for (int64_t r = 0; r < R; ++r)
-      for (int64_t d = 0; d < D; ++d) {
-        double s = 0.0;
-        for (int64_t i = 0; i < p.hidden; ++i)
-          s += WAt(lw.attn_wb_v, r * D + d, i, "wb_v") * xt[i];
-        bv[(t * R + r) * D + d] = float(s);
-      }
-  }
-  std::vector<float> k(len * KV * D), v(len * KV * D);
-  for (int64_t t = 0; t < len; ++t)
-    for (int64_t h = 0; h < KV; ++h)
-      for (int64_t d = 0; d < D; ++d) {
-        double sk = 0.0, sv = 0.0;
-        for (int64_t r = 0; r < R; ++r) {
-          sk += double(ak[(t * KV + h) * R + r]) * bk[(t * R + r) * D + d];
-          sv += double(av[(t * KV + h) * R + r]) * bv[(t * R + r) * D + d];
-        }
-        k[(t * KV + h) * D + d] = float(sk / R);
-        v[(t * KV + h) * D + d] = float(sv / R);
-      }
+      k[j] = float(sk / R);
+      v[j] = float(sv / R);
+    }
+  });
 
   // Token shift (:595-640): alpha = sigmoid(shift_proj(x)); k = a*k_prev +
-  // (1-a)*k with k_prev zeroed at doc starts (pos==0).
-  for (int64_t t = 0; t < len; ++t) {
+  // (1-a)*k with k_prev zeroed at doc starts (pos==0). Perf wave: rows are
+  // independent (each reads only its own t-1 row and writes its own t row).
+  HostRowPool::Get().Run(len * KV, [&](int64_t sb_, int64_t se_) {
+    for (int64_t j = sb_; j < se_; ++j) {
+    const int64_t t = j / KV, h = j % KV;
     const float* xt = x + t * p.hidden;
     const bool doc_start = positions[t] == 0;
-    for (int64_t h = 0; h < KV; ++h) {
+    {
       double sa = 0.0, sb = 0.0;
       for (int64_t i = 0; i < p.hidden; ++i) {
         sa += WAt(lw.attn_shift_k, h, i, "shift_k") * xt[i];
@@ -479,7 +481,8 @@ void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
         v[(t * KV + h) * D + d] = avv * vp + (1.0f - avv) * v[(t * KV + h) * D + d];
       }
     }
-  }
+    }
+  });
 
   // QK-norm (plain RMSNorm, eps=1e-6) per head (:643-645, :249-258).
   const float* qn = F32Bytes(lw.attn_q_norm, "q_norm");
@@ -502,23 +505,28 @@ void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
   }
 
   // Attention (:467-495) + differential merge (:734-740).
-  const float* lam = nullptr;
   std::vector<float> lamb(len * KV);
-  for (int64_t t = 0; t < len; ++t) {
-    const float* xt = x + t * p.hidden;
-    for (int64_t h = 0; h < KV; ++h) {
+  // Perf wave: lambda rows are independent dots (bit-identical row split).
+  HostRowPool::Get().Run(len * KV, [&](int64_t lb, int64_t le) {
+    for (int64_t j = lb; j < le; ++j) {
+      const int64_t t = j / KV, h = j % KV;
+      const float* xt = x + t * p.hidden;
       double s = 0.0;
       for (int64_t i = 0; i < p.hidden; ++i)
         s += WAt(lw.attn_lambda, h, i, "lambda") * xt[i];
-      lamb[t * KV + h] = float(1.0 / (1.0 + std::exp(-s)));
+      lamb[j] = float(1.0 / (1.0 + std::exp(-s)));
     }
-  }
-  (void)lam;
+  });
   std::vector<float> att(len * H * D, 0.0f);
-  std::vector<double> wbuf(len);
-  for (int64_t t = 0; t < len; ++t) {
-    for (int64_t h = 0; h < H; ++h) {
+  // Perf wave: (t, h) attention jobs are independent (each writes only its
+  // own att row and owns its softmax scratch; the serial loop reused one
+  // wbuf across jobs, which workers must not share). Per-job s-order is
+  // untouched (bit-identical).
+  HostRowPool::Get().Run(len * H, [&](int64_t jb, int64_t je) {
+    for (int64_t j = jb; j < je; ++j) {
+      const int64_t t = j / H, h = j % H;
       const int64_t kvh = h / GQA;  // repeat_interleave (:464)
+      std::vector<double> wbuf(t + 1);
       double wsum = 0.0;
       for (int64_t s = 0; s <= t; ++s) {  // causal; window below
         if (t - s > wsize) continue;      // j >= i - w_left (:489)
@@ -539,7 +547,7 @@ void OlalaVAttentionHost(float* out, const float* x, const int64_t* positions,
           att[(t * H + h) * D + d] += float(pr * v[(s * KV + kvh) * D + d]);
       }
     }
-  }
+  });
   // Differential merge: view [L, KV, SNR+1, D]; sig = [..., :SNR], noi =
   // [..., SNR:SNR+1]; out = sig - sigmoid(lambda) * noi -> [L, SIG, D].
   for (int64_t t = 0; t < len; ++t) {
@@ -574,6 +582,8 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
   // Perf wave: heads are independent row sets; the per-head dot order is
   // untouched, so the row split is bit-identical to the serial loop.
   std::vector<float> z(H * P), x(H * P), dt(H), Av(H), trap(H);
+  // Perf wave: heads are independent row sets; the per-head dot order is
+  // untouched, so the row split is bit-identical to the serial loop.
   HostRowPool::Get().Run(H, [&](int64_t hb, int64_t he) {
     for (int64_t h = hb; h < he; ++h) {
       for (int64_t d = 0; d < P; ++d) {
@@ -621,6 +631,7 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
       }
     }
   });
+  if (dbg) fprintf(stderr, "stage: in_proj done\n");
   // _preprocess (:1248-1263): DT, _A clamp, trap sigmoid, B/C norm over N, expand
   const float* bn = F32Bytes(lw.ssm_b_norm, "b_norm");
   const float* cn = F32Bytes(lw.ssm_c_norm, "c_norm");
@@ -640,14 +651,16 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
   }
   // B/C norm over d_state then expand G->H (ngroups=1, so r index direct)
   for (int64_t r = 0; r < R; ++r) {
+    // Perf wave: the rms over N of Bv is independent of h — hoisted out of
+    // the expansion loop (identical value, computed once per r).
+    double bs = 0;
+    for (int64_t n = 0; n < N; ++n) bs += double(Bv[r * N + n]) * Bv[r * N + n];
+    const double binv = 1.0 / std::sqrt(bs / N + 1e-6);
     for (int64_t h = 0; h < H; ++h) {
       // rmsnorm over N of Bv[r*N ..], weight bn (zero-centered -> 1+w=1 on this ckpt)
-      double s = 0;
-      for (int64_t n = 0; n < N; ++n) s += double(Bv[r * N + n]) * Bv[r * N + n];
-      const double inv = 1.0 / std::sqrt(s / N + 1e-6);
       for (int64_t n = 0; n < N; ++n) {
         const double w = bn[n];  // stored weight is effective (1 + gamma)
-        Bn[(r * H + h) * N + n] = float(double(Bv[r * N + n]) * inv * w);
+        Bn[(r * H + h) * N + n] = float(double(Bv[r * N + n]) * binv * w);
       }
     }
     double s = 0;
@@ -711,6 +724,22 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
   auto proj = [&](const OwnedTensor& w, int64_t r, int64_t h, int64_t pp) {
     return W3At(w, h, r, pp, "mimo");  // [H, R, P]
   };
+  // Perf wave: the mimo coefficients (and the identical x[hp]*mimo_x product
+  // the serial loop recomputed per n and per use) are read once per
+  // (h, pp, r) instead of once per state element. Same doubles, same values.
+  std::vector<double> mx(H * P * R), mv(H * P * R), mz(H * P * R),
+      mo(H * P * R);
+  for (int64_t h = 0; h < H; ++h)
+    for (int64_t pp = 0; pp < P; ++pp)
+      for (int64_t r = 0; r < R; ++r) {
+        const int64_t j = (h * P + pp) * R + r;
+        mx[j] = double(x[h * P + pp]) * proj(lw.ssm_mimo_x, r, h, pp);
+        // st.v_state still holds the PREVIOUS step's value here (it is
+        // overwritten only after the step), exactly what the serial loops read.
+        mv[j] = double(st.v_state[h * P + pp]) * proj(lw.ssm_mimo_x, r, h, pp);
+        mz[j] = proj(lw.ssm_mimo_z, r, h, pp);
+        mo[j] = proj(lw.ssm_mimo_o, r, h, pp);
+      }
   // step (:871-889)
   const float* Dv = F32Bytes(lw.ssm_d, "D");
   std::vector<float> newssm(H * P * N, 0.0f);
@@ -723,10 +752,9 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
         for (int64_t n = 0; n < N; ++n) {
           double s = st.ssm[(h * P + pp) * N + n] * alpha[h];
           for (int64_t r = 0; r < R; ++r) {
-            const double xv = double(x[h * P + pp]) * proj(lw.ssm_mimo_x, r, h, pp);
-            s += xv * gamma[h] * K[(r * H + h) * N + n];
-            const double xs = st.v_state[h * P + pp] * proj(lw.ssm_mimo_x, r, h, pp);
-            s += xs * beta[h] * st.k_state[(r * H + h) * N + n];
+            const int64_t j = (h * P + pp) * R + r;
+            s += (mx[j] * gamma[h]) * K[(r * H + h) * N + n];
+            s += (mv[j] * beta[h]) * st.k_state[(r * H + h) * N + n];
           }
           newssm[(h * P + pp) * N + n] = float(s);
         }
@@ -742,15 +770,14 @@ void OlalaMambaStepHost(float* out, OlalaMambaState& st, const float* u,
       for (int64_t pp = 0; pp < P; ++pp) {
         double yv = 0;
         for (int64_t r = 0; r < R; ++r) {
+          const int64_t j = (h * P + pp) * R + r;
           double accr = 0;
           for (int64_t n = 0; n < N; ++n)
             accr += newssm[(h * P + pp) * N + n] * Q[(r * H + h) * N + n];
-          const double xvr = double(x[h * P + pp]) * proj(lw.ssm_mimo_x, r, h, pp);
-          const double orr = accr + xvr * Dv[h];
-          const double zproj = proj(lw.ssm_mimo_z, r, h, pp);
-          const double gate = double(z[h * P + pp]) * zproj;
+          const double orr = accr + mx[j] * Dv[h];
+          const double gate = double(z[h * P + pp]) * mz[j];
           const double silu = gate / (1.0 + std::exp(-gate));
-          yv += orr * silu * proj(lw.ssm_mimo_o, r, h, pp);
+          yv += orr * silu * mo[j];
         }
         out[h * P + pp] = float(yv);
       }
@@ -800,16 +827,6 @@ void OlalaVAttentionStepHost(float* attn_k_cache, float* attn_v_cache,
       q[j] = float(s);
     }
   });
-  for (int64_t h = 0; h < KV; ++h)
-    for (int64_t r = 0; r < R; ++r) {
-      double sa = 0.0, sv = 0.0;
-      for (int64_t i = 0; i < p.hidden; ++i) {
-        sa += WAt(lw.attn_wa_k, h * R + r, i, "wa_k") * x[i];
-        sv += WAt(lw.attn_wa_v, h * R + r, i, "wa_v") * x[i];
-      }
-      ak[h * R + r] = float(sa);
-      av[h * R + r] = float(sv);
-    }
   for (int64_t h = 0; h < KV; ++h)
     for (int64_t r = 0; r < R; ++r) {
       double sa = 0.0, sv = 0.0;
