@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M82MQAJYM6ZAAZC7APD8063T
 Title: Spec the P150 benchmark unit that turns the reference map into gated axes
 Row: QWEN38-DFLASH2-STAGE-C
-State: OPEN
+State: CLOSED
 Kind: docs
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-22
-Updated: 2026-11-22
-Closed: -
+Updated: 2026-11-25
+Closed: 2026-11-25
 
 ## Problem
 
@@ -16,4 +16,4 @@ The P150 reference map (PR #3593, docs/bench-evidence/p150-reference-map-2026112
 
 ## Resolution
 
--
+/tmp/stage-c-close/spec.txt

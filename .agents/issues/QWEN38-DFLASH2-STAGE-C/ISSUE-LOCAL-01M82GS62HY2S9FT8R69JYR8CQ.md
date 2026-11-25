@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M82GS62HY2S9FT8R69JYR8CQ
 Title: Write the P150 benchmark-reference map against the Lottolabs Inkling-2 package
 Row: QWEN38-DFLASH2-STAGE-C
-State: OPEN
+State: CLOSED
 Kind: docs
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-22
-Updated: 2026-11-22
-Closed: -
+Updated: 2026-11-25
+Closed: 2026-11-25
 
 ## Problem
 
@@ -16,4 +16,4 @@ The developer asked to continue until we can get benchmarks and compare with oth
 
 ## Resolution
 
--
+/tmp/stage-c-close/map.txt
