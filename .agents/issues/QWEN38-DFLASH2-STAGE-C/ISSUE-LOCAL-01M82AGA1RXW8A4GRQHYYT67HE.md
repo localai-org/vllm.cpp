@@ -1,14 +1,14 @@
 ID: ISSUE-LOCAL-01M82AGA1RXW8A4GRQHYYT67HE
 Title: Correlate Lottolabs P150 trace-capture fixes with the RAC/PA latent defects
 Row: QWEN38-DFLASH2-STAGE-C
-State: OPEN
+State: CLOSED
 Kind: bug
 GitHub: -
 Mirror: PENDING
 Availability: FULL
 Created: 2026-11-22
-Updated: 2026-11-22
-Closed: -
+Updated: 2026-11-25
+Closed: 2026-11-25
 
 ## Problem
 
@@ -16,4 +16,4 @@ The Lottolabs Inkling-2 P150 runtime documents five fixes for a second-sequence 
 
 ## Resolution
 
--
+/tmp/stage-c-close/corr.txt
