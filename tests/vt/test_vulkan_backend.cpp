@@ -33,6 +33,7 @@
 #include "vt/quant.h"
 #include "vt/vulkan/vulkan_context.h"
 #include "vt/vulkan/vulkan_spirv.h"
+#include "support/test_env.h"  // SetEnv/UnsetEnv -- MSVC has no setenv (#603)
 
 using vt::Backend;
 using vt::Device;
@@ -60,7 +61,8 @@ TEST_CASE("the committed SPIR-V table is present and well-formed") {
   // point of the split: at the target shader surface the words must not be
   // re-parsed by every TU that merely needs the table.
   const size_t n = vt::vulkan::kSpirvModuleCount;
-  CHECK(n == 43);  // +2: BACKEND-VULKAN-EXL3 (#2530); +15: BACKEND-VULKAN-TQ1_0
+  CHECK(n == 44);  // +1: BACKEND-VULKAN-GDN (vt_causal_conv1d_fwd);
+                   // +2: BACKEND-VULKAN-EXL3 (#2530); +15: BACKEND-VULKAN-TQ1_0
                    //   (vt_matmul_bt_tq2, vt_matmul_bt_tq2_grouped, vt_matmul_bt_tq2_dev,
                    //    vt_moe_gate_up_swiglu_grouped_tq2, vt_matmul_bt_tq2_grouped_dev,
                    //    vt_matmul_bt_tq2_dev; VK4 rope/moe)
@@ -81,7 +83,8 @@ TEST_CASE("the committed SPIR-V table is present and well-formed") {
                            "vt_rms_norm_wide",
                            "vt_rope_from_cache", "vt_silu_and_mul",
                            // BACKEND-VULKAN-GDN: the GDN / conv1d glue family.
-                           "vt_causal_conv1d_update", "vt_gdn_post_conv",
+                           "vt_causal_conv1d_update", "vt_causal_conv1d_fwd",
+                           "vt_gdn_post_conv",
                            "vt_gdn_state_gather", "vt_gdn_state_scatter",
                            "vt_rms_norm_gated", "vt_sigmoid_gate_bf16",
                            // BACKEND-VULKAN-GDN-CORE: the two recurrences.
@@ -285,6 +288,13 @@ TEST_CASE("the committed SPIR-V table records each module's specialization const
       // q/k dtype, position dtype, llama3 flag, q/k head-dim overrides.
       REQUIRE(m.spec_id_count == 6);
       for (uint32_t want = 0; want < 6; ++want) CHECK(m.spec_ids[want] == want);
+    } else if (std::strcmp(m.name, "vt_causal_conv1d_fwd") == 0) {
+      // ONE axis, and it is not a dtype: VT_CONV_BLOCKS, the token blocks per
+      // (sequence, channel). Every dtype is a push-constant code, because the
+      // five tensors vary independently and a spec axis per tensor would be a
+      // module explosion for a kernel that runs once per GDN layer.
+      REQUIRE(m.spec_id_count == 1);
+      CHECK(m.spec_ids[0] == 0u);
     } else if (std::strcmp(m.name, "vt_moe_router_topk") == 0) {
       // E, K, renormalize flag, logits dtype.
       REQUIRE(m.spec_id_count == 4);
@@ -590,6 +600,8 @@ TEST_CASE("Vulkan registers the W0 op set and NOT the unimplemented rest") {
                       vt::OpId::kSigmoidGateBf16, vt::OpId::kRmsNormGated,
                       vt::OpId::kGdnStateGather, vt::OpId::kGdnStateScatter,
                       vt::OpId::kCausalConv1dUpdate, vt::OpId::kGdnPostConv,
+                      // ...and the PREFILL conv, which closes the family.
+                      vt::OpId::kCausalConv1dFwd,
                       // BACKEND-VULKAN-GDN-CORE: the two gated-delta recurrences
                       // themselves, which are where a GDN hybrid's prefill time
                       // actually was.
@@ -606,10 +618,9 @@ TEST_CASE("Vulkan registers the W0 op set and NOT the unimplemented rest") {
   // the two MoE router/combine ops (rope_cos_sin_cache, rope_neox,
   // moe_router_topk, moe_combine); the reference tier likewise serves
   // MatmulBTQuant's keep-quant path. Still genuinely unimplemented: the sampler
-  // beyond greedy argmax (kApplyTemperature) and the PRE-FILL conv
-  // (kCausalConv1dFwd -- its state write-back needs a different dispatch shape
-  // than the decode update, see src/vt/vulkan/vulkan_ops.cpp).
-  for (vt::OpId op : {vt::OpId::kApplyTemperature, vt::OpId::kCausalConv1dFwd}) {
+  // beyond greedy argmax (kApplyTemperature). The PRE-FILL conv used to be listed
+  // here and is native now (BACKEND-VULKAN-GDN, vt_causal_conv1d_fwd).
+  for (vt::OpId op : {vt::OpId::kApplyTemperature}) {
     CHECK_FALSE(vt::OpRegistered(op, DeviceType::kVULKAN));
   }
   // ...but they no longer THROW, and this assertion used to say they did.
@@ -2391,6 +2402,464 @@ TEST_CASE("the decode causal conv1d update runs NATIVELY on Vulkan, state roll i
       CHECK(state_got[static_cast<size_t>(last)] == x[static_cast<size_t>(bt * kC + c)]);
     }
   }
+
+  vk.DestroyQueue(vq);
+  cpu.DestroyQueue(cq);
+}
+
+TEST_CASE("the prefill causal conv1d runs NATIVELY on Vulkan, in both token mappings") {
+  if (!VulkanPresent()) return;
+  auto& ctx = vt::vulkan::VulkanContext::Get();
+  Backend& vk = vt::GetBackend(DeviceType::kVULKAN);
+  Backend& cpu = vt::GetBackend(DeviceType::kCPU);
+  Queue vq = vk.CreateQueue();
+  Queue cq = cpu.CreateQueue();
+  const Device vd{DeviceType::kVULKAN, 0};
+  const Device cd{DeviceType::kCPU, 0};
+
+  // A varlen batch of three sequences, lengths 5, 1, 9, one of them with no
+  // initial state. The shape is chosen for the SPLIT arm below: with three
+  // sequences of 24 channels the default grid is a single workgroup, a target
+  // of 5 groups therefore asks for 5 token blocks, and sequence 0 (length 5)
+  // then gets one token per block -- so t = 1 and t = 2, both < width and both
+  // reading the carried state, land OUTSIDE block 0 unless the shader gives
+  // them to it. That is the race the block-0 rule exists for.
+  //
+  // FIVE, NOT FOUR, deliberately. The blocks of one (sequence, channel) are
+  // adjacent invocations; with 4 they sat inside one of llvmpipe's 8-lane
+  // subgroups in this layout and the pre-fix shader PASSED 5 runs of 5. With 5
+  // they straddle a subgroup and it fails 5 of 5.
+  constexpr int64_t kN = 3, kT = 15, kC = 24, kK = 4, kWidth = kK - 1;
+  const std::vector<int32_t> qsl = {0, 5, 6, 15};
+  const std::vector<int32_t> has = {1, 0, 1};
+  const std::vector<float> x = Spread(kT * kC, 2.0f, 71u);
+  const std::vector<float> w = Spread(kC * kK, 0.5f, 73u);
+  const std::vector<float> bias = Spread(kC, 0.2f, 79u);
+  const std::vector<float> state0 = Spread(kN * kC * kWidth, 0.5f, 83u);
+
+  // CPU oracle, once.
+  Buf cx(cpu, kT * kC, 4), cw(cpu, kC * kK, 4), cb(cpu, kC, 4), co(cpu, kT * kC, 4),
+      cs(cpu, kN * kC * kWidth, 4), cqsl(cpu, kN + 1, 4), chas(cpu, kN, 4);
+  std::memcpy(cx.p(), x.data(), x.size() * 4);
+  std::memcpy(cw.p(), w.data(), w.size() * 4);
+  std::memcpy(cb.p(), bias.data(), bias.size() * 4);
+  std::memcpy(cs.p(), state0.data(), state0.size() * 4);
+  std::memcpy(cqsl.p(), qsl.data(), qsl.size() * 4);
+  std::memcpy(chas.p(), has.data(), has.size() * 4);
+  std::memset(co.p(), 0, kT * kC * 4);
+  {
+    Tensor xt = Tensor::Contiguous(cx.p(), vt::DType::kF32, cd, {kT, kC});
+    Tensor wt = Tensor::Contiguous(cw.p(), vt::DType::kF32, cd, {kC, kK});
+    Tensor bt = Tensor::Contiguous(cb.p(), vt::DType::kF32, cd, {kC});
+    Tensor ot = Tensor::Contiguous(co.p(), vt::DType::kF32, cd, {kT, kC});
+    Tensor st = Tensor::Contiguous(cs.p(), vt::DType::kF32, cd, {kN, kC, kWidth});
+    Tensor qt = Tensor::Contiguous(cqsl.p(), vt::DType::kI32, cd, {kN + 1});
+    Tensor ht = Tensor::Contiguous(chas.p(), vt::DType::kI32, cd, {kN});
+    vt::CausalConv1dFwd(cq, ot, xt, wt, &bt, st, qt, ht, vt::CausalConv1dArgs{});
+  }
+  const std::vector<float> out_ref(co.as<float>(), co.as<float>() + kT * kC);
+  const std::vector<float> state_ref(cs.as<float>(), cs.as<float>() + kN * kC * kWidth);
+
+  // Restores the knob even when a CHECK below throws out of the case.
+  struct EnvRestore {
+    ~EnvRestore() { vllm_test::UnsetEnv("VT_VULKAN_CONV_TARGET_GROUPS"); }
+  } restore;
+
+  // Arm "" is the default mapping (one invocation per (sequence, channel)); arm
+  // "5" is the opt-in split. The split runs several times because a race is a
+  // scheduling outcome: one green dispatch would not show it is absent.
+  std::vector<float> out_default;
+  for (const char* target : {"", "5", "5", "5", "5"}) {
+    CAPTURE(std::string(target));
+    vllm_test::SetEnv("VT_VULKAN_CONV_TARGET_GROUPS", target);
+
+    Buf vx(vk, kT * kC, 4), vw(vk, kC * kK, 4), vb(vk, kC, 4), vo(vk, kT * kC, 4),
+        vs(vk, kN * kC * kWidth, 4), vqsl(vk, kN + 1, 4), vhas(vk, kN, 4);
+    vk.Copy(vq, vx.p(), x.data(), x.size() * 4);
+    vk.Copy(vq, vw.p(), w.data(), w.size() * 4);
+    vk.Copy(vq, vb.p(), bias.data(), bias.size() * 4);
+    vk.Copy(vq, vs.p(), state0.data(), state0.size() * 4);
+    vk.Copy(vq, vqsl.p(), qsl.data(), qsl.size() * 4);
+    vk.Copy(vq, vhas.p(), has.data(), has.size() * 4);
+    vk.Synchronize(vq);
+    Tensor xt = Tensor::Contiguous(vx.p(), vt::DType::kF32, vd, {kT, kC});
+    Tensor wt = Tensor::Contiguous(vw.p(), vt::DType::kF32, vd, {kC, kK});
+    Tensor bt = Tensor::Contiguous(vb.p(), vt::DType::kF32, vd, {kC});
+    Tensor ot = Tensor::Contiguous(vo.p(), vt::DType::kF32, vd, {kT, kC});
+    Tensor st = Tensor::Contiguous(vs.p(), vt::DType::kF32, vd, {kN, kC, kWidth});
+    Tensor qt = Tensor::Contiguous(vqsl.p(), vt::DType::kI32, vd, {kN + 1});
+    Tensor ht = Tensor::Contiguous(vhas.p(), vt::DType::kI32, vd, {kN});
+    vt::CausalConv1dFwd(vq, ot, xt, wt, &bt, st, qt, ht, vt::CausalConv1dArgs{});
+    vk.Synchronize(vq);
+
+    CHECK(RanNative(vt::OpId::kCausalConv1dFwd));
+    // The block count is the mechanism, and it is invisible in the numbers by
+    // design, so the specialization VALUE is asserted, not just the module.
+    {
+      const std::string want = std::string("vt_causal_conv1d_fwd|") +
+                               (target[0] == '\0' ? "1" : "5");
+      const std::vector<std::string> keys = ctx.PipelineKeysFor("vt_causal_conv1d_fwd");
+      std::string joined;
+      for (const std::string& k : keys) joined += k + " ";
+      CAPTURE(joined);
+      CHECK(std::find(keys.begin(), keys.end(), want) != keys.end());
+    }
+
+    std::vector<float> out_got(kT * kC), state_got(kN * kC * kWidth);
+    vk.Copy(vq, out_got.data(), vo.p(), out_got.size() * 4);
+    vk.Copy(vq, state_got.data(), vs.p(), state_got.size() * 4);
+    vk.Synchronize(vq);
+
+    const double nmse = NmseOf(out_ref, out_got);
+    MESSAGE("causal_conv1d_fwd NMSE vs the CPU oracle: " << nmse);
+    CHECK(nmse <= kGdnNmseTol);
+    // The state write-back moves RAW x samples, so it is exact, not a tolerance.
+    CHECK(std::memcmp(state_got.data(), state_ref.data(), state_got.size() * 4) == 0);
+    // Spelled out independently of the oracle for the two sequences at least
+    // `width` long: their new state is their own last `width` input rows.
+    for (int64_t s : {int64_t{0}, int64_t{2}}) {
+      const int64_t end = qsl[static_cast<size_t>(s) + 1];
+      for (int64_t c = 0; c < kC; ++c) {
+        for (int64_t j = 0; j < kWidth; ++j) {
+          CAPTURE(s);
+          CAPTURE(c);
+          CAPTURE(j);
+          CHECK(state_got[static_cast<size_t>((s * kC + c) * kWidth + j)] ==
+                x[static_cast<size_t>((end - kWidth + j) * kC + c)]);
+        }
+      }
+    }
+    // The split changes which invocation computes an element, never the order
+    // of its own k-tap sum, so both mappings must agree to the bit.
+    if (target[0] == '\0') {
+      out_default = out_got;
+    } else {
+      CHECK(std::memcmp(out_got.data(), out_default.data(), out_got.size() * 4) == 0);
+    }
+  }
+
+  vk.DestroyQueue(vq);
+  cpu.DestroyQueue(cq);
+}
+
+namespace {
+
+// One prefill-conv call on one backend, everything uploaded from host vectors
+// and downloaded back. Shared by the edge-case and compressed-state cases below
+// so the CPU oracle and the Vulkan arm run the SAME setup code.
+struct ConvFwdCase {
+  std::vector<int32_t> qsl;
+  std::vector<uint8_t> has;      // one flag per sequence
+  bool his_i8 = false;
+  int64_t his_byte_off = 0;      // i8 view start within its allocation
+  int64_t c = 8, k = 4;
+  int64_t x_pad = 0;             // extra elements per x row (padded stride)
+  int64_t state_extra = 0;       // conv_state.shape[2] = k - 1 + state_extra
+  bool with_bias = true;
+  bool silu = true;
+  vt::DType state_dt = vt::DType::kF32;
+  vt::DType op_dt = vt::DType::kF32;   // x, weight and bias storage
+  vt::DType out_dt = vt::DType::kF32;
+  std::vector<float> x, w, bias, state0;  // state0 is [n, c, k-1+state_extra]
+};
+
+struct ConvFwdResult {
+  std::vector<float> out, state;  // state as f32 whatever its storage dtype
+};
+
+// f32 values to the bytes of `dt` (f32, f16 or bf16), and back.
+std::vector<uint8_t> ConvEncode(const std::vector<float>& v, vt::DType dt) {
+  std::vector<uint8_t> out(v.size() * (dt == vt::DType::kF32 ? 4 : 2));
+  for (size_t i = 0; i < v.size(); ++i) {
+    if (dt == vt::DType::kF32) {
+      std::memcpy(out.data() + i * 4, &v[i], 4);
+    } else {
+      const uint16_t h = dt == vt::DType::kBF16 ? vt::F32ToBF16(v[i]) : vt::F32ToF16(v[i]);
+      std::memcpy(out.data() + i * 2, &h, 2);
+    }
+  }
+  return out;
+}
+
+std::vector<float> ConvDecode(const std::vector<uint8_t>& b, vt::DType dt) {
+  const size_t es = dt == vt::DType::kF32 ? 4 : 2;
+  std::vector<float> out(b.size() / es);
+  for (size_t i = 0; i < out.size(); ++i) {
+    if (dt == vt::DType::kF32) {
+      std::memcpy(&out[i], b.data() + i * 4, 4);
+    } else {
+      uint16_t h;
+      std::memcpy(&h, b.data() + i * 2, 2);
+      out[i] = dt == vt::DType::kBF16 ? vt::BF16ToF32(h) : vt::F16ToF32(h);
+    }
+  }
+  return out;
+}
+
+ConvFwdResult RunConvFwd(Backend& b, Queue q, Device d, const ConvFwdCase& cs) {
+  const int64_t n = static_cast<int64_t>(cs.qsl.size()) - 1;
+  const int64_t t = cs.qsl.back();
+  const int64_t rs = cs.c + cs.x_pad;
+  const int64_t sw = cs.k - 1 + cs.state_extra;
+  const int64_t sn = n * cs.c * sw;
+  const size_t st_bytes = cs.state_dt == vt::DType::kF32 ? 4 : 2;
+  const std::vector<uint8_t> xe = ConvEncode(cs.x, cs.op_dt);
+  const std::vector<uint8_t> we = ConvEncode(cs.w, cs.op_dt);
+  const std::vector<uint8_t> be = ConvEncode(cs.bias, cs.op_dt);
+  const size_t oes = cs.out_dt == vt::DType::kF32 ? 4 : 2;
+  Buf bx(b, xe.size() / 4 + 1, 4), bw(b, we.size() / 4 + 1, 4), bb(b, be.size() / 4 + 1, 4),
+      bo(b, static_cast<size_t>(std::max<int64_t>(1, t) * cs.c), oes),
+      bs(b, static_cast<size_t>(sn), st_bytes), bq(b, static_cast<size_t>(n + 1), 4),
+      bh(b, static_cast<size_t>(n + 8), 4);
+  b.Copy(q, bx.p(), xe.data(), xe.size());
+  b.Copy(q, bw.p(), we.data(), we.size());
+  if (cs.with_bias) b.Copy(q, bb.p(), be.data(), be.size());
+  if (cs.state_dt == vt::DType::kF32) {
+    b.Copy(q, bs.p(), cs.state0.data(), cs.state0.size() * 4);
+  } else {
+    std::vector<uint16_t> s16(cs.state0.size());
+    for (size_t i = 0; i < s16.size(); ++i) s16[i] = vt::F32ToBF16(cs.state0[i]);
+    b.Copy(q, bs.p(), s16.data(), s16.size() * 2);
+  }
+  b.Copy(q, bq.p(), cs.qsl.data(), cs.qsl.size() * 4);
+  // Flags: i32 at offset 0, or i8 bytes starting at his_byte_off of a buffer
+  // whose other bytes are a pattern that would flip the answer if read.
+  std::vector<uint8_t> hb(static_cast<size_t>((n + 8) * 4), 0xA5);
+  if (cs.his_i8) {
+    for (int64_t s = 0; s < n; ++s) hb[static_cast<size_t>(cs.his_byte_off + s)] = cs.has[s];
+  } else {
+    for (int64_t s = 0; s < n; ++s) {
+      const int32_t v = cs.has[static_cast<size_t>(s)];
+      std::memcpy(hb.data() + s * 4, &v, 4);
+    }
+  }
+  b.Copy(q, bh.p(), hb.data(), hb.size());
+  const std::vector<uint8_t> seed = ConvEncode(
+      std::vector<float>(static_cast<size_t>(std::max<int64_t>(1, t) * cs.c), -7.0f), cs.out_dt);
+  b.Copy(q, bo.p(), seed.data(), seed.size());
+  b.Synchronize(q);
+
+  Tensor xt = Tensor::Contiguous(bx.p(), cs.op_dt, d, {t, cs.c});
+  xt.stride[0] = rs;
+  Tensor wt = Tensor::Contiguous(bw.p(), cs.op_dt, d, {cs.c, cs.k});
+  Tensor bt = Tensor::Contiguous(bb.p(), cs.op_dt, d, {cs.c});
+  Tensor ot = Tensor::Contiguous(bo.p(), cs.out_dt, d, {t, cs.c});
+  Tensor st = Tensor::Contiguous(bs.p(), cs.state_dt, d, {n, cs.c, sw});
+  Tensor qt = Tensor::Contiguous(bq.p(), vt::DType::kI32, d, {n + 1});
+  Tensor ht = cs.his_i8
+                  ? Tensor::Contiguous(static_cast<char*>(bh.p()) + cs.his_byte_off,
+                                       vt::DType::kI8, d, {n})
+                  : Tensor::Contiguous(bh.p(), vt::DType::kI32, d, {n});
+  vt::CausalConv1dArgs args;
+  args.silu_activation = cs.silu;
+  vt::CausalConv1dFwd(q, ot, xt, wt, cs.with_bias ? &bt : nullptr, st, qt, ht, args);
+  b.Synchronize(q);
+
+  ConvFwdResult r;
+  std::vector<uint8_t> ob(static_cast<size_t>(t * cs.c) * oes);
+  b.Copy(q, ob.data(), bo.p(), ob.size());
+  r.state.resize(static_cast<size_t>(sn));
+  if (cs.state_dt == vt::DType::kF32) {
+    b.Copy(q, r.state.data(), bs.p(), r.state.size() * 4);
+  } else {
+    std::vector<uint16_t> s16(r.state.size());
+    b.Copy(q, s16.data(), bs.p(), s16.size() * 2);
+    for (size_t i = 0; i < s16.size(); ++i) r.state[i] = vt::BF16ToF32(s16[i]);
+  }
+  b.Synchronize(q);
+  r.out = ConvDecode(ob, cs.out_dt);
+  return r;
+}
+
+ConvFwdCase MakeConvFwdCase(std::vector<int32_t> qsl, std::vector<uint8_t> has, int64_t c,
+                            int64_t k, int64_t x_pad, uint32_t seed) {
+  ConvFwdCase cs;
+  cs.qsl = std::move(qsl);
+  cs.has = std::move(has);
+  cs.c = c;
+  cs.k = k;
+  cs.x_pad = x_pad;
+  const int64_t n = static_cast<int64_t>(cs.qsl.size()) - 1;
+  const int64_t t = cs.qsl.back();
+  cs.x = Spread(static_cast<size_t>(std::max<int64_t>(1, t) * (c + x_pad)), 2.0f, seed);
+  cs.w = Spread(static_cast<size_t>(c * k), 0.5f, seed + 1);
+  cs.bias = Spread(static_cast<size_t>(c), 0.2f, seed + 2);
+  cs.state0 = Spread(static_cast<size_t>(n * c * (k - 1)), 0.5f, seed + 3);
+  return cs;
+}
+
+}  // namespace
+
+TEST_CASE("the prefill causal conv1d matches the CPU oracle on its edge shapes") {
+  if (!VulkanPresent()) return;
+  Backend& vk = vt::GetBackend(DeviceType::kVULKAN);
+  Backend& cpu = vt::GetBackend(DeviceType::kCPU);
+  Queue vq = vk.CreateQueue();
+  Queue cq = cpu.CreateQueue();
+  const Device vd{DeviceType::kVULKAN, 0};
+  const Device cd{DeviceType::kCPU, 0};
+
+  // Lengths 5, 0, 1, 7: an EMPTY sequence, and a length-1 sequence WITH initial
+  // state, whose new state is two shifted old taps plus one x sample. Flags
+  // 1,1,1,0. x rows are padded by 3 elements, so the row stride is not c.
+  ConvFwdCase base = MakeConvFwdCase({0, 5, 5, 6, 13}, {1, 1, 1, 0}, 40, 4, 3, 211u);
+
+  struct Variant {
+    const char* name;
+    bool his_i8;
+    int64_t his_byte_off;
+    bool with_bias, silu;
+    vt::DType op_dt = vt::DType::kF32, out_dt = vt::DType::kF32;
+  };
+  // i8 flags at every byte phase of a 32-bit word, the read a 4-aligned
+  // assumption gets wrong; and bias/silu both ways.
+  for (const Variant& v : {Variant{"i32 flags, bias, silu", false, 0, true, true},
+                           Variant{"i8 flags @0, no bias, no silu", true, 0, false, false},
+                           Variant{"i8 flags @1", true, 1, true, true},
+                           Variant{"i8 flags @2, no bias", true, 2, false, true},
+                           Variant{"i8 flags @3, no silu", true, 3, true, false},
+                           // Reduced-precision operands and output: the shader
+                           // reads them through the 16-bit views and its own
+                           // dtype codes, the CPU reference through LoadF32.
+                           Variant{"bf16 x/w/bias, bf16 out", false, 0, true, true,
+                                   vt::DType::kBF16, vt::DType::kBF16},
+                           Variant{"f16 x/w/bias, f32 out", true, 1, true, true,
+                                   vt::DType::kF16, vt::DType::kF32}}) {
+    CAPTURE(std::string(v.name));
+    ConvFwdCase cs = base;
+    cs.his_i8 = v.his_i8;
+    cs.his_byte_off = v.his_byte_off;
+    cs.with_bias = v.with_bias;
+    cs.silu = v.silu;
+    cs.op_dt = v.op_dt;
+    cs.out_dt = v.out_dt;
+    const auto before = vt::GetOpProviderStats(vt::OpId::kCausalConv1dFwd, DeviceType::kVULKAN);
+    const ConvFwdResult ref = RunConvFwd(cpu, cq, cd, cs);
+    const ConvFwdResult got = RunConvFwd(vk, vq, vd, cs);
+    const auto after = vt::GetOpProviderStats(vt::OpId::kCausalConv1dFwd, DeviceType::kVULKAN);
+    CHECK(RanNative(vt::OpId::kCausalConv1dFwd));
+    CHECK(after.declines == before.declines);
+    CHECK(NmseOf(ref.out, got.out) <= kGdnNmseTol);
+    CHECK(std::memcmp(got.state.data(), ref.state.data(), ref.state.size() * 4) == 0);
+  }
+
+  vk.DestroyQueue(vq);
+  cpu.DestroyQueue(cq);
+}
+
+TEST_CASE("the prefill causal conv1d keeps a bf16 conv_state IN PLACE, bit-exact vs the f32 arm") {
+  if (!VulkanPresent()) return;
+  REQUIRE(vt::GetBackend(DeviceType::kVULKAN).SupportsCompressedConvState());
+  Backend& vk = vt::GetBackend(DeviceType::kVULKAN);
+  Queue vq = vk.CreateQueue();
+  const Device vd{DeviceType::kVULKAN, 0};
+
+  // The CPU reference reads f32 state only, so the oracle here is the native f32
+  // arm on bf16-REPRESENTABLE inputs -- the same shape as the compressed-state
+  // update case above. With every x and state value exactly a bf16, the
+  // compressed arm must read the same taps, produce the same outputs, and store
+  // the same raw samples back.
+  ConvFwdCase cs = MakeConvFwdCase({0, 5, 6, 15}, {1, 0, 1}, 24, 4, 0, 307u);
+  for (float& v : cs.x) v = vt::BF16ToF32(vt::F32ToBF16(v));
+  for (float& v : cs.state0) v = vt::BF16ToF32(vt::F32ToBF16(v));
+  const ConvFwdResult f32_arm = RunConvFwd(vk, vq, vd, cs);
+  cs.state_dt = vt::DType::kBF16;
+  const ConvFwdResult bf16_arm = RunConvFwd(vk, vq, vd, cs);
+  CHECK(RanNative(vt::OpId::kCausalConv1dFwd));
+  CHECK(std::memcmp(bf16_arm.out.data(), f32_arm.out.data(), f32_arm.out.size() * 4) == 0);
+  CHECK(std::memcmp(bf16_arm.state.data(), f32_arm.state.data(), f32_arm.state.size() * 4) == 0);
+
+  vk.DestroyQueue(vq);
+}
+
+TEST_CASE("the prefill causal conv1d DECLINES a conv_state row wider than K-1") {
+  if (!VulkanPresent()) return;
+  REQUIRE(vt::ReferenceTierEligible(DeviceType::kVULKAN));
+  Backend& vk = vt::GetBackend(DeviceType::kVULKAN);
+  Backend& cpu = vt::GetBackend(DeviceType::kCPU);
+  Queue vq = vk.CreateQueue();
+  Queue cq = cpu.CreateQueue();
+  const Device vd{DeviceType::kVULKAN, 0};
+  const Device cd{DeviceType::kCPU, 0};
+
+  // A speculative-decode-widened row (K-1 + 2). The CPU reference addresses
+  // rows with stride K-1; the op layer admits the wider row; the native kernel
+  // declines rather than pick one, so the answer is the reference's, byte for
+  // byte, and the decline is counted. Whether the reference's stride is right
+  // for widened rows is a question about the CPU kernel, not tested here.
+  ConvFwdCase cs = MakeConvFwdCase({0, 4, 9}, {1, 1}, 8, 4, 0, 401u);
+  cs.state_extra = 2;
+  cs.state0 = Spread(static_cast<size_t>(2 * 8 * (3 + 2)), 0.5f, 404u);
+  const ConvFwdResult ref = RunConvFwd(cpu, cq, cd, cs);
+  const auto before = vt::GetOpProviderStats(vt::OpId::kCausalConv1dFwd, DeviceType::kVULKAN);
+  const ConvFwdResult got = RunConvFwd(vk, vq, vd, cs);
+  const auto after = vt::GetOpProviderStats(vt::OpId::kCausalConv1dFwd, DeviceType::kVULKAN);
+  CHECK(after.declines == before.declines + 1);
+  CHECK(std::memcmp(got.out.data(), ref.out.data(), ref.out.size() * 4) == 0);
+  CHECK(std::memcmp(got.state.data(), ref.state.data(), ref.state.size() * 4) == 0);
+
+  vk.DestroyQueue(vq);
+  cpu.DestroyQueue(cq);
+}
+
+TEST_CASE("the prefill causal conv1d DECLINES a width past its window, and stays correct") {
+  if (!VulkanPresent()) return;
+  REQUIRE(vt::ReferenceTierEligible(DeviceType::kVULKAN));
+  Backend& vk = vt::GetBackend(DeviceType::kVULKAN);
+  Backend& cpu = vt::GetBackend(DeviceType::kCPU);
+  Queue vq = vk.CreateQueue();
+  Queue cq = cpu.CreateQueue();
+  const Device vd{DeviceType::kVULKAN, 0};
+  const Device cd{DeviceType::kCPU, 0};
+
+  // K = 10 -> width 9, one past the shader's private window. The native kernel
+  // must hand the call to the next provider, not throw and not read past the
+  // array -- and the answer must still be the CPU oracle's.
+  constexpr int64_t kN = 1, kT = 12, kC = 8, kK = 10, kWidth = kK - 1;
+  const std::vector<int32_t> qsl = {0, 12};
+  const std::vector<int32_t> has = {1};
+  const std::vector<float> x = Spread(kT * kC, 2.0f, 89u);
+  const std::vector<float> w = Spread(kC * kK, 0.5f, 97u);
+  const std::vector<float> state0 = Spread(kN * kC * kWidth, 0.5f, 101u);
+
+  struct Arm {
+    Backend& b;
+    Queue qu;
+    Device d;
+  };
+  std::vector<float> outs[2], states[2];
+  for (int arm = 0; arm < 2; ++arm) {
+    Arm a = arm == 0 ? Arm{cpu, cq, cd} : Arm{vk, vq, vd};
+    Buf bx(a.b, kT * kC, 4), bw(a.b, kC * kK, 4), bo(a.b, kT * kC, 4),
+        bs(a.b, kN * kC * kWidth, 4), bq(a.b, kN + 1, 4), bh(a.b, kN, 4);
+    a.b.Copy(a.qu, bx.p(), x.data(), x.size() * 4);
+    a.b.Copy(a.qu, bw.p(), w.data(), w.size() * 4);
+    a.b.Copy(a.qu, bs.p(), state0.data(), state0.size() * 4);
+    a.b.Copy(a.qu, bq.p(), qsl.data(), qsl.size() * 4);
+    a.b.Copy(a.qu, bh.p(), has.data(), has.size() * 4);
+    a.b.Synchronize(a.qu);
+    Tensor xt = Tensor::Contiguous(bx.p(), vt::DType::kF32, a.d, {kT, kC});
+    Tensor wt = Tensor::Contiguous(bw.p(), vt::DType::kF32, a.d, {kC, kK});
+    Tensor ot = Tensor::Contiguous(bo.p(), vt::DType::kF32, a.d, {kT, kC});
+    Tensor st = Tensor::Contiguous(bs.p(), vt::DType::kF32, a.d, {kN, kC, kWidth});
+    Tensor qt = Tensor::Contiguous(bq.p(), vt::DType::kI32, a.d, {kN + 1});
+    Tensor ht = Tensor::Contiguous(bh.p(), vt::DType::kI32, a.d, {kN});
+    const auto before = vt::GetOpProviderStats(vt::OpId::kCausalConv1dFwd, DeviceType::kVULKAN);
+    vt::CausalConv1dFwd(a.qu, ot, xt, wt, nullptr, st, qt, ht, vt::CausalConv1dArgs{});
+    a.b.Synchronize(a.qu);
+    if (arm == 1) {
+      const auto after = vt::GetOpProviderStats(vt::OpId::kCausalConv1dFwd, DeviceType::kVULKAN);
+      CHECK(after.declines == before.declines + 1);
+    }
+    outs[arm].resize(kT * kC);
+    states[arm].resize(kN * kC * kWidth);
+    a.b.Copy(a.qu, outs[arm].data(), bo.p(), outs[arm].size() * 4);
+    a.b.Copy(a.qu, states[arm].data(), bs.p(), states[arm].size() * 4);
+    a.b.Synchronize(a.qu);
+  }
+  // The fallback IS the CPU kernel, so this is exact, not a tolerance.
+  CHECK(std::memcmp(outs[1].data(), outs[0].data(), outs[0].size() * 4) == 0);
+  CHECK(std::memcmp(states[1].data(), states[0].data(), states[0].size() * 4) == 0);
 
   vk.DestroyQueue(vq);
   cpu.DestroyQueue(cq);
